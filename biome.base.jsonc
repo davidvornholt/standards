@@ -1,0 +1,291 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.1/schema.json",
+  // Canonical strict Biome base, synced from davidvornholt/standards. Do NOT
+  // edit locally: repos extend this from their own `biome.jsonc` wrapper and add
+  // project-specific overrides there. The baseline turns every applicable rule
+  // domain and group on at "error"; each opt-out below states why it cannot
+  // apply.
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "ignoreUnknown": false
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2
+  },
+  "linter": {
+    "enabled": true,
+    "domains": {
+      "drizzle": "all",
+      "next": "all",
+      "playwright": "all",
+      "project": "all",
+      "qwik": "none",
+      "react": "all",
+      "reactNative": "none",
+      "solid": "none",
+      "tailwind": "all",
+      "test": "all",
+      "turborepo": "all",
+      "types": "all",
+      "vue": "none"
+    },
+    "rules": {
+      "preset": "recommended",
+      "a11y": "error",
+      "complexity": "error",
+      "correctness": "error",
+      "nursery": "error",
+      "performance": "error",
+      "security": "error",
+      "style": "error",
+      "suspicious": "error"
+    }
+  },
+  "overrides": [
+    {
+      // Deliberate opt-outs and option tuning for the every-rule-at-error
+      // baseline above. Each entry states why the rule cannot apply here.
+      "includes": ["**"],
+      "linter": {
+        "rules": {
+          "complexity": {
+            // JSX render bodies and Effect.gen service pipelines are cohesive
+            // single units; the default of 50 lines forces arbitrary splits.
+            // 100 still mechanically rejects genuinely sprawling functions.
+            "noExcessiveLinesPerFunction": {
+              "level": "error",
+              "options": {
+                "maxLines": 100
+              }
+            }
+          },
+          "correctness": {
+            // Module resolution is handled by Bun and the Next.js bundler;
+            // tsc rejects `.ts` import extensions without
+            // `allowImportingTsExtensions`.
+            "useImportExtensions": "off"
+          },
+          "style": {
+            // Content-driven UIs author literal copy directly in JSX. Projects
+            // with an i18n layer can re-enable this in their wrapper.
+            "noJsxLiterals": "off",
+            // strictCase rejects the standard TypeScript `TFieldValues`-style
+            // generic prefix and acronyms in identifiers; both are accepted
+            // repository idiom.
+            "useNamingConvention": {
+              "level": "error",
+              "options": {
+                "strictCase": false
+              }
+            },
+            // Conflicts with the repository standard of inline exports
+            // (`export const value = ...`).
+            "useExportsLast": "off",
+            "useComponentExportOnlyModules": {
+              "level": "error",
+              "options": {
+                "allowExportNames": [
+                  "metadata",
+                  "generateMetadata",
+                  "viewport",
+                  "generateViewport",
+                  "generateStaticParams",
+                  "generateImageMetadata",
+                  "generateSitemaps"
+                ]
+              }
+            },
+            "useConsistentArrayType": {
+              "level": "error",
+              "options": {
+                "syntax": "generic"
+              }
+            },
+            "useConsistentTypeDefinitions": {
+              "level": "error",
+              "options": {
+                "style": "type"
+              }
+            },
+            // Ternaries are the only conditional expression available inside
+            // JSX; banning them conflicts with idiomatic React rendering.
+            "noTernary": "off",
+            "noExcessiveLinesPerFile": {
+              "level": "error",
+              "options": {
+                "maxLines": 200
+              }
+            }
+          },
+          "nursery": {
+            // React Native rule: requires raw text to be wrapped in <Text>.
+            // This is a DOM application (reactNative domain is "none"); the
+            // group-level "error" above would otherwise force it on.
+            "noReactNativeRawText": "off",
+            // Sort Tailwind classes inside cn()/cva() calls too, not only in
+            // the className attribute.
+            "useSortedClasses": {
+              "level": "error",
+              "options": {
+                "functions": ["cn", "cva"]
+              }
+            },
+            // `hyphens` and `::selection` are progressive enhancements that
+            // degrade gracefully; "widely" rejects hyphens, and ::selection is
+            // universally supported but not Baseline-listed at any level.
+            "useBaseline": {
+              "level": "error",
+              "options": {
+                "available": "newly",
+                "allowSelectors": ["selection"]
+              }
+            },
+            // Explicit annotations fight Effect's inference-first idiom;
+            // spelled-out `Effect<A, E, R>` signatures are machine-derived
+            // noise that breaks on every layer change.
+            "useExplicitType": "off",
+            "useExplicitReturnType": "off",
+            // The repository TypeScript standard prefers inline `export const`
+            // component declarations; function declarations would create a
+            // one-off React style exception.
+            "useReactFunctionComponentDefinition": "off"
+          },
+          "performance": {
+            // Inline handlers are idiomatic React 19; the hoist-every-callback
+            // pattern this rule demands targets memoization-sensitive React
+            // Native trees and makes components strictly harder to read.
+            "noJsxPropsBind": "off"
+          }
+        }
+      }
+    },
+    {
+      // Playwright specs: @playwright/test exports only `test` (no `it`
+      // alias), so the repo-wide `it` preference cannot apply here.
+      "includes": ["**/a11y/*.a11y.ts"],
+      "linter": {
+        "rules": {
+          "nursery": {
+            "useConsistentTestIt": {
+              "level": "error",
+              "options": {
+                "function": "test"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      // Tests legitimately manipulate process.env to exercise
+      // configuration-dependent behavior, and fixtures contain literal dummy
+      // tokens that trip entropy-based secret detection. Biome also does not
+      // resolve Bun's virtual `bun:test` module.
+      "includes": ["**/*.test.ts", "**/*.test.tsx"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noUnresolvedImports": "off"
+          },
+          "security": {
+            "noSecrets": "off"
+          },
+          "style": {
+            "noProcessEnv": "off"
+          }
+        }
+      }
+    },
+    {
+      // Domain error catalogs: the Effect standard requires one specific
+      // Data.TaggedError class per failure mode, and colocating a domain's
+      // failure modes in its errors module is the repository default shape.
+      "includes": ["**/errors/*.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noExcessiveClassesPerFile": "off"
+          }
+        }
+      }
+    },
+    {
+      // Operational tooling runs on Node/Bun built-ins directly.
+      "includes": ["scripts/**", "packages/a11y-testing/**"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noNodejsModules": "off"
+          }
+        }
+      }
+    },
+    {
+      // CLI scripts: console output is the user interface, and they read
+      // environment configuration at the edge.
+      "includes": ["scripts/**"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noConsole": "off"
+          },
+          "style": {
+            "noProcessEnv": "off"
+          }
+        }
+      }
+    },
+    {
+      // Designated environment boundary: the Playwright config factory reads
+      // deployment configuration once and hands typed values to callers.
+      "includes": ["packages/a11y-testing/src/playwright-config.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noProcessEnv": "off"
+          }
+        }
+      }
+    },
+    {
+      // Files allowed to exceed the 200-line limit. Consumers extend this list
+      // in their own biome.jsonc wrapper and document each entry.
+      "includes": [
+        "biome.base.jsonc",
+        "biome.jsonc",
+        "scripts/sync-standards.ts"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noExcessiveLinesPerFile": "off"
+          }
+        }
+      }
+    }
+  ],
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single"
+    }
+  },
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
+    }
+  },
+  "assist": {
+    "enabled": true,
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  }
+}

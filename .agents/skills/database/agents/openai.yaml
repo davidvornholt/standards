@@ -1,0 +1,4 @@
+interface:
+  display_name: "Database"
+  short_description: "Drizzle workspace placement and migration workflow"
+  default_prompt: "Use $database when changing Drizzle schemas, migration files, database package layout, or db:* scripts."

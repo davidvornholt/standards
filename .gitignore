@@ -1,0 +1,6 @@
+node_modules/
+.turbo/
+dist/
+.next/
+*.log
+sync-standards.lock

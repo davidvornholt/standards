@@ -1,0 +1,7 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.1/schema.json",
+  // Repo-owned wrapper. Extends the canonical strict base synced from
+  // davidvornholt/standards. Add project-specific overrides here; never edit
+  // biome.base.jsonc locally.
+  "extends": ["./biome.base.jsonc"]
+}

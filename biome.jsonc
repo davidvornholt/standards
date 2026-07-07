@@ -1,0 +1,11 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.1/schema.json",
+  // Repo-owned wrapper. Extends the canonical strict base; add repo-specific
+  // overrides here. Never edit biome.base.jsonc locally — it is synced.
+  "extends": ["./biome.base.jsonc"],
+  // template/ holds seed files for consumers (its biome.jsonc extends a base
+  // that only exists after seeding); they are not this repo's own source.
+  "files": {
+    "includes": ["**", "!template/**"]
+  }
+}

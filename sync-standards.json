@@ -1,0 +1,17 @@
+{
+  "upstream": "github:davidvornholt/standards",
+  "seedDir": "template",
+  "paths": [
+    "sync-standards.json",
+    "scripts/sync-standards.ts",
+    "AGENTS.md",
+    ".agents/skills",
+    "biome.base.jsonc",
+    "packages/typescript-config",
+    "packages/a11y-testing",
+    "standards.just",
+    "secrets/dev.example.yaml",
+    "secrets/ci.example.yaml",
+    ".github/workflows/standards.yml"
+  ]
+}

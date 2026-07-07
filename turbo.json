@@ -1,0 +1,19 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "globalDependencies": ["biome.jsonc", "biome.base.jsonc"],
+  "tasks": {
+    "lint": {
+      "outputs": []
+    },
+    "lint:fix": {
+      "cache": false,
+      "outputs": []
+    },
+    "check-types": {
+      "outputs": []
+    },
+    "test": {
+      "outputs": []
+    }
+  }
+}
