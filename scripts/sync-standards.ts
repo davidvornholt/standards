@@ -462,11 +462,16 @@ const main = async (): Promise<void> => {
   }
 
   if (command === 'sync') {
-    const manifest = await loadManifest(join(consumer, 'sync-standards.json'));
+    const consumerManifest = await loadManifest(
+      join(consumer, 'sync-standards.json'),
+    );
     const source = resolveSource(
-      optionValue(argv, 'from') ?? manifest.upstream,
+      optionValue(argv, 'from') ?? consumerManifest.upstream,
     );
     try {
+      const manifest = await loadManifest(
+        join(source.dir, 'sync-standards.json'),
+      );
       await runSync(manifest, source, consumer, argv.includes('--dry-run'));
     } finally {
       source.cleanup();
