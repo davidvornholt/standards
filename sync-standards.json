@@ -4,6 +4,7 @@
   "paths": [
     "sync-standards.json",
     "scripts/sync-standards.ts",
+    "scripts/sync-standards.test.ts",
     "AGENTS.md",
     "CLAUDE.md",
     ".agents/skills/database",
@@ -19,6 +20,7 @@
     "standards.just",
     "secrets/dev.example.yaml",
     "secrets/ci.example.yaml",
-    ".github/workflows/standards.yml"
+    ".github/workflows/standards.yml",
+    ".github/workflows/standards-sync.yml"
   ]
 }

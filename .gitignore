@@ -3,4 +3,3 @@ node_modules/
 dist/
 .next/
 *.log
-sync-standards.lock

@@ -111,6 +111,7 @@ const resolveSource = (src: string): Source => {
     try {
       sha = execFileSync('git', ['-C', src, 'rev-parse', 'HEAD'], {
         encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
       }).trim();
     } catch {
       // Not a git checkout; a content-independent marker is fine for local use.
@@ -184,51 +185,97 @@ const assertDisjoint = (
   }
 };
 
+type MirrorResult = {
+  readonly files: Record<string, string>;
+  readonly created: ReadonlyArray<string>;
+  readonly updated: ReadonlyArray<string>;
+  readonly deleted: ReadonlyArray<string>;
+  readonly tampered: ReadonlyArray<string>;
+};
+
 // Mirror managed files into the consumer, deleting any previously-locked file
-// that no longer exists upstream (three-way reconcile against the lock).
+// that no longer exists upstream (three-way reconcile against the lock). When
+// `dryRun` is set nothing is written or deleted; the returned plan is reported.
 const mirror = async (
   manifest: Manifest,
   srcDir: string,
   consumer: string,
   previous: Record<string, string>,
-): Promise<Record<string, string>> => {
+  dryRun: boolean,
+): Promise<MirrorResult> => {
   const upstream = await listManaged(srcDir, manifest.paths);
   const next: Record<string, string> = {};
+  const created: Array<string> = [];
+  const updated: Array<string> = [];
   const tampered: Array<string> = [];
   await Promise.all(
     [...upstream].map(async ([rel, abs]) => {
       const dest = join(consumer, rel);
       const buf = await readFile(abs);
+      const hash = sha256(buf);
+      const currentHash = existsSync(dest)
+        ? sha256(await readFile(dest))
+        : null;
       const prev = previous[rel];
-      if (
-        prev !== undefined &&
-        existsSync(dest) &&
-        sha256(await readFile(dest)) !== prev
-      ) {
+      if (prev !== undefined && currentHash !== null && currentHash !== prev) {
         tampered.push(rel);
       }
-      await mkdir(dirname(dest), { recursive: true });
-      await writeFile(dest, buf);
-      next[rel] = sha256(buf);
+      if (currentHash === null) {
+        created.push(rel);
+      } else if (currentHash !== hash) {
+        updated.push(rel);
+      }
+      if (!dryRun) {
+        await mkdir(dirname(dest), { recursive: true });
+        await writeFile(dest, buf);
+      }
+      next[rel] = hash;
     }),
   );
-  await Promise.all(
-    Object.keys(previous)
-      .filter((rel) => !(rel in next))
-      .map(async (rel) => {
-        const dest = join(consumer, rel);
-        if (existsSync(dest)) {
-          await rm(dest);
-          console.log(`  deleted ${rel} (removed upstream)`);
-        }
-      }),
+  const deleted = Object.keys(previous).filter(
+    (rel) => !(rel in next) && existsSync(join(consumer, rel)),
   );
-  if (tampered.length > 0) {
+  if (!dryRun) {
+    await Promise.all(deleted.map((rel) => rm(join(consumer, rel))));
+  }
+  return { files: next, created, updated, deleted, tampered };
+};
+
+// Print what a mirror did (or, for a dry run, would do). Real syncs stay quiet
+// about unchanged files and only announce deletions and clobbered local edits.
+const reportMirror = (result: MirrorResult, dryRun: boolean): void => {
+  if (dryRun) {
+    for (const rel of result.created) {
+      console.log(`  would create ${rel}`);
+    }
+    for (const rel of result.updated) {
+      console.log(`  would update ${rel}`);
+    }
+    for (const rel of result.deleted) {
+      console.log(`  would delete ${rel} (removed upstream)`);
+    }
+    if (result.tampered.length > 0) {
+      console.log(
+        `  would overwrite ${result.tampered.length} locally-modified canonical file(s): ${result.tampered.join(', ')}`,
+      );
+    }
+    const changes =
+      result.created.length + result.updated.length + result.deleted.length;
     console.log(
-      `  overwrote ${tampered.length} locally-modified canonical file(s): ${tampered.join(', ')}`,
+      changes === 0
+        ? 'dry run: already in sync; no changes'
+        : `dry run: ${result.created.length} to create, ${result.updated.length} to update, ${result.deleted.length} to delete`,
+    );
+    return;
+  }
+  for (const rel of result.deleted) {
+    console.log(`  deleted ${rel} (removed upstream)`);
+  }
+  if (result.tampered.length > 0) {
+    console.log(
+      `  overwrote ${result.tampered.length} locally-modified canonical file(s): ${result.tampered.join(', ')}`,
     );
   }
-  return next;
 };
 
 const seedTargets = async (
@@ -260,14 +307,15 @@ const runInit = async (
       console.log(`  seeded ${rel}`);
     }),
   );
-  const files = await mirror(manifest, src.dir, consumer, {});
+  const result = await mirror(manifest, src.dir, consumer, {}, false);
+  reportMirror(result, false);
   await writeLock(consumer, {
     upstream: manifest.upstream,
     sha: src.sha,
-    files,
+    files: result.files,
   });
   console.log(
-    `init complete: ${Object.keys(files).length} managed file(s) at ${src.sha}`,
+    `init complete: ${Object.keys(result.files).length} managed file(s) at ${src.sha}`,
   );
 };
 
@@ -275,18 +323,29 @@ const runSync = async (
   manifest: Manifest,
   src: Source,
   consumer: string,
+  dryRun: boolean,
 ): Promise<void> => {
   const seeds = await seedTargets(src.dir, manifest.seedDir);
   assertDisjoint(manifest.paths, [...seeds.keys()]);
   const lock = await readLock(consumer);
-  const files = await mirror(manifest, src.dir, consumer, lock?.files ?? {});
+  const result = await mirror(
+    manifest,
+    src.dir,
+    consumer,
+    lock?.files ?? {},
+    dryRun,
+  );
+  reportMirror(result, dryRun);
+  if (dryRun) {
+    return;
+  }
   await writeLock(consumer, {
     upstream: manifest.upstream,
     sha: src.sha,
-    files,
+    files: result.files,
   });
   console.log(
-    `sync complete: ${Object.keys(files).length} managed file(s) at ${src.sha}`,
+    `sync complete: ${Object.keys(result.files).length} managed file(s) at ${src.sha}`,
   );
 };
 
@@ -371,7 +430,7 @@ const main = async (): Promise<void> => {
       optionValue(argv, 'from') ?? manifest.upstream,
     );
     try {
-      await runSync(manifest, source, consumer);
+      await runSync(manifest, source, consumer, argv.includes('--dry-run'));
     } finally {
       source.cleanup();
     }

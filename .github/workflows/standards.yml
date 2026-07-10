@@ -1,4 +1,4 @@
-name: CI
+name: Standards
 
 on:
   pull_request:
@@ -17,11 +17,41 @@ concurrency:
 
 jobs:
   # Canonical quality gate synced from davidvornholt/standards. `bun run check`
-  # runs the sync drift-check first, then lint, types, tests, build, and a11y.
-  # Repos that need extra services (a database, etc.) or a deploy pipeline add
-  # their own workflow files alongside this one.
+  # runs the sync drift-check first, then lint, types, tests, build, and the
+  # browser a11y suite. This is meant to be a consumer's WHOLE quality gate; a
+  # repo with a deploy pipeline keeps that in its own workflow and stops running
+  # the gate there (see the adoption notes in the standards README).
+  #
+  # A Postgres service is always provisioned because the mandatory a11y gate
+  # renders real routes, and on this stack routes are Server Components that
+  # query the database at request time — without a live DB they throw before Axe
+  # can scan them. Repos with no database simply never connect to it (an idle
+  # service container costs a few seconds and nothing else); making it
+  # conditional would fork this file per-repo and defeat a single uniform gate.
+  #
+  # Per-repo DB coordinates come from repository Actions VARIABLES (Settings →
+  # Secrets and variables → Actions → Variables), not edits to this synced file:
+  #   CI_POSTGRES_USER, CI_POSTGRES_PASSWORD, CI_POSTGRES_DB  (defaults below)
+  #   CI_RUNNER  — override the runner label (default ubuntu-latest)
+  # These are non-secret configuration; leaking them enables nothing.
   check:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: ${{ vars.CI_POSTGRES_USER || 'app' }}
+          POSTGRES_PASSWORD: ${{ vars.CI_POSTGRES_PASSWORD || 'app' }}
+          POSTGRES_DB: ${{ vars.CI_POSTGRES_DB || 'app' }}
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ${{ vars.CI_POSTGRES_USER || 'app' }} -d ${{ vars.CI_POSTGRES_DB || 'app' }}"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://${{ vars.CI_POSTGRES_USER || 'app' }}:${{ vars.CI_POSTGRES_PASSWORD || 'app' }}@127.0.0.1:5432/${{ vars.CI_POSTGRES_DB || 'app' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
