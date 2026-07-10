@@ -1,7 +1,0 @@
-interface:
-  display_name: "Vibe Designing"
-  short_description: "Prototype-first design, theme codification, and UI systemization"
-  default_prompt: "Use $vibe-designing to route this design task into the right phase and carry it through from prototype to reusable system."
-
-policy:
-  allow_implicit_invocation: true

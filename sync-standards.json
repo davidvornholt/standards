@@ -14,6 +14,7 @@
     ".agents/skills/review",
     ".agents/skills/review-loop",
     ".agents/skills/standards-sync",
+    ".agents/skills/ux-ui",
     ".agents/skills/vibe-designing",
     "biome.base.jsonc",
     "packages/typescript-config",
