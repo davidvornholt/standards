@@ -6,7 +6,10 @@
   // template/ holds seed files for consumers (its biome.jsonc extends a base
   // that only exists after seeding); the scanner must skip it entirely so it is
   // never loaded as a nested config or linted as this repo's source.
+  // Claude workflow scripts are a sandboxed DSL dialect (ambient orchestration
+  // globals, top-level return) that Biome's ES module parser rejects; the
+  // Workflow harness validates them at run time.
   "files": {
-    "includes": ["**", "!!**/template"]
+    "includes": ["**", "!!**/template", "!.claude/workflows"]
   }
 }

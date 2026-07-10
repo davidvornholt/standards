@@ -3,5 +3,11 @@
   // Repo-owned wrapper. Extends the canonical strict base synced from
   // davidvornholt/standards. Add project-specific overrides here; never edit
   // biome.base.jsonc locally.
-  "extends": ["./biome.base.jsonc"]
+  "extends": ["./biome.base.jsonc"],
+  "files": {
+    // Claude workflow scripts are a sandboxed DSL dialect (ambient
+    // orchestration globals, top-level return) that Biome's ES module
+    // parser rejects; the Workflow harness validates them at run time.
+    "includes": ["**", "!.claude/workflows"]
+  }
 }

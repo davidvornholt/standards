@@ -11,19 +11,30 @@ Use this skill for local review requests across code, documentation, configurati
 
 - Act as a strict reviewer looking for problems, regressions, and repo-contract violations.
 - Findings must be grounded in inspected files, diffs, tests, command output, `AGENTS.md`, matching skills, or documented framework/package behavior.
-- Do not hallucinate requirements, business rules, files, APIs, runtime behavior, tests, command results, or user intent.
-- If evidence is incomplete, either inspect more local context or describe the risk precisely without pretending it is confirmed.
+- If evidence is incomplete, either inspect more local context or report the finding as `needs-verification` (see confidence below).
 
-## Concern scope (optional)
+## Review scope
 
-If invoked with a concern lens (e.g. "security", "accessibility", "types", "architecture", "tests", "docs", or "catch-all"):
+- Unless the invoker narrows it, the diff under review is the full working-tree change against the base ref (default `HEAD`): staged and unstaged changes together, plus untracked files. Use `git diff <base>`, `git status --porcelain`, and reads of untracked files.
+- An index (staged/unstaged) boundary may exist for change attribution during a review loop; it never narrows review scope.
+- When a split-gated review loop (see the `review-loop` skill) scopes the pass to a coupling cluster, "the whole diff" means that cluster's whole delta; the loop's seam check owns the cross-cluster surface.
 
-- Review the WHOLE diff, but report only findings within that concern. Never narrow the files you look at — cross-file findings (e.g. auth enforced in a layout but missing in the nested loaders it should protect) only appear when the whole relationship is in view. Exception: when a split-gated review loop (see the `review-loop` skill) scopes the pass to a coupling cluster, "the whole diff" means that cluster's whole delta; the loop's seam check owns the cross-cluster surface.
-- The posture, finding categories, and output contract below all apply within the lens.
-- For the `security` lens: enumerate security surfaces; do not sample them. For every route, data loader, server action, and token/credential path in scope, state whether auth is enforced, at which layer, and whether that layer survives the framework's navigation and caching model (e.g. framework layouts that do not re-run on client-side navigation). List each surface explicitly rather than reporting only the ones that stand out.
-- The catch-all lens reports anything not owned by another named lens, so nothing falls through the seams between lenses.
+## Concern lenses (optional)
 
-If no concern lens is given, review across all concerns as usual.
+A lens is a concern-scoped reviewer charter defined by the invoker per review — for example `data integrity & atomicity: transactions, TOCTOU windows, partial-failure consistency, audit ordering`. Lenses are invented to fit the diff, not taken from a fixed list. When invoked with a lens:
+
+- Review the WHOLE diff, but report only findings within the lens. Never narrow the files you look at — cross-file findings (e.g. auth enforced in a layout but missing in the nested loaders it should protect) only appear when the whole relationship is in view.
+- Enumerate the lens's surfaces; do not sample them. A security lens states, for every route, data loader, server action, and token/credential path in scope, whether protection holds, at which layer, and whether that layer survives the framework's navigation and caching model. Other lenses enumerate analogously: every mutation for atomicity, every interactive state for accessibility.
+- A `catch-all` lens reports anything not owned by another lens running in the same pass, so nothing falls through the seams between lenses.
+
+If no lens is given, review across all concerns as usual.
+
+## Decisions registry
+
+If `.agents/review/decisions.md` exists, read it before reviewing. Its entries are deliberate, already-litigated decisions:
+
+- Do not re-report an accepted decision as a finding.
+- Challenge an entry only with evidence that did not exist when it was decided, as an explicit finding that names the decision id.
 
 ## What to inspect
 
@@ -32,7 +43,6 @@ Before reviewing, gather enough local context to support findings:
 - Read the relevant `AGENTS.md` instructions.
 - Inspect the `description` frontmatter for local skills under `.agents/skills/*/SKILL.md` and follow any that match the reviewed changes.
 - Inspect the changed files or requested files, plus nearby callers, tests, package manifests, scripts, docs, workflows, and config as needed.
-- Use `git diff`, `git status`, `rg`, and focused file reads to understand scope.
 - Prefer `bun run check` from the repo root for code-affecting changes. If unavailable, inspect `package.json` and run the closest relevant lint/typecheck/test command. For documentation-only changes, use a narrower verification when the full check would not add useful signal.
 - If an orchestrator has already run the full deterministic gate for this pass, do not re-run it; rely on its result and run only focused checks relevant to your concern. This avoids re-running the whole gate once per lens in a fan-out.
 
@@ -53,11 +63,18 @@ Group findings by these sections, ordered by severity within each section:
    - Tiny polish issues and small consistency improvements.
    - Include nits when they exist, but keep them after substantive findings.
 
+## Confidence
+
+Label every finding:
+
+- `confirmed`: you inspected the defect in context and verified the failure mode is real.
+- `needs-verification`: grounded suspicion whose confirmation needs digging you could not complete (dependency internals, runtime behavior, concurrency windows). State exactly what is unverified.
+
 ## Output contract
 
 - Use file and line references for every finding whenever possible.
 - Explain the impact and the concrete problem, not just a preference.
 - Keep findings concise and actionable.
-- If no problems are found, say that no review findings were found, summarize what was inspected, and mention checks actually run.
-- If findings exist, end by asking whether you should fix all findings and issues.
+- When the invoker supplies a structured findings schema, return findings only through that schema — no prose report.
+- If no problems are found, say that no review findings were found and summarize what was inspected.
 - Mention tests or checks run only if they were actually run. Mention meaningful verification gaps when they affect confidence.
