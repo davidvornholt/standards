@@ -1,6 +1,6 @@
 {
   "upstream": "github:davidvornholt/standards",
-  "sha": "abf94902f26d456866cd4d8cf73f3dc96acd8e12",
+  "sha": "51bd9024e893c45bfcf247d72a87e611885374e6",
   "files": {
     ".agents/skills/database/agents/openai.yaml": "4c9f47df24219d5b195c88eef374431f64b453ed1ba057f50d4c11e4549343c1",
     ".agents/skills/database/SKILL.md": "f3fe75b2f5aab696630a72e4ffd562100686e9db62be0a4cb317f4140c2af8da",
@@ -8,7 +8,7 @@
     ".agents/skills/frontend-design/SKILL.md": "b81e2ff87ed8fa4d6c377ccb127a7254c9e6a77e3ae94f21e6b514f7bb2945a0",
     ".agents/skills/git-commit/SKILL.md": "b079e93c303e482ead80f6967e042db35697bf7a94ff8880fcf27b9a9e04397b",
     ".agents/skills/github-actions/agents/openai.yaml": "3e16e49eff2810336fbce00a930aa15b7ab5ec0b1984c7b4d57729fc3ab347d0",
-    ".agents/skills/github-actions/SKILL.md": "49dddee7d2f9809c450db0876efa4145d88fe87d2d9d264c978cc48e3b965618",
+    ".agents/skills/github-actions/SKILL.md": "ca20712e1596d5702bcb2c0564050c96eabaedec3082c1e5334caf94bfe253c0",
     ".agents/skills/review-loop/SKILL.md": "45f0442f6b3522737399f518f8acd34030988954773bac32e4ebaf08bfe7f7a3",
     ".agents/skills/review/SKILL.md": "842f97f6b14eac4dcf43e3e745c46d5b16dc17f8e391609d1fbb1b561d4c22de",
     ".agents/skills/vibe-designing/agents/openai.yaml": "9ba6a28274a5baff3bbd14ccf16220243f705c95fca402af4fa15456c5f2132b",
