@@ -15,7 +15,6 @@
     ".agents/skills/review-loop",
     ".agents/skills/standards-sync",
     ".agents/skills/ux-ui",
-    ".agents/skills/vibe-designing",
     ".claude/agents/reviewer.md",
     ".claude/workflows/review-pass.js",
     ".codex/agents/reviewer.toml",
