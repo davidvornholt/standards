@@ -13,6 +13,7 @@
     ".agents/skills/github-actions",
     ".agents/skills/review",
     ".agents/skills/review-loop",
+    ".agents/skills/standards-sync",
     ".agents/skills/vibe-designing",
     "biome.base.jsonc",
     "packages/typescript-config",

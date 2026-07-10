@@ -1,0 +1,3 @@
+interface:
+  display_name: "Standards sync"
+  short_description: "Operate the standards sync system and its read-only canonical files"
