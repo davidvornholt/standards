@@ -62,7 +62,9 @@ bun /tmp/sync-standards.ts init
 Run the same `init` at the repo root. **`init` never clobbers:** any file that
 already exists (your `package.json`, `biome.jsonc`, `turbo.json`, `README.md`, …)
 is *kept*, and only missing files are seeded. The canonical (bucket-1) files are
-always mirrored in. So on a repo that is already set up, adoption is: `init`,
+always mirrored in. `init` is one-time: once `sync-standards.lock` exists it
+refuses to run again, and all updates go through `sync`. So on a repo that is
+already set up, adoption is: `init`,
 then wire the extension **seams** by hand — a one-time cost that is the whole
 point of the two-bucket model:
 

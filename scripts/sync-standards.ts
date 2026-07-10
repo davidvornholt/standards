@@ -439,6 +439,16 @@ const main = async (): Promise<void> => {
   }
 
   if (command === 'init') {
+    // Refuse before cloning upstream: re-initializing skips the lock, so it
+    // would silently overwrite local canonical edits and orphan files that
+    // upstream deleted (they leave the lock and no future sync removes them).
+    if (existsSync(join(consumer, 'sync-standards.lock'))) {
+      console.error(
+        'sync-standards: already initialized (sync-standards.lock exists). Use `just sync-standards` to update.',
+      );
+      process.exitCode = 1;
+      return;
+    }
     const source = resolveSource(optionValue(argv, 'from') ?? DEFAULT_UPSTREAM);
     try {
       const manifest = await loadManifest(

@@ -30,7 +30,7 @@ If a task seems to require editing a canonical file for one repo's needs, stop �
 
 ## Commands
 
-`init` bootstraps, `sync` mirrors bucket-1 and rewrites the lock, `sync --dry-run` previews, `--check` verifies drift offline (wired into the `check` gate); flags `--from <src>` and `--dir <consumer>`. Run through `just sync-standards <args>`. The engine `scripts/sync-standards.ts` ships in every consumer and is the source of truth for exact behavior — read it rather than restating it here.
+`init` bootstraps (one-time: it refuses to run once `sync-standards.lock` exists — use `sync` from then on), `sync` mirrors bucket-1 and rewrites the lock, `sync --dry-run` previews, `--check` verifies drift offline (wired into the `check` gate); flags `--from <src>` and `--dir <consumer>`. Run through `just sync-standards <args>`. The engine `scripts/sync-standards.ts` ships in every consumer and is the source of truth for exact behavior — read it rather than restating it here.
 
 ## The normal change loop
 

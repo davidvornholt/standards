@@ -109,6 +109,16 @@ describe('init', () => {
     expect(read(consumer, 'seed.txt')).toBe('mine\n');
   });
 
+  test('refuses to re-initialize when a lock already exists', () => {
+    const up = buildUpstream();
+    const { consumer } = initConsumer(up);
+    write(consumer, 'managed/a.txt', 'local edit\n');
+    const again = run(consumer, ['init', '--from', up, '--dir', consumer]);
+    expect(again.status).toBe(1);
+    expect(again.stderr).toContain('already initialized');
+    expect(read(consumer, 'managed/a.txt')).toBe('local edit\n');
+  });
+
   test('errors when a managed path overlaps a seed target', () => {
     const { consumer, result } = initConsumer(buildUpstream(['seed.txt']));
     expect(result.status).not.toBe(0);
