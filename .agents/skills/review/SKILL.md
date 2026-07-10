@@ -18,7 +18,7 @@ Use this skill for local review requests across code, documentation, configurati
 
 If invoked with a concern lens (e.g. "security", "accessibility", "types", "architecture", "tests", "docs", or "catch-all"):
 
-- Review the WHOLE diff, but report only findings within that concern. Never narrow the files you look at — cross-file findings (e.g. auth enforced in a layout but missing in the nested loaders it should protect) only appear when the whole relationship is in view.
+- Review the WHOLE diff, but report only findings within that concern. Never narrow the files you look at — cross-file findings (e.g. auth enforced in a layout but missing in the nested loaders it should protect) only appear when the whole relationship is in view. Exception: when a split-gated review loop (see the `review-loop` skill) scopes the pass to a coupling cluster, "the whole diff" means that cluster's whole delta; the loop's seam check owns the cross-cluster surface.
 - The posture, finding categories, and output contract below all apply within the lens.
 - For the `security` lens: enumerate security surfaces; do not sample them. For every route, data loader, server action, and token/credential path in scope, state whether auth is enforced, at which layer, and whether that layer survives the framework's navigation and caching model (e.g. framework layouts that do not re-run on client-side navigation). List each surface explicitly rather than reporting only the ones that stand out.
 - The catch-all lens reports anything not owned by another named lens, so nothing falls through the seams between lenses.
