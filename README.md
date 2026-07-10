@@ -36,8 +36,10 @@ strengthen gates over time and never weaken one to make a change pass.
 
 Every file is either **synced** (upstream-owned, read-only in consumers — the
 list in `sync-standards.json`) or **seeded once** (written by `init` from
-`template/`, then owned by the repo: the `biome.jsonc` wrapper, `CLAUDE.md`,
-`AGENTS.local.md`, `justfile`, `.sops.yaml`, root scaffolding, `README.md`).
+`template/`, then owned by the repo: the `biome.jsonc` wrapper, `AGENTS.local.md`,
+`justfile`, `.sops.yaml`, `secrets/*.example.yaml`, root scaffolding, `README.md`).
+Secret-shape examples are seeded, not synced, so each repo can extend them to
+mirror its own real secrets without the next sync clobbering them.
 
 Because canonical files are read-only, every point of legitimate per-repo
 variation goes through a wrapper seam: `biome.jsonc` extends `biome.base.jsonc`,

@@ -1,6 +1,6 @@
 {
   "upstream": "github:davidvornholt/standards",
-  "sha": "4c19b023396953d0fcbf5730446c8b95bd64e893",
+  "sha": "abf94902f26d456866cd4d8cf73f3dc96acd8e12",
   "files": {
     ".agents/skills/database/agents/openai.yaml": "4c9f47df24219d5b195c88eef374431f64b453ed1ba057f50d4c11e4549343c1",
     ".agents/skills/database/SKILL.md": "f3fe75b2f5aab696630a72e4ffd562100686e9db62be0a4cb317f4140c2af8da",
@@ -36,10 +36,8 @@
     "packages/typescript-config/README.md": "ffd46925c5c2145247f4fac72adc5c1153930b3bd33a6dbb9d1b2d3c22432f3b",
     "packages/typescript-config/tsconfig.json": "9ba40a1b20b3a3bfea4e4a97e2228ce8ae017393e20e7b906ffe41d35ed83c0d",
     "scripts/sync-standards.test.ts": "f2e46a0f0a2537e1fc5bb31d06cf5d97df3e7f01499ff6a6c0f10eb807ee5b5b",
-    "scripts/sync-standards.ts": "05835accc8d63e4d9043a2ceed519141f448278d97046fdfbc334148693eee68",
-    "secrets/ci.example.yaml": "e04ff7b9e1ed38f770a26de1eb1ec409dd31330a7de0e43e7e1d90d53656992c",
-    "secrets/dev.example.yaml": "f09e51db65afebb659936cabaffdfde2ebbd172f03c62c895ab57146cdc6ab3c",
+    "scripts/sync-standards.ts": "6c958c24b522d7193e452021c0f72c59acb21d0dfeca86feef2983d880beb1ae",
     "standards.just": "145172becdd85f9830e37d279cee62b751f1279176a77e26ff43312505e188f7",
-    "sync-standards.json": "1a5ed7b11e202c8e22ea470ebbf4f08004a01a51f0f0248d4cf381103653153e"
+    "sync-standards.json": "470f484d839db1139ddf2b4f7892410347e598682f4084f7e1e638fbcb589657"
   }
 }

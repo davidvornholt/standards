@@ -30,6 +30,17 @@ const HASH_PREVIEW_LENGTH = 12;
 
 const GITHUB_PREFIX = 'github:';
 
+// Never mirrored, even under a managed directory path: build output, VCS
+// metadata, and installed dependencies would otherwise pollute the lock when
+// syncing from a working tree that has them.
+const IGNORED_DIRS = new Set([
+  'node_modules',
+  '.git',
+  '.turbo',
+  'dist',
+  '.next',
+]);
+
 type Manifest = {
   readonly upstream: string;
   readonly seedDir: string;
@@ -149,7 +160,9 @@ const walk = async (
   if (info.isDirectory()) {
     const entries = await readdir(abs);
     await Promise.all(
-      entries.map((entry) => walk(join(abs, entry), base, out)),
+      entries
+        .filter((entry) => !IGNORED_DIRS.has(entry))
+        .map((entry) => walk(join(abs, entry), base, out)),
     );
     return;
   }
@@ -193,16 +206,24 @@ type MirrorResult = {
   readonly tampered: ReadonlyArray<string>;
 };
 
+type MirrorOptions = {
+  readonly manifest: Manifest;
+  readonly srcDir: string;
+  readonly consumer: string;
+  readonly previous: Record<string, string>;
+  readonly dryRun: boolean;
+};
+
 // Mirror managed files into the consumer, deleting any previously-locked file
 // that no longer exists upstream (three-way reconcile against the lock). When
 // `dryRun` is set nothing is written or deleted; the returned plan is reported.
-const mirror = async (
-  manifest: Manifest,
-  srcDir: string,
-  consumer: string,
-  previous: Record<string, string>,
-  dryRun: boolean,
-): Promise<MirrorResult> => {
+const mirror = async ({
+  manifest,
+  srcDir,
+  consumer,
+  previous,
+  dryRun,
+}: MirrorOptions): Promise<MirrorResult> => {
   const upstream = await listManaged(srcDir, manifest.paths);
   const next: Record<string, string> = {};
   const created: Array<string> = [];
@@ -307,7 +328,13 @@ const runInit = async (
       console.log(`  seeded ${rel}`);
     }),
   );
-  const result = await mirror(manifest, src.dir, consumer, {}, false);
+  const result = await mirror({
+    manifest,
+    srcDir: src.dir,
+    consumer,
+    previous: {},
+    dryRun: false,
+  });
   reportMirror(result, false);
   await writeLock(consumer, {
     upstream: manifest.upstream,
@@ -328,13 +355,13 @@ const runSync = async (
   const seeds = await seedTargets(src.dir, manifest.seedDir);
   assertDisjoint(manifest.paths, [...seeds.keys()]);
   const lock = await readLock(consumer);
-  const result = await mirror(
+  const result = await mirror({
     manifest,
-    src.dir,
+    srcDir: src.dir,
     consumer,
-    lock?.files ?? {},
+    previous: lock?.files ?? {},
     dryRun,
-  );
+  });
   reportMirror(result, dryRun);
   if (dryRun) {
     return;

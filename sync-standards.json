@@ -18,8 +18,6 @@
     "packages/typescript-config",
     "packages/a11y-testing",
     "standards.just",
-    "secrets/dev.example.yaml",
-    "secrets/ci.example.yaml",
     ".github/workflows/standards.yml",
     ".github/workflows/standards-sync.yml"
   ]
