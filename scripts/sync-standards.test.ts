@@ -154,6 +154,30 @@ describe('--check', () => {
 });
 
 describe('sync', () => {
+  test('uses new managed paths from the upstream manifest immediately', () => {
+    const up = buildUpstream();
+    const { consumer } = initConsumer(up);
+    write(up, 'newly-managed.txt', 'new\n');
+    write(
+      up,
+      'sync-standards.json',
+      JSON.stringify({
+        upstream: up,
+        seedDir: 'template',
+        paths: [...STD_PATHS, 'newly-managed.txt'],
+      }),
+    );
+
+    const result = sync(up, consumer);
+
+    expect(result.status).toBe(0);
+    expect(read(consumer, 'newly-managed.txt')).toBe('new\n');
+    expect(readLock(consumer).files['newly-managed.txt']).toBeDefined();
+    expect(sync(up, consumer, ['--dry-run']).stdout).toContain(
+      'dry run: already in sync; no changes',
+    );
+  });
+
   test('deletes a consumer file removed from upstream and prunes the lock', () => {
     const up = buildUpstream();
     const { consumer } = initConsumer(up);
