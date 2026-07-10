@@ -7,8 +7,8 @@
     "packages/*"
   ],
   "scripts": {
-    "check": "bun run scripts/sync-standards.ts --check && bun test scripts/ && turbo run lint check-types test",
-    "check:fix": "bun run scripts/sync-standards.ts --check && bun test scripts/ && turbo run lint:fix check-types test"
+    "check": "bun test scripts/ && turbo run lint check-types test",
+    "check:fix": "bun test scripts/ && turbo run lint:fix check-types test"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.1",

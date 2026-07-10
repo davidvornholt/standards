@@ -3,3 +3,9 @@ node_modules/
 dist/
 .next/
 *.log
+
+# The standards repo is the authority for canonical files, so it does not run
+# the drift `--check` against itself; its lock would only ever record its own
+# hashes. Consumers commit their lock (it is their drift baseline); the source
+# does not need one.
+sync-standards.lock
