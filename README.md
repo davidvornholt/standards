@@ -95,9 +95,9 @@ update is just `just sync-standards`.
 Once `sync-standards.json` and the engine are present:
 
 ```sh
-just sync-standards                          # pull latest canonical files (mirror + deletions)
-bun run scripts/sync-standards.ts --dry-run  # preview a sync, writing nothing
-bun run scripts/sync-standards.ts --check    # verify nothing canonical was edited locally
+just sync-standards            # pull latest canonical files (mirror + deletions)
+just sync-standards --dry-run  # preview a sync, writing nothing
+just sync-standards --check    # verify nothing canonical was edited locally
 ```
 
 The `Standards sync` workflow also runs `sync` weekly and opens a PR when
