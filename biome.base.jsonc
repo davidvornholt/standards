@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.5.1/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.5.3/schema.json",
   // Canonical strict Biome base, synced from davidvornholt/standards. Do NOT
   // edit locally: repos extend this from their own `biome.jsonc` wrapper and add
   // project-specific overrides there. The baseline turns every applicable rule
