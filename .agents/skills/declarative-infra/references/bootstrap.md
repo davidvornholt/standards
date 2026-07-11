@@ -1,8 +1,6 @@
 # Bootstrapping a host repo
 
-How to stand up a new self-contained infrastructure repo (or an `infra/`
-directory inside an app repo). Inspect any existing infrastructure first and
-preserve working host definitions, state, secrets, and workflows.
+How to stand up a new self-contained infrastructure repo (or an `infra/` directory inside an app repo). Inspect any existing infrastructure first and preserve working host definitions, state, secrets, and workflows.
 
 ## Layout
 
@@ -78,22 +76,15 @@ infra/
 }
 ```
 
-Build-time parameters (image digests, preview lists) enter via
-`specialArgs` from environment variables in the deploy workflow, with safe
-fallbacks so plain `nix flake check` evaluates without them.
+Build-time parameters (image digests, preview lists) enter via `specialArgs` from environment variables in the deploy workflow, with safe fallbacks so plain `nix flake check` evaluates without them.
 
 ## Host essentials
 
-In `hosts/<name>/configuration.nix`: `networking.hostName`,
-`networking.domain`, `time.timeZone`, profile parameters (SSH keys, ACME
-email, databases), app options, SOPS wiring — and `system.stateVersion`,
-set once at install and never changed afterward.
+In `hosts/<name>/configuration.nix`: `networking.hostName`, `networking.domain`, `time.timeZone`, profile parameters (SSH keys, ACME email, databases), app options, SOPS wiring — and `system.stateVersion`, set once at install and never changed afterward.
 
 ## Secrets (SOPS + age)
 
-- Host key is the recipient: derive with
-  `ssh-to-age < /etc/ssh/ssh_host_ed25519_key.pub`, list it (plus admin
-  keys) in `.sops.yaml` creation rules.
+- Host key is the recipient: derive with `ssh-to-age < /etc/ssh/ssh_host_ed25519_key.pub`, list it (plus admin keys) in `.sops.yaml` creation rules.
 - Host side:
 
 ```nix
@@ -109,15 +100,6 @@ sops = {
 
 ## Install and convergence
 
-- **First install**: nixos-anywhere with the disko layout, or a NixOS
-  installer + `disko` run; capture `hardware-configuration.nix` from the
-  target. After install, collect the host key and re-encrypt secrets for it.
-- **Convergence**: a main-branch workflow deploys — `nix run
-  .#deploy-rs` (deploy-rs handles rollback on failed activation) using a
-  dedicated deploy SSH key that only CI holds; `tofu apply` runs there too,
-  gated on the plan job. PR workflows run the validation gates only
-  (`nix flake check`, toplevel build, `tofu plan`) with read-only
-  credentials or `-backend=false`.
-- Protect the default branch: require the PR gates, no force-push, no
-  bypass. The deploy workflow is the only thing that mutates
-  infrastructure.
+- **First install**: nixos-anywhere with the disko layout, or a NixOS installer + `disko` run; capture `hardware-configuration.nix` from the target. After install, collect the host key and re-encrypt secrets for it.
+- **Convergence**: a main-branch workflow deploys — `nix run .#deploy-rs` (deploy-rs handles rollback on failed activation) using a dedicated deploy SSH key that only CI holds; `tofu apply` runs there too, gated on the plan job. PR workflows run the validation gates only (`nix flake check`, toplevel build, `tofu plan`) with read-only credentials or `-backend=false`.
+- Protect the default branch: require the PR gates, no force-push, no bypass. The deploy workflow is the only thing that mutates infrastructure.
