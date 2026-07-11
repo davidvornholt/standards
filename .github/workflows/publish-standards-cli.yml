@@ -30,6 +30,7 @@ jobs:
       contents: read
       id-token: write
     outputs:
+      publish: ${{ steps.release.outputs.publish }}
       tag: ${{ steps.release.outputs.tag }}
       version: ${{ steps.release.outputs.version }}
       sha: ${{ github.event.workflow_run.head_sha }}
@@ -148,6 +149,7 @@ jobs:
 
   release:
     needs: publish
+    if: needs.publish.outputs.publish == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
