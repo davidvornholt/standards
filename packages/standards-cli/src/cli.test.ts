@@ -65,6 +65,23 @@ const buildUpstream = (paths: ReadonlyArray<string> = STD_PATHS): string => {
   write(up, 'template/seed.txt', 'seed original\n');
   write(up, 'template/AGENTS.local.md', '# Local\n');
   write(up, 'template/biome.jsonc', '{"extends":["./biome.base.jsonc"]}\n');
+  write(
+    up,
+    'template/.github/dependabot.yml',
+    [
+      'version: 2',
+      'updates:',
+      '  - package-ecosystem: bun',
+      '    directory: /',
+      '    schedule:',
+      '      interval: weekly',
+      '  - package-ecosystem: github-actions',
+      '    directory: /',
+      '    schedule:',
+      '      interval: weekly',
+      '',
+    ].join('\n'),
+  );
   write(up, 'template/justfile', "import 'standards.just'\n");
   write(
     up,
@@ -109,6 +126,9 @@ describe('init', () => {
     expect(result.stdout).toContain('seeded seed.txt');
     expect(result.stdout).toContain('init complete:');
     expect(read(consumer, 'seed.txt')).toBe('seed original\n');
+    expect(read(consumer, '.github/dependabot.yml')).toContain(
+      'package-ecosystem: bun',
+    );
     expect(read(consumer, 'managed/a.txt')).toBe('alpha\n');
     expect(readLock(consumer).files['managed/a.txt']).toBeDefined();
   });
@@ -183,9 +203,101 @@ describe('doctor', () => {
     expect(doctor.stderr).toContain('justfile must import');
     expect(doctor.stderr).toContain('biome.jsonc must extend');
     expect(doctor.stderr).toContain('AGENTS.local.md must exist');
+    expect(doctor.stderr).toContain('.github/dependabot.yml must exist');
     expect(doctor.stderr).toContain('@davidvornholt/standards');
     expect(doctor.stderr).toContain('script "check"');
     expect(doctor.stderr).toContain('script "check:fix"');
+  });
+
+  it('reports invalid Dependabot structure and missing baseline ecosystems', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    write(
+      consumer,
+      '.github/dependabot.yml',
+      [
+        'version: 1',
+        'updates:',
+        '  - package-ecosystem: nix',
+        '    directory: /',
+        '',
+      ].join('\n'),
+    );
+
+    const doctor = run(consumer, ['doctor', '--dir', consumer]);
+
+    expect(doctor.status).toBe(1);
+    expect(doctor.stderr).toContain('must use version: 2');
+    expect(doctor.stderr).toContain('must define schedule.interval');
+    expect(doctor.stderr).toContain('root-directory bun ecosystem');
+    expect(doctor.stderr).toContain('root-directory github-actions ecosystem');
+  });
+
+  it('reports malformed Dependabot YAML as an integration problem', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    write(consumer, '.github/dependabot.yml', 'version: [\n');
+
+    const doctor = run(consumer, ['doctor', '--dir', consumer]);
+
+    expect(doctor.status).toBe(1);
+    expect(doctor.stderr).toContain('must contain valid YAML');
+  });
+
+  it('rejects unsupported and incomplete cron schedules', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    const dependabotPath = '.github/dependabot.yml';
+    write(
+      consumer,
+      dependabotPath,
+      read(consumer, dependabotPath)
+        .replace('interval: weekly', 'interval: never')
+        .replace('interval: weekly', 'interval: cron'),
+    );
+
+    const doctor = run(consumer, ['doctor', '--dir', consumer]);
+
+    expect(doctor.status).toBe(1);
+    expect(doctor.stderr).toContain('unsupported schedule.interval');
+    expect(doctor.stderr).toContain('must define schedule.cronjob');
+  });
+
+  it('accepts additional ecosystems with a shared group schedule', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    write(
+      consumer,
+      '.github/dependabot.yml',
+      [
+        'version: 2',
+        'multi-ecosystem-groups:',
+        '  infrastructure:',
+        '    schedule:',
+        '      interval: weekly',
+        'updates:',
+        '  - package-ecosystem: bun',
+        '    directory: /',
+        '    schedule:',
+        '      interval: weekly',
+        '  - package-ecosystem: github-actions',
+        '    directory: /',
+        '    schedule:',
+        '      interval: weekly',
+        '  - package-ecosystem: nix',
+        '    directories:',
+        '      - /',
+        '      - /infra',
+        '    patterns: ["*"]',
+        '    multi-ecosystem-group: infrastructure',
+        '  - package-ecosystem: opentofu',
+        '    directory: /infra',
+        '    patterns: ["*"]',
+        '    multi-ecosystem-group: infrastructure',
+        '',
+      ].join('\n'),
+    );
+
+    const doctor = run(consumer, ['doctor', '--dir', consumer]);
+
+    expect(doctor.status).toBe(0);
+    expect(doctor.stdout).toContain('consumer integration seams are wired');
   });
 });
 

@@ -1,0 +1,14 @@
+version: 2
+
+# This file is seeded once and then owned by the repository. Keep these baseline
+# ecosystems and add repo-specific ones such as nix or opentofu as needed.
+updates:
+  - package-ecosystem: "bun"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

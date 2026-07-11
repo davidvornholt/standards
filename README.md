@@ -38,7 +38,8 @@ strengthen gates over time and never weaken one to make a change pass.
 Every file is either **synced** (upstream-owned, read-only in consumers — the
 list in `sync-standards.json`) or **seeded once** (written by `init` from
 `template/`, then owned by the repo: the `biome.jsonc` wrapper, `AGENTS.local.md`,
-`justfile`, `.sops.yaml`, `secrets/*.example.yaml`, root scaffolding, `README.md`).
+`justfile`, `.github/dependabot.yml`, `.sops.yaml`, `secrets/*.example.yaml`,
+root scaffolding, `README.md`).
 Secret-shape examples are seeded, not synced, so each repo can extend them to
 mirror its own real secrets without the next sync clobbering them.
 
@@ -85,6 +86,9 @@ point of the two-bucket model:
   `AGENTS.local.md`, which `AGENTS.md` includes.
 - **`package.json`** — declare `@davidvornholt/standards` directly and make
   `check` and `check:fix` run `standards check` first.
+- **`.github/dependabot.yml`** — keep the baseline root entries for the Bun and
+  GitHub Actions ecosystems; add repo-specific ecosystems such as Nix or
+  OpenTofu when the repository uses them.
 - **`.sops.yaml`** — keep your real age recipients; only the
   `secrets/*.example.yaml` *shapes* are canonical.
 - **CI** — the synced `.github/workflows/standards.yml` is your quality gate.
