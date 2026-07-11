@@ -1,19 +1,13 @@
 # OpenTofu reference implementations
 
-Root stacks live under `opentofu/<stack>/` in the consuming repo. Each stack
-owns its backend, provider configuration, credentials, and state — resources
-are written inline; there are no shared child modules.
+Root stacks live under `opentofu/<stack>/` in the consuming repo. Each stack owns its backend, provider configuration, credentials, and state — resources are written inline; there are no shared child modules.
 
 ## Stack conventions
 
-- One directory per stack, one state per directory. Commit
-  `.terraform.lock.hcl`.
-- Backend: `backend "s3" {}` with configuration and credentials injected by
-  the workflow/environment (R2 is S3-compatible), never hardcoded.
-- Providers configured empty (`provider "cloudflare" {}`); credentials come
-  from the environment.
-- Non-secret identifiers (zone IDs, account IDs, record contents) are plain
-  `locals` — they are not secrets, and inline values keep plans reviewable.
+- One directory per stack, one state per directory. Commit `.terraform.lock.hcl`.
+- Backend: `backend "s3" {}` with configuration and credentials injected by the workflow/environment (R2 is S3-compatible), never hardcoded.
+- Providers configured empty (`provider "cloudflare" {}`); credentials come from the environment.
+- Non-secret identifiers (zone IDs, account IDs, record contents) are plain `locals` — they are not secrets, and inline values keep plans reviewable.
 
 ```hcl
 terraform {
@@ -34,9 +28,7 @@ provider "cloudflare" {}
 
 ## Cloudflare DNS records
 
-One `for_each` resource over a map keyed by a stable identifier — renaming a
-key is a `moved` block, not a destroy/create. Defaults: `ttl = 1` (auto),
-`proxied = false`.
+One `for_each` resource over a map keyed by a stable identifier — renaming a key is a `moved` block, not a destroy/create. Defaults: `ttl = 1` (auto), `proxied = false`.
 
 ```hcl
 locals {
@@ -65,8 +57,7 @@ resource "cloudflare_dns_record" "managed" {
 
 ## Cloudflare R2 buckets
 
-`prevent_destroy` guards data: removing a bucket is a deliberate two-step
-(lift the guard, then destroy), never a plan side effect.
+`prevent_destroy` guards data: removing a bucket is a deliberate two-step (lift the guard, then destroy), never a plan side effect.
 
 ```hcl
 resource "cloudflare_r2_bucket" "bucket" {
@@ -88,9 +79,5 @@ resource "cloudflare_r2_bucket" "bucket" {
 
 ## Adopting or restructuring resources
 
-- Existing cloud resources enter state through `import` blocks; refactors
-  move addresses with `moved` blocks. Both stay in the repo as history.
-- Any migration — including inlining a retired
-  `davidvornholt/declarative-infra` child module (address
-  `module.<name>.cloudflare_*` → `cloudflare_*`) — must produce a **no-op
-  plan** before it merges.
+- Existing cloud resources enter state through `import` blocks; refactors move addresses with `moved` blocks. Both stay in the repo as history.
+- Any migration — including inlining a retired `davidvornholt/declarative-infra` child module (address `module.<name>.cloudflare_*` → `cloudflare_*`) — must produce a **no-op plan** before it merges.

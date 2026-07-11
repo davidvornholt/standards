@@ -8,33 +8,33 @@ description: Must be used for every task that creates or modifies UI — pages, 
 ## Design contract
 
 - Use the `frontend-design` skill for all UI work.
-- Read the root `DESIGN.md` before any UI work and follow it. It defines the design intent and references the theme.
+- Read the root `DESIGN.md` before any UI work and follow it. It defines the design intent and points to the theme/token source.
 - Skip `DESIGN.md` only when the user explicitly asks to explore a new design direction. Treat that exploration as a prototype: prioritize originality, taste, cohesion, and visual force over systemization.
 - After a successful exploration, offer to update `DESIGN.md` and the theme so the system matches the new reality.
 
 ## Theme tokens
 
-- All color and design values come from `packages/ui/src/theme.css`. No raw color values (`#hex`, `rgb()`, `hsl()`, `oklch()` literals) in app or component code.
-- No default Tailwind palette classes (`text-blue-400`, `bg-red-500`, …). Use only semantic utilities generated from theme tokens (`bg-primary`, `text-muted`, …). The default palette is disabled in `theme.css` via `--color-*: initial`, so palette classes produce no CSS.
-- Define color tokens and authored CSS colors with `oklch(...)` inside `theme.css`.
-- If a needed token does not exist, add it rather than misusing a nearby token or hardcoding a value. New tokens must be semantic, follow the existing naming scheme, live in `theme.css`, and be reported to the user in the summary.
-- Shared components in `packages/ui` use semantic theme tokens only. Hairline rules use `border-border`; the heavy chapter rule uses `border-foreground`; muted prose uses `text-muted-foreground` — never `ink-*` ramp steps.
-- Transactional email HTML cannot resolve CSS variables. Email templates interpolate the shared mail palette (`apps/web/src/shared/mail/constants/mail-palette.ts`), whose hex constants mirror theme anchors. That file carries the only sanctioned raw color literals outside `theme.css`.
+- All color and design values come from the project's central token source (its theme file). No raw color values (`#hex`, `rgb()`, `hsl()`, `oklch()` literals) in app or component code.
+- When the project uses a semantic token layer, do not use default Tailwind palette classes (`text-blue-400`, `bg-red-500`, …); use only the semantic utilities generated from theme tokens (`bg-primary`, `text-muted`, …).
+- Define color tokens and authored CSS colors with `oklch(...)` in the token source.
+- If a needed token does not exist, add it rather than misusing a nearby token or hardcoding a value. New tokens must be semantic, follow the existing naming scheme, live in the token source, and be reported to the user in the summary.
+- Shared and foundational components use semantic theme tokens only — never raw ramp steps or ad-hoc values.
+- Contexts that cannot resolve CSS variables (for example transactional email HTML) may mirror the theme's anchor colors as raw literals in a single, clearly colocated constants file. Keep that the only sanctioned raw-color exception outside the token source.
 
 ## Typography in code
 
-- `font-display` (Titan One) is display-only: `text-2xl` is the minimum, `text-4xl` and larger is preferred. Put the size class on the heading element itself — the guardrail cascade in `apps/web/src/app/globals.css` only promotes `h1`–`h6` that carry `text-2xl`+, and an explicit `font-display` below that size is a violation, not an override.
-- Below display size, use IBM Plex Sans with `font-semibold` or `font-bold`. Never use Titan One for small headings, cards, article teasers, review quotes, metadata, captions, phone numbers, or sentence-length content.
+- Follow the project's typographic scale. A display or heading typeface is used only at the sizes the design system reserves for it, and the size class goes on the heading element itself. Do not use the display face for small headings, cards, teasers, quotes, metadata, captions, or sentence-length content.
+- Below display size, use the project's body typeface at the weight the design system specifies.
 
 ## Motion in code
 
-- One easing curve. Use the `ease-editorial` utility (or `var(--ease-editorial)`); do not use `ease-out`, `ease-in-out`, or ad-hoc `cubic-bezier(...)` in product code.
-- JS animation code (Motion library) imports `editorialEase` from `@fesk/ui/motion` instead of re-encoding the curve; a colocated test in `packages/ui` guards it against `theme.css`.
+- Use one easing curve: the project's shared easing token or utility. Do not use ad-hoc `ease-out`, `ease-in-out`, or inline `cubic-bezier(...)` in product code.
+- JS animation code imports the shared easing constant from the project's UI package instead of re-encoding the curve, so CSS and JS stay in sync; guard it with a colocated test where practical.
 
 ## Shape in code
 
-- Pills (`rounded-full`) exist for status chips, avatars, and icon discs only.
-- Full square corners are reserved for documentary forms (pull quotes, large image plates, list rows); everything else uses the theme's radius steps.
+- Use the theme's radius steps for corners.
+- Reserve fully rounded shapes (`rounded-full`) for the elements the design system intends (status chips, avatars, icon discs), and reserve any full-square-corner treatment for its documented uses. Everything else uses the theme's radius steps.
 
 ## Frontend standards
 
@@ -51,5 +51,5 @@ description: Must be used for every task that creates or modifies UI — pages, 
 ## Accessibility testing
 
 - Browser-rendered apps must have Playwright + Axe coverage asserting zero violations against the full WCAG 2.2 AA tag set.
-- Keep the Axe scan helper and Playwright config factory in `packages/a11y-testing`; app-local `a11y/*.a11y.ts` specs stay thin lists of routes and states.
+- Keep the Axe scan helper and Playwright config factory in the shared `a11y-testing` package; app-local `a11y/*.a11y.ts` specs stay thin lists of routes and states.
 - Cover every reachable route and meaningful interaction states (open menus, dialogs, expanded/error states).

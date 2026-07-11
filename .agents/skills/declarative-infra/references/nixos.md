@@ -1,10 +1,6 @@
 # NixOS reference implementations
 
-Canonical implementations of the server profile. Copy the sections the host
-needs into its repo — flattened into the host configuration or as local
-modules, whichever reads better there — and fill in the `let` parameters.
-These are opinions, not templates to generalize: keep the values unless the
-host has a documented reason to differ.
+Canonical implementations of the server profile. Copy the sections the host needs into its repo — flattened into the host configuration or as local modules, whichever reads better there — and fill in the `let` parameters. These are opinions, not templates to generalize: keep the values unless the host has a documented reason to differ.
 
 ## Base hardening
 
@@ -75,8 +71,7 @@ services.caddy = {
 };
 ```
 
-App modules add their own `services.caddy.virtualHosts`; nothing else opens
-80/443.
+App modules add their own `services.caddy.virtualHosts`; nothing else opens 80/443.
 
 ## Podman
 
@@ -90,9 +85,7 @@ virtualisation.oci-containers.backend = "podman";
 
 ## PostgreSQL (peer auth per app)
 
-Each app database's role is owned by the database of the same name; listed
-system users may peer-authenticate as it over the socket. Loopback TCP gets
-scram; sockets never get passwords.
+Each app database's role is owned by the database of the same name; listed system users may peer-authenticate as it over the socket. Loopback TCP gets scram; sockets never get passwords.
 
 ```nix
 { config, lib, ... }:
@@ -169,8 +162,7 @@ in {
 
 ## GitHub Actions runner (trusted jobs only)
 
-nix-ld lets downloaded runner tooling execute; resource caps keep jobs from
-starving the host's services.
+nix-ld lets downloaded runner tooling execute; resource caps keep jobs from starving the host's services.
 
 ```nix
 { pkgs, ... }:
@@ -202,8 +194,4 @@ in {
 
 ## App modules
 
-Host-specific services (containers, jobs) live under the repo's own option
-namespace (`<repo>.apps.*`) in `modules/apps/`, gated behind `enable`
-options. They consume the profile: publish through Caddy virtual hosts, run
-on Podman with digest-pinned images, peer-auth to their database as their
-own system user, read secrets from SOPS paths.
+Host-specific services (containers, jobs) live under the repo's own option namespace (`<repo>.apps.*`) in `modules/apps/`, gated behind `enable` options. They consume the profile: publish through Caddy virtual hosts, run on Podman with digest-pinned images, peer-auth to their database as their own system user, read secrets from SOPS paths.

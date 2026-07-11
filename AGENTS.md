@@ -142,11 +142,10 @@ For documentation-only changes, run a narrower verification when the full check 
 
 - Prefer self-documenting code.
 - Add comments only for non-obvious intent.
+- Do not hard-wrap Markdown prose; keep each paragraph or list item on one logical line.
 
 ## Project-specific rules
 
-This file is canonical and synced from the standards template — do not edit it
-locally. Project-specific rules that extend this contract live in
-`AGENTS.local.md`; add local guidance there instead.
+This file is canonical and synced from the standards template — do not edit it locally. Project-specific rules that extend this contract live in `AGENTS.local.md`; add local guidance there instead.
 
 @AGENTS.local.md
