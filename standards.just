@@ -1,9 +1,9 @@
 # Recipes synced from davidvornholt/standards. Do not edit locally; import this
 # file from your repo-owned justfile with `import 'standards.just'`.
 
-# Sync upstream-owned standards from the template repo (pass --check to verify only).
+# Operate upstream-owned standards through the installed CLI.
 sync-standards *args:
-    bun run scripts/sync-standards.ts {{args}}
+    bun run standards -- {{args}}
 
 # Create an age key for SOPS (if missing) and print its recipient public key.
 age-create key_file="${HOME}/.config/sops/age/keys.txt":

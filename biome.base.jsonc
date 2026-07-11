@@ -217,7 +217,11 @@
     },
     {
       // Operational tooling runs on Node/Bun built-ins directly.
-      "includes": ["scripts/**", "packages/a11y-testing/**"],
+      "includes": [
+        "scripts/**",
+        "packages/a11y-testing/**",
+        "packages/standards-cli/**"
+      ],
       "linter": {
         "rules": {
           "correctness": {
@@ -229,7 +233,7 @@
     {
       // CLI scripts: console output is the user interface, and they read
       // environment configuration at the edge.
-      "includes": ["scripts/**"],
+      "includes": ["scripts/**", "packages/standards-cli/src/cli.ts"],
       "linter": {
         "rules": {
           "suspicious": {
@@ -259,7 +263,8 @@
       "includes": [
         "biome.base.jsonc",
         "biome.jsonc",
-        "scripts/sync-standards.ts"
+        "packages/standards-cli/src/cli.ts",
+        "packages/standards-cli/src/cli.test.ts"
       ],
       "linter": {
         "rules": {

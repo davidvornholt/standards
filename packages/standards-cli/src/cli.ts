@@ -1,11 +1,13 @@
-// Standards sync engine. Mirrors upstream-owned ("bucket 1") files from the
+#!/usr/bin/env bun
+
+// Standards CLI. Mirrors upstream-owned ("bucket 1") files from the
 // davidvornholt/standards template into a consumer repo and detects local
-// tampering with them. See docs/standards-template.md for the full design.
+// tampering with them. See the standards repository README for the design.
 //
 // This script is intentionally zero-dependency (Bun + Node built-ins only) and
-// does NOT use Effect: it must run standalone when fetched raw during the
-// bootstrap one-liner. That is the one documented exception to the repo's
-// Effect standard, justified because this is standalone bootstrap tooling.
+// does NOT use Effect: `bunx` must be able to execute the published package
+// before a consumer has dependencies. That is the documented exception to the
+// repo's Effect standard for standalone bootstrap tooling.
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -20,7 +22,15 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import {
+  dirname,
+  isAbsolute,
+  join,
+  normalize,
+  relative,
+  resolve,
+  sep,
+} from 'node:path';
 import process from 'node:process';
 
 const DEFAULT_UPSTREAM = 'github:davidvornholt/standards';
@@ -59,10 +69,35 @@ type Source = {
   readonly cleanup: () => void;
 };
 
+type Command = 'check' | 'doctor' | 'init' | 'sync';
+
+type CliOptions = {
+  readonly command: Command;
+  readonly consumer: string;
+  readonly dryRun: boolean;
+  readonly from: string | undefined;
+};
+
 const sha256 = (buf: Buffer): string =>
   createHash('sha256').update(buf).digest('hex');
 
 const toPosix = (p: string): string => p.split(sep).join('/');
+
+const assertSafeRelativePath = (path: string, label: string): void => {
+  const normalized = normalize(path);
+  if (
+    path.length === 0 ||
+    path === '.' ||
+    isAbsolute(path) ||
+    path.includes('\\') ||
+    normalized !== path ||
+    path.split('/').includes('..')
+  ) {
+    throw new Error(
+      `${label} must be a normalized repository-relative path: ${path}`,
+    );
+  }
+};
 
 const parseManifest = (raw: unknown): Manifest => {
   if (typeof raw !== 'object' || raw === null) {
@@ -78,6 +113,13 @@ const parseManifest = (raw: unknown): Manifest => {
     !(Array.isArray(o.paths) && o.paths.every((p) => typeof p === 'string'))
   ) {
     throw new Error('sync-standards.json requires a string array "paths"');
+  }
+  assertSafeRelativePath(o.seedDir, 'sync-standards.json "seedDir"');
+  for (const path of o.paths as ReadonlyArray<string>) {
+    assertSafeRelativePath(path, 'sync-standards.json managed path');
+  }
+  if (new Set(o.paths).size !== o.paths.length) {
+    throw new Error('sync-standards.json managed paths must be unique');
   }
   return {
     upstream: o.upstream,
@@ -224,6 +266,9 @@ const mirror = async ({
   previous,
   dryRun,
 }: MirrorOptions): Promise<MirrorResult> => {
+  for (const rel of Object.keys(previous)) {
+    assertSafeRelativePath(rel, 'sync-standards.lock file');
+  }
   const upstream = await listManaged(srcDir, manifest.paths);
   const next: Record<string, string> = {};
   const created: Array<string> = [];
@@ -378,12 +423,17 @@ const runSync = async (
 
 // Offline drift detection: every locked file must still match its hash. Catches
 // local edits or deletions of canonical files. Does NOT detect upstream moving
-// on — see the "known limitation" in docs/standards-template.md.
+// on — see the "known limitation" in the standards repository README.
 const runCheck = async (consumer: string): Promise<boolean> => {
   const lock = await readLock(consumer);
   if (lock === null || Object.keys(lock.files).length === 0) {
-    console.log('sync-standards: no synced files to check');
-    return true;
+    console.error(
+      'standards: no non-empty sync-standards.lock found; run `standards init` before checking',
+    );
+    return false;
+  }
+  for (const rel of Object.keys(lock.files)) {
+    assertSafeRelativePath(rel, 'sync-standards.lock file');
   }
   const results = await Promise.all(
     Object.entries(lock.files).map(async ([rel, hash]) => {
@@ -401,7 +451,7 @@ const runCheck = async (consumer: string): Promise<boolean> => {
   const problems = results.filter((p): p is string => p !== null);
   if (problems.length > 0) {
     console.error(
-      `sync-standards: ${problems.length} canonical file(s) drifted from upstream:`,
+      `standards: ${problems.length} canonical file(s) drifted from upstream:`,
     );
     console.error(problems.join('\n'));
     console.error(
@@ -410,29 +460,156 @@ const runCheck = async (consumer: string): Promise<boolean> => {
     return false;
   }
   console.log(
-    `sync-standards: ${Object.keys(lock.files).length} canonical file(s) match upstream`,
+    `standards: ${Object.keys(lock.files).length} canonical file(s) match upstream`,
   );
   return true;
 };
 
-const optionValue = (
+const readTextIfPresent = async (path: string): Promise<string | null> =>
+  existsSync(path) ? readFile(path, 'utf8') : null;
+
+const hasStandardsImport = (justfile: string): boolean =>
+  justfile.split('\n').some((line) => {
+    const trimmed = line.trim();
+    return (
+      trimmed === "import 'standards.just'" ||
+      trimmed === 'import "standards.just"'
+    );
+  });
+
+const inspectPackageJson = (packageRaw: string): ReadonlyArray<string> => {
+  const problems: Array<string> = [];
+  const packageJson = JSON.parse(packageRaw) as Record<string, unknown>;
+  const scripts = packageJson.scripts as Record<string, unknown> | undefined;
+  const devDependencies = packageJson.devDependencies as
+    | Record<string, unknown>
+    | undefined;
+  if (typeof devDependencies?.['@davidvornholt/standards'] !== 'string') {
+    problems.push(
+      'package.json must declare @davidvornholt/standards directly',
+    );
+  }
+  for (const name of ['check', 'check:fix']) {
+    const script = scripts?.[name];
+    if (typeof script !== 'string' || !script.includes('standards check')) {
+      problems.push(`package.json script "${name}" must run standards check`);
+    }
+  }
+  return problems;
+};
+
+const runDoctor = async (consumer: string): Promise<boolean> => {
+  const problems: Array<string> = [];
+  const justfile = await readTextIfPresent(join(consumer, 'justfile'));
+  if (justfile === null || !hasStandardsImport(justfile)) {
+    problems.push("justfile must import 'standards.just'");
+  }
+
+  const biome = await readTextIfPresent(join(consumer, 'biome.jsonc'));
+  if (biome === null || !biome.includes('"./biome.base.jsonc"')) {
+    problems.push('biome.jsonc must extend "./biome.base.jsonc"');
+  }
+
+  if (!existsSync(join(consumer, 'AGENTS.local.md'))) {
+    problems.push('AGENTS.local.md must exist for project-specific guidance');
+  }
+
+  const packagePath = join(consumer, 'package.json');
+  const packageRaw = await readTextIfPresent(packagePath);
+  if (packageRaw === null) {
+    problems.push('package.json must exist');
+  } else {
+    problems.push(...inspectPackageJson(packageRaw));
+  }
+
+  if (problems.length > 0) {
+    console.error(
+      `standards doctor: ${problems.length} integration problem(s):`,
+    );
+    console.error(problems.map((problem) => `  - ${problem}`).join('\n'));
+    return false;
+  }
+  console.log('standards doctor: consumer integration seams are wired');
+  return true;
+};
+
+const commandFromArg = (arg: string): Command => {
+  if (arg === 'check' || arg === 'doctor' || arg === 'init' || arg === 'sync') {
+    return arg;
+  }
+  throw new Error(
+    arg.startsWith('--') ? `Unknown option: ${arg}` : `Unknown command: ${arg}`,
+  );
+};
+
+const setCommand = (current: Command | undefined, next: Command): Command => {
+  if (current !== undefined) {
+    throw new Error(`Unexpected second command: ${next}`);
+  }
+  return next;
+};
+
+const nextOptionValue = (
   argv: ReadonlyArray<string>,
-  name: string,
-): string | undefined => {
-  const index = argv.indexOf(`--${name}`);
-  return index >= 0 ? argv[index + 1] : undefined;
+  index: number,
+): string => {
+  const value = argv[index + 1];
+  if (value === undefined || value.startsWith('--')) {
+    throw new Error(`${argv[index]} requires a value`);
+  }
+  return value;
+};
+
+const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
+  let command: Command | undefined;
+  let consumer = process.cwd();
+  let dryRun = false;
+  let from: string | undefined;
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    switch (arg) {
+      case '--check':
+        command = setCommand(command, 'check');
+        break;
+      case '--dir':
+        consumer = nextOptionValue(argv, index);
+        index += 1;
+        break;
+      case '--dry-run':
+        dryRun = true;
+        break;
+      case '--from':
+        from = nextOptionValue(argv, index);
+        index += 1;
+        break;
+      default:
+        command = setCommand(command, commandFromArg(arg));
+    }
+  }
+
+  return {
+    command: command ?? 'sync',
+    consumer: resolve(consumer),
+    dryRun,
+    from,
+  };
 };
 
 const main = async (): Promise<void> => {
-  const argv = process.argv.slice(2);
-  const positional = argv.filter((a) => !a.startsWith('--'));
-  const command = argv.includes('--check')
-    ? 'check'
-    : (positional[0] ?? 'sync');
-  const consumer = resolve(optionValue(argv, 'dir') ?? process.cwd());
+  const { command, consumer, dryRun, from } = parseArgs(process.argv.slice(2));
 
   if (command === 'check') {
-    if (!(await runCheck(consumer))) {
+    const driftIsClean = await runCheck(consumer);
+    const integrationIsValid = await runDoctor(consumer);
+    if (!(driftIsClean && integrationIsValid)) {
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  if (command === 'doctor') {
+    if (!(await runDoctor(consumer))) {
       process.exitCode = 1;
     }
     return;
@@ -444,12 +621,12 @@ const main = async (): Promise<void> => {
     // upstream deleted (they leave the lock and no future sync removes them).
     if (existsSync(join(consumer, 'sync-standards.lock'))) {
       console.error(
-        'sync-standards: already initialized (sync-standards.lock exists). Use `just sync-standards` to update.',
+        'standards: already initialized (sync-standards.lock exists). Use `just sync-standards` to update.',
       );
       process.exitCode = 1;
       return;
     }
-    const source = resolveSource(optionValue(argv, 'from') ?? DEFAULT_UPSTREAM);
+    const source = resolveSource(from ?? DEFAULT_UPSTREAM);
     try {
       const manifest = await loadManifest(
         join(source.dir, 'sync-standards.json'),
@@ -465,24 +642,21 @@ const main = async (): Promise<void> => {
     const consumerManifest = await loadManifest(
       join(consumer, 'sync-standards.json'),
     );
-    const source = resolveSource(
-      optionValue(argv, 'from') ?? consumerManifest.upstream,
-    );
+    const source = resolveSource(from ?? consumerManifest.upstream);
     try {
       const manifest = await loadManifest(
         join(source.dir, 'sync-standards.json'),
       );
-      await runSync(manifest, source, consumer, argv.includes('--dry-run'));
+      await runSync(manifest, source, consumer, dryRun);
     } finally {
       source.cleanup();
     }
-    return;
   }
-
-  console.error(
-    `Unknown command: ${command}. Expected init, sync, or --check.`,
-  );
-  process.exitCode = 1;
 };
 
-await main();
+try {
+  await main();
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
+}

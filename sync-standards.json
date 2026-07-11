@@ -3,8 +3,6 @@
   "seedDir": "template",
   "paths": [
     "sync-standards.json",
-    "scripts/sync-standards.ts",
-    "scripts/sync-standards.test.ts",
     "AGENTS.md",
     "CLAUDE.md",
     ".agents/skills/database",

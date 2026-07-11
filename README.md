@@ -30,7 +30,8 @@ strengthen gates over time and never weaken one to make a change pass.
   config and the Playwright + Axe (WCAG 2.2 AA) test harness, under a stable
   `@davidvornholt` scope.
 - **`standards.just`** — generic `just` recipes (`sync-standards`, age keygen).
-- **`scripts/sync-standards.ts`** — the sync engine (below).
+- **`@davidvornholt/standards`** — the Bun-executable CLI for bootstrap, sync,
+  drift detection, and consumer integration validation.
 
 ## Two buckets
 
@@ -49,17 +50,24 @@ variation goes through a wrapper seam: `biome.jsonc` extends `biome.base.jsonc`,
 
 ### New repo
 
-Bootstrap with the engine — it fetches this template, seeds the repo-owned
-files, mirrors the canonical ones, and writes the lock:
+Bootstrap with the published CLI — it fetches this template, seeds the
+repo-owned files, mirrors the canonical ones, and writes the lock:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/davidvornholt/standards/main/scripts/sync-standards.ts -o /tmp/sync-standards.ts
-bun /tmp/sync-standards.ts init
+bunx @davidvornholt/standards init
+bun install
 ```
 
 ### Existing repo — first adoption
 
-Run the same `init` at the repo root. **`init` never clobbers:** any file that
+Install the CLI directly, then run `init` at the repo root:
+
+```sh
+bun add --dev --exact @davidvornholt/standards
+bun run standards -- init
+```
+
+**`init` never clobbers:** any file that
 already exists (your `package.json`, `biome.jsonc`, `turbo.json`, `README.md`, …)
 is *kept*, and only missing files are seeded. The canonical (bucket-1) files are
 always mirrored in. `init` is one-time: once `sync-standards.lock` exists it
@@ -75,8 +83,8 @@ point of the two-bucket model:
   canonical and synced, so it must match byte-for-byte.
 - **`AGENTS.md`** — now canonical and synced; move anything repo-specific into
   `AGENTS.local.md`, which `AGENTS.md` includes.
-- **`package.json`** — make `check` run the drift-check first, e.g.
-  `bun run scripts/sync-standards.ts --check && turbo run lint check-types test build`.
+- **`package.json`** — declare `@davidvornholt/standards` directly and make
+  `check` and `check:fix` run `standards check` first.
 - **`.sops.yaml`** — keep your real age recipients; only the
   `secrets/*.example.yaml` *shapes* are canonical.
 - **CI** — the synced `.github/workflows/standards.yml` is your quality gate.
@@ -85,7 +93,7 @@ point of the two-bucket model:
   need a specific database, set the repo Actions variables `CI_POSTGRES_USER` /
   `CI_POSTGRES_PASSWORD` / `CI_POSTGRES_DB` (and optionally `CI_RUNNER`).
 
-- **`sync-standards.lock`** — commit it. It is the baseline `--check` compares
+- **`sync-standards.lock`** — commit it. It is the baseline `check` compares
   against in CI; if it is untracked, a fresh CI clone has nothing to check and
   the drift gate is silently inert.
 
@@ -94,12 +102,13 @@ update is just `just sync-standards`.
 
 ### Keep in sync
 
-Once `sync-standards.json` and the engine are present:
+Once `sync-standards.json` and the CLI dependency are present:
 
 ```sh
 just sync-standards            # pull latest canonical files (mirror + deletions)
 just sync-standards --dry-run  # preview a sync, writing nothing
-just sync-standards --check    # verify nothing canonical was edited locally
+just sync-standards check      # verify canonical files and extension seams
+just sync-standards doctor     # validate extension seams without drift checks
 ```
 
 The `Standards sync` workflow also runs `sync` weekly and opens a PR when
@@ -107,20 +116,21 @@ upstream has moved, so you never have to remember to pull.
 
 ## How sync works
 
-- **No pinning, no versions.** Consumers track this repo's `main`. Updates arrive
-  the next time a repo runs `sync`; there is no staging step. (With more than one
-  consumer you would reintroduce a pin — for a solo owner this is deliberate.)
+- **Canonical content tracks `main`.** The CLI is a normal package dependency,
+  but synced content is not versioned or pinned. Updates arrive the next time a
+  repo runs `sync`; the resulting diff is still reviewed in a pull request.
 - **Mirror, including deletions.** `sync` reconciles managed paths against the
   lock three ways: files removed upstream are removed locally, so "canonical"
   never drifts into a pile of stale copies. `--dry-run` previews the plan
   (create / update / delete) and writes nothing.
-- **`--check` is the CI gate.** It is offline and hash-based: it confirms every
-  synced file still matches what `sync` last wrote, and fails the build if a
-  canonical file was edited locally. It runs first inside `bun run check`.
+- **`check` is the CI gate.** It is offline and hash-based: it confirms every
+  synced file still matches what `sync` last wrote, fails closed when the lock
+  is absent, and runs `doctor` to verify the repo-owned extension seams. It runs
+  first inside `bun run check`.
 
 ### Known limitation
 
-`--check` detects **local tampering** with canonical files, not that **upstream
+`check` detects **local tampering** with canonical files, not that **upstream
 has moved on**. Without a pin, nothing local encodes "the template changed"; a
 repo only learns of upstream changes by running `sync`. The `Standards sync`
 workflow closes this: it runs `sync` weekly (and on demand) and opens a PR when
