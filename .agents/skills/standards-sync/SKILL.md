@@ -14,7 +14,7 @@ Reusable engineering standards live in one upstream repo, `davidvornholt/standar
 ## The two buckets
 
 - **Bucket 1 — synced (upstream-owned, read-only).** Mirrored on every `sync`, including deletions. Listed in `sync-standards.json` under `paths`.
-- **Bucket 2 — repo-owned (seeded once, then diverges).** Written from the template's seed dir during `init`, then owned by the consumer. `sync` never touches them. Examples: `biome.jsonc`, `AGENTS.local.md`, `justfile`, `.sops.yaml`, `secrets/*`, root `package.json`, `turbo.json`, `README.md`.
+- **Bucket 2 — repo-owned (seeded once, then diverges).** Written from the template's seed dir during `init`, then owned by the consumer. `sync` never touches them. Examples: `biome.jsonc`, `AGENTS.local.md`, `justfile`, `.github/dependabot.yml`, `.sops.yaml`, `secrets/*`, root `package.json`, `turbo.json`, `README.md`.
 
 ## Per-repo variation goes through a seam, never a local edit
 

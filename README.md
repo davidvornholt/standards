@@ -38,7 +38,8 @@ strengthen gates over time and never weaken one to make a change pass.
 Every file is either **synced** (upstream-owned, read-only in consumers — the
 list in `sync-standards.json`) or **seeded once** (written by `init` from
 `template/`, then owned by the repo: the `biome.jsonc` wrapper, `AGENTS.local.md`,
-`justfile`, `.sops.yaml`, `secrets/*.example.yaml`, root scaffolding, `README.md`).
+`justfile`, `.github/dependabot.yml`, `.sops.yaml`, `secrets/*.example.yaml`,
+root scaffolding, `README.md`).
 Secret-shape examples are seeded, not synced, so each repo can extend them to
 mirror its own real secrets without the next sync clobbering them.
 
@@ -85,6 +86,9 @@ point of the two-bucket model:
   `AGENTS.local.md`, which `AGENTS.md` includes.
 - **`package.json`** — declare `@davidvornholt/standards` directly and make
   `check` and `check:fix` run `standards check` first.
+- **`.github/dependabot.yml`** — keep the baseline root entries for the Bun and
+  GitHub Actions ecosystems; add repo-specific ecosystems such as Nix or
+  OpenTofu when the repository uses them.
 - **`.sops.yaml`** — keep your real age recipients; only the
   `secrets/*.example.yaml` *shapes* are canonical.
 - **CI** — the synced `.github/workflows/standards.yml` is your quality gate.
@@ -113,6 +117,16 @@ just sync-standards doctor     # validate extension seams without drift checks
 
 The `Standards sync` workflow also runs `sync` weekly and opens a PR when
 upstream has moved, so you never have to remember to pull.
+
+## Release the CLI
+
+The version in `packages/standards-cli/package.json` is the release declaration.
+Change it to a new stable SemVer in a pull request and update the version seeded
+by `template/package.json` at the same time. After the exact merge commit passes
+the `Standards` workflow on `main`, `Publish standards CLI` packs and publishes
+that version through npm trusted publishing, then creates the matching `vX.Y.Z`
+Git tag and GitHub Release. An unchanged version is a no-op; a version behind
+npm or a conflicting tag fails closed.
 
 ## How sync works
 
