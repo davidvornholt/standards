@@ -82,7 +82,7 @@ Workflow({ name: 'review-pass', args: {
 }})
 ```
 
-It fans out one `reviewer` subagent per lens with schema-enforced findings, pipelines every blocking or `needs-verification` finding into a read-only refutation agent, dedupes across lens seams, and returns one merged, severity-ordered finding set plus per-lens coverage statements.
+It fans out one `reviewer` subagent per lens with schema-enforced findings, pipelines every blocking or `needs-verification` finding into a read-only refutation agent, dedupes across lens seams, and returns one merged, severity-ordered finding set plus per-lens coverage statements. It also returns `skippedLenses` — any lens whose reviewer died or was skipped — so a dead reviewer reads as a partial fan-out that does not increment the dry counter, not a clean pass. A finding sent to verification whose refutation agent failed carries an explicit `unverified` verdict rather than a silent null, so it is re-verified rather than trusted.
 
 Without the Workflow tool (other harnesses or model families), spawn `reviewer` subagents directly with the same thin prompt contract — role, full-diff scope, lens charter, gate status, decisions registry, JSON finding shape with confidence — and apply the same refute-then-merge step. The pass semantics must be identical either way.
 
