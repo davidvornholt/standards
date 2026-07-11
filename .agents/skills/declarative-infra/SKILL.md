@@ -1,27 +1,38 @@
 ---
 name: declarative-infra
-description: Set up and safely change opinionated declarative infrastructure using davidvornholt/declarative-infra. Use when bootstrapping a repository's NixOS or OpenTofu layout, consuming or updating the shared modules, editing host configuration, or changing related GitHub convergence workflows.
+description: Design, bootstrap, and safely change self-contained declarative infrastructure (NixOS hosts, OpenTofu stacks). Use when creating or editing host configuration, flakes, disko/SOPS/deploy wiring, cloud resources (DNS, buckets), convergence workflows — or when a repo still consumes the retired davidvornholt/declarative-infra flake.
 ---
 
 # Declarative infrastructure
 
-Apply configuration and infrastructure by pushing changes to GitHub and letting the configured automation converge them. Do not apply changes directly. Avoid direct mutation commands such as `deploy-rs`, `tofu apply`, or `nixos-rebuild switch`. Use direct application only for an emergency.
+## Model
 
-Reusable building blocks live in [davidvornholt/declarative-infra](https://github.com/davidvornholt/declarative-infra) and are consumed pinned: NixOS modules (`davidvornholt.*` options) through a flake input, OpenTofu child modules through `?ref=` module sources. Improve generic modules upstream in declarative-infra; keep host, app, secret, and state specifics in the consuming repo.
+- Each repo owns its infrastructure completely: flake and locks, host modules, hardware and disko configuration, SOPS secrets, OpenTofu root stacks and state. There is no shared infrastructure dependency — this skill is the reuse mechanism. Instantiate its reference material and adapt it to the host; never add abstraction for hypothetical other consumers.
+- Apply changes by pushing to GitHub and letting trusted main-branch automation converge. Do not run `deploy-rs`, `tofu apply`, or `nixos-rebuild switch` by hand; direct mutation is for emergencies only, and must be flagged when used.
+- Pull requests evaluate, build, and plan. They never mutate.
 
-## Set up a consumer
+## Server profile
 
-1. Inspect existing infrastructure first. Preserve working host definitions, state, imports, secrets, and deployment workflows.
-2. Keep the consumer as the source of truth for flake composition and locks, hardware and disko configuration, SOPS recipients and encrypted secrets, OpenTofu root stacks and backends, application modules, and deployment topology.
-3. Add `github:davidvornholt/declarative-infra` as a flake input, make its `nixpkgs` and `treefmt-nix` inputs follow the consumer when those inputs already exist, and import `nixosModules.default` before local host/application modules.
-4. Enable only the opinionated `davidvornholt.*` modules the host needs. Do not add hypothetical options or split modules merely to make them generally configurable.
-5. Consume OpenTofu child modules from tagged `?ref=` sources. Keep provider configuration, credentials, backend, state, imports, and `moved` blocks in the consumer root stack.
-6. Wire pull requests to evaluate/build and plan without mutation; let trusted main-branch automation perform convergence.
+The contract every host follows unless its repo documents a deliberate divergence. New hosts take every item. When editing an existing host, diff what you touch against this list and report drift rather than silently normalizing or preserving it.
 
-## Change a shared module
+- systemd-boot with writable EFI variables; flakes + nix-command enabled; weekly GC deleting generations older than 14 days.
+- One non-root admin user: wheel, passwordless sudo, SSH keys only. Root SSH restricted to deploy keys (`prohibit-password`).
+- sshd: no password or keyboard-interactive auth. fail2ban: 5 retries, 1 h ban.
+- Firewall on; only 22/80/443 open. Every additional port is a documented decision in the host repo.
+- journald capped: 1 G, 14 days.
+- Caddy terminates TLS with an ACME contact email; services publish only through it.
+- Containers run on Podman (DNS-enabled default network) as the `oci-containers` backend; images pinned by digest.
+- PostgreSQL host-managed and local-only: peer auth per app database/system-user pair, scram only on loopback TCP, never passwords on sockets.
+- Hourly local `pg_dump` (custom format) with retention, directory owned by `postgres`.
+- Secrets SOPS-encrypted in-repo, decrypted by the host's SSH key; no plaintext secrets in the Nix store or workflow env.
 
-Treat current opinions as part of the contract. Change or parameterize one only when a real consumer requirement conflicts with it. Add a contract evaluation for the intended behavior, change the module upstream, validate it there, then update the consumer pin in a separate reviewable change.
+## Procedures
 
-## Validate
+- **New host or repo** — read `references/bootstrap.md` for the repo layout, flake skeleton, SOPS and deploy wiring, and convergence workflows; instantiate services from `references/nixos.md` and cloud resources from `references/opentofu.md`.
+- **Change an existing host** — preserve working state: hardware configuration, disko layout, `system.stateVersion`, secrets, state backends. Read only the reference section the change touches.
+- **Cloud resources** — `references/opentofu.md`. Root stacks own backend, provider config, credentials, and `import`/`moved` blocks.
+- **Repo still imports `github:davidvornholt/declarative-infra`** — that flake is retired. Migrate when touching infra: vendor the equivalents from `references/nixos.md`, inline tofu child modules into the root stack with `moved` blocks and a no-op plan, drop the input.
 
-Run non-mutating gates: `nix flake check`, relevant Nix builds or dry activation, `tofu fmt -check`, `tofu init -backend=false`, `tofu validate`, and plans where credentials are available. Never turn validation into an apply.
+## Validation
+
+Non-mutating gates before pushing: `nix flake check`, build the host toplevel, `tofu fmt -check`, `tofu init -backend=false && tofu validate`, and `tofu plan` where credentials exist. Migrations and refactors must show a no-op plan. Never let validation become an apply.

@@ -153,15 +153,16 @@ silent drift.
 
 ## Non-goals
 
-- **No infrastructure.** No host provisioning, deployment topology, or server
-  secrets. A single host serves many repos, public and private, so standards
-  never couple to one. Only the repo-scoped secret *shape*
-  (`secrets/*.example.yaml`), generic SOPS/age tooling, and the behavior policy
-  (the `declarative-infra` skill) ship here. Reusable infrastructure
-  building blocks live in
-  [davidvornholt/declarative-infra](https://github.com/davidvornholt/declarative-infra),
-  consumed through pinned Nix flake inputs and OpenTofu module sources — file
-  sync is the wrong mechanism for code that converges onto singleton hosts.
+- **No infrastructure code.** No host provisioning, deployment topology, or
+  server secrets. A single host serves many repos, public and private, so
+  standards never couple to one. Only the repo-scoped secret *shape*
+  (`secrets/*.example.yaml`), generic SOPS/age tooling, and the
+  `declarative-infra` skill ship here. The skill carries the reusable
+  *knowledge* — the opinionated server profile, reference NixOS/OpenTofu
+  snippets, and bootstrap/audit procedures — while each consumer repo owns its
+  infrastructure code outright. (The former
+  [davidvornholt/declarative-infra](https://github.com/davidvornholt/declarative-infra)
+  shared-module repo is retired and archived in favor of this skill.)
 
 ## License
 
