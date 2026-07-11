@@ -8,6 +8,7 @@
     "AGENTS.md",
     "CLAUDE.md",
     ".agents/skills/database",
+    ".agents/skills/declarative-infra",
     ".agents/skills/frontend-design",
     ".agents/skills/git-commit",
     ".agents/skills/github-actions",

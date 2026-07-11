@@ -1,0 +1,4 @@
+interface:
+  display_name: "Declarative Infrastructure"
+  short_description: "Guardrails for declarative infra changes"
+  default_prompt: "Use $declarative-infra to handle an infrastructure or configuration change safely."
