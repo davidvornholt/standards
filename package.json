@@ -7,8 +7,9 @@
     "packages/*"
   ],
   "scripts": {
-    "check": "bun test scripts/ && turbo run lint check-types test",
-    "check:fix": "bun test scripts/ && turbo run lint:fix check-types test"
+    "standards": "bun packages/standards-cli/src/cli.ts",
+    "check": "turbo run lint check-types test",
+    "check:fix": "turbo run lint:fix check-types test"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.3",

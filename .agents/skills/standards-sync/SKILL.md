@@ -1,15 +1,15 @@
 ---
 name: standards-sync
-description: Understand and operate the standards sync system. Use this skill before editing any file that might be canonical (synced from davidvornholt/standards), when a change needs to reach every consumer repo, when running or reasoning about `sync-standards` / `just sync-standards` / `--check`, when a repo reports canonical drift, or when testing a change to a canonical file before publishing it upstream.
+description: Understand and operate the standards sync system. Use this skill before editing any file that might be canonical (synced from davidvornholt/standards), when a change needs to reach every consumer repo, when running or reasoning about `standards`, `just sync-standards`, `check`, or `doctor`, when a repo reports canonical drift or invalid extension seams, or when testing a canonical change before publishing it upstream.
 ---
 
 # Standards sync
 
 ## Overview
 
-Reusable engineering standards live in one upstream repo, `davidvornholt/standards`, and are mirrored into each consumer repo by `scripts/sync-standards.ts`. Every file the system owns is in one of two buckets, and the bucket decides who may edit it.
+Reusable engineering standards live in one upstream repo, `davidvornholt/standards`, and are mirrored into each consumer by the published `@davidvornholt/standards` CLI. Every file the system owns is in one of two buckets, and the bucket decides who may edit it.
 
-**Golden rule: canonical (bucket-1) files are read-only in a consumer.** Never edit one locally to change its behavior. A local edit is a defect that `--check` catches; the next `sync` overwrites it. To change a canonical file, change it upstream and sync.
+**Golden rule: canonical (bucket-1) files are read-only in a consumer.** Never edit one locally to change its behavior. A local edit is a defect that `standards check` catches; the next `sync` overwrites it. To change a canonical file, change it upstream and sync.
 
 ## The two buckets
 
@@ -30,7 +30,7 @@ If a task seems to require editing a canonical file for one repo's needs, stop �
 
 ## Commands
 
-`init` bootstraps (one-time: it refuses to run once `sync-standards.lock` exists — use `sync` from then on), `sync` mirrors bucket-1 and rewrites the lock, `sync --dry-run` previews, `--check` verifies drift offline (wired into the `check` gate); flags `--from <src>` and `--dir <consumer>`. Run through `just sync-standards <args>`. The engine `scripts/sync-standards.ts` ships in every consumer and is the source of truth for exact behavior — read it rather than restating it here.
+`init` bootstraps once, `sync` mirrors bucket 1 and rewrites the lock, `sync --dry-run` previews, `check` verifies drift and extension seams, and `doctor` validates only the seams. Flags `--from <src>` and `--dir <consumer>` support local testing. Run through `just sync-standards <args>`; the CLI implementation and tests stay in the standards repo instead of being copied into consumers.
 
 ## The normal change loop
 
@@ -46,12 +46,12 @@ github/URL sources always clone `main`, so the only way to try an unpushed chang
 
 ```sh
 # In the CONSUMER, sourcing from a local standards clone with uncommitted edits:
-bun run scripts/sync-standards.ts sync --from ../standards --dry-run   # preview
-bun run scripts/sync-standards.ts sync --from ../standards            # apply
+bun run standards -- sync --from ../standards --dry-run   # preview
+bun run standards -- sync --from ../standards             # apply
 bun run check                                                          # see the effect
 ```
 
-**Critical caveat — throw the result away afterward.** `sync` rewrites the lock from whatever source you pointed at, so a local-path sync records the hash of your *uncommitted* change and a `sha` that is your local HEAD (or the literal `local` if the source is not a git checkout) — a state that does not exist upstream. `--check` then passes locally against that lock, which is false comfort. So: test, then discard.
+**Critical caveat — throw the result away afterward.** `sync` rewrites the lock from whatever source you pointed at, so a local-path sync records the hash of your *uncommitted* change and a `sha` that is your local HEAD (or the literal `local` if the source is not a git checkout) — a state that does not exist upstream. `check` then passes locally against that lock, which is false comfort. So: test, then discard.
 
 ```sh
 git restore -- sync-standards.lock <files-the-sync-touched>   # discard the local-sourced state

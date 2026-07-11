@@ -1,7 +1,7 @@
 // Black-box integration tests: drive the sync CLI as a subprocess against
 // throwaway temp fixtures and assert its documented status/stdout/stderr.
 
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import {
   existsSync,
@@ -14,7 +14,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-const ENGINE = join(import.meta.dir, 'sync-standards.ts');
+const ENGINE = join(import.meta.dir, 'cli.ts');
 const STD_PATHS: ReadonlyArray<string> = ['sync-standards.json', 'managed'];
 
 type RunResult = { stdout: string; stderr: string; status: number };
@@ -47,8 +47,8 @@ const run = (cwd: string, args: ReadonlyArray<string>): RunResult => {
   } catch (error) {
     const e = error as { status?: number; stdout?: string; stderr?: string };
     return {
-      stdout: String(e.stdout ?? ''),
-      stderr: String(e.stderr ?? ''),
+      stdout: e.stdout ?? '',
+      stderr: e.stderr ?? '',
       status: e.status ?? 1,
     };
   }
@@ -63,6 +63,20 @@ const buildUpstream = (paths: ReadonlyArray<string> = STD_PATHS): string => {
     JSON.stringify({ upstream: up, seedDir: 'template', paths }),
   );
   write(up, 'template/seed.txt', 'seed original\n');
+  write(up, 'template/AGENTS.local.md', '# Local\n');
+  write(up, 'template/biome.jsonc', '{"extends":["./biome.base.jsonc"]}\n');
+  write(up, 'template/justfile', "import 'standards.just'\n");
+  write(
+    up,
+    'template/package.json',
+    JSON.stringify({
+      scripts: {
+        check: 'standards check',
+        'check:fix': 'standards check',
+      },
+      devDependencies: { '@davidvornholt/standards': '0.1.0' },
+    }),
+  );
   write(up, 'managed/a.txt', 'alpha\n');
   write(up, 'managed/b.txt', 'beta\n');
   return up;
@@ -89,7 +103,7 @@ afterEach(() => {
 });
 
 describe('init', () => {
-  test('seeds a template-only file, mirrors managed files, writes lock', () => {
+  it('seeds a template-only file, mirrors managed files, writes lock', () => {
     const { consumer, result } = initConsumer(buildUpstream());
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('seeded seed.txt');
@@ -99,7 +113,7 @@ describe('init', () => {
     expect(readLock(consumer).files['managed/a.txt']).toBeDefined();
   });
 
-  test('never clobbers a pre-existing seed destination', () => {
+  it('never clobbers a pre-existing seed destination', () => {
     const up = buildUpstream();
     const consumer = mkTmp('sync-cons-');
     write(consumer, 'seed.txt', 'mine\n');
@@ -109,7 +123,7 @@ describe('init', () => {
     expect(read(consumer, 'seed.txt')).toBe('mine\n');
   });
 
-  test('refuses to re-initialize when a lock already exists', () => {
+  it('refuses to re-initialize when a lock already exists', () => {
     const up = buildUpstream();
     const { consumer } = initConsumer(up);
     write(consumer, 'managed/a.txt', 'local edit\n');
@@ -119,7 +133,7 @@ describe('init', () => {
     expect(read(consumer, 'managed/a.txt')).toBe('local edit\n');
   });
 
-  test('errors when a managed path overlaps a seed target', () => {
+  it('errors when a managed path overlaps a seed target', () => {
     const { consumer, result } = initConsumer(buildUpstream(['seed.txt']));
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('overlaps seed path');
@@ -128,14 +142,14 @@ describe('init', () => {
 });
 
 describe('--check', () => {
-  test('passes right after init', () => {
+  it('passes right after init', () => {
     const { consumer } = initConsumer(buildUpstream());
     const check = run(consumer, ['--check', '--dir', consumer]);
     expect(check.status).toBe(0);
     expect(check.stdout).toContain('canonical file(s) match upstream');
   });
 
-  test('fails and reports modified when a managed file is edited', () => {
+  it('fails and reports modified when a managed file is edited', () => {
     const { consumer } = initConsumer(buildUpstream());
     write(consumer, 'managed/a.txt', 'tampered\n');
     const check = run(consumer, ['--check', '--dir', consumer]);
@@ -144,17 +158,39 @@ describe('--check', () => {
     expect(check.stderr).toContain('modified: managed/a.txt');
   });
 
-  test('fails and reports missing when a managed file is deleted', () => {
+  it('fails and reports missing when a managed file is deleted', () => {
     const { consumer } = initConsumer(buildUpstream());
     rmSync(join(consumer, 'managed/a.txt'));
     const check = run(consumer, ['--check', '--dir', consumer]);
     expect(check.status).toBe(1);
     expect(check.stderr).toContain('missing:  managed/a.txt');
   });
+
+  it('fails closed when the lock is missing', () => {
+    const consumer = mkTmp('sync-cons-');
+    const check = run(consumer, ['check', '--dir', consumer]);
+    expect(check.status).toBe(1);
+    expect(check.stderr).toContain('no non-empty sync-standards.lock found');
+  });
+});
+
+describe('doctor', () => {
+  it('reports every missing integration seam together', () => {
+    const consumer = mkTmp('sync-cons-');
+    write(consumer, 'package.json', '{}');
+    const doctor = run(consumer, ['doctor', '--dir', consumer]);
+    expect(doctor.status).toBe(1);
+    expect(doctor.stderr).toContain('justfile must import');
+    expect(doctor.stderr).toContain('biome.jsonc must extend');
+    expect(doctor.stderr).toContain('AGENTS.local.md must exist');
+    expect(doctor.stderr).toContain('@davidvornholt/standards');
+    expect(doctor.stderr).toContain('script "check"');
+    expect(doctor.stderr).toContain('script "check:fix"');
+  });
 });
 
 describe('sync', () => {
-  test('uses new managed paths from the upstream manifest immediately', () => {
+  it('uses new managed paths from the upstream manifest immediately', () => {
     const up = buildUpstream();
     const { consumer } = initConsumer(up);
     write(up, 'newly-managed.txt', 'new\n');
@@ -178,7 +214,7 @@ describe('sync', () => {
     );
   });
 
-  test('deletes a consumer file removed from upstream and prunes the lock', () => {
+  it('deletes a consumer file removed from upstream and prunes the lock', () => {
     const up = buildUpstream();
     const { consumer } = initConsumer(up);
     rmSync(join(up, 'managed/b.txt'));
@@ -189,7 +225,7 @@ describe('sync', () => {
     expect(readLock(consumer).files['managed/b.txt']).toBeUndefined();
   });
 
-  test('updates a changed upstream file and check passes afterward', () => {
+  it('updates a changed upstream file and check passes afterward', () => {
     const up = buildUpstream();
     const { consumer } = initConsumer(up);
     write(up, 'managed/a.txt', 'alpha v2\n');
@@ -199,7 +235,7 @@ describe('sync', () => {
     expect(run(consumer, ['--check', '--dir', consumer]).status).toBe(0);
   });
 
-  test('dry-run writes nothing, then a real sync applies the change', () => {
+  it('dry-run writes nothing, then a real sync applies the change', () => {
     const up = buildUpstream();
     const { consumer } = initConsumer(up);
     const lockBefore = read(consumer, 'sync-standards.lock');
@@ -213,7 +249,7 @@ describe('sync', () => {
     expect(read(consumer, 'managed/a.txt')).toBe('alpha v2\n');
   });
 
-  test('dry-run reports no changes when already in sync', () => {
+  it('dry-run reports no changes when already in sync', () => {
     const up = buildUpstream();
     const { consumer } = initConsumer(up);
     const dry = sync(up, consumer, ['--dry-run']);
@@ -223,10 +259,22 @@ describe('sync', () => {
 });
 
 describe('unknown command', () => {
-  test('exits 1 with Unknown command', () => {
+  it('exits 1 with Unknown command', () => {
     const consumer = mkTmp('sync-cons-');
     const result = run(consumer, ['bogus', '--dir', consumer]);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('Unknown command');
+  });
+});
+
+describe('path safety', () => {
+  it('rejects managed paths that escape the source repository', () => {
+    const up = buildUpstream(['../outside']);
+    const consumer = mkTmp('sync-cons-');
+    const result = run(consumer, ['init', '--from', up, '--dir', consumer]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      'managed path must be a normalized repository-relative path',
+    );
   });
 });

@@ -1,3 +1,4 @@
 interface:
   display_name: "Standards sync"
-  short_description: "Operate the standards sync system and its read-only canonical files"
+  short_description: "Sync and validate canonical repository standards"
+  default_prompt: "Use $standards-sync to update or validate this repository's canonical standards safely."

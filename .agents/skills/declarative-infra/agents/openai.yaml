@@ -1,4 +1,4 @@
 interface:
   display_name: "Declarative Infrastructure"
-  short_description: "Guardrails for declarative infra changes"
-  default_prompt: "Use $declarative-infra to handle an infrastructure or configuration change safely."
+  short_description: "Set up and change pinned declarative infrastructure"
+  default_prompt: "Use $declarative-infra to set up or change this repository's infrastructure safely."
