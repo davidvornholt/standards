@@ -133,9 +133,9 @@ silent drift.
   secrets. A single host serves many repos, public and private, so standards
   never couple to one. Only the repo-scoped secret *shape*
   (`secrets/*.example.yaml`), generic SOPS/age tooling, and the behavior policy
-  (the `declarative-infrastructure` skill) ship here. Reusable infrastructure
+  (the `declarative-infra` skill) ship here. Reusable infrastructure
   building blocks live in
-  [davidvornholt/nix-infra](https://github.com/davidvornholt/nix-infra),
+  [davidvornholt/declarative-infra](https://github.com/davidvornholt/declarative-infra),
   consumed through pinned Nix flake inputs and OpenTofu module sources — file
   sync is the wrong mechanism for code that converges onto singleton hosts.
 
