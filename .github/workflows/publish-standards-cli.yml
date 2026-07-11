@@ -1,0 +1,198 @@
+name: Publish standards CLI
+
+# A reviewed version in the package manifest is the release declaration. Wait
+# for the canonical quality gate to finish so publishing is hard-gated on the
+# exact main-branch commit that is packaged and tagged.
+on:
+  workflow_run:
+    workflows:
+      - Standards
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-standards-cli
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+      sha: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - name: Checkout tested commit
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Verify tested commit is on main
+        env:
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$RELEASE_SHA" origin/main; then
+            echo "::error::Tested commit $RELEASE_SHA is not on main"
+            exit 1
+          fi
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Setup Node for npm trusted publishing
+        uses: actions/setup-node@v6
+        with:
+          node-version: "26"
+          package-manager-cache: false
+          registry-url: https://registry.npmjs.org
+
+      - name: Determine release state
+        id: release
+        env:
+          PACKAGE_NAME: "@davidvornholt/standards"
+          PACKAGE_PATH: packages/standards-cli/package.json
+        run: |
+          name="$(jq -er '.name | select(type == "string")' "$PACKAGE_PATH")"
+          if [[ "$name" != "$PACKAGE_NAME" ]]; then
+            echo "::error::$PACKAGE_PATH name must be $PACKAGE_NAME; received $name"
+            exit 1
+          fi
+
+          version="$(jq -er '.version | select(type == "string")' "$PACKAGE_PATH")"
+          if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::$PACKAGE_PATH version must be a stable SemVer; received $version"
+            exit 1
+          fi
+
+          encoded_name="${PACKAGE_NAME/@/%40}"
+          encoded_name="${encoded_name//\//%2F}"
+          metadata="$(curl --fail --silent --show-error \
+            "https://registry.npmjs.org/$encoded_name")"
+          latest="$(jq -er '.["dist-tags"].latest' <<<"$metadata")"
+
+          if ! bun -e \
+            'if (Bun.semver.order(process.argv[1], process.argv[2]) < 0) process.exit(1)' \
+            "$version" "$latest"; then
+            echo "::error::Manifest version $version is behind npm latest $latest"
+            exit 1
+          fi
+
+          npm_version="$(npm --version)"
+          if ! bun -e \
+            'if (Bun.semver.order(process.argv[1], "11.5.1") < 0) process.exit(1)' \
+            "$npm_version"; then
+            echo "::error::npm 11.5.1 or newer is required for trusted publishing"
+            exit 1
+          fi
+
+          if jq -e --arg version "$version" '.versions[$version] != null' \
+            <<<"$metadata" >/dev/null; then
+            publish=false
+          else
+            publish=true
+          fi
+
+          {
+            echo "version=$version"
+            echo "tag=v$version"
+            echo "publish=$publish"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Pack and inspect package
+        id: package
+        if: steps.release.outputs.publish == 'true'
+        run: |
+          artifact_dir="$RUNNER_TEMP/standards-cli-package"
+          mkdir "$artifact_dir"
+          bun pm pack \
+            --cwd packages/standards-cli \
+            --destination "$artifact_dir" \
+            --ignore-scripts
+
+          mapfile -t artifacts < <(find "$artifact_dir" -maxdepth 1 -type f -name '*.tgz')
+          if [[ "${#artifacts[@]}" -ne 1 ]]; then
+            echo "::error::Expected exactly one package tarball"
+            exit 1
+          fi
+          tar -tzf "${artifacts[0]}"
+          echo "artifact=${artifacts[0]}" >>"$GITHUB_OUTPUT"
+
+      - name: Publish package
+        if: steps.release.outputs.publish == 'true'
+        env:
+          PACKAGE_TARBALL: ${{ steps.package.outputs.artifact }}
+        run: >-
+          npm publish "$PACKAGE_TARBALL"
+          --ignore-scripts
+          --provenance
+          --access public
+          --tag latest
+          --registry=https://registry.npmjs.org
+
+  release:
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout released commit
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ needs.publish.outputs.sha }}
+
+      - name: Reconcile GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_SHA: ${{ needs.publish.outputs.sha }}
+          RELEASE_TAG: ${{ needs.publish.outputs.tag }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            is_draft="$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)"
+            if [[ "$is_draft" == "true" ]]; then
+              echo "::error::$RELEASE_TAG already exists as a draft release"
+              exit 1
+            fi
+            git fetch --force origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+            tag_sha="$(git rev-list -n 1 "$RELEASE_TAG")"
+            if [[ "$tag_sha" != "$RELEASE_SHA" ]]; then
+              echo "::error::$RELEASE_TAG points to $tag_sha, expected $RELEASE_SHA"
+              exit 1
+            fi
+            echo "$RELEASE_TAG already exists at the tested commit"
+            exit 0
+          fi
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" \
+            >/dev/null 2>&1; then
+            git fetch --force origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+            tag_sha="$(git rev-list -n 1 "$RELEASE_TAG")"
+            if [[ "$tag_sha" != "$RELEASE_SHA" ]]; then
+              echo "::error::$RELEASE_TAG points to $tag_sha, expected $RELEASE_SHA"
+              exit 1
+            fi
+          fi
+
+          gh release create "$RELEASE_TAG" \
+            --generate-notes \
+            --target "$RELEASE_SHA" \
+            --title "$RELEASE_TAG"

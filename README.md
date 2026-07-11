@@ -118,6 +118,16 @@ just sync-standards doctor     # validate extension seams without drift checks
 The `Standards sync` workflow also runs `sync` weekly and opens a PR when
 upstream has moved, so you never have to remember to pull.
 
+## Release the CLI
+
+The version in `packages/standards-cli/package.json` is the release declaration.
+Change it to a new stable SemVer in a pull request and update the version seeded
+by `template/package.json` at the same time. After the exact merge commit passes
+the `Standards` workflow on `main`, `Publish standards CLI` packs and publishes
+that version through npm trusted publishing, then creates the matching `vX.Y.Z`
+Git tag and GitHub Release. An unchanged version is a no-op; a version behind
+npm or a conflicting tag fails closed.
+
 ## How sync works
 
 - **Canonical content tracks `main`.** The CLI is a normal package dependency,

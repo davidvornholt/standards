@@ -1,8 +1,17 @@
 {
   "name": "@davidvornholt/standards",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Bootstrap, synchronize, and validate davidvornholt/standards consumers",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/davidvornholt/standards.git",
+    "directory": "packages/standards-cli"
+  },
+  "homepage": "https://github.com/davidvornholt/standards#readme",
+  "bugs": {
+    "url": "https://github.com/davidvornholt/standards/issues"
+  },
   "type": "module",
   "bin": {
     "standards": "src/cli.ts"
