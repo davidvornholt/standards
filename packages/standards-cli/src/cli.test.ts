@@ -82,7 +82,6 @@ const buildUpstream = (paths: ReadonlyArray<string> = STD_PATHS): string => {
       '',
     ].join('\n'),
   );
-  write(up, 'template/justfile', "import 'standards.just'\n");
   write(
     up,
     'template/package.json',
@@ -200,7 +199,6 @@ describe('doctor', () => {
     write(consumer, 'package.json', '{}');
     const doctor = run(consumer, ['doctor', '--dir', consumer]);
     expect(doctor.status).toBe(1);
-    expect(doctor.stderr).toContain('justfile must import');
     expect(doctor.stderr).toContain('biome.jsonc must extend');
     expect(doctor.stderr).toContain('AGENTS.local.md must exist');
     expect(doctor.stderr).toContain('.github/dependabot.yml must exist');

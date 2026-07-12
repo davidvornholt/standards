@@ -474,15 +474,6 @@ const runCheck = async (consumer: string): Promise<boolean> => {
 const readTextIfPresent = async (path: string): Promise<string | null> =>
   existsSync(path) ? readFile(path, 'utf8') : null;
 
-const hasStandardsImport = (justfile: string): boolean =>
-  justfile.split('\n').some((line) => {
-    const trimmed = line.trim();
-    return (
-      trimmed === "import 'standards.just'" ||
-      trimmed === 'import "standards.just"'
-    );
-  });
-
 const DEPENDABOT_BASELINE_ECOSYSTEMS = ['bun', 'github-actions'] as const;
 const DEPENDABOT_SCHEDULE_INTERVALS = new Set([
   'daily',
@@ -679,11 +670,6 @@ const inspectPackageJson = (packageRaw: string): ReadonlyArray<string> => {
 
 const runDoctor = async (consumer: string): Promise<boolean> => {
   const problems: Array<string> = [];
-  const justfile = await readTextIfPresent(join(consumer, 'justfile'));
-  if (justfile === null || !hasStandardsImport(justfile)) {
-    problems.push("justfile must import 'standards.just'");
-  }
-
   const biome = await readTextIfPresent(join(consumer, 'biome.jsonc'));
   if (biome === null || !biome.includes('"./biome.base.jsonc"')) {
     problems.push('biome.jsonc must extend "./biome.base.jsonc"');

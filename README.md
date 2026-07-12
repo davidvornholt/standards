@@ -14,15 +14,14 @@ Quality gates are deliberately strict so that **agents can verify their work mec
 - **`.agents/skills/**`** — dual-target skills that work in both Claude Code (`SKILL.md`) and Codex (`agents/openai.yaml`).
 - **`biome.base.jsonc`** — every applicable Biome rule domain and group at `error`, with each opt-out documented inline. Repos extend it from a thin `biome.jsonc` wrapper.
 - **`packages/typescript-config`, `packages/a11y-testing`** — the shared TS config and the Playwright + Axe (WCAG 2.2 AA) test harness, under a stable `@davidvornholt` scope.
-- **`standards.just`** — generic `just` recipes (age keygen).
 - **`.github/settings.json`** — the declared GitHub repository state: merge settings (auto-merge, delete-branch-on-merge, squash commit shape) and the default-branch ruleset (PR required, `check` status required, linear history, no bypass). `standards github --apply` converges the live repo; `standards check` fails on drift.
 - **`@davidvornholt/standards`** — the Bun-executable CLI for bootstrap, sync, drift detection, and consumer integration validation.
 
 ## Two buckets
 
-Every file is either **synced** (upstream-owned, read-only in consumers — the list in `sync-standards.json`) or **seeded once** (written by `init` from `template/`, then owned by the repo: the `biome.jsonc` wrapper, `AGENTS.local.md`, `justfile`, `.github/dependabot.yml`, `.sops.yaml`, `secrets/*.example.yaml`, root scaffolding, `README.md`). Secret-shape examples are seeded, not synced, so each repo can extend them to mirror its own real secrets without the next sync clobbering them.
+Every file is either **synced** (upstream-owned, read-only in consumers — the list in `sync-standards.json`) or **seeded once** (written by `init` from `template/`, then owned by the repo: the `biome.jsonc` wrapper, `AGENTS.local.md`, `.github/dependabot.yml`, `.sops.yaml`, `secrets/*.example.yaml`, root scaffolding, `README.md`). Secret-shape examples are seeded, not synced, so each repo can extend them to mirror its own real secrets without the next sync clobbering them.
 
-Because canonical files are read-only, every point of legitimate per-repo variation goes through a wrapper seam: `biome.jsonc` extends `biome.base.jsonc`, `justfile` imports `standards.just`, `AGENTS.local.md` extends `AGENTS.md`, and `.github/settings.local.json` extends `.github/settings.json` (additively — it can add repository settings and rulesets but never override canonical ones).
+Because canonical files are read-only, every point of legitimate per-repo variation goes through a wrapper seam: `biome.jsonc` extends `biome.base.jsonc`, `AGENTS.local.md` extends `AGENTS.md`, and `.github/settings.local.json` extends `.github/settings.json` (additively — it can add repository settings and rulesets but never override canonical ones).
 
 ## Adopt it
 
@@ -47,7 +46,6 @@ bun standards init
 **`init` never clobbers:** any file that already exists (your `package.json`, `biome.jsonc`, `turbo.json`, `README.md`, …) is *kept*, and only missing files are seeded. The canonical (bucket-1) files are always mirrored in. `init` is one-time: once `sync-standards.lock` exists it refuses to run again, and all updates go through `sync`. So on a repo that is already set up, adoption is: `init`, then wire the extension **seams** by hand — a one-time cost that is the whole point of the two-bucket model:
 
 - **`biome.jsonc`** — add `"extends": ["./biome.base.jsonc"]`; move any rules you override into its `overrides` and delete ones now inherited from the base.
-- **`justfile`** — add `import 'standards.just'` at the top.
 - **`CLAUDE.md`** — replace its contents with the single line `@AGENTS.md`. It is canonical and synced, so it must match byte-for-byte.
 - **`AGENTS.md`** — now canonical and synced; move anything repo-specific into `AGENTS.local.md`, which `AGENTS.md` includes.
 - **`package.json`** — declare `@davidvornholt/standards` directly and make `check` and `check:fix` run `standards check` first.
@@ -92,7 +90,7 @@ The version in `packages/standards-cli/package.json` is the release declaration.
 
 ## Non-goals
 
-- **No infrastructure code.** No host provisioning, deployment topology, or server secrets. A single host serves many repos, public and private, so standards never couple to one. Only the repo-scoped secret *shape* (`secrets/*.example.yaml`), generic SOPS/age tooling, and the `declarative-infra` skill ship here. The skill carries the reusable *knowledge* — the opinionated server profile, reference NixOS/OpenTofu snippets, and bootstrap/audit procedures — while each consumer repo owns its infrastructure code outright. (The former [davidvornholt/declarative-infra](https://github.com/davidvornholt/declarative-infra) shared-module repo is retired and archived in favor of this skill.)
+- **No infrastructure code.** No host provisioning, deployment topology, or server secrets. A single host serves many repos, public and private, so standards never couple to one. Only the repo-scoped secret *shape* (`secrets/*.example.yaml`) and the `declarative-infra` skill ship here. The skill carries the reusable *knowledge* — the opinionated server profile, reference NixOS/OpenTofu snippets, SOPS/age key tooling, and bootstrap/audit procedures — while each consumer repo owns its infrastructure code outright. (The former [davidvornholt/declarative-infra](https://github.com/davidvornholt/declarative-infra) shared-module repo is retired and archived in favor of this skill.)
 
 ## License
 

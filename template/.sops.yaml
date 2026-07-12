@@ -1,6 +1,7 @@
 # Repo-owned SOPS policy. Replace the placeholder recipients below with your
-# real age public keys (`just age-create` prints one), then encrypt
-# secrets/*.yaml. This file is seeded once and never synced.
+# real age public keys (`age-keygen` prints one; the declarative-infra skill
+# has key-management helpers), then encrypt secrets/*.yaml. This file is
+# seeded once and never synced.
 keys:
   - &primary age1replacewithyourpersonalagerecipientpublickeyxxxxxxxxxxxxxxxxxx
   - &ci age1replacewithyourgithubactionscirecipientpublickeyxxxxxxxxxxxxxxxxxxx
