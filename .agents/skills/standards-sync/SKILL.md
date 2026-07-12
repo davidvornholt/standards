@@ -1,6 +1,6 @@
 ---
 name: standards-sync
-description: Understand and operate the standards sync system. Use this skill before editing any file that might be canonical (synced from davidvornholt/standards), when a change needs to reach every consumer repo, when running or reasoning about `standards`, `just sync-standards`, `check`, or `doctor`, when a repo reports canonical drift or invalid extension seams, or when testing a canonical change before publishing it upstream.
+description: Understand and operate the standards sync system. Use this skill before editing any file that might be canonical (synced from davidvornholt/standards), when a change needs to reach every consumer repo, when running or reasoning about `standards`, `just sync-standards`, `check`, `doctor`, or `github --check`/`--apply`, when a repo reports canonical drift, invalid extension seams, or GitHub settings drift, or when testing a canonical change before publishing it upstream.
 ---
 
 # Standards sync
@@ -20,17 +20,22 @@ Reusable engineering standards live in one upstream repo, `davidvornholt/standar
 
 Because bucket-1 files are byte-identical everywhere, every legitimate per-repo customization uses a designated extension seam — extend, never patch:
 
-| Synced (bucket 1) | Consumer seam (bucket 2)                                 |
-| ----------------- | -------------------------------------------------------- |
-| `biome.base.jsonc`| `biome.jsonc` extends it                                 |
-| `AGENTS.md`       | `AGENTS.local.md` extends it; `CLAUDE.md` points to it   |
-| `standards.just`  | `justfile` imports it                                    |
+| Synced (bucket 1)      | Consumer seam (bucket 2)                                     |
+| ---------------------- | ------------------------------------------------------------ |
+| `biome.base.jsonc`     | `biome.jsonc` extends it                                     |
+| `AGENTS.md`            | `AGENTS.local.md` extends it; `CLAUDE.md` points to it       |
+| `standards.just`       | `justfile` imports it                                        |
+| `.github/settings.json` | `.github/settings.local.json` extends it (additive only: it may add repository settings and rulesets but never override canonical ones — GitHub layers rulesets strictest-wins, so additions can only tighten) |
 
 If a task seems to require editing a canonical file for one repo's needs, stop — the change either belongs upstream (it's a real standard) or in the seam (it's repo-specific).
 
 ## Commands
 
-`init` bootstraps once, `sync` mirrors bucket 1 and rewrites the lock, `sync --dry-run` previews, `check` verifies drift and extension seams, and `doctor` validates only the seams. Flags `--from <src>` and `--dir <consumer>` support local testing. Run through `just sync-standards <args>`; the CLI implementation and tests stay in the standards repo instead of being copied into consumers.
+`init` bootstraps once, `sync` mirrors bucket 1 and rewrites the lock, `check` verifies drift, extension seams, and (once `.github/settings.json` is synced) live GitHub settings, `doctor` validates only the seams, and `sync --dry-run` previews. Flags `--from <src>` and `--dir <consumer>` support local testing. Run through `just sync-standards <args>`; the CLI implementation and tests stay in the standards repo instead of being copied into consumers.
+
+`github --check` verifies the live GitHub repository (merge settings and rulesets) against the merged declaration and fails closed on drift or API errors; `github --apply` converges the live repository — creating, updating, and deleting rulesets to exactly the declared set. Apply needs admin auth (the local `gh` CLI or `GH_TOKEN`), which CI's token cannot hold, so drift found in CI is fixed by a human or local agent running `just sync-standards github --apply`. Never hand-edit rulesets or merge settings in the GitHub UI; change the declaration instead.
+
+A PR that changes the declaration fails its own gate until the change is applied: run `github --apply` from that branch before merging. Live state converging ahead of the merge is fine — the declaration is authoritative, not the merge order.
 
 ## The normal change loop
 
