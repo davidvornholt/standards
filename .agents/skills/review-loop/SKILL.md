@@ -1,140 +1,80 @@
 ---
 name: review-loop
-description: Use when the user asks for a review loop, review pass with fixes, or to keep fixing until review is clean. The review loop may be requested after implementation work or for an existing diff. Broad diffs covering multiple unrelated aspects go through the split gate first and are reviewed and committed per coupling cluster.
+description: Use when the user asks for a review loop, review pass with fixes, or to keep fixing until review is clean. Runs against a pull request in a repo you control; findings live as PR review threads, fixes land as commits from thread-consuming workers, and broad diffs split into a stacked PR train. All agents run locally, never in CI.
 ---
 
 # Review loop
 
-Repeated review/fix passes over the current diff until convergence is evidenced, not just asserted — see the stopping rule. Along the way, convert every confirmed finding class into deterministic gate coverage where possible.
+Repeated review/fix passes over a pull request until convergence is evidenced, not asserted. The PR is the only durable state: its diff is the work under review, review threads are the findings ledger (unresolved threads block merge via the repository ruleset), pass summaries are PR comments, and the loop's own work is its commits. Any session can resume by reading the PR — there is no local ledger.
 
-This skill orchestrates the `review` skill.
+This skill orchestrates the `review` skill. Every agent runs locally; nothing runs in CI.
 
 ## Roles
 
-- **Orchestrator** (the invoking agent): owns the ledger, the split gate, lens selection, dispositions, convergence accounting, gate runs, registry updates, and the final report. Does not implement fixes directly.
+- **Orchestrator** (the invoking agent): PR setup, split gate, lens selection, dispositions, thread posting, convergence accounting, gate runs, final report. Never implements fixes.
 - **`reviewer` subagents**: read-only finding and verification passes under the `review` skill contract.
-- **Worker subagent**: applies dispositioned fixes. Must never run `git add`, `git commit`, or `git stash`.
+- **Worker subagents**: consume unresolved review threads and push fix commits. A worker's inputs are the thread, the repository, and `.agents/review/decisions.md` — never the reviewer's reasoning. Threads must therefore be self-contained.
 
 If subagent tooling is unavailable, stop and report that blocker; do not substitute a local-only review.
 
-## Setup
+## PR setup
 
-1. Stage the entire pre-loop state with `git add -A`. From here on the index is the attribution boundary: `git diff --staged` is the work under review as the user handed it over; `git diff` plus new untracked files is what the loop changed (including gate `lint:fix` output, which is loop work). Only the split gate (below) may re-point the index; nothing else in the loop touches it again.
-2. Record a recovery snapshot in the ledger: the commit SHA printed by `git stash create` (it records state without modifying the worktree or index).
-3. Open a durable ledger at `.agents/tmp/review-loop-<short-slug>.md`. Timestamp every entry (`YYYY-MM-DD HH:mm:ss Z`).
-4. Run the deterministic gate (root `bun run check:fix`) and fix what it reports BEFORE any review pass. Mechanically detectable issues belong to the gate: it finds every instance at once, whereas a reviewer finds a stochastic subset per pass. Review passes start only on a green gate.
-5. Read `.agents/review/decisions.md` (if present); pass its content to every reviewer.
+1. The loop runs on a PR in a repo you control. For uncommitted work: commit via the `git-commit` skill on a feature branch, push, `gh pr create`. For a third-party contribution: run the loop on a PR inside your fork and open the upstream PR only after convergence — upstream sees one clean artifact, the review dialogue stays in your fork.
+2. The PR is a **draft** while the loop owns it; convergence flips it to ready for review. Draft state structurally blocks merging and auto-merge — the loop's status needs no label taxonomy beyond this plus the `needs-clarification` label below.
+3. Run the deterministic gate (root `bun run check:fix`), fix and commit what it reports, BEFORE any review pass. Mechanical issues belong to the gate: it finds every instance at once; a reviewer finds a stochastic subset per pass.
+4. Read `.agents/review/decisions.md` (if present); pass its content to every reviewer.
+5. Fixes are always new commits — never amend or force-push a branch under review (threads lose their anchors), except the restack step below. Never arm auto-merge; merging stays a human decision.
 
-## Split gate (broad multi-aspect diffs)
+## Split gate → stacked PRs
 
-When the diff contains several unrelated changes, one review pass over all of them dilutes reviewer attention across content no single finding can span. Partition the diff into coupling clusters, then review and commit each cluster in isolation. Sharding by cluster is not sharding by file — the coupling map is the evidence that no cross-cluster finding exists, the per-cluster gate tests that evidence mechanically, and the seam check covers what remains.
+When the diff contains several unrelated changes, one review pass dilutes attention across content no single finding can span. Vocabulary: a **theme** is one commit subject's worth of intent; **coupling** edges in decreasing strength are an interleaved file, a code dependency, a shared artifact, and semantic coupling (shared runtime behavior, no shared text); a **cluster** is a connected component under coupling edges — the smallest unit reviewable in *parallel isolation*; never shard a cluster for isolation.
 
-Vocabulary:
+The gate has two modes:
 
-- **Theme**: a set of changes serving one intent — what would be one commit subject line.
-- **Coupling**: an observable relationship between two themes that means a reviewer seeing only one of them could miss or misjudge a finding. Edges in decreasing strength: an interleaved file (one file carries hunks of both themes), a code dependency (one theme consumes an API the other introduces or changes), a shared artifact (both edit the same config, manifest, or lockfile), and semantic coupling (shared runtime behavior with no shared text).
-- **Cluster**: a connected component of the theme graph under coupling edges. The cluster is the smallest unit reviewable in isolation without losing cross-file findings; never shard below it.
+- **Unrelated themes** (several clusters): the parallel-reviewable stack below.
+- **One oversized coherent change** (a single cluster so large that whole-diff reading exhausts a reviewer context before enumeration starts): decompose along dependency layers into a sequential stack — schema, then service, then UI. This is the normal delivery path for large coherent work, not a last resort: implement and refine the whole change locally until the user is satisfied with the end result, then decompose for review. Nothing merges early — the whole stack can converge before the user merges bottom-up, so rejecting the end result costs closed PRs, not reverts on main. This is not sharding for isolation: reviews run down the stack in order, and each layer's review sees every ancestor layer as settled code in the checkout, so cross-layer relationships stay visible; a finding against an earlier layer becomes a thread on that layer's PR. Sequential review is the honest price of the coupling. For large-but-fitting coherent diffs, splitting is the wrong tool — partition attention with more, narrower lenses instead. Offer plan-first incremental delivery (landing early layers before later ones exist) only when the user explicitly wants early integration.
 
-Procedure, after setup and before the first review pass:
+1. Delegate the mapping to a subagent: themes, coupling edges, and clusters — or layer boundaries in layered mode. An unrelated-theme split requires that no file carries hunks of two clusters; a layered split requires each layer to be gate-clean on top of its ancestors. A single reviewable cluster or a trivially small diff skips the gate.
+2. Propose the split as an ordered branch-and-PR plan and wait for explicit user approval before restructuring anything.
+3. Build the stack in dependency order — one branch per cluster, each based on its parent, committed via `git-commit` — push, and open every PR immediately as a draft with its parent branch as base, so each PR shows exactly its cluster and CI runs from minute one. A child's base being the parent's branch also structurally enforces merge order: it cannot land in main before its parent.
+4. The deterministic gate must pass per cluster in isolation. A failure the combined diff did not have is hidden coupling: merge those clusters and re-plan; do not patch around it.
+5. Review in convergence-gated order: run the full loop on PR 1; when it *converges* (dry counter — not when it merges), restack its child onto the converged head and start the child's loop while PR 1 awaits human merge. Clusters in disjoint stacks loop in parallel — one git worktree per concurrently active loop, because a loop owns its branch's checkout for gate runs and worker commits.
+6. Restack after each squash merge: branch deletion auto-retargets the child PR to main; rebase the child (`git rebase --onto main <merged-branch-head>`, the old head SHA is recorded on the merged PR) and force-push. Threads survive as "outdated" and stay merge-blocking. If a restack conflicts — a converged parent changed after the child based on it — collapse the remaining stack into one PR and continue the loop there; never hand-resolve a broken stack incrementally.
+7. Seam check, proportional to residual risk: file-disjoint, independently gate-clean clusters with no shared runtime skip it (record that evidence in the PR); a shared surface (config, docs spanning clusters, cross-cluster naming) gets one reviewer over exactly that surface; only a judgment-based hunk assignment earns a catch-all pass over the combined diff.
 
-1. Map themes, coupling edges, and clusters (delegate the mapping to a subagent) and record the map in the ledger.
-2. Check separability mechanically: split only when no file carries hunks from two different clusters. A single cluster, non-separable clusters, or a trivially small diff skips the split gate — run the normal loop on the whole diff.
-3. Propose the split as an ordered commit plan with draft messages and wait for explicit user approval. Never restructure the working tree without it.
-4. Confirm the setup recovery snapshot covers the full working tree; it is the restore point for the whole split.
-5. Per cluster, in dependency order:
-   - Re-point the index at the cluster: reset the index to `HEAD`, stage the cluster's files, then park everything else with `git stash push --keep-index --include-untracked`. This re-establishes the setup attribution invariant, now scoped to the cluster.
-   - Run the deterministic gate on the isolated cluster. A failure that the whole diff did not have is evidence of hidden coupling: restore the snapshot, merge the affected clusters, and re-plan. Do not patch around it.
-   - Run the loop below (lens selection, passes, stopping rule) on the cluster. Fixes must stay within the cluster's file set; defer anything a reviewer wants to change outside it to the seam check.
-   - Commit via the `git-commit` skill, `git stash pop`, and continue with the next cluster.
-6. Run the seam check, proportional to residual risk:
-   - Clusters that are file-disjoint, independently gate-clean, and without a shared runtime: skip the seam check and record that evidence in the ledger.
-   - A shared surface exists (shared config, docs describing several clusters, cross-cluster naming): one reviewer reads exactly that surface against all cluster commits.
-   - Only a forced or ambiguous split (hunks assigned by judgment rather than file boundaries) earns a full catch-all pass over the combined diff.
+## Passes
 
-### Parallel execution with the Workflow tool
+Invent the lens set per diff with one-line charters (see the `review` skill's lens contract); include `catch-all` unless an unscoped reviewer runs. A diff with database mutations and no data-integrity lens, or auth surfaces and no security lens, is a selection error. Post the lens set and justification as a PR comment before pass 1.
 
-When cluster count and size justify it, execute step 5 of the split gate with the Workflow tool instead of serially:
-
-- Export one patch per cluster from the working tree; pass the approved cluster map and patch paths as workflow `args`.
-- Run one agent per cluster with `isolation: 'worktree'`: apply the patch onto clean HEAD, run the gate, run the review/fix loop, and commit on a `split/<cluster>` branch. Worktrees share the object database, so the branches are visible to the main checkout.
-- Enforce the disjointness check and the proportional seam-check decision in script code, not agent judgment.
-- After the workflow returns, cherry-pick the `split/<cluster>` branches onto the working branch in dependency order from the main checkout.
-- The approval in split-gate step 3 stays in conversation; the workflow itself never restructures the user's working tree.
-- Each worktree pays its own dependency install; weigh that cost against wall-clock savings before parallelizing small clusters.
-
-## Lens selection
-
-- Invent the lens set per diff: read the diff, decide which concern-scoped reviewers this change deserves, and give each lens a one-line charter (see the `review` skill's lens contract).
-- Every fan-out includes a `catch-all` lens unless an unscoped full reviewer also runs.
-- Before pass 1, record the lens set and a one-line justification in the ledger. A diff containing database mutations without a data-integrity lens, or auth surfaces without a security lens, is a lens-selection error.
-
-## Pass structure
-
-A pass is one fan-out of reviewers over the FULL current diff (staged + unstaged + untracked, against `HEAD`) — never over just the latest fix delta. Inside a split, the current cluster's whole delta is that diff. Verifying that a fix is correct is a disposition step, not a pass.
-
-When the Claude Workflow tool is available, run each pass as the saved `review-pass` workflow:
+A pass is one fan-out of reviewers over the FULL PR diff (branch vs base) — never over just the latest fix delta. Run it as the saved `review-pass` workflow:
 
 ```
 Workflow({ name: 'review-pass', args: {
-  passNumber, baseRef: 'HEAD', gateStatus,
-  decisions,                     // registry content, or '(none)'
-  lenses: [{ key, charter, notes }]  // notes: what changed since this lens last ran
-}})
+  passNumber, baseRef: '<PR base branch>', gateStatus,
+  decisions, lenses: [{ key, charter, notes }] } })
 ```
 
-It fans out one `reviewer` subagent per lens with schema-enforced findings, pipelines every blocking or `needs-verification` finding into a read-only refutation agent, dedupes across lens seams, and returns one merged, severity-ordered finding set plus per-lens coverage statements. It also returns `skippedLenses` — any lens whose reviewer died or was skipped — so a dead reviewer reads as a partial fan-out that does not increment the dry counter, not a clean pass. A finding sent to verification whose refutation agent failed carries an explicit `unverified` verdict rather than a silent null, so it is re-verified rather than trusted.
-
-Without the Workflow tool (other harnesses or model families), spawn `reviewer` subagents directly with the same thin prompt contract — role, full-diff scope, lens charter, gate status, decisions registry, JSON finding shape with confidence — and apply the same refute-then-merge step. The pass semantics must be identical either way.
+It fans out one reviewer per lens with schema-enforced findings, pipelines risky findings through refutation, dedupes across lens seams, and returns a merged severity-ordered set plus `skippedLenses` — a dead reviewer reads as a partial fan-out, not a clean pass. Without the Workflow tool, spawn `reviewer` subagents directly with the same thin contract; pass semantics must be identical.
 
 Then, per pass:
 
-1. **Disposition** every finding against local evidence, repo contracts, and the registry: to-fix, `discarded` (with reason), or `needs clarification` (pause and ask the user). Do not blindly implement speculative, incorrect, duplicate, or out-of-scope findings. Spawn an additional refutation reviewer only when confirmation genuinely requires digging the pass's verify stage did not settle.
-2. **Fix**: send all accepted blocking/non-blocking findings to one worker subagent, batched. Batch nits separately; they may be deferred to a single end-of-loop fix round.
-3. **Gate**: re-run the deterministic gate, verify each fix with focused checks, and record dispositions and verification in the ledger.
+1. **Disposition** every finding against evidence, repo contracts, and the registry: to-fix, discarded (with reason), or needs-clarification (pause and ask the user). Never blindly implement speculative, duplicate, or out-of-scope findings — this filter is what keeps false positives from costing worker spawns and damaging code.
+2. **Post one PR review for the pass**: one line-anchored thread per to-fix finding, self-contained (evidence, concrete failure scenario, suggested verification) because the worker sees nothing else. Findings with no diff line (missing files, architecture) anchor to the nearest implicated line, or go in the review body — the orchestrator tracks those to closure itself, since thread-resolution enforcement cannot. Batch nits into one comment for a single end-of-loop fix round. Summarize discards in the review body, not as threads.
+3. **Fix**: poll unresolved threads and dispatch workers. Batch same-file threads into one worker; workers within a PR run sequentially by default — parallel workers collide on gate output and the index, so parallelize only across disjoint file sets with one worktree each. Worker contract: reproduce the finding from the thread — if you cannot, reply in-thread with what you found and leave it unresolved (that disagreement is a free re-verification; the orchestrator arbitrates). Otherwise fix, run the gate plus the thread's suggested verification, commit and push, reply with the verification evidence, and resolve the thread (GraphQL `resolveReviewThread`).
+4. **Gate and record**: re-run the deterministic gate, then post a pass-summary comment: lenses run, findings by disposition, dry-counter value.
 
 ## Stopping rule
 
-Track a dry counter of consecutive FULL fan-outs (all selected lenses, fresh reviewer contexts) that produced zero new confirmed blocking or non-blocking findings:
-
-- Any new confirmed blocking or non-blocking finding resets the counter to 0.
-- Nits, refuted findings, and discards do not reset it. Nit fixes do not reset it.
-- Intermediate passes may re-sample only the lenses that produced confirmed findings plus `catch-all` (cheaper, converges faster), but a partial pass never increments the counter.
-- The loop converges at counter = 2: two consecutive clean full fan-outs. One clean pass is a sample, not proof — a fresh fan-out after a "clean" pass turning up a new batch of findings is the documented failure mode this rule exists to prevent.
-- Inside a split, the counter and convergence are per cluster; a cluster commits only after it converges.
-- Pause instead of converging when a finding needs user, product, or architecture clarification.
+Track a dry counter of consecutive FULL fan-outs (all selected lenses, fresh contexts) with zero new confirmed blocking or non-blocking findings; the loop converges at 2 — one clean pass is a sample, not proof. New confirmed findings reset it; nits, refutations, and discards do not. Intermediate passes may re-sample only previously-hot lenses plus `catch-all`, but a partial pass never increments the counter. In a stack, the counter is per PR. Convergence flips the PR from draft to ready for review. Pause instead of converging when a finding needs user, product, or architecture clarification — apply the `needs-clarification` label (create it if missing) while paused and remove it once resolved.
 
 ## Ratchet: strengthen the gate
 
-At disposition time, tag every confirmed finding with a mechanization candidate: `biome-rule`, `axe-or-playwright`, `test`, `grit-plugin`, or `none` (judgment-only). After convergence:
+At disposition, tag every confirmed finding with a mechanization candidate: `biome-rule`, `axe-or-playwright`, `test`, `grit-plugin`, or `none`. After convergence, implement ratchets — native mechanisms first (Biome rule/option, Axe/Playwright assertion), then repo tests for behavioral invariants and Grit plugins for syntactic classes; cover the finding's class, not the instance. Ratchet commits ride the same PR. Ask the user before a ratchet that would force broad changes to unrelated code. Every ratcheted class is recall future passes no longer spend.
 
-- Implement ratchets with native mechanisms first: Biome-native rule or option, then Axe/Playwright assertion. Below native coverage, choose by the shape of the finding class: behavioral invariants (rollback, ordering, sanitization semantics) become repo tests; syntactic, pattern-shaped classes become Grit plugins, which catch every future instance repo-wide and are reusable across repositories. Prefer the mechanism that covers the whole class, not just the found instance.
-- Ask the user first when a ratchet would force broad changes to unrelated code (per `AGENTS.md`).
-- Ratchet changes run through the gate like any other change; leave unimplemented candidates in the final report.
+## Decisions registry
 
-Every ratcheted finding class is recall future review passes no longer need to spend.
-
-## Decisions registry maintenance
-
-Append an entry to `.agents/review/decisions.md` when a discard has durable value: a deliberate policy or architecture choice, an accepted risk, or an open product question. Session-specific discards (false positive, reviewer misreading) stay in the ledger only. The registry is committed and reviewed like code; follow its entry format.
-
-## Ledger schema
-
-Keep the ledger concise and append-only except for disposition updates. Record at least:
-
-- Scope: user request, base ref, gate command, staging boundary and recovery SHA, model family.
-- Split gate, when it ran: the theme map with coupling edges, cluster assignment per changed file, separability evidence, user approval, snapshot ref, per-cluster commit hashes, and the seam-check decision with its evidence.
-- Lens set with justification; updated when it changes.
-- Passes: number, timestamp, full or partial fan-out, lenses run, cluster (when the split gate ran), invocation status and retries, gate state before the pass, dry-counter value after disposition.
-- Findings: stable ID, timestamp, severity, lens, cluster (when the split gate ran), file/line evidence, summary, confidence and verification outcome, disposition with reason, ratchet tag, and fix verification.
+Append discards with durable value (deliberate policy or architecture choices, accepted risks, open product questions) to `.agents/review/decisions.md` per its entry format; it is committed and reviewed like code. Session-specific discards stay in the PR review body.
 
 ## Final report
 
-Report from the ledger:
-
-- Whether the split gate ran: the clusters, the commits created, and the seam-check decision with its evidence.
-- Passes completed (full vs. partial fan-outs) and reviewer/worker invocations, including retries and invalid attempts.
-- Findings fixed, discarded (with reasons), and needing clarification, grouped by pass when useful.
-- Registry entries added; ratchets implemented and candidates left pending.
-- Verification gaps (checks not run, behavior not exercised against a live system).
-- The loop-attributed change summary (`git diff --stat`; unstaged changes are the loop's work), or the per-cluster commits when the split gate ran.
-- The convergence evidence, stated honestly: "two consecutive clean full fan-outs over N lenses", not "clean".
+Report from PR state: passes completed (full vs partial) and agent invocations including retries; findings fixed, discarded (with reasons), and needing clarification; threads still open and why; ratchets implemented and candidates left pending; verification gaps; for a stack, its structure and per-PR status. State convergence honestly — "two consecutive clean full fan-outs over N lenses", not "clean" — and hand off what remains to the human: review the PR(s) and arm the merge.
