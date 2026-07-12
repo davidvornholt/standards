@@ -161,10 +161,10 @@ describe('init', () => {
   });
 });
 
-describe('--check', () => {
+describe('check', () => {
   it('passes right after init', () => {
     const { consumer } = initConsumer(buildUpstream());
-    const check = run(consumer, ['--check', '--dir', consumer]);
+    const check = run(consumer, ['check', '--dir', consumer]);
     expect(check.status).toBe(0);
     expect(check.stdout).toContain('canonical file(s) match upstream');
   });
@@ -172,7 +172,7 @@ describe('--check', () => {
   it('fails and reports modified when a managed file is edited', () => {
     const { consumer } = initConsumer(buildUpstream());
     write(consumer, 'managed/a.txt', 'tampered\n');
-    const check = run(consumer, ['--check', '--dir', consumer]);
+    const check = run(consumer, ['check', '--dir', consumer]);
     expect(check.status).toBe(1);
     expect(check.stderr).toContain('canonical file(s) drifted from upstream');
     expect(check.stderr).toContain('modified: managed/a.txt');
@@ -181,7 +181,7 @@ describe('--check', () => {
   it('fails and reports missing when a managed file is deleted', () => {
     const { consumer } = initConsumer(buildUpstream());
     rmSync(join(consumer, 'managed/a.txt'));
-    const check = run(consumer, ['--check', '--dir', consumer]);
+    const check = run(consumer, ['check', '--dir', consumer]);
     expect(check.status).toBe(1);
     expect(check.stderr).toContain('missing:  managed/a.txt');
   });
@@ -344,7 +344,7 @@ describe('sync', () => {
     const result = sync(up, consumer);
     expect(result.status).toBe(0);
     expect(read(consumer, 'managed/a.txt')).toBe('alpha v2\n');
-    expect(run(consumer, ['--check', '--dir', consumer]).status).toBe(0);
+    expect(run(consumer, ['check', '--dir', consumer]).status).toBe(0);
   });
 
   it('dry-run writes nothing, then a real sync applies the change', () => {
@@ -464,6 +464,34 @@ describe('github', () => {
     expect(combined.stderr).toContain(
       'github accepts exactly one of --check or --apply',
     );
+  });
+
+  it('rejects --check outside the github command', () => {
+    const consumer = mkTmp('sync-cons-');
+    const result = run(consumer, ['sync', '--check', '--dir', consumer]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      '--check is only valid with the github command',
+    );
+  });
+});
+
+describe('help', () => {
+  it('fails with usage when no command is given', () => {
+    const consumer = mkTmp('sync-cons-');
+    const result = run(consumer, ['--dir', consumer]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('a command is required');
+    expect(result.stderr).toContain('Usage: standards <command>');
+  });
+
+  it('prints usage and exits 0 for help, --help, and -h', () => {
+    const consumer = mkTmp('sync-cons-');
+    for (const spelling of ['help', '--help', '-h']) {
+      const result = run(consumer, [spelling]);
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain('Usage: standards <command>');
+    }
   });
 });
 

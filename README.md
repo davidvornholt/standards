@@ -14,7 +14,7 @@ Quality gates are deliberately strict so that **agents can verify their work mec
 - **`.agents/skills/**`** — dual-target skills that work in both Claude Code (`SKILL.md`) and Codex (`agents/openai.yaml`).
 - **`biome.base.jsonc`** — every applicable Biome rule domain and group at `error`, with each opt-out documented inline. Repos extend it from a thin `biome.jsonc` wrapper.
 - **`packages/typescript-config`, `packages/a11y-testing`** — the shared TS config and the Playwright + Axe (WCAG 2.2 AA) test harness, under a stable `@davidvornholt` scope.
-- **`standards.just`** — generic `just` recipes (`sync-standards`, age keygen).
+- **`standards.just`** — generic `just` recipes (age keygen).
 - **`.github/settings.json`** — the declared GitHub repository state: merge settings (auto-merge, delete-branch-on-merge, squash commit shape) and the default-branch ruleset (PR required, `check` status required, linear history, no bypass). `standards github --apply` converges the live repo; `standards check` fails on drift.
 - **`@davidvornholt/standards`** — the Bun-executable CLI for bootstrap, sync, drift detection, and consumer integration validation.
 
@@ -41,7 +41,7 @@ Install the CLI directly, then run `init` at the repo root:
 
 ```sh
 bun add --dev --exact @davidvornholt/standards
-bun run standards -- init
+bun standards init
 ```
 
 **`init` never clobbers:** any file that already exists (your `package.json`, `biome.jsonc`, `turbo.json`, `README.md`, …) is *kept*, and only missing files are seeded. The canonical (bucket-1) files are always mirrored in. `init` is one-time: once `sync-standards.lock` exists it refuses to run again, and all updates go through `sync`. So on a repo that is already set up, adoption is: `init`, then wire the extension **seams** by hand — a one-time cost that is the whole point of the two-bucket model:
@@ -56,21 +56,22 @@ bun run standards -- init
 - **CI** — the synced `.github/workflows/standards.yml` is your quality gate. If the repo already ran its own gate, drop that duplication and keep only what the canonical gate does not (deploy, infra, workflow linting). If your tests need a specific database, set the repo Actions variables `CI_POSTGRES_USER` / `CI_POSTGRES_PASSWORD` / `CI_POSTGRES_DB` (and optionally `CI_RUNNER`).
 
 - **`sync-standards.lock`** — commit it. It is the baseline `check` compares against in CI; if it is untracked, a fresh CI clone has nothing to check and the drift gate is silently inert.
-- **GitHub settings** — create `.github/settings.local.json` (seeded on new repos; `{"repository":{},"rulesets":[]}` when you have nothing to add) and run `just sync-standards github --apply` once with admin `gh` auth. It converges the live repo onto the declared merge settings and default-branch ruleset — including deleting hand-made rulesets that are not declared. From then on `check` fails whenever live settings drift from the declaration.
+- **GitHub settings** — create `.github/settings.local.json` (seeded on new repos; `{"repository":{},"rulesets":[]}` when you have nothing to add) and run `bun standards github --apply` once with admin `gh` auth. It converges the live repo onto the declared merge settings and default-branch ruleset — including deleting hand-made rulesets that are not declared. From then on `check` fails whenever live settings drift from the declaration.
 
-Then run `bun run check` until green. After this one-time wiring every future update is just `just sync-standards`.
+Then run `bun run check` until green. After this one-time wiring every future update is just `bun standards sync`.
 
 ### Keep in sync
 
 Once `sync-standards.json` and the CLI dependency are present:
 
 ```sh
-just sync-standards                 # pull latest canonical files (mirror + deletions)
-just sync-standards --dry-run       # preview a sync, writing nothing
-just sync-standards check           # verify canonical files, seams, and GitHub settings
-just sync-standards doctor          # validate extension seams without drift checks
-just sync-standards github --check  # compare live GitHub settings to the declaration
-just sync-standards github --apply  # converge the live repo (needs admin gh auth)
+bun standards sync            # pull latest canonical files (mirror + deletions)
+bun standards sync --dry-run  # preview a sync, writing nothing
+bun standards check           # verify canonical files, seams, and GitHub settings
+bun standards doctor          # validate extension seams without drift checks
+bun standards github --check  # compare live GitHub settings to the declaration
+bun standards github --apply  # converge the live repo (needs admin gh auth)
+bun standards help            # list commands and options
 ```
 
 The `Standards sync` workflow also runs `sync` weekly and opens a PR when upstream has moved, so you never have to remember to pull.
