@@ -826,7 +826,7 @@ const runCheckCommand = async (consumer: string): Promise<boolean> => {
   const driftIsClean = await runCheck(consumer);
   const integrationIsValid = await runDoctor(consumer);
   // The GitHub gate activates with the synced declaration and then fails
-  // closed: once github-settings.json exists, an unreachable API or an
+  // closed: once .github/settings.json exists, an unreachable API or an
   // unreadable origin is a failure, not a skip.
   const githubIsConverged = existsSync(join(consumer, CANONICAL_SETTINGS_FILE))
     ? await runGithubCheck(consumer)

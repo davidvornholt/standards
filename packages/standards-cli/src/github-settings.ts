@@ -1,6 +1,6 @@
 // Declarative GitHub repository settings: parsing and seam merging for the
-// canonical `github-settings.json` and the repo-owned
-// `github-settings.local.json` extension. Pure logic only; drift comparison
+// canonical `.github/settings.json` and the repo-owned
+// `.github/settings.local.json` extension. Pure logic only; drift comparison
 // lives in github-diff.ts and the API interaction in github-api.ts. Like
 // cli.ts, this module is zero-dependency so `bunx` can execute the published
 // package.
@@ -101,7 +101,7 @@ const mergeSettings = (
   for (const key of Object.keys(local.repository)) {
     if (key in canonical.repository) {
       problems.push(
-        `github-settings.local.json repository."${key}" would override a canonical value; canonical settings are read-only`,
+        `.github/settings.local.json repository."${key}" would override a canonical value; canonical settings are read-only`,
       );
     }
   }
@@ -109,7 +109,7 @@ const mergeSettings = (
   for (const ruleset of local.rulesets) {
     if (canonicalNames.has(ruleset.name)) {
       problems.push(
-        `github-settings.local.json ruleset "${ruleset.name}" collides with a canonical ruleset; add a separately named ruleset to tighten further`,
+        `.github/settings.local.json ruleset "${ruleset.name}" collides with a canonical ruleset; add a separately named ruleset to tighten further`,
       );
     }
   }
@@ -144,27 +144,27 @@ export const loadGithubSettings = (
   localRaw: string | null,
 ): LoadedGithubSettings => {
   const problems: Array<string> = [];
-  const canonicalJson = parseJson(canonicalRaw, 'github-settings.json');
+  const canonicalJson = parseJson(canonicalRaw, '.github/settings.json');
   if (canonicalJson.problem !== null) {
     problems.push(canonicalJson.problem);
   }
   if (localRaw === null) {
     problems.push(
-      'github-settings.local.json must exist; seed it with {"repository":{},"rulesets":[]}',
+      '.github/settings.local.json must exist; seed it with {"repository":{},"rulesets":[]}',
     );
   }
   const localJson =
     localRaw === null
       ? null
-      : parseJson(localRaw, 'github-settings.local.json');
+      : parseJson(localRaw, '.github/settings.local.json');
   if (localJson !== null && localJson.problem !== null) {
     problems.push(localJson.problem);
   }
   if (problems.length > 0) {
     return { merged: null, problems };
   }
-  const canonical = parseSettings(canonicalJson.value, 'github-settings.json');
-  const local = parseSettings(localJson?.value, 'github-settings.local.json');
+  const canonical = parseSettings(canonicalJson.value, '.github/settings.json');
+  const local = parseSettings(localJson?.value, '.github/settings.local.json');
   problems.push(...canonical.problems, ...local.problems);
   if (canonical.settings === null || local.settings === null) {
     return { merged: null, problems };

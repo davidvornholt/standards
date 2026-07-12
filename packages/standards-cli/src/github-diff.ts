@@ -117,7 +117,7 @@ export const diffRulesets = (
   for (const name of liveByName.keys()) {
     if (!declaredNames.has(name)) {
       problems.push(
-        `ruleset "${name}" exists on GitHub but is not declared; declare it in github-settings.local.json or delete it`,
+        `ruleset "${name}" exists on GitHub but is not declared; declare it in .github/settings.local.json or delete it`,
       );
     }
   }

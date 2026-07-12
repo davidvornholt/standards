@@ -25,13 +25,13 @@ Because bucket-1 files are byte-identical everywhere, every legitimate per-repo 
 | `biome.base.jsonc`     | `biome.jsonc` extends it                                     |
 | `AGENTS.md`            | `AGENTS.local.md` extends it; `CLAUDE.md` points to it       |
 | `standards.just`       | `justfile` imports it                                        |
-| `github-settings.json` | `github-settings.local.json` extends it (additive only: it may add repository settings and rulesets but never override canonical ones — GitHub layers rulesets strictest-wins, so additions can only tighten) |
+| `.github/settings.json` | `.github/settings.local.json` extends it (additive only: it may add repository settings and rulesets but never override canonical ones — GitHub layers rulesets strictest-wins, so additions can only tighten) |
 
 If a task seems to require editing a canonical file for one repo's needs, stop — the change either belongs upstream (it's a real standard) or in the seam (it's repo-specific).
 
 ## Commands
 
-`init` bootstraps once, `sync` mirrors bucket 1 and rewrites the lock, `check` verifies drift, extension seams, and (once `github-settings.json` is synced) live GitHub settings, `doctor` validates only the seams, and `sync --dry-run` previews. Flags `--from <src>` and `--dir <consumer>` support local testing. Run through `just sync-standards <args>`; the CLI implementation and tests stay in the standards repo instead of being copied into consumers.
+`init` bootstraps once, `sync` mirrors bucket 1 and rewrites the lock, `check` verifies drift, extension seams, and (once `.github/settings.json` is synced) live GitHub settings, `doctor` validates only the seams, and `sync --dry-run` previews. Flags `--from <src>` and `--dir <consumer>` support local testing. Run through `just sync-standards <args>`; the CLI implementation and tests stay in the standards repo instead of being copied into consumers.
 
 `github --check` verifies the live GitHub repository (merge settings and rulesets) against the merged declaration and fails closed on drift or API errors; `github --apply` converges the live repository — creating, updating, and deleting rulesets to exactly the declared set. Apply needs admin auth (the local `gh` CLI or `GH_TOKEN`), which CI's token cannot hold, so drift found in CI is fixed by a human or local agent running `just sync-standards github --apply`. Never hand-edit rulesets or merge settings in the GitHub UI; change the declaration instead.
 

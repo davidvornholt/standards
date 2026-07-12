@@ -11,7 +11,7 @@ standards github --check
 standards github --apply
 ```
 
-`github --check` compares the live GitHub repository (merge settings and rulesets) against the merged declaration in `github-settings.json` + `github-settings.local.json`; `github --apply` converges the live repository to exactly the declared state. `check` runs the same comparison whenever `github-settings.json` is present.
+`github --check` compares the live GitHub repository (merge settings and rulesets) against the merged declaration in `.github/settings.json` + `.github/settings.local.json`; `github --apply` converges the live repository to exactly the declared state. `check` runs the same comparison whenever `.github/settings.json` is present.
 
 ## Configuration
 

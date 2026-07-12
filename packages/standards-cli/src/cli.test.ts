@@ -381,13 +381,13 @@ describe('github', () => {
     const { consumer } = initConsumer(buildUpstream());
     const result = run(consumer, ['github', '--dir', consumer]);
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain('github-settings.json not found');
+    expect(result.stderr).toContain('.github/settings.json not found');
   });
 
   it('fails closed when the origin remote cannot be resolved', () => {
     const { consumer } = initConsumer(buildUpstream());
-    write(consumer, 'github-settings.json', Canonical);
-    write(consumer, 'github-settings.local.json', EmptySeam);
+    write(consumer, '.github/settings.json', Canonical);
+    write(consumer, '.github/settings.local.json', EmptySeam);
     const result = run(consumer, ['github', '--check', '--dir', consumer]);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(
@@ -397,8 +397,8 @@ describe('github', () => {
 
   it('apply also requires a resolvable origin remote', () => {
     const { consumer } = initConsumer(buildUpstream());
-    write(consumer, 'github-settings.json', Canonical);
-    write(consumer, 'github-settings.local.json', EmptySeam);
+    write(consumer, '.github/settings.json', Canonical);
+    write(consumer, '.github/settings.local.json', EmptySeam);
     const result = run(consumer, ['github', '--apply', '--dir', consumer]);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(
@@ -408,8 +408,8 @@ describe('github', () => {
 
   it('check gates on the declaration once it is present', () => {
     const { consumer } = initConsumer(buildUpstream());
-    write(consumer, 'github-settings.json', Canonical);
-    write(consumer, 'github-settings.local.json', EmptySeam);
+    write(consumer, '.github/settings.json', Canonical);
+    write(consumer, '.github/settings.local.json', EmptySeam);
     const result = run(consumer, ['check', '--dir', consumer]);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(
@@ -419,18 +419,18 @@ describe('github', () => {
 
   it('doctor requires the local seam once the declaration is synced', () => {
     const { consumer } = initConsumer(buildUpstream());
-    write(consumer, 'github-settings.json', Canonical);
+    write(consumer, '.github/settings.json', Canonical);
     const result = run(consumer, ['doctor', '--dir', consumer]);
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain('github-settings.local.json must exist');
+    expect(result.stderr).toContain('.github/settings.local.json must exist');
   });
 
   it('doctor rejects a seam that overrides canonical values', () => {
     const { consumer } = initConsumer(buildUpstream());
-    write(consumer, 'github-settings.json', Canonical);
+    write(consumer, '.github/settings.json', Canonical);
     write(
       consumer,
-      'github-settings.local.json',
+      '.github/settings.local.json',
       JSON.stringify({
         repository: { allow_auto_merge: false },
         rulesets: [{ name: 'Protect main' }],

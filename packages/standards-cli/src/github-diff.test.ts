@@ -127,7 +127,7 @@ describe('diffRulesets', () => {
       'ruleset "Protect main" is declared but missing on GitHub',
     );
     expect(problems).toContain(
-      'ruleset "Handmade rules" exists on GitHub but is not declared; declare it in github-settings.local.json or delete it',
+      'ruleset "Handmade rules" exists on GitHub but is not declared; declare it in .github/settings.local.json or delete it',
     );
   });
 

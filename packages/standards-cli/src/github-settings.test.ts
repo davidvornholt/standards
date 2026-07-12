@@ -30,7 +30,7 @@ describe('loadGithubSettings', () => {
     const loaded = loadGithubSettings(canonical, null);
     expect(loaded.merged).toBeNull();
     expect(loaded.problems).toEqual([
-      'github-settings.local.json must exist; seed it with {"repository":{},"rulesets":[]}',
+      '.github/settings.local.json must exist; seed it with {"repository":{},"rulesets":[]}',
     ]);
   });
 
@@ -42,8 +42,8 @@ describe('loadGithubSettings', () => {
     const loaded = loadGithubSettings(canonical, local);
     expect(loaded.merged).toBeNull();
     expect(loaded.problems).toEqual([
-      'github-settings.local.json repository."allow_auto_merge" would override a canonical value; canonical settings are read-only',
-      'github-settings.local.json ruleset "Protect main" collides with a canonical ruleset; add a separately named ruleset to tighten further',
+      '.github/settings.local.json repository."allow_auto_merge" would override a canonical value; canonical settings are read-only',
+      '.github/settings.local.json ruleset "Protect main" collides with a canonical ruleset; add a separately named ruleset to tighten further',
     ]);
   });
 
@@ -56,10 +56,10 @@ describe('loadGithubSettings', () => {
     const loaded = loadGithubSettings(badCanonical, badLocal);
     expect(loaded.merged).toBeNull();
     expect(loaded.problems).toEqual([
-      'github-settings.json has unknown key "repositories"',
-      'github-settings.json rulesets[0] must be an object with a non-empty "name"',
-      'github-settings.json declares ruleset "Dup" more than once',
-      'github-settings.local.json "rulesets" must be an array',
+      '.github/settings.json has unknown key "repositories"',
+      '.github/settings.json rulesets[0] must be an object with a non-empty "name"',
+      '.github/settings.json declares ruleset "Dup" more than once',
+      '.github/settings.local.json "rulesets" must be an array',
     ]);
   });
 
@@ -67,8 +67,8 @@ describe('loadGithubSettings', () => {
     const loaded = loadGithubSettings('{', 'also not json');
     expect(loaded.merged).toBeNull();
     expect(loaded.problems).toEqual([
-      'github-settings.json must contain valid JSON',
-      'github-settings.local.json must contain valid JSON',
+      '.github/settings.json must contain valid JSON',
+      '.github/settings.local.json must contain valid JSON',
     ]);
   });
 
