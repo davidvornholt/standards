@@ -17,24 +17,13 @@ description: Must be used for every task that creates or modifies UI — pages, 
 - All color and design values come from the project's central token source (its theme file). No raw color values (`#hex`, `rgb()`, `hsl()`, `oklch()` literals) in app or component code.
 - When the project uses a semantic token layer, do not use default Tailwind palette classes (`text-blue-400`, `bg-red-500`, …); use only the semantic utilities generated from theme tokens (`bg-primary`, `text-muted`, …).
 - Define color tokens and authored CSS colors with `oklch(...)` in the token source.
-- If a needed token does not exist, add it rather than misusing a nearby token or hardcoding a value. New tokens must be semantic, follow the existing naming scheme, live in the token source, and be reported to the user in the summary.
-- Shared and foundational components use semantic theme tokens only — never raw ramp steps or ad-hoc values.
-- Contexts that cannot resolve CSS variables (for example transactional email HTML) may mirror the theme's anchor colors as raw literals in a single, clearly colocated constants file. Keep that the only sanctioned raw-color exception outside the token source.
-
-## Typography in code
-
-- Follow the project's typographic scale. A display or heading typeface is used only at the sizes the design system reserves for it, and the size class goes on the heading element itself. Do not use the display face for small headings, cards, teasers, quotes, metadata, captions, or sentence-length content.
-- Below display size, use the project's body typeface at the weight the design system specifies.
+- If a needed token does not exist, add it rather than misusing a nearby token or hardcoding a value. New tokens must be semantic, follow the existing naming scheme, and be reported to the user in the summary.
+- Contexts that cannot resolve CSS variables (for example email HTML) may mirror the theme's anchor colors as raw literals in a single, clearly colocated constants file.
 
 ## Motion in code
 
 - Use one easing curve: the project's shared easing token or utility. Do not use ad-hoc `ease-out`, `ease-in-out`, or inline `cubic-bezier(...)` in product code.
-- JS animation code imports the shared easing constant from the project's UI package instead of re-encoding the curve, so CSS and JS stay in sync; guard it with a colocated test where practical.
-
-## Shape in code
-
-- Use the theme's radius steps for corners.
-- Reserve fully rounded shapes (`rounded-full`) for the elements the design system intends (status chips, avatars, icon discs), and reserve any full-square-corner treatment for its documented uses. Everything else uses the theme's radius steps.
+- JS animation code imports the shared easing constant from the project's UI package instead of re-encoding the curve, so CSS and JS stay in sync.
 
 ## Frontend standards
 

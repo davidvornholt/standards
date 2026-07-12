@@ -105,25 +105,9 @@ Before generating code, inspect the `description` frontmatter for every local sk
 - Server Components, Route Handlers, and Server Actions may be `async`; bridge Effect programs with `await Effect.runPromise(program)`.
 - Use Next.js Cache Components patterns. Do not add route segment config (`runtime`, `dynamic`, `revalidate`, etc.). Use `'use cache'` plus `cacheLife`/`cacheTag` for cacheable async data, and Suspense/request-time APIs for genuinely dynamic content.
 
-## Frontend standards
+## Writing style
 
-- Meet WCAG 2.2 AA with semantic HTML, correct heading hierarchy, keyboard navigation, visible focus states, and non-color-only communication.
-- Use framework metadata/document primitives for SEO and prefer server-rendered/indexable content when SEO matters.
 - Use sentence case where sensible for reader-facing text, including UI text, button labels, command-style actions, and Markdown headings, while preserving proper nouns, acronyms, filenames, package names, and domain terms.
-- Use browser hyphenation for long reader-facing text, and add manual soft hyphens only in curated display copy where wrapping needs help. Use `&shy;` in markup or `\u00AD` in string literals where entities are not decoded; avoid both in identifiers, URLs, form values, searchable data, tests, and accessibility labels.
-- Define color tokens and authored CSS colors with `oklch(...)`.
-
-## Accessibility testing
-
-- Browser-rendered apps must have Playwright + Axe coverage asserting zero violations against the full WCAG 2.2 AA tag set.
-- Keep the Axe scan helper and Playwright config factory in `packages/a11y-testing`; app-local `a11y/*.a11y.ts` specs stay thin lists of routes and states.
-- Cover every reachable route and meaningful interaction states (open menus, dialogs, expanded/error states).
-
-## State management
-
-- Keep state as local as practical. Use React local state for component-owned UI state.
-- Use Zustand by default for shared client-side UI/app state in React and Next.js.
-- Do not use Zustand as a server-data cache. If client-side remote data needs caching, refetching, invalidation, pagination, optimistic updates, or mutation coordination, propose TanStack Query before building custom store logic.
 
 ## Testing
 
