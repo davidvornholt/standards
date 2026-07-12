@@ -20,9 +20,10 @@ If subagent tooling is unavailable, stop and report that blocker; do not substit
 ## PR setup
 
 1. The loop runs on a PR in a repo you control. For uncommitted work: commit via the `git-commit` skill on a feature branch, push, `gh pr create`. For a third-party contribution: run the loop on a PR inside your fork and open the upstream PR only after convergence — upstream sees one clean artifact, the review dialogue stays in your fork.
-2. Run the deterministic gate (root `bun run check:fix`), fix and commit what it reports, BEFORE any review pass. Mechanical issues belong to the gate: it finds every instance at once; a reviewer finds a stochastic subset per pass.
-3. Read `.agents/review/decisions.md` (if present); pass its content to every reviewer.
-4. Fixes are always new commits — never amend or force-push a branch under review (threads lose their anchors), except the restack step below. Never arm auto-merge; merging stays a human decision.
+2. The PR is a **draft** while the loop owns it; convergence flips it to ready for review. Draft state structurally blocks merging and auto-merge — the loop's status needs no label taxonomy beyond this plus the `needs-clarification` label below.
+3. Run the deterministic gate (root `bun run check:fix`), fix and commit what it reports, BEFORE any review pass. Mechanical issues belong to the gate: it finds every instance at once; a reviewer finds a stochastic subset per pass.
+4. Read `.agents/review/decisions.md` (if present); pass its content to every reviewer.
+5. Fixes are always new commits — never amend or force-push a branch under review (threads lose their anchors), except the restack step below. Never arm auto-merge; merging stays a human decision.
 
 ## Split gate → stacked PRs
 
@@ -30,10 +31,10 @@ When the diff contains several unrelated changes, one review pass dilutes attent
 
 1. Delegate the theme/coupling/cluster mapping to a subagent. Split only when no file carries hunks of two clusters; a single cluster or a trivially small diff skips the gate.
 2. Propose the split as an ordered branch-and-PR plan and wait for explicit user approval before restructuring anything.
-3. Build the stack in dependency order — one branch per cluster, each based on its parent, committed via `git-commit` — push, and open every PR immediately with its parent branch as base, so each PR shows exactly its cluster and CI runs from minute one.
+3. Build the stack in dependency order — one branch per cluster, each based on its parent, committed via `git-commit` — push, and open every PR immediately as a draft with its parent branch as base, so each PR shows exactly its cluster and CI runs from minute one. A child's base being the parent's branch also structurally enforces merge order: it cannot land in main before its parent.
 4. The deterministic gate must pass per cluster in isolation. A failure the combined diff did not have is hidden coupling: merge those clusters and re-plan; do not patch around it.
-5. Review in convergence-gated order: run the full loop on PR 1; when it *converges* (dry counter — not when it merges), restack its child onto the converged head and start the child's loop while PR 1 awaits human merge. Clusters in disjoint stacks loop in parallel.
-6. Restack after each squash merge: branch deletion auto-retargets the child PR to main; rebase the child (`git rebase --onto main <merged-branch-head>`) and force-push. Threads survive as "outdated" and stay merge-blocking.
+5. Review in convergence-gated order: run the full loop on PR 1; when it *converges* (dry counter — not when it merges), restack its child onto the converged head and start the child's loop while PR 1 awaits human merge. Clusters in disjoint stacks loop in parallel — one git worktree per concurrently active loop, because a loop owns its branch's checkout for gate runs and worker commits.
+6. Restack after each squash merge: branch deletion auto-retargets the child PR to main; rebase the child (`git rebase --onto main <merged-branch-head>`, the old head SHA is recorded on the merged PR) and force-push. Threads survive as "outdated" and stay merge-blocking. If a restack conflicts — a converged parent changed after the child based on it — collapse the remaining stack into one PR and continue the loop there; never hand-resolve a broken stack incrementally.
 7. Seam check, proportional to residual risk: file-disjoint, independently gate-clean clusters with no shared runtime skip it (record that evidence in the PR); a shared surface (config, docs spanning clusters, cross-cluster naming) gets one reviewer over exactly that surface; only a judgment-based hunk assignment earns a catch-all pass over the combined diff.
 
 ## Passes
@@ -54,12 +55,12 @@ Then, per pass:
 
 1. **Disposition** every finding against evidence, repo contracts, and the registry: to-fix, discarded (with reason), or needs-clarification (pause and ask the user). Never blindly implement speculative, duplicate, or out-of-scope findings — this filter is what keeps false positives from costing worker spawns and damaging code.
 2. **Post one PR review for the pass**: one line-anchored thread per to-fix finding, self-contained (evidence, concrete failure scenario, suggested verification) because the worker sees nothing else. Findings with no diff line (missing files, architecture) anchor to the nearest implicated line, or go in the review body — the orchestrator tracks those to closure itself, since thread-resolution enforcement cannot. Batch nits into one comment for a single end-of-loop fix round. Summarize discards in the review body, not as threads.
-3. **Fix**: poll unresolved threads and dispatch workers. Batch same-file threads into one worker; run workers in parallel only on disjoint file sets. Worker contract: reproduce the finding from the thread — if you cannot, reply in-thread with what you found and leave it unresolved (that disagreement is a free re-verification; the orchestrator arbitrates). Otherwise fix, run the gate plus the thread's suggested verification, commit and push, reply with the verification evidence, and resolve the thread (GraphQL `resolveReviewThread`).
+3. **Fix**: poll unresolved threads and dispatch workers. Batch same-file threads into one worker; workers within a PR run sequentially by default — parallel workers collide on gate output and the index, so parallelize only across disjoint file sets with one worktree each. Worker contract: reproduce the finding from the thread — if you cannot, reply in-thread with what you found and leave it unresolved (that disagreement is a free re-verification; the orchestrator arbitrates). Otherwise fix, run the gate plus the thread's suggested verification, commit and push, reply with the verification evidence, and resolve the thread (GraphQL `resolveReviewThread`).
 4. **Gate and record**: re-run the deterministic gate, then post a pass-summary comment: lenses run, findings by disposition, dry-counter value.
 
 ## Stopping rule
 
-Track a dry counter of consecutive FULL fan-outs (all selected lenses, fresh contexts) with zero new confirmed blocking or non-blocking findings; the loop converges at 2 — one clean pass is a sample, not proof. New confirmed findings reset it; nits, refutations, and discards do not. Intermediate passes may re-sample only previously-hot lenses plus `catch-all`, but a partial pass never increments the counter. In a stack, the counter is per PR. Pause instead of converging when a finding needs user, product, or architecture clarification.
+Track a dry counter of consecutive FULL fan-outs (all selected lenses, fresh contexts) with zero new confirmed blocking or non-blocking findings; the loop converges at 2 — one clean pass is a sample, not proof. New confirmed findings reset it; nits, refutations, and discards do not. Intermediate passes may re-sample only previously-hot lenses plus `catch-all`, but a partial pass never increments the counter. In a stack, the counter is per PR. Convergence flips the PR from draft to ready for review. Pause instead of converging when a finding needs user, product, or architecture clarification — apply the `needs-clarification` label (create it if missing) while paused and remove it once resolved.
 
 ## Ratchet: strengthen the gate
 
