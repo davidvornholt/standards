@@ -16,8 +16,7 @@ Use this skill for local review requests across code, documentation, configurati
 ## Review scope
 
 - Unless the invoker narrows it, the diff under review is the full working-tree change against the base ref (default `HEAD`): staged and unstaged changes together, plus untracked files. Use `git diff <base>`, `git status --porcelain`, and reads of untracked files.
-- An index (staged/unstaged) boundary may exist for change attribution during a review loop; it never narrows review scope.
-- When a split-gated review loop (see the `review-loop` skill) scopes the pass to a coupling cluster, "the whole diff" means that cluster's whole delta; the loop's seam check owns the cross-cluster surface.
+- A review loop (see the `review-loop` skill) sets the base ref to the PR's base branch, so the diff under review is the PR's full delta; loop-scoped passes over a stacked cluster PR review that PR's delta against its parent, and the loop's seam check owns the cross-cluster surface.
 
 ## Concern lenses (optional)
 
