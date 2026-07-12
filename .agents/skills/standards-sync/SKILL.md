@@ -35,6 +35,8 @@ If a task seems to require editing a canonical file for one repo's needs, stop �
 
 `github --check` verifies the live GitHub repository (merge settings and rulesets) against the merged declaration and fails closed on drift or API errors; `github --apply` converges the live repository — creating, updating, and deleting rulesets to exactly the declared set. Apply needs admin auth (the local `gh` CLI or `GH_TOKEN`), which CI's token cannot hold, so drift found in CI is fixed by a human or local agent running `just sync-standards github --apply`. Never hand-edit rulesets or merge settings in the GitHub UI; change the declaration instead.
 
+A PR that changes the declaration fails its own gate until the change is applied: run `github --apply` from that branch before merging. Live state converging ahead of the merge is fine — the declaration is authoritative, not the merge order.
+
 ## The normal change loop
 
 To change a canonical file so it reaches every repo:

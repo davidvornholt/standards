@@ -32,7 +32,8 @@ const reconcileRuleset = async (
     }
     return `created ruleset "${name}"`;
   }
-  if (diffRuleset(ruleset, liveRuleset).length === 0) {
+  const diff = diffRuleset(ruleset, liveRuleset);
+  if (diff.drifted.length === 0 && diff.unverifiable.length === 0) {
     return null;
   }
   const updated = await request(

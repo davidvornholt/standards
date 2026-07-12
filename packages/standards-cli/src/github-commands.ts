@@ -53,7 +53,13 @@ const collectLiveDrift = async (
     if (live.rulesets === null) {
       problems.push(live.problem ?? 'unable to read rulesets');
     } else {
-      problems.push(...diffRulesets(declared.rulesets, live.rulesets));
+      const rulesetDiff = diffRulesets(declared.rulesets, live.rulesets);
+      problems.push(...rulesetDiff.drifted);
+      if (rulesetDiff.unverifiable.length > 0) {
+        console.log(
+          `standards github: ruleset field(s) not visible to this token, verify with admin auth: ${rulesetDiff.unverifiable.join('; ')}`,
+        );
+      }
     }
   } catch (error) {
     problems.push(

@@ -72,15 +72,30 @@ describe('subsetMatches', () => {
 
 describe('diffRuleset', () => {
   it('accepts a live ruleset with extra server fields and parameters', () => {
-    expect(diffRuleset(declaredRuleset, liveRuleset())).toEqual([]);
+    expect(diffRuleset(declaredRuleset, liveRuleset())).toEqual({
+      drifted: [],
+      unverifiable: [],
+    });
   });
 
   it('flags an added bypass actor as drift', () => {
     const live = liveRuleset({
       bypass_actors: [{ actor_id: 5, actor_type: 'RepositoryRole' }],
     });
-    expect(diffRuleset(declaredRuleset, live)).toEqual([
+    expect(diffRuleset(declaredRuleset, live).drifted).toEqual([
       'ruleset "Protect main": bypass_actors differs from the declared configuration',
+    ]);
+  });
+
+  it('treats fields the token cannot see as unverifiable, not drift', () => {
+    // Non-admin API responses omit bypass_actors entirely.
+    const live = Object.fromEntries(
+      Object.entries(liveRuleset()).filter(([key]) => key !== 'bypass_actors'),
+    );
+    const diff = diffRuleset(declaredRuleset, live);
+    expect(diff.drifted).toEqual([]);
+    expect(diff.unverifiable).toEqual([
+      'ruleset "Protect main": bypass_actors',
     ]);
   });
 
@@ -97,21 +112,21 @@ describe('diffRuleset', () => {
         { type: 'creation' },
       ],
     });
-    const problems = diffRuleset(declaredRuleset, live);
-    expect(problems).toContain(
+    const { drifted } = diffRuleset(declaredRuleset, live);
+    expect(drifted).toContain(
       'ruleset "Protect main": missing rule "deletion"',
     );
-    expect(problems).toContain(
+    expect(drifted).toContain(
       'ruleset "Protect main": rule "pull_request" differs from the declared configuration',
     );
-    expect(problems).toContain(
+    expect(drifted).toContain(
       'ruleset "Protect main": has undeclared extra rule "creation"',
     );
   });
 
   it('flags a disabled enforcement', () => {
     const live = liveRuleset({ enforcement: 'disabled' });
-    expect(diffRuleset(declaredRuleset, live)).toEqual([
+    expect(diffRuleset(declaredRuleset, live).drifted).toEqual([
       'ruleset "Protect main": enforcement differs from the declared configuration',
     ]);
   });
@@ -119,20 +134,23 @@ describe('diffRuleset', () => {
 
 describe('diffRulesets', () => {
   it('flags declared-but-missing and live-but-undeclared rulesets', () => {
-    const problems = diffRulesets(
+    const { drifted } = diffRulesets(
       [declaredRuleset],
       [liveRuleset({ name: 'Handmade rules' })],
     );
-    expect(problems).toContain(
+    expect(drifted).toContain(
       'ruleset "Protect main" is declared but missing on GitHub',
     );
-    expect(problems).toContain(
+    expect(drifted).toContain(
       'ruleset "Handmade rules" exists on GitHub but is not declared; declare it in .github/settings.local.json or delete it',
     );
   });
 
   it('is empty when live state matches exactly', () => {
-    expect(diffRulesets([declaredRuleset], [liveRuleset()])).toEqual([]);
+    expect(diffRulesets([declaredRuleset], [liveRuleset()])).toEqual({
+      drifted: [],
+      unverifiable: [],
+    });
   });
 });
 
