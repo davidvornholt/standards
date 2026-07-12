@@ -14,7 +14,7 @@ Reusable engineering standards live in one upstream repo, `davidvornholt/standar
 ## The two buckets
 
 - **Bucket 1 — synced (upstream-owned, read-only).** Mirrored on every `sync`, including deletions. Listed in `sync-standards.json` under `paths`.
-- **Bucket 2 — repo-owned (seeded once, then diverges).** Written from the template's seed dir during `init`, then owned by the consumer. `sync` never touches them. Examples: `biome.jsonc`, `AGENTS.local.md`, `justfile`, `.github/dependabot.yml`, `.sops.yaml`, `secrets/*`, root `package.json`, `turbo.json`, `README.md`.
+- **Bucket 2 — repo-owned (seeded once, then diverges).** Written from the template's seed dir during `init`, then owned by the consumer. `sync` never touches them. Examples: `biome.jsonc`, `AGENTS.local.md`, `.github/dependabot.yml`, `.sops.yaml`, `secrets/*`, root `package.json`, `turbo.json`, `README.md`.
 
 ## Per-repo variation goes through a seam, never a local edit
 
@@ -24,7 +24,6 @@ Because bucket-1 files are byte-identical everywhere, every legitimate per-repo 
 | ---------------------- | ------------------------------------------------------------ |
 | `biome.base.jsonc`     | `biome.jsonc` extends it                                     |
 | `AGENTS.md`            | `AGENTS.local.md` extends it; `CLAUDE.md` points to it       |
-| `standards.just`       | `justfile` imports it                                        |
 | `.github/settings.json` | `.github/settings.local.json` extends it (additive only: it may add repository settings and rulesets but never override canonical ones — GitHub layers rulesets strictest-wins, so additions can only tighten) |
 
 If a task seems to require editing a canonical file for one repo's needs, stop — the change either belongs upstream (it's a real standard) or in the seam (it's repo-specific).

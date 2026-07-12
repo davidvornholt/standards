@@ -85,6 +85,42 @@ In `hosts/<name>/configuration.nix`: `networking.hostName`, `networking.domain`,
 ## Secrets (SOPS + age)
 
 - Host key is the recipient: derive with `ssh-to-age < /etc/ssh/ssh_host_ed25519_key.pub`, list it (plus admin keys) in `.sops.yaml` creation rules.
+- Admin and CI recipients come from age keys: `age-keygen -o <file>` creates one, `age-keygen -y <file>` prints its public key. When the repo uses `just`, instantiate the recipes below as a repo-owned `secrets.just` module (`mod secrets 'secrets.just'` in the justfile) so key setup is one command:
+
+```just
+# Create an age key for SOPS (if missing) and print its recipient public key
+age-create key_file="${HOME}/.config/sops/age/keys.txt":
+    @if [ -f "{{key_file}}" ] && grep -q '^AGE-SECRET-KEY-' "{{key_file}}"; then \
+      printf 'Existing age key: %s\n' "{{key_file}}"; \
+    elif [ -e "{{key_file}}" ]; then \
+      printf 'Refusing to overwrite existing non-age key file: %s\n' "{{key_file}}" >&2; \
+      exit 1; \
+    else \
+      mkdir -p "$(dirname "{{key_file}}")"; \
+      umask 077; \
+      if command -v age-keygen >/dev/null 2>&1; then \
+        output="$(age-keygen -o "{{key_file}}" 2>&1)" || { printf '%s\n' "$output" >&2; exit 1; }; \
+      else \
+        output="$(nix --extra-experimental-features 'nix-command flakes' shell nixpkgs#age -c age-keygen -o "{{key_file}}" 2>&1)" || { printf '%s\n' "$output" >&2; exit 1; }; \
+      fi; \
+    fi; \
+    just secrets age-recipient "{{key_file}}"
+
+# Print the SOPS recipient public key for an age key file
+age-recipient key_file="${HOME}/.config/sops/age/keys.txt":
+    @if [ ! -f "{{key_file}}" ]; then \
+      printf 'No age key file found at %s\n' "{{key_file}}" >&2; \
+      exit 1; \
+    fi; \
+    if grep -m1 '^# public key: age1' "{{key_file}}" >/dev/null; then \
+      grep -m1 '^# public key: age1' "{{key_file}}" | sed 's/^# public key: //'; \
+    elif command -v age-keygen >/dev/null 2>&1; then \
+      age-keygen -y "{{key_file}}"; \
+    else \
+      nix --extra-experimental-features 'nix-command flakes' shell nixpkgs#age -c age-keygen -y "{{key_file}}"; \
+    fi
+```
+
 - Host side:
 
 ```nix
