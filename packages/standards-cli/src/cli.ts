@@ -32,6 +32,9 @@ import {
   sep,
 } from 'node:path';
 import process from 'node:process';
+import { CANONICAL_SETTINGS_FILE, LOCAL_SETTINGS_FILE } from './github-api';
+import { runGithubApply, runGithubCheck } from './github-commands';
+import { loadGithubSettings } from './github-settings';
 
 const { YAML: BunYaml } = await import('bun');
 
@@ -71,13 +74,14 @@ type Source = {
   readonly cleanup: () => void;
 };
 
-type Command = 'check' | 'doctor' | 'init' | 'sync';
+type Command = 'check' | 'doctor' | 'github' | 'init' | 'sync';
 
 type CliOptions = {
   readonly command: Command;
   readonly consumer: string;
   readonly dryRun: boolean;
   readonly from: string | undefined;
+  readonly apply: boolean;
 };
 
 const sha256 = (buf: Buffer): string =>
@@ -706,6 +710,20 @@ const runDoctor = async (consumer: string): Promise<boolean> => {
     problems.push(...inspectPackageJson(packageRaw));
   }
 
+  // The GitHub settings seam only exists once the canonical declaration has
+  // been synced in; before that there is nothing to extend.
+  const canonicalSettings = await readTextIfPresent(
+    join(consumer, CANONICAL_SETTINGS_FILE),
+  );
+  if (canonicalSettings !== null) {
+    const localSettings = await readTextIfPresent(
+      join(consumer, LOCAL_SETTINGS_FILE),
+    );
+    problems.push(
+      ...loadGithubSettings(canonicalSettings, localSettings).problems,
+    );
+  }
+
   if (problems.length > 0) {
     console.error(
       `standards doctor: ${problems.length} integration problem(s):`,
@@ -718,7 +736,13 @@ const runDoctor = async (consumer: string): Promise<boolean> => {
 };
 
 const commandFromArg = (arg: string): Command => {
-  if (arg === 'check' || arg === 'doctor' || arg === 'init' || arg === 'sync') {
+  if (
+    arg === 'check' ||
+    arg === 'doctor' ||
+    arg === 'github' ||
+    arg === 'init' ||
+    arg === 'sync'
+  ) {
     return arg;
   }
   throw new Error(
@@ -749,12 +773,17 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
   let consumer = process.cwd();
   let dryRun = false;
   let from: string | undefined;
+  let checkFlag = false;
+  let apply = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     switch (arg) {
+      case '--apply':
+        apply = true;
+        break;
       case '--check':
-        command = setCommand(command, 'check');
+        checkFlag = true;
         break;
       case '--dir':
         consumer = nextOptionValue(argv, index);
@@ -772,21 +801,100 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
     }
   }
 
+  // `--check` doubles as the legacy spelling of the check command and as the
+  // explicit (default) mode of `github`.
+  if (checkFlag && command !== 'github') {
+    command = setCommand(command, 'check');
+  }
+  if (apply && command !== 'github') {
+    throw new Error('--apply is only valid with the github command');
+  }
+  if (apply && checkFlag) {
+    throw new Error('github accepts exactly one of --check or --apply');
+  }
+
   return {
     command: command ?? 'sync',
     consumer: resolve(consumer),
     dryRun,
     from,
+    apply,
   };
 };
 
+const runCheckCommand = async (consumer: string): Promise<boolean> => {
+  const driftIsClean = await runCheck(consumer);
+  const integrationIsValid = await runDoctor(consumer);
+  // The GitHub gate activates with the synced declaration and then fails
+  // closed: once github-settings.json exists, an unreachable API or an
+  // unreadable origin is a failure, not a skip.
+  const githubIsConverged = existsSync(join(consumer, CANONICAL_SETTINGS_FILE))
+    ? await runGithubCheck(consumer)
+    : true;
+  return driftIsClean && integrationIsValid && githubIsConverged;
+};
+
+const runInitCommand = async (
+  consumer: string,
+  from: string | undefined,
+): Promise<void> => {
+  // Refuse before cloning upstream: re-initializing skips the lock, so it
+  // would silently overwrite local canonical edits and orphan files that
+  // upstream deleted (they leave the lock and no future sync removes them).
+  if (existsSync(join(consumer, 'sync-standards.lock'))) {
+    console.error(
+      'standards: already initialized (sync-standards.lock exists). Use `just sync-standards` to update.',
+    );
+    process.exitCode = 1;
+    return;
+  }
+  const source = resolveSource(from ?? DEFAULT_UPSTREAM);
+  try {
+    const manifest = await loadManifest(
+      join(source.dir, 'sync-standards.json'),
+    );
+    await runInit(manifest, source, consumer);
+  } finally {
+    source.cleanup();
+  }
+};
+
+const runSyncCommand = async (
+  consumer: string,
+  from: string | undefined,
+  dryRun: boolean,
+): Promise<void> => {
+  const consumerManifest = await loadManifest(
+    join(consumer, 'sync-standards.json'),
+  );
+  const source = resolveSource(from ?? consumerManifest.upstream);
+  try {
+    const manifest = await loadManifest(
+      join(source.dir, 'sync-standards.json'),
+    );
+    await runSync(manifest, source, consumer, dryRun);
+  } finally {
+    source.cleanup();
+  }
+};
+
 const main = async (): Promise<void> => {
-  const { command, consumer, dryRun, from } = parseArgs(process.argv.slice(2));
+  const { command, consumer, dryRun, from, apply } = parseArgs(
+    process.argv.slice(2),
+  );
 
   if (command === 'check') {
-    const driftIsClean = await runCheck(consumer);
-    const integrationIsValid = await runDoctor(consumer);
-    if (!(driftIsClean && integrationIsValid)) {
+    if (!(await runCheckCommand(consumer))) {
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  if (command === 'github') {
+    const converged = apply
+      ? await runGithubApply(consumer)
+      : await runGithubCheck(consumer);
+    if (!converged) {
       process.exitCode = 1;
     }
     return;
@@ -800,41 +908,12 @@ const main = async (): Promise<void> => {
   }
 
   if (command === 'init') {
-    // Refuse before cloning upstream: re-initializing skips the lock, so it
-    // would silently overwrite local canonical edits and orphan files that
-    // upstream deleted (they leave the lock and no future sync removes them).
-    if (existsSync(join(consumer, 'sync-standards.lock'))) {
-      console.error(
-        'standards: already initialized (sync-standards.lock exists). Use `just sync-standards` to update.',
-      );
-      process.exitCode = 1;
-      return;
-    }
-    const source = resolveSource(from ?? DEFAULT_UPSTREAM);
-    try {
-      const manifest = await loadManifest(
-        join(source.dir, 'sync-standards.json'),
-      );
-      await runInit(manifest, source, consumer);
-    } finally {
-      source.cleanup();
-    }
+    await runInitCommand(consumer, from);
     return;
   }
 
   if (command === 'sync') {
-    const consumerManifest = await loadManifest(
-      join(consumer, 'sync-standards.json'),
-    );
-    const source = resolveSource(from ?? consumerManifest.upstream);
-    try {
-      const manifest = await loadManifest(
-        join(source.dir, 'sync-standards.json'),
-      );
-      await runSync(manifest, source, consumer, dryRun);
-    } finally {
-      source.cleanup();
-    }
+    await runSyncCommand(consumer, from, dryRun);
   }
 };
 

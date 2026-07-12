@@ -370,6 +370,103 @@ describe('sync', () => {
   });
 });
 
+describe('github', () => {
+  const EmptySeam = JSON.stringify({ repository: {}, rulesets: [] });
+  const Canonical = JSON.stringify({
+    repository: { allow_auto_merge: true },
+    rulesets: [{ name: 'Protect main', target: 'branch' }],
+  });
+
+  it('fails when the canonical declaration is missing', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    const result = run(consumer, ['github', '--dir', consumer]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('github-settings.json not found');
+  });
+
+  it('fails closed when the origin remote cannot be resolved', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    write(consumer, 'github-settings.json', Canonical);
+    write(consumer, 'github-settings.local.json', EmptySeam);
+    const result = run(consumer, ['github', '--check', '--dir', consumer]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      'cannot determine the GitHub repository from the origin remote',
+    );
+  });
+
+  it('apply also requires a resolvable origin remote', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    write(consumer, 'github-settings.json', Canonical);
+    write(consumer, 'github-settings.local.json', EmptySeam);
+    const result = run(consumer, ['github', '--apply', '--dir', consumer]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      'cannot determine the GitHub repository from the origin remote',
+    );
+  });
+
+  it('check gates on the declaration once it is present', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    write(consumer, 'github-settings.json', Canonical);
+    write(consumer, 'github-settings.local.json', EmptySeam);
+    const result = run(consumer, ['check', '--dir', consumer]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      'cannot determine the GitHub repository from the origin remote',
+    );
+  });
+
+  it('doctor requires the local seam once the declaration is synced', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    write(consumer, 'github-settings.json', Canonical);
+    const result = run(consumer, ['doctor', '--dir', consumer]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('github-settings.local.json must exist');
+  });
+
+  it('doctor rejects a seam that overrides canonical values', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    write(consumer, 'github-settings.json', Canonical);
+    write(
+      consumer,
+      'github-settings.local.json',
+      JSON.stringify({
+        repository: { allow_auto_merge: false },
+        rulesets: [{ name: 'Protect main' }],
+      }),
+    );
+    const result = run(consumer, ['doctor', '--dir', consumer]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      'repository."allow_auto_merge" would override a canonical value',
+    );
+    expect(result.stderr).toContain(
+      'ruleset "Protect main" collides with a canonical ruleset',
+    );
+  });
+
+  it('rejects --apply outside the github command and combined with --check', () => {
+    const consumer = mkTmp('sync-cons-');
+    const outside = run(consumer, ['sync', '--apply', '--dir', consumer]);
+    expect(outside.status).toBe(1);
+    expect(outside.stderr).toContain(
+      '--apply is only valid with the github command',
+    );
+    const combined = run(consumer, [
+      'github',
+      '--check',
+      '--apply',
+      '--dir',
+      consumer,
+    ]);
+    expect(combined.status).toBe(1);
+    expect(combined.stderr).toContain(
+      'github accepts exactly one of --check or --apply',
+    );
+  });
+});
+
 describe('unknown command', () => {
   it('exits 1 with Unknown command', () => {
     const consumer = mkTmp('sync-cons-');

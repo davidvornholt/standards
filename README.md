@@ -15,13 +15,14 @@ Quality gates are deliberately strict so that **agents can verify their work mec
 - **`biome.base.jsonc`** — every applicable Biome rule domain and group at `error`, with each opt-out documented inline. Repos extend it from a thin `biome.jsonc` wrapper.
 - **`packages/typescript-config`, `packages/a11y-testing`** — the shared TS config and the Playwright + Axe (WCAG 2.2 AA) test harness, under a stable `@davidvornholt` scope.
 - **`standards.just`** — generic `just` recipes (`sync-standards`, age keygen).
+- **`github-settings.json`** — the declared GitHub repository state: merge settings (auto-merge, delete-branch-on-merge, squash commit shape) and the default-branch ruleset (PR required, `check` status required, linear history, no bypass). `standards github --apply` converges the live repo; `standards check` fails on drift.
 - **`@davidvornholt/standards`** — the Bun-executable CLI for bootstrap, sync, drift detection, and consumer integration validation.
 
 ## Two buckets
 
 Every file is either **synced** (upstream-owned, read-only in consumers — the list in `sync-standards.json`) or **seeded once** (written by `init` from `template/`, then owned by the repo: the `biome.jsonc` wrapper, `AGENTS.local.md`, `justfile`, `.github/dependabot.yml`, `.sops.yaml`, `secrets/*.example.yaml`, root scaffolding, `README.md`). Secret-shape examples are seeded, not synced, so each repo can extend them to mirror its own real secrets without the next sync clobbering them.
 
-Because canonical files are read-only, every point of legitimate per-repo variation goes through a wrapper seam: `biome.jsonc` extends `biome.base.jsonc`, `justfile` imports `standards.just`, `AGENTS.local.md` extends `AGENTS.md`.
+Because canonical files are read-only, every point of legitimate per-repo variation goes through a wrapper seam: `biome.jsonc` extends `biome.base.jsonc`, `justfile` imports `standards.just`, `AGENTS.local.md` extends `AGENTS.md`, and `github-settings.local.json` extends `github-settings.json` (additively — it can add repository settings and rulesets but never override canonical ones).
 
 ## Adopt it
 
@@ -55,6 +56,7 @@ bun run standards -- init
 - **CI** — the synced `.github/workflows/standards.yml` is your quality gate. If the repo already ran its own gate, drop that duplication and keep only what the canonical gate does not (deploy, infra, workflow linting). If your tests need a specific database, set the repo Actions variables `CI_POSTGRES_USER` / `CI_POSTGRES_PASSWORD` / `CI_POSTGRES_DB` (and optionally `CI_RUNNER`).
 
 - **`sync-standards.lock`** — commit it. It is the baseline `check` compares against in CI; if it is untracked, a fresh CI clone has nothing to check and the drift gate is silently inert.
+- **GitHub settings** — create `github-settings.local.json` (seeded on new repos; `{"repository":{},"rulesets":[]}` when you have nothing to add) and run `just sync-standards github --apply` once with admin `gh` auth. It converges the live repo onto the declared merge settings and default-branch ruleset — including deleting hand-made rulesets that are not declared. From then on `check` fails whenever live settings drift from the declaration.
 
 Then run `bun run check` until green. After this one-time wiring every future update is just `just sync-standards`.
 
@@ -63,10 +65,12 @@ Then run `bun run check` until green. After this one-time wiring every future up
 Once `sync-standards.json` and the CLI dependency are present:
 
 ```sh
-just sync-standards            # pull latest canonical files (mirror + deletions)
-just sync-standards --dry-run  # preview a sync, writing nothing
-just sync-standards check      # verify canonical files and extension seams
-just sync-standards doctor     # validate extension seams without drift checks
+just sync-standards                 # pull latest canonical files (mirror + deletions)
+just sync-standards --dry-run       # preview a sync, writing nothing
+just sync-standards check           # verify canonical files, seams, and GitHub settings
+just sync-standards doctor          # validate extension seams without drift checks
+just sync-standards github --check  # compare live GitHub settings to the declaration
+just sync-standards github --apply  # converge the live repo (needs admin gh auth)
 ```
 
 The `Standards sync` workflow also runs `sync` weekly and opens a PR when upstream has moved, so you never have to remember to pull.
@@ -79,7 +83,7 @@ The version in `packages/standards-cli/package.json` is the release declaration.
 
 - **Canonical content tracks `main`.** The CLI is a normal package dependency, but synced content is not versioned or pinned. Updates arrive the next time a repo runs `sync`; the resulting diff is still reviewed in a pull request.
 - **Mirror, including deletions.** `sync` reconciles managed paths against the lock three ways: files removed upstream are removed locally, so "canonical" never drifts into a pile of stale copies. `--dry-run` previews the plan (create / update / delete) and writes nothing.
-- **`check` is the CI gate.** It is offline and hash-based: it confirms every synced file still matches what `sync` last wrote, fails closed when the lock is absent, and runs `doctor` to verify the repo-owned extension seams. It runs first inside `bun run check`.
+- **`check` is the CI gate.** It confirms every synced file still matches what `sync` last wrote (offline, hash-based), fails closed when the lock is absent, and runs `doctor` to verify the repo-owned extension seams. Once `github-settings.json` is synced it also compares the live GitHub repository against the declaration via the API and fails on drift — repo merge settings that the CI token cannot see are reported as unverifiable instead of failing, since only admin tokens can read them. It runs first inside `bun run check`.
 
 ### Known limitation
 

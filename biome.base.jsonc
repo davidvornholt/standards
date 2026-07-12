@@ -233,7 +233,12 @@
     {
       // CLI scripts: console output is the user interface, and they read
       // environment configuration at the edge.
-      "includes": ["scripts/**", "packages/standards-cli/src/cli.ts"],
+      "includes": [
+        "scripts/**",
+        "packages/standards-cli/src/cli.ts",
+        "packages/standards-cli/src/github-api.ts",
+        "packages/standards-cli/src/github-commands.ts"
+      ],
       "linter": {
         "rules": {
           "suspicious": {
@@ -241,6 +246,22 @@
           },
           "style": {
             "noProcessEnv": "off"
+          }
+        }
+      }
+    },
+    {
+      // GitHub API wire format is snake_case; these tests declare literals
+      // that mirror real API payloads and declared-settings JSON.
+      "includes": [
+        "packages/standards-cli/src/cli.test.ts",
+        "packages/standards-cli/src/github-diff.test.ts",
+        "packages/standards-cli/src/github-settings.test.ts"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "useNamingConvention": "off"
           }
         }
       }

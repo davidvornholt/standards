@@ -1,6 +1,6 @@
 {
   "name": "@davidvornholt/standards",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Bootstrap, synchronize, and validate davidvornholt/standards consumers",
   "license": "MIT",
   "repository": {
@@ -19,7 +19,12 @@
   "files": [
     "LICENSE",
     "README.md",
-    "src/cli.ts"
+    "src/cli.ts",
+    "src/github-api.ts",
+    "src/github-apply.ts",
+    "src/github-commands.ts",
+    "src/github-diff.ts",
+    "src/github-settings.ts"
   ],
   "scripts": {
     "lint": "biome check --error-on-warnings .",
