@@ -8,7 +8,6 @@
     ".agents/skills/database",
     ".agents/skills/declarative-infra",
     ".agents/skills/frontend-design",
-    ".agents/skills/git-commit",
     ".agents/skills/github-actions",
     ".agents/skills/review",
     ".agents/skills/review-loop",
@@ -23,6 +22,7 @@
     "packages/a11y-testing",
     "standards.just",
     ".github/workflows/standards.yml",
-    ".github/workflows/standards-sync.yml"
+    ".github/workflows/standards-sync.yml",
+    ".github/workflows/pr-title.yml"
   ]
 }
