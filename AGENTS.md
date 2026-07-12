@@ -20,6 +20,10 @@ Before generating code, inspect the `description` frontmatter for every local sk
 
 - Delegate liberally to subagents for work where only the conclusion matters — broad searches, stale-reference sweeps, verification passes, independent parallel changes. Spending extra tokens to keep the main context lean is the right trade in this repo.
 
+## Pull requests
+
+- Changes land on main through squash-merged PRs. The PR title becomes the commit subject on main, so it must be a Conventional Commit subject (`<type>(scope): <imperative description>`); CI lints it. Branch commit messages carry no format requirement.
+
 ## Package management
 
 - Use Bun only.
