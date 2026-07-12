@@ -99,7 +99,7 @@ export const loadDeclared = async (
     return {
       merged: null,
       problems: [
-        `${CANONICAL_SETTINGS_FILE} not found; run \`just sync-standards\` first`,
+        `${CANONICAL_SETTINGS_FILE} not found; run \`bun standards sync\` first`,
       ],
     };
   }

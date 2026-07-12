@@ -74,10 +74,10 @@ type Source = {
   readonly cleanup: () => void;
 };
 
-type Command = 'check' | 'doctor' | 'github' | 'init' | 'sync';
+type Command = 'check' | 'doctor' | 'github' | 'help' | 'init' | 'sync';
 
 type CliOptions = {
-  readonly command: Command;
+  readonly command: Command | undefined;
   readonly consumer: string;
   readonly dryRun: boolean;
   readonly from: string | undefined;
@@ -461,7 +461,7 @@ const runCheck = async (consumer: string): Promise<boolean> => {
     );
     console.error(problems.join('\n'));
     console.error(
-      'These files are read-only. Restore them with `just sync-standards`, or move your change upstream.',
+      'These files are read-only. Restore them with `bun standards sync`, or move your change upstream.',
     );
     return false;
   }
@@ -735,11 +735,29 @@ const runDoctor = async (consumer: string): Promise<boolean> => {
   return true;
 };
 
+const USAGE = `Usage: standards <command> [options]
+
+Commands:
+  init    Bootstrap a consumer repo: seed repo-owned files, mirror canonical files, write the lock
+  sync    Mirror canonical files from upstream and rewrite the lock
+  check   Verify canonical files, extension seams, and GitHub settings
+  doctor  Validate extension seams only
+  github  Compare (--check) or converge (--apply) live GitHub settings
+  help    Show this help
+
+Options:
+  --dir <path>   Consumer directory to operate on (default: current directory)
+  --from <src>   Upstream override for init/sync (GitHub repo or local path)
+  --dry-run      Preview a sync without writing anything
+  --check        With github: compare live settings to the declaration (default)
+  --apply        With github: converge the live repository (needs admin auth)`;
+
 const commandFromArg = (arg: string): Command => {
   if (
     arg === 'check' ||
     arg === 'doctor' ||
     arg === 'github' ||
+    arg === 'help' ||
     arg === 'init' ||
     arg === 'sync'
   ) {
@@ -796,15 +814,17 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
         from = nextOptionValue(argv, index);
         index += 1;
         break;
+      case '--help':
+      case '-h':
+        command = setCommand(command, 'help');
+        break;
       default:
         command = setCommand(command, commandFromArg(arg));
     }
   }
 
-  // `--check` doubles as the legacy spelling of the check command and as the
-  // explicit (default) mode of `github`.
   if (checkFlag && command !== 'github') {
-    command = setCommand(command, 'check');
+    throw new Error('--check is only valid with the github command');
   }
   if (apply && command !== 'github') {
     throw new Error('--apply is only valid with the github command');
@@ -814,7 +834,7 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
   }
 
   return {
-    command: command ?? 'sync',
+    command,
     consumer: resolve(consumer),
     dryRun,
     from,
@@ -843,7 +863,7 @@ const runInitCommand = async (
   // upstream deleted (they leave the lock and no future sync removes them).
   if (existsSync(join(consumer, 'sync-standards.lock'))) {
     console.error(
-      'standards: already initialized (sync-standards.lock exists). Use `just sync-standards` to update.',
+      'standards: already initialized (sync-standards.lock exists). Use `bun standards sync` to update.',
     );
     process.exitCode = 1;
     return;
@@ -882,6 +902,18 @@ const main = async (): Promise<void> => {
   const { command, consumer, dryRun, from, apply } = parseArgs(
     process.argv.slice(2),
   );
+
+  if (command === undefined) {
+    console.error('standards: a command is required\n');
+    console.error(USAGE);
+    process.exitCode = 1;
+    return;
+  }
+
+  if (command === 'help') {
+    console.log(USAGE);
+    return;
+  }
 
   if (command === 'check') {
     if (!(await runCheckCommand(consumer))) {

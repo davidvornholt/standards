@@ -78,7 +78,7 @@ export const runGithubCheck = async (consumer: string): Promise<boolean> => {
   if (problems.length > 0) {
     reportProblems(problems);
     console.error(
-      'Converge with `just sync-standards github --apply` (admin auth), or fix the declaration.',
+      'Converge with `bun standards github --apply` (admin auth), or fix the declaration.',
     );
     return false;
   }
