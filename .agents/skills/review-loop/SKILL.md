@@ -27,9 +27,14 @@ If subagent tooling is unavailable, stop and report that blocker; do not substit
 
 ## Split gate → stacked PRs
 
-When the diff contains several unrelated changes, one review pass dilutes attention across content no single finding can span. Vocabulary: a **theme** is one commit subject's worth of intent; **coupling** edges in decreasing strength are an interleaved file, a code dependency, a shared artifact, and semantic coupling (shared runtime behavior, no shared text); a **cluster** is a connected component under coupling edges — the smallest unit reviewable in isolation, never shard below it.
+When the diff contains several unrelated changes, one review pass dilutes attention across content no single finding can span. Vocabulary: a **theme** is one commit subject's worth of intent; **coupling** edges in decreasing strength are an interleaved file, a code dependency, a shared artifact, and semantic coupling (shared runtime behavior, no shared text); a **cluster** is a connected component under coupling edges — the smallest unit reviewable in *parallel isolation*; never shard a cluster for isolation.
 
-1. Delegate the theme/coupling/cluster mapping to a subagent. Split only when no file carries hunks of two clusters; a single cluster or a trivially small diff skips the gate.
+The gate has two modes:
+
+- **Unrelated themes** (several clusters): the parallel-reviewable stack below.
+- **One oversized coherent change** (a single cluster so large that whole-diff reading exhausts a reviewer context before enumeration starts): decompose along dependency layers into a sequential stack — schema, then service, then UI. This is not sharding for isolation: reviews run down the stack in order, and each layer's review sees every ancestor layer as settled code in the checkout, so cross-layer relationships stay visible; a finding against an earlier layer becomes a thread on that layer's PR. Sequential review is the honest price of the coupling. For large-but-fitting coherent diffs, splitting is the wrong tool — partition attention with more, narrower lenses instead. And prefer planning large features as stacks from the start, so this mode stays rare.
+
+1. Delegate the mapping to a subagent: themes, coupling edges, and clusters — or layer boundaries in layered mode. An unrelated-theme split requires that no file carries hunks of two clusters; a layered split requires each layer to be gate-clean on top of its ancestors. A single reviewable cluster or a trivially small diff skips the gate.
 2. Propose the split as an ordered branch-and-PR plan and wait for explicit user approval before restructuring anything.
 3. Build the stack in dependency order — one branch per cluster, each based on its parent, committed via `git-commit` — push, and open every PR immediately as a draft with its parent branch as base, so each PR shows exactly its cluster and CI runs from minute one. A child's base being the parent's branch also structurally enforces merge order: it cannot land in main before its parent.
 4. The deterministic gate must pass per cluster in isolation. A failure the combined diff did not have is hidden coupling: merge those clusters and re-plan; do not patch around it.
