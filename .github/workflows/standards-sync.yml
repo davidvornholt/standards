@@ -6,9 +6,9 @@ name: Standards sync
 # remembering to pull. Synced from davidvornholt/standards; in the standards
 # repo itself it is a harmless no-op (nothing upstream of the source).
 #
-# Cadence and pinning are repo policy, read by the CLI from the consumer-owned
-# sync-standards.local.json. Keeping this workflow a bare delegator preserves
-# compatibility with existing consumers and keeps policy outside the mirror.
+# The weekly cadence is canonical. The consumer-owned sync-standards.local.json
+# controls the upstream ref and whether scheduled runs proceed. A zero-install
+# preflight owns that enablement decision; the CLI remains a bare sync delegator.
 
 on:
   schedule:
@@ -30,15 +30,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Check scheduled sync policy
+        id: preflight
+        run: node .github/scripts/standards-sync-preflight.mjs
+
       - name: Setup Bun
+        if: steps.preflight.outputs.run_sync == 'true'
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.14
 
       - name: Install dependencies
+        if: steps.preflight.outputs.run_sync == 'true'
         run: bun install --frozen-lockfile
 
       - name: Sync canonical files from upstream
+        if: steps.preflight.outputs.run_sync == 'true'
         run: bun standards sync
 
       # This workflow deliberately runs no inline `bun run check`: the synced
@@ -58,6 +65,7 @@ jobs:
       # branch: the `schedule` event carries no payload, so expressions like
       # `github.event.repository.default_branch` are empty here.
       - name: Open a pull request if the mirror changed
+        if: steps.preflight.outputs.run_sync == 'true'
         env:
           GH_TOKEN: ${{ secrets.STANDARDS_SYNC_TOKEN || secrets.GITHUB_TOKEN }}
         run: |

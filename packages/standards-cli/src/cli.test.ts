@@ -694,7 +694,7 @@ describe('ref resolution', () => {
 });
 
 describe('scheduled and legacy sync', () => {
-  it('scheduled false skips only scheduled Actions runs', () => {
+  it('leaves scheduled-run enablement to the zero-install workflow preflight', () => {
     const { up } = buildGitUpstream();
     const { consumer } = initConsumer(up);
     write(
@@ -706,20 +706,10 @@ describe('scheduled and legacy sync', () => {
     git(up, ['add', '-A']);
     git(up, ['commit', '--quiet', '-m', 'v3']);
 
-    const scheduled = run(consumer, ['sync', '--dir', consumer], {
+    const scheduledCli = run(consumer, ['sync', '--dir', consumer], {
       env: { GITHUB_ACTIONS: 'true', GITHUB_EVENT_NAME: 'schedule' },
     });
-    expect(scheduled.status).toBe(0);
-    expect(scheduled.stdout).toContain('scheduled sync disabled');
-    expect(read(consumer, 'managed/a.txt')).toBe('alpha v2\n');
-
-    const manual = run(consumer, ['sync', '--dir', consumer], {
-      env: {
-        GITHUB_ACTIONS: 'true',
-        GITHUB_EVENT_NAME: 'workflow_dispatch',
-      },
-    });
-    expect(manual.status).toBe(0);
+    expect(scheduledCli.status).toBe(0);
     expect(read(consumer, 'managed/a.txt')).toBe('alpha v3\n');
 
     write(up, 'managed/a.txt', 'alpha v4\n');

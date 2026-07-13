@@ -24,7 +24,9 @@ Because bucket-1 files are byte-identical everywhere, every legitimate per-repo 
 | `AGENTS.md`            | `AGENTS.local.md` extends it; `CLAUDE.md` points to it       |
 | `.github/settings.json` | `.github/settings.local.json` extends it (additive only: it may add repository settings and rulesets but never override canonical ones — GitHub layers rulesets strictest-wins, so additions can only tighten) |
 
-`sync-standards.local.json` is the bucket-2 sync policy seam. Its required `ref` is a qualified branch (`refs/heads/...`), qualified tag (`refs/tags/...`), or full commit SHA; `scheduledSync` controls only scheduled GitHub Actions runs. A missing file uses the backwards-compatible default of `refs/heads/main` with scheduled sync enabled. Bare local and workflow syncs read the same policy, while successful non-dry `sync --ref <ref>` updates it.
+`sync-standards.local.json` is the bucket-2 sync policy seam. Its required `ref` is a qualified branch (`refs/heads/...`), qualified tag (`refs/tags/...`), or full commit SHA; `scheduledSync` controls only scheduled GitHub Actions run enablement, while the weekly cadence remains canonical. A missing file uses the backwards-compatible default of `refs/heads/main` with scheduled sync enabled. Bare local and workflow syncs read the same ref policy, while successful non-dry `sync --ref <ref>` updates it.
+
+Non-default policy requires `@davidvornholt/standards` >=0.5.0. Before an existing consumer adds or changes the policy file, upgrade its bucket-2 dependency—for 0.5.0, run `bun add --dev --exact @davidvornholt/standards@0.5.0`. Sync cannot upgrade the consumer-owned `package.json`; an older CLI ignores the ref policy.
 
 If a task seems to require editing a canonical file for one repo's needs, stop — the change either belongs upstream (it's a real standard) or in the seam (it's repo-specific).
 

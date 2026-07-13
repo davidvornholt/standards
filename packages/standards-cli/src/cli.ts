@@ -1001,16 +1001,6 @@ const runSyncCommand = async (
     assertSupportedRef(ref);
   }
   const policy = await loadSyncPolicy(consumer);
-  if (
-    process.env.GITHUB_ACTIONS === 'true' &&
-    process.env.GITHUB_EVENT_NAME === 'schedule' &&
-    !policy.scheduledSync
-  ) {
-    console.log(
-      `standards: scheduled sync disabled by ${LOCAL_POLICY_FILE}; skipping`,
-    );
-    return;
-  }
   const consumerManifest = await loadManifest(
     join(consumer, 'sync-standards.json'),
   );

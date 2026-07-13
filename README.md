@@ -79,6 +79,8 @@ The `Standards sync` workflow also runs `sync` weekly and opens a PR when upstre
 
 Tracking `main` weekly is the default and the recommended mode for repos whose owner also follows this template. Consumers that want to control *when* standards change instead — typical for repos you adopt these standards into but don't co-evolve with this one — declare both levers in the checked-in, consumer-owned `sync-standards.local.json`:
 
+Non-default policy requires `@davidvornholt/standards` >=0.5.0. Existing consumers must upgrade that bucket-2 dependency before adding or changing this file—for 0.5.0, run `bun add --dev --exact @davidvornholt/standards@0.5.0`; sync cannot update a consumer-owned `package.json`. The weekly workflow cadence remains canonical; consumer policy controls only the ref and whether scheduled runs are enabled.
+
 ```json
 {
   "ref": "refs/heads/main",
