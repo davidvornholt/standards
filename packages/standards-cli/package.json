@@ -30,6 +30,7 @@
     "lint": "biome check --error-on-warnings .",
     "lint:fix": "biome check --write --error-on-warnings .",
     "check-types": "tsc --noEmit",
+    "release:state": "bun scripts/release-state.ts",
     "test": "bun test"
   },
   "devDependencies": {
