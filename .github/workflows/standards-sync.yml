@@ -37,17 +37,25 @@ jobs:
       - name: Sync canonical files from upstream
         run: bun standards sync
 
-      - name: Validate the synchronized repository
-        run: bun run check
-
+      # This workflow deliberately runs no inline `bun run check`: the synced
+      # result is validated by the required Standards gate on the PR it opens,
+      # like any other change. An inline gate would duplicate the gate's
+      # environment (services, browsers) into a second canonical file forever,
+      # and its failure would withhold the PR exactly when upstream breaking a
+      # consumer most needs to be visible — an open PR with a red required
+      # check is the signal, and branch protection keeps it unmergeable.
+      #
+      # Configure STANDARDS_SYNC_TOKEN (fine-grained PAT: contents + pull
+      # requests write) so the opened PR triggers workflows; PRs opened with
+      # the default GITHUB_TOKEN fallback do not, and need a manual nudge
+      # (push to the branch or close and reopen) to run the gate.
+      #
       # `gh pr create` is left to default `--base` to the repository's default
       # branch: the `schedule` event carries no payload, so expressions like
-      # `github.event.repository.default_branch` are empty here. Note that PRs
-      # opened with GITHUB_TOKEN do not trigger other workflows — push to the
-      # branch or close and reopen the PR to run the Standards gate on it.
+      # `github.event.repository.default_branch` are empty here.
       - name: Open a pull request if the mirror changed
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.STANDARDS_SYNC_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           if [ -z "$(git status --porcelain)" ]; then
             echo "Already in sync with upstream standards; nothing to open."

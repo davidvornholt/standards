@@ -72,7 +72,7 @@ bun standards github --apply  # converge the live repo (needs admin gh auth)
 bun standards help            # list commands and options
 ```
 
-The `Standards sync` workflow also runs `sync` weekly and opens a PR when upstream has moved, so you never have to remember to pull.
+The `Standards sync` workflow also runs `sync` weekly and opens a PR when upstream has moved, so you never have to remember to pull. The PR is validated by the required `Standards` gate like any other change; configure a `STANDARDS_SYNC_TOKEN` Actions secret (fine-grained PAT with contents and pull-requests write) so the opened PR triggers that gate automatically — with the default `GITHUB_TOKEN` it needs a manual nudge.
 
 ## Release the CLI
 
