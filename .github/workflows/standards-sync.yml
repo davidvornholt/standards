@@ -32,7 +32,7 @@ jobs:
 
       - name: Check scheduled sync policy
         id: preflight
-        run: node .github/scripts/standards-sync-preflight.mjs
+        uses: ./.github/actions/standards-sync-preflight
 
       - name: Setup Bun
         if: steps.preflight.outputs.run_sync == 'true'

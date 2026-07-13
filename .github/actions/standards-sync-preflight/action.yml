@@ -1,0 +1,10 @@
+name: Standards sync preflight
+description: Validate consumer sync policy before dependency setup
+
+outputs:
+  run_sync:
+    description: Whether the workflow should install dependencies and sync
+
+runs:
+  using: node24
+  main: index.mjs

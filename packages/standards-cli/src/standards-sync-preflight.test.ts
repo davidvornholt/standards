@@ -12,22 +12,13 @@ import { join } from 'node:path';
 import process from 'node:process';
 
 const ROOT = join(import.meta.dir, '../../..');
-const PREFLIGHT = join(ROOT, '.github/scripts/standards-sync-preflight.mjs');
-const WORKFLOW = join(ROOT, '.github/workflows/standards-sync.yml');
-const MANIFEST = join(ROOT, 'sync-standards.json');
+const PREFLIGHT = join(
+  ROOT,
+  '.github/actions/standards-sync-preflight/index.mjs',
+);
 const POLICY_FILE = 'sync-standards.local.json';
-const GATED_STEPS = [
-  'Setup Bun',
-  'Install dependencies',
-  'Sync canonical files from upstream',
-  'Open a pull request if the mirror changed',
-] as const;
-const DOCS = [
-  join(ROOT, 'README.md'),
-  join(ROOT, 'template/README.md'),
-  join(ROOT, 'packages/standards-cli/README.md'),
-  join(ROOT, '.agents/skills/standards-sync/SKILL.md'),
-] as const;
+const STANDARDS_PACKAGE = '@davidvornholt/standards';
+const FULL_SHA_LENGTH = 40;
 
 type RunResult = {
   readonly output: string;
@@ -40,19 +31,30 @@ const temporaryDirectories: Array<string> = [];
 
 const runPreflight = (
   eventName: 'schedule' | 'workflow_dispatch',
-  policy: string | undefined,
+  policyJson: string | undefined,
+  version?: string,
 ): RunResult => {
   const directory = mkdtempSync(join(tmpdir(), 'standards-preflight-'));
   temporaryDirectories.push(directory);
   const outputPath = join(directory, 'github-output');
-  if (policy !== undefined) {
-    writeFileSync(join(directory, POLICY_FILE), policy);
+  if (policyJson !== undefined) {
+    writeFileSync(join(directory, POLICY_FILE), policyJson);
+  }
+  if (version !== undefined) {
+    writeFileSync(
+      join(directory, 'package.json'),
+      JSON.stringify({
+        devDependencies: { [STANDARDS_PACKAGE]: version },
+      }),
+    );
   }
   const environment = { ...process.env };
   const eventNameVariable = 'GITHUB_EVENT_NAME';
   const outputVariable = 'GITHUB_OUTPUT';
+  const workspaceVariable = 'GITHUB_WORKSPACE';
   environment[eventNameVariable] = eventName;
   environment[outputVariable] = outputPath;
+  environment[workspaceVariable] = directory;
 
   const result = spawnSync('node', [PREFLIGHT], {
     cwd: directory,
@@ -67,15 +69,8 @@ const runPreflight = (
   };
 };
 
-const workflowStep = (workflow: string, name: string): string => {
-  const marker = `      - name: ${name}`;
-  const start = workflow.indexOf(marker);
-  if (start === -1) {
-    throw new Error(`Workflow step not found: ${name}`);
-  }
-  const next = workflow.indexOf('\n      - name:', start + marker.length);
-  return workflow.slice(start, next === -1 ? undefined : next);
-};
+const serializePolicy = (ref: string, scheduledSync: boolean): string =>
+  JSON.stringify({ ref, scheduledSync });
 
 afterEach(() => {
   while (temporaryDirectories.length > 0) {
@@ -90,7 +85,8 @@ describe('scheduled sync preflight', () => {
   it('disables a scheduled run before dependency setup when policy opts out', () => {
     const result = runPreflight(
       'schedule',
-      JSON.stringify({ ref: 'refs/heads/main', scheduledSync: false }),
+      serializePolicy('refs/heads/main', false),
+      '0.5.0',
     );
 
     expect(result.status).toBe(0);
@@ -98,10 +94,10 @@ describe('scheduled sync preflight', () => {
     expect(result.stdout).toContain('scheduled sync disabled');
   });
 
-  it('enables scheduled runs when policy opts in or is missing', () => {
+  it('enables scheduled runs for default policy without requiring a new CLI', () => {
     const configured = runPreflight(
       'schedule',
-      JSON.stringify({ ref: 'refs/heads/main', scheduledSync: true }),
+      serializePolicy('refs/heads/main', true),
     );
     const missing = runPreflight('schedule', undefined);
 
@@ -109,65 +105,59 @@ describe('scheduled sync preflight', () => {
     expect(missing.output).toBe('run_sync=true\n');
   });
 
+  it('accepts a non-default ref with an exact compatible CLI', () => {
+    for (const ref of ['refs/tags/v0.5.0', 'a'.repeat(FULL_SHA_LENGTH)]) {
+      const result = runPreflight(
+        'schedule',
+        serializePolicy(ref, true),
+        '0.5.0',
+      );
+      expect(result.status).toBe(0);
+      expect(result.output).toBe('run_sync=true\n');
+    }
+  });
+
   it('keeps manual dispatch enabled when scheduled runs are disabled', () => {
     const result = runPreflight(
       'workflow_dispatch',
-      JSON.stringify({ ref: 'refs/heads/main', scheduledSync: false }),
+      serializePolicy('refs/heads/main', false),
+      '0.5.0',
     );
 
     expect(result.status).toBe(0);
     expect(result.output).toBe('run_sync=true\n');
   });
 
-  it('fails closed on malformed policy or a missing scheduledSync field', () => {
-    for (const policy of ['not json', '{}', '{"scheduledSync":"false"}']) {
-      const result = runPreflight('schedule', policy);
+  it('fails before run selection for an old or unverifiable CLI', () => {
+    for (const [eventName, version] of [
+      ['schedule', '0.4.0'],
+      ['workflow_dispatch', '^0.5.0'],
+      ['schedule', undefined],
+    ] as const) {
+      const result = runPreflight(
+        eventName,
+        serializePolicy('refs/tags/v0.5.0', true),
+        version,
+      );
+      expect(result.status).not.toBe(0);
+      expect(result.output).toBe('');
+      expect(result.stderr).toContain('exact stable version >=0.5.0');
+    }
+  });
+
+  it('fails closed on malformed or incomplete policy', () => {
+    for (const invalidPolicy of [
+      'not json',
+      '{}',
+      serializePolicy('main', true),
+      serializePolicy('refs/heads/bad..ref', true),
+      JSON.stringify({ ref: 'refs/heads/main' }),
+      JSON.stringify({ ref: 'refs/heads/main', scheduledSync: 'false' }),
+    ]) {
+      const result = runPreflight('schedule', invalidPolicy);
       expect(result.status).not.toBe(0);
       expect(result.output).toBe('');
       expect(result.stderr.length).toBeGreaterThan(0);
-    }
-  });
-});
-
-describe('canonical scheduled sync contract', () => {
-  it('runs the preflight after checkout and gates every paid step', () => {
-    const workflow = readFileSync(WORKFLOW, 'utf8');
-    const checkout = workflow.indexOf('      - name: Checkout');
-    const preflight = workflow.indexOf(
-      '      - name: Check scheduled sync policy',
-    );
-    const setup = workflow.indexOf('      - name: Setup Bun');
-
-    expect(checkout).toBeGreaterThanOrEqual(0);
-    expect(preflight).toBeGreaterThan(checkout);
-    expect(setup).toBeGreaterThan(preflight);
-    expect(workflowStep(workflow, 'Check scheduled sync policy')).toContain(
-      'run: node .github/scripts/standards-sync-preflight.mjs',
-    );
-    for (const name of GATED_STEPS) {
-      expect(workflowStep(workflow, name)).toContain(
-        "if: steps.preflight.outputs.run_sync == 'true'",
-      );
-    }
-  });
-
-  it('syncs the preflight as canonical content', () => {
-    const manifest = JSON.parse(readFileSync(MANIFEST, 'utf8')) as {
-      readonly paths: ReadonlyArray<string>;
-    };
-
-    expect(manifest.paths).toContain(
-      '.github/scripts/standards-sync-preflight.mjs',
-    );
-  });
-
-  it('documents the old-consumer upgrade before non-default policy', () => {
-    for (const path of DOCS) {
-      const documentation = readFileSync(path, 'utf8');
-      expect(documentation).toContain('@davidvornholt/standards` >=0.5.0');
-      expect(documentation).toContain(
-        'bun add --dev --exact @davidvornholt/standards@0.5.0',
-      );
     }
   });
 });
