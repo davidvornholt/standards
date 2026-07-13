@@ -1,5 +1,3 @@
-import { appendFileSync } from 'node:fs';
-import process from 'node:process';
 import { failureOption, pretty } from 'effect/Cause';
 import { isFailure } from 'effect/Exit';
 import { isSome } from 'effect/Option';
@@ -9,11 +7,11 @@ import type { GithubStateError } from '../src/github-state-error';
 import type { NpmRegistryError } from '../src/npm-registry-error';
 import {
   type Effect,
-  effectTry,
   fail,
   gen,
   runPromiseExit,
   succeed,
+  tryPromise,
 } from '../src/release-effect';
 import {
   inspectGithubRelease,
@@ -22,11 +20,17 @@ import {
 import { ReleaseInputError } from '../src/release-input-error';
 import { inspectNpmRelease } from '../src/release-npm';
 import { ReleaseOutputError } from '../src/release-output-error';
-import { classifyReleaseDeclaration } from '../src/release-state';
+import {
+  argv,
+  env,
+  file,
+  runtimeProcess,
+  stderr,
+  write,
+} from '../src/release-runtime';
 import type { ReleaseValidationError } from '../src/release-validation-error';
 
-// biome-ignore lint/style/noProcessEnv: This workflow entrypoint receives its deployment configuration from GitHub Actions.
-const environment = process.env;
+const environment = env;
 
 type ReleaseError =
   | ArtifactIdentityError
@@ -47,38 +51,30 @@ const nullableArg = (value: string | undefined): string | null => {
   return present === '' ? null : present;
 };
 
+const firstNonEmpty = (
+  values: ReadonlyArray<string | undefined>,
+): string | undefined =>
+  values.find((value) => value !== undefined && value !== '');
+
 const writeOutput = (
   output: string,
   values: Readonly<Record<string, string | boolean>>,
-) =>
-  effectTry({
-    try: () => {
-      const lines = Object.entries(values).map(
-        ([key, value]) => `${key}=${value}\n`,
-      );
-      appendFileSync(output, lines.join(''));
-    },
+) => {
+  const content = Object.entries(values)
+    .map(([key, value]) => `${key}=${value}\n`)
+    .join('');
+  return tryPromise({
+    try: () =>
+      file(output)
+        .exists()
+        .then((exists) => (exists ? file(output).text() : Promise.resolve('')))
+        .then((current) => write(output, `${current}${content}`)),
     catch: (cause) =>
       new ReleaseOutputError({
         message: `Writing GitHub outputs failed: ${String(cause)}`,
       }),
   });
-
-const classify = (args: ReadonlyArray<string>) =>
-  gen(function* () {
-    const [output, version, parentVersion] = args;
-    const outputPath = yield* requireValue(output, 'GitHub output path');
-    const requiredVersion = yield* requireValue(version, 'release version');
-    const declared = yield* classifyReleaseDeclaration({
-      parentVersion: nullableArg(parentVersion),
-      version: requiredVersion,
-    });
-    yield* writeOutput(outputPath, {
-      declared,
-      tag: `v${requiredVersion}`,
-      version: requiredVersion,
-    });
-  });
+};
 
 const inspectNpm = (args: ReadonlyArray<string>) =>
   gen(function* () {
@@ -100,15 +96,15 @@ const github = (mode: 'inspect' | 'reconcile', args: ReadonlyArray<string>) =>
     const outputPath = yield* requireValue(output, 'GitHub output path');
     const input = {
       expectedSha: yield* requireValue(expectedSha, 'release sha'),
+      token: yield* requireValue(
+        firstNonEmpty([environment.GH_TOKEN, environment.GITHUB_TOKEN]),
+        'GitHub token',
+      ),
       repo: yield* requireValue(
         environment.GITHUB_REPOSITORY,
         'GitHub repository',
       ),
       tag: yield* requireValue(tag, 'release tag'),
-      token: yield* requireValue(
-        environment.GH_TOKEN ?? environment.GITHUB_TOKEN,
-        'GitHub token',
-      ),
     };
     const action = yield* mode === 'inspect'
       ? inspectGithubRelease(input)
@@ -117,10 +113,7 @@ const github = (mode: 'inspect' | 'reconcile', args: ReadonlyArray<string>) =>
   });
 
 const main = (): Effect<void, ReleaseError> => {
-  const [command, ...args] = process.argv.slice(2);
-  if (command === 'classify') {
-    return classify(args);
-  }
+  const [command, ...args] = argv.slice(2);
   if (command === 'npm') {
     return inspectNpm(args);
   }
@@ -133,7 +126,7 @@ const main = (): Effect<void, ReleaseError> => {
   return fail(
     new ReleaseInputError({
       message:
-        'Expected release-state command classify, npm, github-inspect, or github-reconcile',
+        'Expected release-state command npm, github-inspect, or github-reconcile',
     }),
   );
 };
@@ -142,6 +135,6 @@ const exit = await runPromiseExit(main());
 if (isFailure(exit)) {
   const failure = failureOption(exit.cause);
   const message = isSome(failure) ? failure.value.message : pretty(exit.cause);
-  process.stderr.write(`::error::${message}\n`);
-  process.exit(1);
+  await write(stderr, `::error::${message}\n`);
+  runtimeProcess.exitCode = 1;
 }

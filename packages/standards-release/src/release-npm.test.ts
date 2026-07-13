@@ -1,13 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { spawnSync } from 'bun';
 import { flip, runPromise } from './release-effect';
 import {
   inspectNpmRelease,
   npmIntegrity,
   type ReleaseFetcher,
 } from './release-npm';
+import { write } from './release-runtime';
 
 let directory = '';
 let artifact = '';
@@ -16,18 +15,23 @@ const HTTP_NOT_FOUND = 404;
 const HTTP_UNAVAILABLE = 503;
 
 beforeAll(async () => {
-  directory = await mkdtemp(join(tmpdir(), 'release-npm-'));
-  artifact = join(directory, 'package.tgz');
-  await writeFile(artifact, 'exact package bytes');
+  directory = spawnSync(['mktemp', '-d', '/tmp/release-npm-XXXXXX'])
+    .stdout.toString()
+    .trim();
+  artifact = `${directory}/package.tgz`;
+  await write(artifact, 'exact package bytes');
   integrity = await runPromise(npmIntegrity(artifact));
 });
 
-afterAll(async () => {
-  await rm(directory, { force: true, recursive: true });
+afterAll(() => {
+  spawnSync(['rm', '-rf', directory]);
 });
 
-const metadata = (overrides: Record<string, unknown> = {}) => ({
-  'dist-tags': { latest: '0.5.0' },
+const metadata = (
+  overrides: Record<string, unknown> = {},
+  latest = '0.5.0',
+) => ({
+  'dist-tags': { latest },
   versions: {
     '0.5.0': {
       dist: { integrity },
@@ -55,6 +59,14 @@ const effect = (fetcher: ReleaseFetcher) =>
 describe('npm release inspection', () => {
   it('accepts matching registry bytes and source metadata', async () => {
     expect(await runPromise(effect(fetchJson(metadata())))).toEqual({
+      integrity,
+      publish: false,
+      reconcile: true,
+    });
+  });
+
+  it('reconciles an identity-verified historical version behind latest', async () => {
+    expect(await runPromise(effect(fetchJson(metadata({}, '0.6.0'))))).toEqual({
       integrity,
       publish: false,
       reconcile: true,
@@ -104,6 +116,24 @@ describe('npm release inspection', () => {
         _tag: cases[index]?.expectedTag,
       });
     }
+  });
+
+  it('rejects publishing an absent historical version behind latest', async () => {
+    expect(
+      await runPromise(
+        flip(
+          effect(
+            fetchJson({
+              'dist-tags': { latest: '0.6.0' },
+              versions: {},
+            }),
+          ),
+        ),
+      ),
+    ).toMatchObject({
+      _tag: 'ReleaseValidationError',
+      message: 'Manifest version 0.5.0 is behind npm latest 0.6.0',
+    });
   });
 
   it('rejects mismatched registry bytes and source metadata', async () => {

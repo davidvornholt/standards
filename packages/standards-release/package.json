@@ -1,0 +1,23 @@
+{
+  "name": "@davidvornholt/standards-release",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {},
+  "scripts": {
+    "lint": "biome check --error-on-warnings scripts src package.json tsconfig.json",
+    "lint:fix": "biome check --write --error-on-warnings scripts src package.json tsconfig.json",
+    "check-types": "tsc --noEmit",
+    "release:classify": "bun scripts/classify-release.ts",
+    "release:state": "bun scripts/release-state.ts",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@davidvornholt/typescript-config": "workspace:*",
+    "@types/bun": "^1.3.14",
+    "typescript": "7.0.2"
+  },
+  "dependencies": {
+    "effect": "3.22.0"
+  }
+}

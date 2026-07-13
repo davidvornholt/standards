@@ -25,7 +25,7 @@ describe('release planning', () => {
     expect(
       succeed(
         decideRelease({
-          npmLatest: '0.5.0',
+          npmLatest: '0.6.0',
           npmVersionExists: true,
           parentVersion: '0.4.0',
           version: '0.5.0',
@@ -102,7 +102,7 @@ describe('release planning', () => {
     ).toBeTrue();
   });
 
-  it('fails closed for regressions and malformed npm latest', () => {
+  it('fails closed for unpublished regressions and malformed npm latest', () => {
     expect(
       fail(
         decideRelease({

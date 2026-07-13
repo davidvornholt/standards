@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
 import { ArtifactIdentityError } from './artifact-identity-error';
 import { NpmRegistryError } from './npm-registry-error';
 import {
@@ -15,6 +13,7 @@ import {
   tryPromise,
   Unknown,
 } from './release-effect';
+import { BunCryptoHasher, file } from './release-runtime';
 import {
   decideRelease,
   type ReleasePlan,
@@ -131,14 +130,16 @@ const loadNpmState = (input: {
 
 export const npmIntegrity = (artifact: string) =>
   tryPromise({
-    try: () => readFile(artifact),
+    try: () => file(artifact).arrayBuffer(),
     catch: (cause) =>
       new ArtifactIdentityError({
         message: `Reading package artifact failed: ${String(cause)}`,
       }),
   }).pipe(
     map((bytes) => {
-      const digest = createHash('sha512').update(bytes).digest('base64');
+      const digest = new BunCryptoHasher('sha512')
+        .update(bytes)
+        .digest('base64');
       return `sha512-${digest}`;
     }),
   );

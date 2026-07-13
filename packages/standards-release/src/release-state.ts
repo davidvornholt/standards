@@ -1,6 +1,11 @@
 import { ArtifactIdentityError } from './artifact-identity-error';
 import { GithubStateError } from './github-state-error';
-import { either, fail, gen, isLeft, succeed } from './release-effect';
+import {
+  classifyReleaseDeclaration as classifyDeclaration,
+  compareStableVersions,
+  parseStableVersion,
+} from './release-declaration';
+import { fail, gen, succeed } from './release-effect';
 import { ReleaseValidationError } from './release-validation-error';
 
 export type ReleasePlan = {
@@ -10,60 +15,27 @@ export type ReleasePlan = {
 
 export type ReconciliationAction = 'create' | 'exists';
 
-const stableSemver =
-  /^(?<major>0|[1-9][0-9]*)\.(?<minor>0|[1-9][0-9]*)\.(?<patch>0|[1-9][0-9]*)$/u;
-
 const parseVersion = (version: string, label = 'Version') => {
-  const match = stableSemver.exec(version);
-  const { major, minor, patch } = match?.groups ?? {};
-  if (major === undefined || minor === undefined || patch === undefined) {
+  const parsed = parseStableVersion(version);
+  if (parsed === null) {
     return fail(
       new ReleaseValidationError({
         message: `${label} ${version} must be a stable SemVer`,
       }),
     );
   }
-  return succeed([BigInt(major), BigInt(minor), BigInt(patch)] as const);
-};
-
-const compareVersions = (
-  left: readonly [bigint, bigint, bigint],
-  right: readonly [bigint, bigint, bigint],
-): number => {
-  for (const index of [0, 1, 2] as const) {
-    if (left[index] > right[index]) {
-      return 1;
-    }
-    if (left[index] < right[index]) {
-      return -1;
-    }
-  }
-  return 0;
+  return succeed(parsed);
 };
 
 export const classifyReleaseDeclaration = (input: {
   readonly parentVersion: string | null;
   readonly version: string;
-}) =>
-  gen(function* () {
-    const version = yield* parseVersion(input.version);
-    if (input.parentVersion === null) {
-      return true;
-    }
-    const parent = yield* either(parseVersion(input.parentVersion));
-    if (isLeft(parent)) {
-      return true;
-    }
-    const comparison = compareVersions(version, parent.right);
-    if (comparison < 0) {
-      return yield* fail(
-        new ReleaseValidationError({
-          message: `Declared version ${input.version} must not be older than first-parent version ${input.parentVersion}`,
-        }),
-      );
-    }
-    return comparison > 0;
-  });
+}) => {
+  const result = classifyDeclaration(input);
+  return result.ok
+    ? succeed(result.declared)
+    : fail(new ReleaseValidationError({ message: result.message }));
+};
 
 export const decideRelease = (input: {
   readonly npmLatest: string | null;
@@ -79,7 +51,10 @@ export const decideRelease = (input: {
     const version = yield* parseVersion(input.version);
     if (input.npmLatest !== null) {
       const npmLatest = yield* parseVersion(input.npmLatest, 'npm latest');
-      if (compareVersions(version, npmLatest) < 0) {
+      if (
+        compareStableVersions(version, npmLatest) < 0 &&
+        !input.npmVersionExists
+      ) {
         return yield* fail(
           new ReleaseValidationError({
             message: `Manifest version ${input.version} is behind npm latest ${input.npmLatest}`,
