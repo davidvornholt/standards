@@ -159,5 +159,13 @@ describe('scheduled sync preflight', () => {
       expect(result.output).toBe('');
       expect(result.stderr.length).toBeGreaterThan(0);
     }
+
+    const aggregated = runPreflight(
+      'schedule',
+      JSON.stringify({ ref: 'refs/tags/v0.5.0' }),
+      '0.4.0',
+    );
+    expect(aggregated.stderr).toContain('requires boolean "scheduledSync"');
+    expect(aggregated.stderr).toContain('exact stable version >=0.5.0');
   });
 });

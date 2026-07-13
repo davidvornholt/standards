@@ -32,6 +32,7 @@ import {
   sep,
 } from 'node:path';
 import process from 'node:process';
+import { pathToFileURL } from 'node:url';
 import { CANONICAL_SETTINGS_FILE, LOCAL_SETTINGS_FILE } from './github-api';
 import { runGithubApply, runGithubCheck } from './github-commands';
 import { loadGithubSettings } from './github-settings';
@@ -41,6 +42,8 @@ const { YAML: BunYaml } = await import('bun');
 const DEFAULT_UPSTREAM = 'github:davidvornholt/standards';
 const DEFAULT_REF = 'refs/heads/main';
 const LOCAL_POLICY_FILE = 'sync-standards.local.json';
+const SYNC_POLICY_CONTRACT_FILE =
+  '.github/actions/standards-sync-preflight/sync-policy.mjs';
 
 // Characters of a sha256 hex digest shown in drift reports; enough to identify.
 const HASH_PREVIEW_LENGTH = 12;
@@ -75,6 +78,18 @@ type Lock = {
 type SyncPolicy = {
   readonly ref: string;
   readonly scheduledSync: boolean;
+};
+
+type SyncPolicyInspection = {
+  readonly packageJson: Record<string, unknown> | undefined;
+  readonly policy: SyncPolicy | null;
+  readonly problems: ReadonlyArray<string>;
+};
+
+type SyncPolicyInspectionInput = {
+  readonly packageText: string | undefined;
+  readonly policyText: string | undefined;
+  readonly requireDirectPackage: boolean;
 };
 
 type Source = {
@@ -534,7 +549,7 @@ const runSync = async ({
 // on — see the "known limitation" in the standards repository README.
 const runCheck = async (
   consumer: string,
-  policy: SyncPolicy,
+  policy: SyncPolicy | null,
 ): Promise<boolean> => {
   const lock = await readLock(consumer);
   if (lock === null || Object.keys(lock.files).length === 0) {
@@ -547,8 +562,8 @@ const runCheck = async (
     assertSafeRelativePath(rel, 'sync-standards.lock file');
   }
   const lockedRef = lock.ref ?? DEFAULT_REF;
-  const policyMatchesLock = lockedRef === policy.ref;
-  if (!policyMatchesLock) {
+  const policyMatchesLock = policy === null || lockedRef === policy.ref;
+  if (policy !== null && !policyMatchesLock) {
     console.error(
       `standards: sync policy requests ${policy.ref}, but sync-standards.lock records ${lockedRef}; run \`bun standards sync\``,
     );
@@ -602,6 +617,109 @@ const DEPENDABOT_SCHEDULE_INTERVALS = new Set([
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const isSyncPolicyInspection = (
+  value: unknown,
+): value is SyncPolicyInspection => {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const { packageJson, policy, problems } = value;
+  const policyIsValid =
+    policy === null ||
+    (isRecord(policy) &&
+      typeof policy.ref === 'string' &&
+      typeof policy.scheduledSync === 'boolean');
+  return (
+    (packageJson === undefined || isRecord(packageJson)) &&
+    policyIsValid &&
+    Array.isArray(problems) &&
+    problems.every((problem) => typeof problem === 'string')
+  );
+};
+
+const inspectPackageWithoutPolicyContract = (
+  packageText: string | null,
+): {
+  readonly packageJson: Record<string, unknown> | undefined;
+  readonly problems: ReadonlyArray<string>;
+} => {
+  if (packageText === null) {
+    return { packageJson: undefined, problems: ['package.json must exist'] };
+  }
+  let rawPackageJson: unknown;
+  try {
+    rawPackageJson = JSON.parse(packageText) as unknown;
+  } catch {
+    return {
+      packageJson: undefined,
+      problems: ['package.json must contain valid JSON'],
+    };
+  }
+  if (!isRecord(rawPackageJson)) {
+    return {
+      packageJson: undefined,
+      problems: ['package.json must be a JSON object'],
+    };
+  }
+  const devDependencies = isRecord(rawPackageJson.devDependencies)
+    ? rawPackageJson.devDependencies
+    : undefined;
+  const problems =
+    typeof devDependencies?.['@davidvornholt/standards'] === 'string'
+      ? []
+      : ['package.json must declare @davidvornholt/standards directly'];
+  return { packageJson: rawPackageJson, problems };
+};
+
+const loadSyncPolicyInspector = async (
+  contractPath: string,
+): Promise<(input: SyncPolicyInspectionInput) => unknown> => {
+  const contractModule = (await import(
+    pathToFileURL(contractPath).href
+  )) as unknown;
+  if (!isRecord(contractModule)) {
+    throw new Error(`${SYNC_POLICY_CONTRACT_FILE} has invalid exports`);
+  }
+  const inspect = contractModule.inspectSyncPolicy as
+    | ((input: SyncPolicyInspectionInput) => unknown)
+    | undefined;
+  if (typeof inspect !== 'function') {
+    throw new Error(`${SYNC_POLICY_CONTRACT_FILE} has invalid exports`);
+  }
+  return inspect;
+};
+
+const inspectConsumerSyncPolicy = async (
+  consumer: string,
+): Promise<SyncPolicyInspection> => {
+  const contractPath = join(consumer, SYNC_POLICY_CONTRACT_FILE);
+  if (!existsSync(contractPath)) {
+    const packageInspection = inspectPackageWithoutPolicyContract(
+      await readTextIfPresent(join(consumer, 'package.json')),
+    );
+    return {
+      packageJson: packageInspection.packageJson,
+      policy: null,
+      problems: [
+        `${SYNC_POLICY_CONTRACT_FILE} must exist; run \`bun standards sync\``,
+        ...packageInspection.problems,
+      ],
+    };
+  }
+  const inspect = await loadSyncPolicyInspector(contractPath);
+  const result = inspect({
+    packageText:
+      (await readTextIfPresent(join(consumer, 'package.json'))) ?? undefined,
+    policyText:
+      (await readTextIfPresent(join(consumer, LOCAL_POLICY_FILE))) ?? undefined,
+    requireDirectPackage: true,
+  });
+  if (!isSyncPolicyInspection(result)) {
+    throw new Error(`${SYNC_POLICY_CONTRACT_FILE} returned an invalid result`);
+  }
+  return result;
+};
 
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0;
@@ -762,18 +880,11 @@ const inspectDependabot = (raw: string): ReadonlyArray<string> => {
   return problems;
 };
 
-const inspectPackageJson = (packageRaw: string): ReadonlyArray<string> => {
+const inspectPackageJson = (
+  packageJson: Record<string, unknown>,
+): ReadonlyArray<string> => {
   const problems: Array<string> = [];
-  const packageJson = JSON.parse(packageRaw) as Record<string, unknown>;
   const scripts = packageJson.scripts as Record<string, unknown> | undefined;
-  const devDependencies = packageJson.devDependencies as
-    | Record<string, unknown>
-    | undefined;
-  if (typeof devDependencies?.['@davidvornholt/standards'] !== 'string') {
-    problems.push(
-      'package.json must declare @davidvornholt/standards directly',
-    );
-  }
   for (const name of ['check', 'check:fix']) {
     const script = scripts?.[name];
     if (typeof script !== 'string' || !script.includes('standards check')) {
@@ -783,8 +894,11 @@ const inspectPackageJson = (packageRaw: string): ReadonlyArray<string> => {
   return problems;
 };
 
-const runDoctor = async (consumer: string): Promise<boolean> => {
-  const problems: Array<string> = [];
+const runDoctor = async (
+  consumer: string,
+  policyInspection: SyncPolicyInspection,
+): Promise<boolean> => {
+  const problems: Array<string> = [...policyInspection.problems];
   const biome = await readTextIfPresent(join(consumer, 'biome.jsonc'));
   if (biome === null || !biome.includes('"./biome.base.jsonc"')) {
     problems.push('biome.jsonc must extend "./biome.base.jsonc"');
@@ -803,12 +917,8 @@ const runDoctor = async (consumer: string): Promise<boolean> => {
     problems.push(...inspectDependabot(dependabot));
   }
 
-  const packagePath = join(consumer, 'package.json');
-  const packageRaw = await readTextIfPresent(packagePath);
-  if (packageRaw === null) {
-    problems.push('package.json must exist');
-  } else {
-    problems.push(...inspectPackageJson(packageRaw));
+  if (policyInspection.packageJson !== undefined) {
+    problems.push(...inspectPackageJson(policyInspection.packageJson));
   }
 
   // The GitHub settings seam only exists once the canonical declaration has
@@ -954,9 +1064,9 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
 };
 
 const runCheckCommand = async (consumer: string): Promise<boolean> => {
-  const policy = await loadSyncPolicy(consumer);
-  const driftIsClean = await runCheck(consumer, policy);
-  const integrationIsValid = await runDoctor(consumer);
+  const policyInspection = await inspectConsumerSyncPolicy(consumer);
+  const driftIsClean = await runCheck(consumer, policyInspection.policy);
+  const integrationIsValid = await runDoctor(consumer, policyInspection);
   // The GitHub gate activates with the synced declaration and then fails
   // closed: once .github/settings.json exists, an unreachable API or an
   // unreadable origin is a failure, not a skip.
@@ -1065,7 +1175,8 @@ const main = async (): Promise<void> => {
   }
 
   if (command === 'doctor') {
-    if (!(await runDoctor(consumer))) {
+    const policyInspection = await inspectConsumerSyncPolicy(consumer);
+    if (!(await runDoctor(consumer, policyInspection))) {
       process.exitCode = 1;
     }
     return;

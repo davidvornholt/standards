@@ -25,7 +25,18 @@ const POLICY_SEED = join(
   import.meta.dir,
   '../../../template/sync-standards.local.json',
 );
-const STD_PATHS: ReadonlyArray<string> = ['sync-standards.json', 'managed'];
+const SYNC_POLICY_CONTRACT_PATH =
+  '.github/actions/standards-sync-preflight/sync-policy.mjs';
+const SYNC_POLICY_CONTRACT = join(
+  import.meta.dir,
+  '../../../',
+  SYNC_POLICY_CONTRACT_PATH,
+);
+const STD_PATHS: ReadonlyArray<string> = [
+  'sync-standards.json',
+  'managed',
+  SYNC_POLICY_CONTRACT_PATH,
+];
 const DEFAULT_REF = 'refs/heads/main';
 const BARE_SYNC_STEP = /^\s+run: bun standards sync$/mu;
 
@@ -54,6 +65,13 @@ const read = (root: string, rel: string): string =>
   readFileSync(join(root, rel), 'utf8');
 const readLock = (root: string): Lock =>
   JSON.parse(read(root, 'sync-standards.lock')) as Lock;
+const setStandardsVersion = (root: string, version: string): void => {
+  const packageJson = JSON.parse(read(root, 'package.json')) as {
+    devDependencies: Record<string, string>;
+  };
+  packageJson.devDependencies['@davidvornholt/standards'] = version;
+  write(root, 'package.json', JSON.stringify(packageJson));
+};
 
 const run = (
   cwd: string,
@@ -124,6 +142,11 @@ const buildUpstream = (paths: ReadonlyArray<string> = STD_PATHS): string => {
   write(up, 'managed/a.txt', 'alpha\n');
   write(up, 'managed/b.txt', 'beta\n');
   write(up, 'managed/standards-sync.yml', 'run: bun standards sync\n');
+  write(
+    up,
+    SYNC_POLICY_CONTRACT_PATH,
+    readFileSync(SYNC_POLICY_CONTRACT, 'utf8'),
+  );
   return up;
 };
 const initConsumer = (up: string): { consumer: string; result: RunResult } => {
@@ -424,6 +447,44 @@ describe('doctor', () => {
 
     expect(doctor.status).toBe(0);
     expect(doctor.stdout).toContain('consumer integration seams are wired');
+  });
+});
+
+describe('sync policy integration', () => {
+  it('aggregates malformed policy and incompatible CLI problems', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    write(
+      consumer,
+      'sync-standards.local.json',
+      JSON.stringify({ ref: 'refs/tags/v0.5.0' }),
+    );
+    setStandardsVersion(consumer, '0.4.0');
+    rmSync(join(consumer, 'AGENTS.local.md'));
+
+    for (const command of ['doctor', 'check']) {
+      const result = run(consumer, [command, '--dir', consumer]);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('requires boolean "scheduledSync"');
+      expect(result.stderr).toContain('exact stable version >=0.5.0');
+      expect(result.stderr).toContain('AGENTS.local.md must exist');
+    }
+  });
+
+  it('accepts only exact compatible CLI versions for non-default policy', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    write(
+      consumer,
+      'sync-standards.local.json',
+      JSON.stringify({ ref: 'refs/tags/v0.5.0', scheduledSync: true }),
+    );
+
+    setStandardsVersion(consumer, '^0.5.0');
+    expect(run(consumer, ['doctor', '--dir', consumer]).stderr).toContain(
+      'exact stable version >=0.5.0',
+    );
+
+    setStandardsVersion(consumer, '0.5.0');
+    expect(run(consumer, ['doctor', '--dir', consumer]).status).toBe(0);
   });
 });
 

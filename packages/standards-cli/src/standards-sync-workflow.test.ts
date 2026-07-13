@@ -48,6 +48,9 @@ describe('canonical scheduled sync contract', () => {
     expect(checkout).toBeGreaterThanOrEqual(0);
     expect(preflight).toBeGreaterThan(checkout);
     expect(setup).toBeGreaterThan(preflight);
+    const checkoutStep = workflowStep(workflow, 'Checkout');
+    expect(checkoutStep).toContain('uses: actions/checkout@v6');
+    expect(checkoutStep).toContain('ref: main');
     const preflightStep = workflowStep(workflow, 'Check scheduled sync policy');
     expect(preflightStep).toContain(
       'uses: ./.github/actions/standards-sync-preflight',
