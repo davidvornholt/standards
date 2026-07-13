@@ -60,12 +60,13 @@ jobs:
       # consumer most needs to be visible — an open PR with a red required
       # check is the signal, and branch protection keeps it unmergeable.
       #
-      # Configure STANDARDS_SYNC_TOKEN in the protected `standards-sync`
-      # environment (fine-grained PAT: contents + pull requests write) so the
-      # opened PR triggers workflows. Restrict that environment to `main`; both
-      # schedule and repository_dispatch load this workflow from the default
-      # branch. PRs opened with the default GITHUB_TOKEN fallback do not trigger
-      # workflows and need a manual nudge (push or close/reopen) to run the gate.
+      # Configure STANDARDS_SYNC_ENVIRONMENT_TOKEN in the protected
+      # `standards-sync` environment (fine-grained PAT: contents + pull requests
+      # write) so the opened PR triggers workflows. Declarative GitHub settings
+      # restrict that environment to `main`; both schedule and
+      # repository_dispatch load this workflow from the default branch. PRs
+      # opened with the default GITHUB_TOKEN fallback do not trigger workflows
+      # and need a manual nudge (push or close/reopen) to run the gate.
       #
       # `gh pr create` is left to default `--base` to the repository's default
       # branch: the `schedule` event carries no payload, so expressions like
@@ -73,7 +74,7 @@ jobs:
       - name: Open a pull request if the mirror changed
         if: steps.preflight.outputs.run_sync == 'true'
         env:
-          GH_TOKEN: ${{ secrets.STANDARDS_SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.STANDARDS_SYNC_ENVIRONMENT_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           if [ -z "$(git status --porcelain)" ]; then
             echo "Already in sync with upstream standards; nothing to open."

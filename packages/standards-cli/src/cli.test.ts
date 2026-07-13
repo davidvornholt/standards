@@ -25,8 +25,13 @@ const POLICY_SEED = join(
   import.meta.dir,
   '../../../template/sync-standards.local.json',
 );
-const SYNC_POLICY_CONTRACT_PATH =
-  '.github/actions/standards-sync-preflight/sync-policy.mjs';
+const SYNC_POLICY_CONTROLLER_PATH = '.github/actions/standards-sync-preflight';
+const SYNC_POLICY_CONTROLLER_FILES = [
+  'action.yml',
+  'index.mjs',
+  'sync-policy.mjs',
+] as const;
+const SYNC_POLICY_CONTRACT_PATH = `${SYNC_POLICY_CONTROLLER_PATH}/sync-policy.mjs`;
 const SYNC_POLICY_CONTRACT = join(
   import.meta.dir,
   '../../../',
@@ -35,7 +40,7 @@ const SYNC_POLICY_CONTRACT = join(
 const STD_PATHS: ReadonlyArray<string> = [
   'sync-standards.json',
   'managed',
-  SYNC_POLICY_CONTRACT_PATH,
+  SYNC_POLICY_CONTROLLER_PATH,
 ];
 const DEFAULT_REF = 'refs/heads/main';
 const SYNC_POLICY_CONTRACT_VERSION = 1;
@@ -148,11 +153,13 @@ const buildUpstream = (paths: ReadonlyArray<string> = STD_PATHS): string => {
   write(up, 'managed/a.txt', 'alpha\n');
   write(up, 'managed/b.txt', 'beta\n');
   write(up, 'managed/standards-sync.yml', 'run: bun standards sync\n');
-  write(
-    up,
-    SYNC_POLICY_CONTRACT_PATH,
-    readFileSync(SYNC_POLICY_CONTRACT, 'utf8'),
-  );
+  for (const file of SYNC_POLICY_CONTROLLER_FILES) {
+    write(
+      up,
+      `${SYNC_POLICY_CONTROLLER_PATH}/${file}`,
+      readFileSync(join(dirname(SYNC_POLICY_CONTRACT), file), 'utf8'),
+    );
+  }
   return up;
 };
 const initConsumer = (up: string): { consumer: string; result: RunResult } => {
@@ -194,7 +201,12 @@ const buildGitUpstream = (): {
 } => {
   const up = buildUpstream();
   git(up, ['init', '--quiet', '-b', 'main']);
-  const contract = read(up, SYNC_POLICY_CONTRACT_PATH);
+  const controllerFiles = Object.fromEntries(
+    SYNC_POLICY_CONTROLLER_FILES.map((file) => [
+      file,
+      read(up, `${SYNC_POLICY_CONTROLLER_PATH}/${file}`),
+    ]),
+  );
   write(
     up,
     'sync-standards.json',
@@ -220,7 +232,9 @@ const buildGitUpstream = (): {
       paths: STD_PATHS,
     }),
   );
-  write(up, SYNC_POLICY_CONTRACT_PATH, contract);
+  for (const [file, content] of Object.entries(controllerFiles)) {
+    write(up, `${SYNC_POLICY_CONTROLLER_PATH}/${file}`, content);
+  }
   git(up, ['add', '-A']);
   git(up, ['commit', '--quiet', '-m', 'v1']);
   git(up, ['tag', 'v1']);
@@ -288,7 +302,9 @@ describe('init', () => {
   });
 
   it('errors when a managed path overlaps a seed target', () => {
-    const { consumer, result } = initConsumer(buildUpstream(['seed.txt']));
+    const { consumer, result } = initConsumer(
+      buildUpstream([...STD_PATHS, 'seed.txt']),
+    );
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('overlaps seed path');
     expect(existsSync(join(consumer, 'sync-standards.lock'))).toBe(false);
@@ -509,6 +525,86 @@ describe('sync policy integration', () => {
 
     setStandardsVersion(consumer, '0.5.0');
     expect(run(consumer, ['doctor', '--dir', consumer]).status).toBe(0);
+  });
+});
+
+describe('sync source compatibility', () => {
+  it('rejects a v1 source that omits the managed controller before mutation', () => {
+    const up = buildUpstream();
+    const { consumer } = initConsumer(up);
+    const lockBefore = read(consumer, 'sync-standards.lock');
+    const managedBefore = read(consumer, 'managed/a.txt');
+    const controllerBefore = read(consumer, SYNC_POLICY_CONTRACT_PATH);
+    const policyBefore = read(consumer, 'sync-standards.local.json');
+    write(up, 'managed/a.txt', 'should not apply\n');
+    write(
+      up,
+      'sync-standards.json',
+      JSON.stringify({
+        upstream: up,
+        seedDir: 'template',
+        syncPolicyContractVersion: SYNC_POLICY_CONTRACT_VERSION,
+        paths: STD_PATHS.filter((path) => path !== SYNC_POLICY_CONTROLLER_PATH),
+      }),
+    );
+
+    const result = sync(up, consumer);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('requires managed path');
+    expect(read(consumer, 'managed/a.txt')).toBe(managedBefore);
+    expect(read(consumer, SYNC_POLICY_CONTRACT_PATH)).toBe(controllerBefore);
+    expect(read(consumer, 'sync-standards.local.json')).toBe(policyBefore);
+    expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
+  });
+
+  it('rejects v1 sources missing any required controller file before mutation', () => {
+    for (const missingFile of SYNC_POLICY_CONTROLLER_FILES) {
+      const up = buildUpstream();
+      const { consumer } = initConsumer(up);
+      const lockBefore = read(consumer, 'sync-standards.lock');
+      const managedBefore = read(consumer, 'managed/a.txt');
+      const controllerBefore = read(consumer, SYNC_POLICY_CONTRACT_PATH);
+      const policyBefore = read(consumer, 'sync-standards.local.json');
+      write(up, 'managed/a.txt', 'should not apply\n');
+      rmSync(join(up, SYNC_POLICY_CONTROLLER_PATH, missingFile));
+
+      const result = sync(up, consumer);
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        `requires controller file "${SYNC_POLICY_CONTROLLER_PATH}/${missingFile}"`,
+      );
+      expect(read(consumer, 'managed/a.txt')).toBe(managedBefore);
+      expect(read(consumer, SYNC_POLICY_CONTRACT_PATH)).toBe(controllerBefore);
+      expect(read(consumer, 'sync-standards.local.json')).toBe(policyBefore);
+      expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
+    }
+  });
+
+  it('rejects a mismatched controller generation before mutation', () => {
+    const up = buildUpstream();
+    const { consumer } = initConsumer(up);
+    const lockBefore = read(consumer, 'sync-standards.lock');
+    const managedBefore = read(consumer, 'managed/a.txt');
+    write(up, 'managed/a.txt', 'should not apply\n');
+    write(
+      up,
+      SYNC_POLICY_CONTRACT_PATH,
+      read(up, SYNC_POLICY_CONTRACT_PATH).replace(
+        'SYNC_POLICY_CONTRACT_VERSION = 1',
+        'SYNC_POLICY_CONTRACT_VERSION = 2',
+      ),
+    );
+
+    const result = sync(up, consumer);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      'must export SYNC_POLICY_CONTRACT_VERSION = 1',
+    );
+    expect(read(consumer, 'managed/a.txt')).toBe(managedBefore);
+    expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
   });
 });
 
@@ -840,6 +936,54 @@ describe('ref resolution', () => {
 });
 
 describe('scheduled and legacy sync', () => {
+  it('bootstraps a missing controller only from the exact default policy before pinning', () => {
+    const { up, url } = buildGitUpstream();
+    const { consumer } = initConsumer(up);
+    rmSync(join(consumer, SYNC_POLICY_CONTROLLER_PATH), { recursive: true });
+    write(
+      consumer,
+      'sync-standards.local.json',
+      JSON.stringify({ ref: DEFAULT_REF, scheduledSync: true }),
+    );
+    setStandardsVersion(consumer, '0.5.0');
+
+    const bootstrap = run(consumer, ['sync', '--dir', consumer]);
+
+    expect(bootstrap.status).toBe(0);
+    for (const file of SYNC_POLICY_CONTROLLER_FILES) {
+      expect(
+        existsSync(join(consumer, SYNC_POLICY_CONTROLLER_PATH, file)),
+      ).toBe(true);
+    }
+    expect(sync(url, consumer, ['--ref', 'refs/tags/v1']).status).toBe(0);
+    expect(JSON.parse(read(consumer, 'sync-standards.local.json'))).toEqual({
+      ref: 'refs/tags/v1',
+      scheduledSync: true,
+    });
+  });
+
+  it('rejects non-default policy while the controller is missing before remote setup', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    rmSync(join(consumer, SYNC_POLICY_CONTROLLER_PATH), { recursive: true });
+    write(
+      consumer,
+      'sync-standards.local.json',
+      JSON.stringify({ ref: 'refs/tags/v1', scheduledSync: true }),
+    );
+    const lockBefore = read(consumer, 'sync-standards.lock');
+    const managedBefore = read(consumer, 'managed/a.txt');
+
+    const result = sync('file:///missing-standards', consumer);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      'upgrade @davidvornholt/standards, run a bare main sync, then pin',
+    );
+    expect(result.stderr).not.toContain('Cannot fetch');
+    expect(read(consumer, 'managed/a.txt')).toBe(managedBefore);
+    expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
+  });
+
   it('leaves scheduled-run enablement to the zero-install workflow preflight', () => {
     const { up } = buildGitUpstream();
     const { consumer } = initConsumer(up);
@@ -919,10 +1063,15 @@ describe('canonical workflow', () => {
 });
 
 describe('github', () => {
-  const EmptySeam = JSON.stringify({ repository: {}, rulesets: [] });
+  const EmptySeam = JSON.stringify({
+    repository: {},
+    rulesets: [],
+    environments: [],
+  });
   const Canonical = JSON.stringify({
     repository: { allow_auto_merge: true },
     rulesets: [{ name: 'Protect main', target: 'branch' }],
+    environments: [],
   });
 
   it('fails when the canonical declaration is missing', () => {

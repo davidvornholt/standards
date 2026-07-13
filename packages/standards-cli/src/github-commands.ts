@@ -13,7 +13,13 @@ import {
   resolveToken,
 } from './github-api';
 import { applyRulesets } from './github-apply';
-import { diffRepositorySettings, diffRulesets } from './github-diff';
+import {
+  diffEnvironment,
+  diffRepositorySettings,
+  diffRulesets,
+} from './github-diff';
+import { applyEnvironment } from './github-environment-apply';
+import { fetchLiveEnvironment } from './github-environments';
 import { type GithubSettings, isRecord } from './github-settings';
 
 const reportProblems = (problems: ReadonlyArray<string>): void => {
@@ -21,6 +27,43 @@ const reportProblems = (problems: ReadonlyArray<string>): void => {
     `standards github: ${problems.length} problem(s) with declared GitHub settings:`,
   );
   console.error(problems.map((problem) => `  - ${problem}`).join('\n'));
+};
+
+const collectEnvironmentDrift = async (
+  token: string | null,
+  repo: string,
+  environments: GithubSettings['environments'],
+): Promise<ReadonlyArray<string>> => {
+  const liveEnvironments = await Promise.all(
+    environments.map(async (declared) => ({
+      declared,
+      live: await fetchLiveEnvironment(token, repo, String(declared.name)),
+    })),
+  );
+  return liveEnvironments.flatMap(({ declared, live }) => {
+    if (live.problem !== null) {
+      return [live.problem];
+    }
+    if (live.missing || live.environment === null) {
+      return [
+        `environment "${declared.name}" is declared but missing on GitHub`,
+      ];
+    }
+    return diffEnvironment(declared, live.environment);
+  });
+};
+
+const applyEnvironments = async (
+  token: string,
+  repo: string,
+  environments: GithubSettings['environments'],
+): Promise<ReadonlyArray<string>> => {
+  const actions: Array<string> = [];
+  for (const environment of environments) {
+    // biome-ignore lint/performance/noAwaitInLoops: GitHub write requests are intentionally serialized to avoid secondary rate limits.
+    actions.push(...(await applyEnvironment(token, repo, environment)));
+  }
+  return actions;
 };
 
 const collectLiveDrift = async (
@@ -61,6 +104,9 @@ const collectLiveDrift = async (
         );
       }
     }
+    problems.push(
+      ...(await collectEnvironmentDrift(token, repo, declared.environments)),
+    );
   } catch (error) {
     problems.push(
       `GitHub API unreachable: ${error instanceof Error ? error.message : String(error)}`,
@@ -131,6 +177,9 @@ export const runGithubApply = async (consumer: string): Promise<boolean> => {
       actions.push('updated repository merge settings');
     }
     actions.push(...(await applyRulesets(token, repo, declared.merged)));
+    actions.push(
+      ...(await applyEnvironments(token, repo, declared.merged.environments)),
+    );
     for (const action of actions) {
       console.log(`  ${action}`);
     }

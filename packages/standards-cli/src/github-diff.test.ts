@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  diffEnvironment,
   diffRepositorySettings,
   diffRuleset,
   diffRulesets,
@@ -163,5 +164,37 @@ describe('diffRepositorySettings', () => {
       'repository setting "allow_auto_merge" is false on GitHub, declared true',
     ]);
     expect(diff.unverifiable).toEqual(['delete_branch_on_merge']);
+  });
+});
+
+describe('diffEnvironment', () => {
+  const declared: Record<string, unknown> = {
+    name: 'standards-sync',
+    wait_timer: 0,
+    prevent_self_review: false,
+    reviewers: [],
+    deployment_branch_policy: {
+      protected_branches: false,
+      custom_branch_policies: true,
+    },
+    deployment_branch_policies: [{ name: 'main', type: 'branch' }],
+  };
+
+  it('accepts the exact declared main-only policy', () => {
+    expect(diffEnvironment(declared, { id: 5, ...declared })).toEqual([]);
+  });
+
+  it('flags additional deployment branches', () => {
+    expect(
+      diffEnvironment(declared, {
+        ...declared,
+        deployment_branch_policies: [
+          { name: 'main', type: 'branch', id: 1 },
+          { name: 'release', type: 'branch', id: 2 },
+        ],
+      }),
+    ).toEqual([
+      'environment "standards-sync": deployment_branch_policies differs from the declared configuration',
+    ]);
   });
 });

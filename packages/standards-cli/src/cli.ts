@@ -11,7 +11,13 @@
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+} from 'node:fs';
 import {
   cp,
   mkdir,
@@ -48,6 +54,14 @@ const DEFAULT_SYNC_POLICY: SyncPolicy = {
 const LOCAL_POLICY_FILE = 'sync-standards.local.json';
 const SYNC_POLICY_CONTRACT_FILE =
   '.github/actions/standards-sync-preflight/sync-policy.mjs';
+const SYNC_POLICY_CONTROLLER_PATH = '.github/actions/standards-sync-preflight';
+const SYNC_POLICY_CONTROLLER_FILES = [
+  'action.yml',
+  'index.mjs',
+  'sync-policy.mjs',
+] as const;
+const SYNC_POLICY_GENERATION_EXPORT =
+  /^export const SYNC_POLICY_CONTRACT_VERSION = (?<version>\d+);$/mu;
 const SYNC_POLICY_CONTRACT_VERSION = 1;
 
 // Characters of a sha256 hex digest shown in drift reports; enough to identify.
@@ -179,10 +193,37 @@ const loadManifest = async (path: string): Promise<Manifest> => {
   return parseManifest(JSON.parse(await readFile(path, 'utf8')) as unknown);
 };
 
-const assertCompatibleSyncSource = (manifest: Manifest): void => {
+const assertCompatibleSyncSource = (
+  manifest: Manifest,
+  sourceDir: string,
+): void => {
   if (manifest.syncPolicyContractVersion !== SYNC_POLICY_CONTRACT_VERSION) {
     throw new Error(
       `Selected standards source must declare syncPolicyContractVersion: ${SYNC_POLICY_CONTRACT_VERSION}; choose a ref that includes the sync-policy controller contract`,
+    );
+  }
+  if (!manifest.paths.includes(SYNC_POLICY_CONTROLLER_PATH)) {
+    throw new Error(
+      `syncPolicyContractVersion ${SYNC_POLICY_CONTRACT_VERSION} requires managed path "${SYNC_POLICY_CONTROLLER_PATH}"`,
+    );
+  }
+  for (const file of SYNC_POLICY_CONTROLLER_FILES) {
+    const path = join(sourceDir, SYNC_POLICY_CONTROLLER_PATH, file);
+    if (!(existsSync(path) && statSync(path).isFile())) {
+      throw new Error(
+        `syncPolicyContractVersion ${SYNC_POLICY_CONTRACT_VERSION} requires controller file "${SYNC_POLICY_CONTROLLER_PATH}/${file}"`,
+      );
+    }
+  }
+  const contract = readFileSync(
+    join(sourceDir, SYNC_POLICY_CONTRACT_FILE),
+    'utf8',
+  );
+  const generation = contract.match(SYNC_POLICY_GENERATION_EXPORT)?.groups
+    ?.version;
+  if (generation !== String(SYNC_POLICY_CONTRACT_VERSION)) {
+    throw new Error(
+      `${SYNC_POLICY_CONTRACT_FILE} must export SYNC_POLICY_CONTRACT_VERSION = ${SYNC_POLICY_CONTRACT_VERSION}`,
     );
   }
 };
@@ -716,6 +757,42 @@ const inspectPackageWithoutPolicyContract = (
   return { packageJson: rawPackageJson, problems };
 };
 
+const inspectBootstrapPolicyWithoutContract = (
+  policyText: string | undefined,
+): {
+  readonly policy: SyncPolicy | null;
+  readonly problems: ReadonlyArray<string>;
+} => {
+  if (policyText === undefined) {
+    return { policy: DEFAULT_SYNC_POLICY, problems: [] };
+  }
+  let raw: unknown;
+  try {
+    raw = JSON.parse(policyText) as unknown;
+  } catch {
+    return {
+      policy: null,
+      problems: [
+        `${LOCAL_POLICY_FILE} must contain valid JSON before bootstrapping the controller`,
+      ],
+    };
+  }
+  const isExactDefault =
+    isRecord(raw) &&
+    Object.keys(raw).length === 2 &&
+    raw.ref === DEFAULT_SYNC_POLICY.ref &&
+    raw.scheduledSync === DEFAULT_SYNC_POLICY.scheduledSync;
+  if (!isExactDefault) {
+    return {
+      policy: null,
+      problems: [
+        `${LOCAL_POLICY_FILE} may be absent or contain only the exact default policy while ${SYNC_POLICY_CONTRACT_FILE} is missing; upgrade @davidvornholt/standards, run a bare main sync, then pin a non-default ref`,
+      ],
+    };
+  }
+  return { policy: DEFAULT_SYNC_POLICY, problems: [] };
+};
+
 const loadSyncPolicyInspector = async (
   contractPath: string,
 ): Promise<(input: SyncPolicyInspectionInput) => unknown> => {
@@ -745,19 +822,18 @@ const inspectConsumerSyncPolicy = async (
   const effectivePolicyText =
     options.policyText ?? storedPolicyText ?? undefined;
   if (!existsSync(contractPath)) {
-    if (
-      options.allowMissingDefaultContract &&
-      effectivePolicyText === undefined
-    ) {
-      return {
-        packageJson: undefined,
-        policy: DEFAULT_SYNC_POLICY,
-        problems: [],
-      };
-    }
     const packageInspection = inspectPackageWithoutPolicyContract(
       await readTextIfPresent(join(consumer, 'package.json')),
     );
+    if (options.allowMissingDefaultContract) {
+      const bootstrapPolicy =
+        inspectBootstrapPolicyWithoutContract(effectivePolicyText);
+      return {
+        packageJson: packageInspection.packageJson,
+        policy: bootstrapPolicy.policy,
+        problems: [...bootstrapPolicy.problems, ...packageInspection.problems],
+      };
+    }
     return {
       packageJson: packageInspection.packageJson,
       policy: null,
@@ -1189,7 +1265,7 @@ const runInitCommand = async (
     const manifest = await loadManifest(
       join(source.dir, 'sync-standards.json'),
     );
-    assertCompatibleSyncSource(manifest);
+    assertCompatibleSyncSource(manifest, source.dir);
     await runInit(manifest, source, consumer);
   } finally {
     source.cleanup();
@@ -1217,7 +1293,7 @@ const runSyncCommand = async (
     const manifest = await loadManifest(
       join(source.dir, 'sync-standards.json'),
     );
-    assertCompatibleSyncSource(manifest);
+    assertCompatibleSyncSource(manifest, source.dir);
     await runSync({
       manifest,
       src: source,

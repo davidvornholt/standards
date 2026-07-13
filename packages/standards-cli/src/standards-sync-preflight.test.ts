@@ -32,7 +32,7 @@ const temporaryDirectories: Array<string> = [];
 const runPreflight = (
   eventName: 'repository_dispatch' | 'schedule' | 'workflow_dispatch',
   policyJson: string | undefined,
-  version?: string,
+  packageJson?: string,
 ): RunResult => {
   const directory = mkdtempSync(join(tmpdir(), 'standards-preflight-'));
   temporaryDirectories.push(directory);
@@ -40,13 +40,8 @@ const runPreflight = (
   if (policyJson !== undefined) {
     writeFileSync(join(directory, POLICY_FILE), policyJson);
   }
-  if (version !== undefined) {
-    writeFileSync(
-      join(directory, 'package.json'),
-      JSON.stringify({
-        devDependencies: { [STANDARDS_PACKAGE]: version },
-      }),
-    );
+  if (packageJson !== undefined) {
+    writeFileSync(join(directory, 'package.json'), packageJson);
   }
   const environment = { ...process.env };
   const eventNameVariable = 'GITHUB_EVENT_NAME';
@@ -71,6 +66,8 @@ const runPreflight = (
 
 const serializePolicy = (ref: string, scheduledSync: boolean): string =>
   JSON.stringify({ ref, scheduledSync });
+const packageWithStandards = (version: string): string =>
+  JSON.stringify({ devDependencies: { [STANDARDS_PACKAGE]: version } });
 
 afterEach(() => {
   while (temporaryDirectories.length > 0) {
@@ -86,20 +83,31 @@ describe('scheduled sync preflight', () => {
     const result = runPreflight(
       'schedule',
       serializePolicy('refs/heads/main', false),
-      '0.5.0',
+      packageWithStandards('0.5.0'),
     );
 
     expect(result.status).toBe(0);
     expect(result.output).toBe('run_sync=false\n');
     expect(result.stdout).toContain('scheduled sync disabled');
+    const unsupported = runPreflight(
+      'workflow_dispatch',
+      undefined,
+      packageWithStandards('0.5.0'),
+    );
+    expect(unsupported.stderr).toContain('Unsupported Standards sync event');
   });
 
-  it('enables scheduled runs for default policy without requiring a new CLI', () => {
+  it('enables default policy with an old direct standards version', () => {
     const configured = runPreflight(
       'schedule',
       serializePolicy('refs/heads/main', true),
+      packageWithStandards('0.4.0'),
     );
-    const missing = runPreflight('schedule', undefined);
+    const missing = runPreflight(
+      'schedule',
+      undefined,
+      packageWithStandards('0.4.0'),
+    );
 
     expect(configured.output).toBe('run_sync=true\n');
     expect(missing.output).toBe('run_sync=true\n');
@@ -110,7 +118,7 @@ describe('scheduled sync preflight', () => {
       const result = runPreflight(
         'schedule',
         serializePolicy(ref, true),
-        '0.5.0',
+        packageWithStandards('0.5.0'),
       );
       expect(result.status).toBe(0);
       expect(result.output).toBe('run_sync=true\n');
@@ -121,7 +129,7 @@ describe('scheduled sync preflight', () => {
     const result = runPreflight(
       'repository_dispatch',
       serializePolicy('refs/heads/main', false),
-      '0.5.0',
+      packageWithStandards('0.5.0'),
     );
 
     expect(result.status).toBe(0);
@@ -137,7 +145,7 @@ describe('scheduled sync preflight', () => {
       const result = runPreflight(
         eventName,
         serializePolicy('refs/tags/v0.5.0', true),
-        version,
+        version === undefined ? undefined : packageWithStandards(version),
       );
       expect(result.status).not.toBe(0);
       expect(result.output).toBe('');
@@ -163,17 +171,30 @@ describe('scheduled sync preflight', () => {
     const aggregated = runPreflight(
       'schedule',
       JSON.stringify({ ref: 'refs/tags/v0.5.0' }),
-      '0.4.0',
+      packageWithStandards('0.4.0'),
     );
     expect(aggregated.stderr).toContain('requires boolean "scheduledSync"');
     expect(aggregated.stderr).toContain('exact stable version >=0.5.0');
   });
+});
 
-  it('rejects direct workflow dispatch', () => {
-    const result = runPreflight('workflow_dispatch', undefined);
-
-    expect(result.status).toBe(1);
-    expect(result.output).toBe('');
-    expect(result.stderr).toContain('Unsupported Standards sync event');
+describe('scheduled sync package preflight', () => {
+  it('requires a valid direct standards dependency before run selection', () => {
+    for (const packageJson of [
+      undefined,
+      'not json',
+      '{}',
+      JSON.stringify({ dependencies: { [STANDARDS_PACKAGE]: '0.5.0' } }),
+      JSON.stringify({ devDependencies: { [STANDARDS_PACKAGE]: 5 } }),
+    ]) {
+      const result = runPreflight(
+        'schedule',
+        serializePolicy('refs/heads/main', true),
+        packageJson,
+      );
+      expect(result.status).not.toBe(0);
+      expect(result.output).toBe('');
+      expect(result.stderr).toContain('package.json');
+    }
   });
 });

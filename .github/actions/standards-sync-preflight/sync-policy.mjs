@@ -3,6 +3,8 @@ export const DEFAULT_SYNC_POLICY = {
   scheduledSync: true,
 };
 
+export const SYNC_POLICY_CONTRACT_VERSION = 1;
+
 const POLICY_FILE = 'sync-standards.local.json';
 const PACKAGE_FILE = 'package.json';
 const STANDARDS_PACKAGE = '@davidvornholt/standards';

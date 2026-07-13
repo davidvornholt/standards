@@ -5,9 +5,12 @@
 // cli.ts, this module is zero-dependency so `bunx` can execute the published
 // package.
 
+import { environmentListProblems } from './github-environment-settings';
+
 export type GithubSettings = {
   readonly repository: Readonly<Record<string, unknown>>;
   readonly rulesets: ReadonlyArray<Readonly<Record<string, unknown>>>;
+  readonly environments: ReadonlyArray<Readonly<Record<string, unknown>>>;
 };
 
 export type LoadedGithubSettings = {
@@ -18,7 +21,7 @@ export type LoadedGithubSettings = {
 export const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const SETTINGS_KEYS = new Set(['repository', 'rulesets']);
+const SETTINGS_KEYS = new Set(['repository', 'rulesets', 'environments']);
 
 type ParseResult = {
   readonly settings: GithubSettings | null;
@@ -73,6 +76,12 @@ const parseSettings = (raw: unknown, label: string): ParseResult => {
   } else {
     problems.push(`${label} "rulesets" must be an array`);
   }
+  const environments = raw.environments ?? [];
+  if (Array.isArray(environments)) {
+    problems.push(...environmentListProblems(environments, label));
+  } else {
+    problems.push(`${label} "environments" must be an array`);
+  }
   if (problems.length > 0) {
     return { settings: null, problems };
   }
@@ -80,6 +89,7 @@ const parseSettings = (raw: unknown, label: string): ParseResult => {
     settings: {
       repository: repository as Record<string, unknown>,
       rulesets: rulesets as ReadonlyArray<Record<string, unknown>>,
+      environments: environments as ReadonlyArray<Record<string, unknown>>,
     },
     problems: [],
   };
@@ -91,8 +101,7 @@ type MergeResult = {
 };
 
 // The seam may only add. Overriding a canonical repository key or redefining a
-// canonical ruleset could weaken the canonical floor; GitHub layers multiple
-// rulesets strictest-wins, so adding a ruleset is always safe.
+// canonical ruleset or environment could weaken the canonical floor.
 const mergeSettings = (
   canonical: GithubSettings,
   local: GithubSettings,
@@ -113,6 +122,16 @@ const mergeSettings = (
       );
     }
   }
+  const canonicalEnvironmentNames = new Set(
+    canonical.environments.map((environment) => environment.name),
+  );
+  for (const environment of local.environments) {
+    if (canonicalEnvironmentNames.has(environment.name)) {
+      problems.push(
+        `.github/settings.local.json environment "${environment.name}" collides with a canonical environment; canonical settings are read-only`,
+      );
+    }
+  }
   if (problems.length > 0) {
     return { merged: null, problems };
   }
@@ -120,6 +139,7 @@ const mergeSettings = (
     merged: {
       repository: { ...canonical.repository, ...local.repository },
       rulesets: [...canonical.rulesets, ...local.rulesets],
+      environments: [...canonical.environments, ...local.environments],
     },
     problems: [],
   };
@@ -150,7 +170,7 @@ export const loadGithubSettings = (
   }
   if (localRaw === null) {
     problems.push(
-      '.github/settings.local.json must exist; seed it with {"repository":{},"rulesets":[]}',
+      '.github/settings.local.json must exist; seed it with {"repository":{},"rulesets":[],"environments":[]}',
     );
   }
   const localJson =

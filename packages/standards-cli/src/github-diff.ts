@@ -170,3 +170,27 @@ export const diffRepositorySettings = (
   }
   return { drifted, unverifiable };
 };
+
+const ENVIRONMENT_COMPARED_KEYS = [
+  'wait_timer',
+  'prevent_self_review',
+  'reviewers',
+  'deployment_branch_policy',
+  'deployment_branch_policies',
+] as const;
+
+export const diffEnvironment = (
+  declared: Readonly<Record<string, unknown>>,
+  live: Readonly<Record<string, unknown>>,
+): ReadonlyArray<string> => {
+  const name = String(declared.name);
+  const drifted: Array<string> = [];
+  for (const key of ENVIRONMENT_COMPARED_KEYS) {
+    if (!subsetMatches(declared[key], live[key])) {
+      drifted.push(
+        `environment "${name}": ${key} differs from the declared configuration`,
+      );
+    }
+  }
+  return drifted;
+};

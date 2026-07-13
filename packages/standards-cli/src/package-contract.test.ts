@@ -67,6 +67,9 @@ describe('published package contract', () => {
       'package/src/github-apply.ts',
       'package/src/github-commands.ts',
       'package/src/github-diff.ts',
+      'package/src/github-environment-apply.ts',
+      'package/src/github-environment-settings.ts',
+      'package/src/github-environments.ts',
       'package/src/github-settings.ts',
     ]);
     const manifestArchive = run([

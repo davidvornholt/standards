@@ -25,7 +25,7 @@ const main = () => {
   const inspection = inspectSyncPolicy({
     packageText: readIfPresent(join(workspace, 'package.json')),
     policyText: readIfPresent(join(workspace, 'sync-standards.local.json')),
-    requireDirectPackage: false,
+    requireDirectPackage: true,
   });
   if (inspection.policy === null || inspection.problems.length > 0) {
     throw new Error(inspection.problems.join('\n'));

@@ -77,9 +77,10 @@ describe('canonical scheduled sync contract', () => {
     ).toContain(
       [
         'GH_TOKEN: $',
-        '{{ secrets.STANDARDS_SYNC_TOKEN || secrets.GITHUB_TOKEN }}',
+        '{{ secrets.STANDARDS_SYNC_ENVIRONMENT_TOKEN || secrets.GITHUB_TOKEN }}',
       ].join(''),
     );
+    expect(workflow).not.toContain('secrets.STANDARDS_SYNC_TOKEN');
     const preflightStep = workflowStep(workflow, 'Check scheduled sync policy');
     expect(preflightStep).toContain(
       'uses: ./.github/actions/standards-sync-preflight',
@@ -113,7 +114,9 @@ describe('canonical scheduled sync contract', () => {
       '.github/scripts/standards-sync-preflight.mjs',
     );
   });
+});
 
+describe('standards sync documentation', () => {
   it('documents migration and configured-ref recovery accurately', () => {
     for (const path of POLICY_DOCS) {
       const documentation = readFileSync(path, 'utf8');
@@ -134,11 +137,19 @@ describe('canonical scheduled sync contract', () => {
     for (const documentation of [
       rootDocumentation,
       templateDocumentation,
+      readFileSync(join(ROOT, 'packages/standards-cli/README.md'), 'utf8'),
       readFileSync(SYNC_SKILL, 'utf8'),
     ]) {
       expect(documentation).toContain('protected `standards-sync`');
       expect(documentation).toContain('repository dispatch');
       expect(documentation).toContain('syncPolicyContractVersion');
+      expect(documentation).toContain('STANDARDS_SYNC_ENVIRONMENT_TOKEN');
+      expect(documentation).toContain('legacy repository-level');
+      expect(documentation).toContain('STANDARDS_SYNC_TOKEN');
+      expect(documentation).toContain('main`-only deployment policy');
+      expect(documentation).toContain(
+        'run a bare `bun standards sync` from main',
+      );
     }
   });
 });

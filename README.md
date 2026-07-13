@@ -21,7 +21,7 @@ Quality gates are deliberately strict so that **agents can verify their work mec
 
 Every file is either **synced** (upstream-owned, read-only in consumers — the list in `sync-standards.json`) or **seeded once** (written by `init` from `template/`, then owned by the repo: the `biome.jsonc` wrapper, `AGENTS.local.md`, `.github/dependabot.yml`, `.sops.yaml`, `secrets/*.example.yaml`, root scaffolding, `README.md`). Secret-shape examples are seeded, not synced, so each repo can extend them to mirror its own real secrets without the next sync clobbering them.
 
-Because canonical files are read-only, every point of legitimate per-repo variation goes through a wrapper seam: `biome.jsonc` extends `biome.base.jsonc`, `AGENTS.local.md` extends `AGENTS.md`, and `.github/settings.local.json` extends `.github/settings.json` (additively — it can add repository settings and rulesets but never override canonical ones).
+Because canonical files are read-only, every point of legitimate per-repo variation goes through a wrapper seam: `biome.jsonc` extends `biome.base.jsonc`, `AGENTS.local.md` extends `AGENTS.md`, and `.github/settings.local.json` extends `.github/settings.json` (additively — it can add repository settings, rulesets, and environments but never override canonical ones).
 
 ## Adopt it
 
@@ -54,7 +54,7 @@ bun standards init
 - **CI** — the synced `.github/workflows/standards.yml` is your quality gate. If the repo already ran its own gate, drop that duplication and keep only what the canonical gate does not (deploy, infra). If your tests need a specific database, set the repo Actions variables `CI_POSTGRES_USER` / `CI_POSTGRES_PASSWORD` / `CI_POSTGRES_DB` (and optionally `CI_RUNNER`).
 
 - **`sync-standards.lock`** — commit it. It is the baseline `check` compares against in CI; if it is untracked, a fresh CI clone has nothing to check and the drift gate is silently inert.
-- **GitHub settings** — create `.github/settings.local.json` (seeded on new repos; `{"repository":{},"rulesets":[]}` when you have nothing to add) and run `bun standards github --apply` once with admin `gh` auth. It converges the live repo onto the declared merge settings and default-branch ruleset — including deleting hand-made rulesets that are not declared. From then on `check` fails whenever live settings drift from the declaration.
+- **GitHub settings** — create `.github/settings.local.json` (seeded on new repos; `{"repository":{},"rulesets":[],"environments":[]}` when you have nothing to add) and run `bun standards github --apply` once with admin `gh` auth. It converges the live repo onto the declared merge settings, rulesets, and the protected `standards-sync` environment with an exact `main`-only deployment policy — including deleting hand-made rulesets and deployment branch policies that are not declared. From then on `check` fails whenever live settings drift from the declaration. Secret values remain outside the declaration and are never read or written by these commands.
 
 Then run `bun run check` until green. After this one-time wiring every future update is just `bun standards sync`.
 
@@ -73,13 +73,13 @@ bun standards github --apply  # converge the live repo (needs admin gh auth)
 bun standards help            # list commands and options
 ```
 
-The `Standards sync` workflow also runs `sync` weekly and opens a PR when upstream has moved, so you never have to remember to pull. The PR is validated by the required `Standards` gate like any other change. Create a protected `standards-sync` Actions environment restricted to the default `main` branch, then configure its `STANDARDS_SYNC_TOKEN` environment secret (fine-grained PAT with contents and pull-requests write) so the opened PR triggers that gate automatically — with the default `GITHUB_TOKEN` it needs a manual nudge. Manual runs use the default-branch-bound `standards-sync` repository dispatch: `gh api --method POST repos/OWNER/REPO/dispatches -f event_type=standards-sync`.
+The `Standards sync` workflow also runs `sync` weekly and opens a PR when upstream has moved, so you never have to remember to pull. The PR is validated by the required `Standards` gate like any other change. Declarative GitHub settings manage the protected `standards-sync` Actions environment and its exact `main`-only deployment policy. Separately store the fine-grained PAT (contents and pull-requests write) as the environment secret `STANDARDS_SYNC_ENVIRONMENT_TOKEN` so the opened PR triggers that gate automatically — with the default `GITHUB_TOKEN` it needs a manual nudge. After migration, delete the legacy repository-level `STANDARDS_SYNC_TOKEN` secret so it cannot be reused outside the protected environment. Manual runs use the default-branch-bound `standards-sync` repository dispatch: `gh api --method POST repos/OWNER/REPO/dispatches -f event_type=standards-sync`.
 
 ### Track main or pin a version
 
 Tracking `main` weekly is the default and the recommended mode for repos whose owner also follows this template. Consumers that want to control *when* standards change instead — typical for repos you adopt these standards into but don't co-evolve with this one — declare both levers in the checked-in, consumer-owned `sync-standards.local.json`:
 
-Non-default policy requires `@davidvornholt/standards` >=0.5.0 declared as an exact stable version. Existing consumers must upgrade that bucket-2 dependency before adding or changing this file—for 0.5.0, run `bun add --dev --exact @davidvornholt/standards@0.5.0`; sync cannot update a consumer-owned `package.json`. The weekly workflow cadence remains canonical; consumer policy controls only the ref and whether scheduled runs are enabled.
+Non-default policy requires `@davidvornholt/standards` >=0.5.0 declared as an exact stable version. Existing consumers must upgrade that bucket-2 dependency before adding or changing this file—for 0.5.0, run `bun add --dev --exact @davidvornholt/standards@0.5.0`; sync cannot update a consumer-owned `package.json`. If the shared controller is still missing, leave the policy absent or at its exact default, run a bare `bun standards sync` from main to install the controller, and only then pin a non-default ref. The weekly workflow cadence remains canonical; consumer policy controls only the ref and whether scheduled runs are enabled.
 
 ```json
 {
