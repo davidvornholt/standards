@@ -14,6 +14,8 @@ export const meta = {
 // normalize once so every dereference below is safe.
 const input = typeof args === 'string' ? JSON.parse(args) : args;
 
+// The severity and confidence enums mirror the review skill's finding
+// categories and confidence labels — renaming either side breaks the contract.
 const findingsSchema = {
   type: 'object',
   additionalProperties: false,
@@ -70,7 +72,7 @@ const reviewPrompt = (lens) =>
   [
     'You are a read-only review subagent running one concern lens of a review-loop pass. The review skill in your context is your operating contract — its scope, lens, registry, confidence, and output rules apply; this prompt only parameterizes them.',
     '',
-    `Review scope: the full current diff against ${input.baseRef}, per the review skill's scope contract.`,
+    `Review scope: the full current diff against ${input.baseRef}, per the review skill's scope contract. In a stacked PR train that base is the parent PR's branch: ancestor layers are settled code, and the loop's seam check owns cross-cluster surfaces.`,
     '',
     `Concern lens "${lens.key}": ${lens.charter}`,
     ...(lens.notes ? [`Since this lens last ran: ${lens.notes}`] : []),
