@@ -16,6 +16,10 @@ const REQUIRED_VERSION = [0n, REQUIRED_MINOR_VERSION, 0n];
 const INVALID_REF_CHARACTERS = new Set(['~', '^', ':', '?', '*', '[', '\\']);
 const SPACE_CODE_POINT = 32;
 const DELETE_CODE_POINT = 127;
+const POLICY_KEYS = new Set(['ref', 'scheduledSync']);
+
+const compatiblePackageProblem = () =>
+  `${PACKAGE_FILE} must declare devDependencies["${STANDARDS_PACKAGE}"] as an exact stable version >=0.5.0; run \`bun add --dev --exact ${STANDARDS_PACKAGE}@0.5.0\` before using sync policy`;
 
 const parseJson = (text, label, problems) => {
   try {
@@ -78,6 +82,12 @@ const inspectPolicy = (policyText, problems) => {
     return { policy: null, requestsNonDefault: false };
   }
 
+  for (const key of Object.keys(raw)) {
+    if (!POLICY_KEYS.has(key)) {
+      problems.push(`${POLICY_FILE} has unknown key "${key}"`);
+    }
+  }
+
   const requestsNonDefault =
     (typeof raw.ref === 'string' && raw.ref !== DEFAULT_SYNC_POLICY.ref) ||
     raw.scheduledSync === false;
@@ -135,13 +145,7 @@ export const inspectSyncPolicy = ({
 
   if (inspectPackage) {
     if (packageText === undefined) {
-      if (requestsNonDefault) {
-        problems.push(
-          `Non-default sync policy requires devDependencies["${STANDARDS_PACKAGE}"] to be an exact stable version >=0.5.0; run \`bun add --dev --exact ${STANDARDS_PACKAGE}@0.5.0\` before using the policy`,
-        );
-      } else {
-        problems.push(`${PACKAGE_FILE} must exist`);
-      }
+      problems.push(compatiblePackageProblem());
     } else {
       packageJson = parseJson(packageText, PACKAGE_FILE, problems);
       if (packageJson !== undefined && !isRecord(packageJson)) {
@@ -153,16 +157,8 @@ export const inspectSyncPolicy = ({
           ? packageJson.devDependencies
           : undefined;
         const version = devDependencies?.[STANDARDS_PACKAGE];
-        if (requestsNonDefault) {
-          if (typeof version !== 'string' || !versionIsCompatible(version)) {
-            problems.push(
-              `Non-default sync policy requires devDependencies["${STANDARDS_PACKAGE}"] to be an exact stable version >=0.5.0; run \`bun add --dev --exact ${STANDARDS_PACKAGE}@0.5.0\` before using the policy`,
-            );
-          }
-        } else if (typeof version !== 'string') {
-          problems.push(
-            `${PACKAGE_FILE} must declare ${STANDARDS_PACKAGE} directly`,
-          );
+        if (typeof version !== 'string' || !versionIsCompatible(version)) {
+          problems.push(compatiblePackageProblem());
         }
       }
     }

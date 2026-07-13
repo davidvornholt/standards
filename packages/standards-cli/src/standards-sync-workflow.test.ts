@@ -124,6 +124,8 @@ describe('standards sync documentation', () => {
       const documentation = readFileSync(path, 'utf8');
       expect(documentation).toContain('@davidvornholt/standards` >=0.5.0');
       expect(documentation).toContain('declared as an exact stable version');
+      expect(documentation).toContain('for every policy');
+      expect(documentation).toContain('first land the bucket-2 CLI upgrade');
       expect(documentation).toContain(
         'bun add --dev --exact @davidvornholt/standards@0.5.0',
       );
@@ -152,6 +154,7 @@ describe('standards sync documentation', () => {
       expect(documentation).toContain(
         'run a bare `bun standards sync` from main',
       );
+      expect(documentation).toContain('bun standards github --apply');
     }
   });
 });

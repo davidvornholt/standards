@@ -3,6 +3,30 @@
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
+const ENVIRONMENT_KEYS = new Set([
+  'name',
+  'wait_timer',
+  'prevent_self_review',
+  'reviewers',
+  'deployment_branch_policy',
+  'deployment_branch_policies',
+]);
+const REVIEWER_KEYS = new Set(['type', 'id']);
+const BRANCH_POLICY_MODE_KEYS = new Set([
+  'protected_branches',
+  'custom_branch_policies',
+]);
+const DEPLOYMENT_POLICY_KEYS = new Set(['name', 'type']);
+
+const unknownKeyProblems = (
+  record: Readonly<Record<string, unknown>>,
+  allowed: ReadonlySet<string>,
+  prefix: string,
+): ReadonlyArray<string> =>
+  Object.keys(record).flatMap((key) =>
+    allowed.has(key) ? [] : [`${prefix} has unknown key "${key}"`],
+  );
+
 const reviewerProblems = (
   reviewers: unknown,
   prefix: string,
@@ -10,29 +34,42 @@ const reviewerProblems = (
   if (!Array.isArray(reviewers)) {
     return [`${prefix}.reviewers must be an array`];
   }
-  return reviewers.flatMap((reviewer, index) =>
-    isRecord(reviewer) &&
-    (reviewer.type === 'User' || reviewer.type === 'Team') &&
-    Number.isInteger(reviewer.id)
-      ? []
-      : [
-          `${prefix}.reviewers[${index}] must have type "User" or "Team" and an integer id`,
-        ],
-  );
+  return reviewers.flatMap((reviewer, index) => {
+    const reviewerPrefix = `${prefix}.reviewers[${index}]`;
+    if (!isRecord(reviewer)) {
+      return [
+        `${reviewerPrefix} must have type "User" or "Team" and an integer id`,
+      ];
+    }
+    return [
+      ...unknownKeyProblems(reviewer, REVIEWER_KEYS, reviewerPrefix),
+      ...((reviewer.type === 'User' || reviewer.type === 'Team') &&
+      Number.isInteger(reviewer.id)
+        ? []
+        : [
+            `${reviewerPrefix} must have type "User" or "Team" and an integer id`,
+          ]),
+    ];
+  });
 };
 
 const branchPolicyModeProblems = (
   policy: unknown,
   prefix: string,
-): ReadonlyArray<string> =>
-  isRecord(policy) &&
-  typeof policy.protected_branches === 'boolean' &&
-  typeof policy.custom_branch_policies === 'boolean' &&
-  policy.protected_branches !== policy.custom_branch_policies
-    ? []
-    : [
-        `${prefix}.deployment_branch_policy must enable exactly one branch-policy mode`,
-      ];
+): ReadonlyArray<string> => {
+  const policyPrefix = `${prefix}.deployment_branch_policy`;
+  if (!isRecord(policy)) {
+    return [`${policyPrefix} must enable exactly one branch-policy mode`];
+  }
+  return [
+    ...unknownKeyProblems(policy, BRANCH_POLICY_MODE_KEYS, policyPrefix),
+    ...(typeof policy.protected_branches === 'boolean' &&
+    typeof policy.custom_branch_policies === 'boolean' &&
+    policy.protected_branches !== policy.custom_branch_policies
+      ? []
+      : [`${policyPrefix} must enable exactly one branch-policy mode`]),
+  ];
+};
 
 const deploymentPolicyProblems = (
   policies: unknown,
@@ -43,6 +80,7 @@ const deploymentPolicyProblems = (
   }
   const names = new Set<string>();
   return policies.flatMap((policy, index) => {
+    const policyPrefix = `${prefix}.deployment_branch_policies[${index}]`;
     if (
       !(
         isRecord(policy) &&
@@ -52,7 +90,7 @@ const deploymentPolicyProblems = (
       )
     ) {
       return [
-        `${prefix}.deployment_branch_policies[${index}] must have a non-empty name and type "branch" or "tag"`,
+        `${policyPrefix} must have a non-empty name and type "branch" or "tag"`,
       ];
     }
     const key = `${policy.type}:${policy.name}`;
@@ -62,7 +100,7 @@ const deploymentPolicyProblems = (
       ];
     }
     names.add(key);
-    return [];
+    return unknownKeyProblems(policy, DEPLOYMENT_POLICY_KEYS, policyPrefix);
   });
 };
 
@@ -86,6 +124,7 @@ const environmentProblems = (
   environment: Readonly<Record<string, unknown>>,
   prefix: string,
 ): ReadonlyArray<string> => [
+  ...unknownKeyProblems(environment, ENVIRONMENT_KEYS, prefix),
   ...(Number.isInteger(environment.wait_timer) &&
   Number(environment.wait_timer) >= 0
     ? []

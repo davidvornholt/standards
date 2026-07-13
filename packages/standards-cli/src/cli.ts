@@ -52,6 +52,7 @@ const DEFAULT_SYNC_POLICY: SyncPolicy = {
   scheduledSync: true,
 };
 const LOCAL_POLICY_FILE = 'sync-standards.local.json';
+const SYNC_POLICY_KEYS = new Set(['ref', 'scheduledSync']);
 const SYNC_POLICY_CONTRACT_FILE =
   '.github/actions/standards-sync-preflight/sync-policy.mjs';
 const SYNC_POLICY_CONTROLLER_PATH = '.github/actions/standards-sync-preflight';
@@ -776,6 +777,16 @@ const inspectBootstrapPolicyWithoutContract = (
         `${LOCAL_POLICY_FILE} must contain valid JSON before bootstrapping the controller`,
       ],
     };
+  }
+  if (isRecord(raw)) {
+    const unknownProblems = Object.keys(raw).flatMap((key) =>
+      SYNC_POLICY_KEYS.has(key)
+        ? []
+        : [`${LOCAL_POLICY_FILE} has unknown key "${key}"`],
+    );
+    if (unknownProblems.length > 0) {
+      return { policy: null, problems: unknownProblems };
+    }
   }
   const isExactDefault =
     isRecord(raw) &&

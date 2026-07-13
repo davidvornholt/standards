@@ -16,6 +16,10 @@ import { dirname, join } from 'node:path';
 import process from 'node:process';
 
 const ENGINE = join(import.meta.dir, 'cli.ts');
+const LEGACY_ENGINE = join(
+  import.meta.dir,
+  '../node_modules/standards-v04/src/cli.ts',
+);
 const WORKFLOW = join(
   import.meta.dir,
   '../../../.github/workflows/standards-sync.yml',
@@ -53,7 +57,10 @@ type Lock = {
   sha: string;
   files: Record<string, string>;
 };
-type RunOptions = { readonly env?: Readonly<Record<string, string>> };
+type RunOptions = {
+  readonly engine?: string;
+  readonly env?: Readonly<Record<string, string>>;
+};
 
 const tmps: Array<string> = [];
 
@@ -85,7 +92,7 @@ const run = (
   options: RunOptions = {},
 ): RunResult => {
   try {
-    const stdout = execFileSync('bun', [ENGINE, ...args], {
+    const stdout = execFileSync('bun', [options.engine ?? ENGINE, ...args], {
       cwd,
       encoding: 'utf8',
       env: { ...process.env, ...options.env },
@@ -491,6 +498,40 @@ describe('doctor', () => {
 });
 
 describe('sync policy integration', () => {
+  it('requires upgrading a real v0.4 consumer before adopting current settings', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    write(consumer, 'justfile', "import 'standards.just'\n");
+    write(
+      consumer,
+      '.github/settings.json',
+      readFileSync(
+        join(import.meta.dir, '../../../.github/settings.json'),
+        'utf8',
+      ),
+    );
+    write(
+      consumer,
+      '.github/settings.local.json',
+      JSON.stringify({ repository: {}, rulesets: [], environments: [] }),
+    );
+    setStandardsVersion(consumer, '0.4.0');
+
+    const legacy = run(consumer, ['doctor', '--dir', consumer], {
+      engine: LEGACY_ENGINE,
+    });
+    expect(legacy.status).toBe(1);
+    expect(legacy.stderr).toContain('has unknown key "environments"');
+
+    const currentBeforeUpgrade = run(consumer, ['doctor', '--dir', consumer]);
+    expect(currentBeforeUpgrade.status).toBe(1);
+    expect(currentBeforeUpgrade.stderr).toContain(
+      'exact stable version >=0.5.0',
+    );
+
+    setStandardsVersion(consumer, '0.5.0');
+    expect(run(consumer, ['doctor', '--dir', consumer]).status).toBe(0);
+  });
+
   it('aggregates malformed policy and incompatible CLI problems', () => {
     const { consumer } = initConsumer(buildUpstream());
     write(
@@ -787,6 +828,22 @@ describe('policy validation', () => {
     }
   });
 
+  it('rejects unknown policy keys through the installed controller', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    const lockBefore = read(consumer, 'sync-standards.lock');
+    write(
+      consumer,
+      'sync-standards.local.json',
+      JSON.stringify({ ref: DEFAULT_REF, scheduledSync: true, typo: false }),
+    );
+
+    const result = run(consumer, ['sync', '--dir', consumer]);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('has unknown key "typo"');
+    expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
+  });
+
   it('rejects incompatible effective policy before remote setup', () => {
     const { consumer } = initConsumer(buildUpstream());
     const lockBefore = read(consumer, 'sync-standards.lock');
@@ -819,6 +876,28 @@ describe('policy validation', () => {
     expect(bare.status).toBe(1);
     expect(bare.stderr).toContain('exact stable version >=0.5.0');
     expect(bare.stderr).not.toContain('Cannot fetch');
+    expect(read(consumer, 'managed/a.txt')).toBe(managedBefore);
+    expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
+  });
+});
+
+describe('legacy policy bootstrap exactness', () => {
+  it('rejects unknown policy keys before remote setup without a controller', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    rmSync(join(consumer, SYNC_POLICY_CONTROLLER_PATH), { recursive: true });
+    write(
+      consumer,
+      'sync-standards.local.json',
+      JSON.stringify({ ref: DEFAULT_REF, scheduledSync: true, typo: false }),
+    );
+    const lockBefore = read(consumer, 'sync-standards.lock');
+    const managedBefore = read(consumer, 'managed/a.txt');
+
+    const result = sync('file:///missing-standards', consumer);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('has unknown key "typo"');
+    expect(result.stderr).not.toContain('Cannot fetch');
     expect(read(consumer, 'managed/a.txt')).toBe(managedBefore);
     expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
   });

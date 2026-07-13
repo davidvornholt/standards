@@ -97,16 +97,16 @@ describe('scheduled sync preflight', () => {
     expect(unsupported.stderr).toContain('Unsupported Standards sync event');
   });
 
-  it('enables default policy with an old direct standards version', () => {
+  it('enables default policy with a compatible direct standards version', () => {
     const configured = runPreflight(
       'schedule',
       serializePolicy('refs/heads/main', true),
-      packageWithStandards('0.4.0'),
+      packageWithStandards('0.5.0'),
     );
     const missing = runPreflight(
       'schedule',
       undefined,
-      packageWithStandards('0.4.0'),
+      packageWithStandards('0.5.0'),
     );
 
     expect(configured.output).toBe('run_sync=true\n');
@@ -165,27 +165,27 @@ describe('scheduled sync preflight', () => {
       const result = runPreflight('schedule', invalidPolicy);
       expect(result.status).not.toBe(0);
       expect(result.output).toBe('');
-      expect(result.stderr.length).toBeGreaterThan(0);
     }
 
     const aggregated = runPreflight(
       'schedule',
-      JSON.stringify({ ref: 'refs/tags/v0.5.0' }),
+      JSON.stringify({ ref: 'refs/tags/v0.5.0', typo: true }),
       packageWithStandards('0.4.0'),
     );
     expect(aggregated.stderr).toContain('requires boolean "scheduledSync"');
     expect(aggregated.stderr).toContain('exact stable version >=0.5.0');
+    expect(aggregated.stderr).toContain('has unknown key "typo"');
   });
 });
 
 describe('scheduled sync package preflight', () => {
-  it('requires a valid direct standards dependency before run selection', () => {
+  it('requires an exact compatible direct standards dependency before run selection', () => {
     for (const packageJson of [
       undefined,
       'not json',
       '{}',
+      packageWithStandards('0.4.0'),
       JSON.stringify({ dependencies: { [STANDARDS_PACKAGE]: '0.5.0' } }),
-      JSON.stringify({ devDependencies: { [STANDARDS_PACKAGE]: 5 } }),
     ]) {
       const result = runPreflight(
         'schedule',

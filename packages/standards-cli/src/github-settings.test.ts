@@ -99,6 +99,24 @@ describe('loadGithubSettings', () => {
 });
 
 describe('environment settings validation', () => {
+  it('rejects unknown keys at every environment record boundary', () => {
+    const withUnknownKeys = JSON.parse(
+      '{"name":"standards-sync","wait_timer":0,"prevent_self_review":false,"reviewers":[{"type":"User","id":1,"login":"ignored"}],"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true,"protected_branch":false},"deployment_branch_policies":[{"name":"main","type":"branch","pattern":"main"}],"waitTimer":0}',
+    );
+    const loaded = loadGithubSettings(
+      JSON.stringify({ environments: [withUnknownKeys] }),
+      emptySeam,
+    );
+
+    expect(loaded.merged).toBeNull();
+    expect(loaded.problems).toEqual([
+      '.github/settings.json environments[0] has unknown key "waitTimer"',
+      '.github/settings.json environments[0].reviewers[0] has unknown key "login"',
+      '.github/settings.json environments[0].deployment_branch_policy has unknown key "protected_branch"',
+      '.github/settings.json environments[0].deployment_branch_policies[0] has unknown key "pattern"',
+    ]);
+  });
+
   it('rejects malformed environment protection and deployment policy data', () => {
     const malformed = JSON.parse(
       '{"name":"standards-sync","wait_timer":-1,"prevent_self_review":"no","reviewers":{},"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":true},"deployment_branch_policies":[{"name":"","type":"branch"}]}',
