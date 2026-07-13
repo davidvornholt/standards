@@ -22,9 +22,36 @@ concurrency:
 jobs:
   sync:
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: ${{ vars.CI_POSTGRES_USER || 'app' }}
+          POSTGRES_PASSWORD: ${{ vars.CI_POSTGRES_PASSWORD || 'app' }}
+          POSTGRES_DB: ${{ vars.CI_POSTGRES_DB || 'app' }}
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ${{ vars.CI_POSTGRES_USER || 'app' }} -d ${{ vars.CI_POSTGRES_DB || 'app' }}"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://${{ vars.CI_POSTGRES_USER || 'app' }}:${{ vars.CI_POSTGRES_PASSWORD || 'app' }}@127.0.0.1:5432/${{ vars.CI_POSTGRES_DB || 'app' }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Detect browser a11y suite
+        id: a11y
+        run: |
+          if find . -path ./node_modules -prune -o \
+            \( -name 'playwright.config.*' -o -name '*.a11y.ts' \) -print | grep -q .; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -36,6 +63,10 @@ jobs:
 
       - name: Sync canonical files from upstream
         run: bun standards sync
+
+      - name: Install Playwright Chromium
+        if: steps.a11y.outputs.present == 'true'
+        run: bunx playwright install --with-deps chromium
 
       - name: Validate the synchronized repository
         run: bun run check
