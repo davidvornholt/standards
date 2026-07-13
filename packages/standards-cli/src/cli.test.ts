@@ -368,6 +368,101 @@ describe('sync', () => {
   });
 });
 
+describe('ref pinning', () => {
+  const git = (dir: string, args: ReadonlyArray<string>): string =>
+    execFileSync(
+      'git',
+      [
+        '-C',
+        dir,
+        '-c',
+        'user.name=test',
+        '-c',
+        'user.email=test@example.com',
+        '-c',
+        'commit.gpgsign=false',
+        ...args,
+      ],
+      { encoding: 'utf8' },
+    ).trim();
+
+  // A git-backed upstream with two commits: tag `v1` holds the original
+  // managed content, `main` has moved on. `file://` forces the remote-source
+  // code path that a plain local path would bypass.
+  const buildGitUpstream = (): {
+    up: string;
+    url: string;
+    taggedSha: string;
+  } => {
+    const up = buildUpstream();
+    git(up, ['init', '--quiet', '-b', 'main']);
+    git(up, ['add', '-A']);
+    git(up, ['commit', '--quiet', '-m', 'v1']);
+    git(up, ['tag', 'v1']);
+    const taggedSha = git(up, ['rev-parse', 'HEAD']);
+    write(up, 'managed/a.txt', 'alpha v2\n');
+    git(up, ['add', '-A']);
+    git(up, ['commit', '--quiet', '-m', 'v2']);
+    return { up, url: `file://${up}`, taggedSha };
+  };
+
+  it('syncs the tagged snapshot with --ref and main without it', () => {
+    const { up, url, taggedSha } = buildGitUpstream();
+    const { consumer } = initConsumer(up);
+
+    const pinned = sync(url, consumer, ['--ref', 'v1']);
+    expect(pinned.status).toBe(0);
+    expect(read(consumer, 'managed/a.txt')).toBe('alpha\n');
+    expect(readLock(consumer).sha).toBe(taggedSha);
+
+    const tracking = sync(url, consumer);
+    expect(tracking.status).toBe(0);
+    expect(read(consumer, 'managed/a.txt')).toBe('alpha v2\n');
+  });
+
+  it('init honors --ref for a pinned first mirror', () => {
+    const { url, taggedSha } = buildGitUpstream();
+    const consumer = mkTmp('sync-cons-');
+    const result = run(consumer, [
+      'init',
+      '--from',
+      url,
+      '--ref',
+      'v1',
+      '--dir',
+      consumer,
+    ]);
+    expect(result.status).toBe(0);
+    expect(read(consumer, 'managed/a.txt')).toBe('alpha\n');
+    expect(readLock(consumer).sha).toBe(taggedSha);
+  });
+
+  it('fails with an actionable error for an unknown ref', () => {
+    const { up, url } = buildGitUpstream();
+    const { consumer } = initConsumer(up);
+    const result = sync(url, consumer, ['--ref', 'v9']);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Cannot fetch "v9"');
+  });
+
+  it('rejects --ref combined with a local path source', () => {
+    const up = buildUpstream();
+    const { consumer } = initConsumer(up);
+    const result = sync(up, consumer, ['--ref', 'v1']);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('--ref requires a git URL source');
+  });
+
+  it('rejects --ref outside init and sync', () => {
+    const consumer = mkTmp('sync-cons-');
+    const result = run(consumer, ['check', '--ref', 'v1', '--dir', consumer]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      '--ref is only valid with the init and sync commands',
+    );
+  });
+});
+
 describe('github', () => {
   const EmptySeam = JSON.stringify({ repository: {}, rulesets: [] });
   const Canonical = JSON.stringify({
