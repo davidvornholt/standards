@@ -24,6 +24,8 @@ Because bucket-1 files are byte-identical everywhere, every legitimate per-repo 
 | `AGENTS.md`            | `AGENTS.local.md` extends it; `CLAUDE.md` points to it       |
 | `.github/settings.json` | `.github/settings.local.json` extends it (additive only: it may add repository settings and rulesets but never override canonical ones — GitHub layers rulesets strictest-wins, so additions can only tighten) |
 
+`sync-standards.local.json` is the bucket-2 sync policy seam. Its required `ref` is a qualified branch (`refs/heads/...`), qualified tag (`refs/tags/...`), or full commit SHA; `scheduledSync` controls only scheduled GitHub Actions runs. A missing file uses the backwards-compatible default of `refs/heads/main` with scheduled sync enabled. Bare local and workflow syncs read the same policy, while successful non-dry `sync --ref <ref>` updates it.
+
 If a task seems to require editing a canonical file for one repo's needs, stop — the change either belongs upstream (it's a real standard) or in the seam (it's repo-specific).
 
 ## Commands
@@ -38,7 +40,7 @@ A PR that changes the declaration fails its own gate until the change is applied
 
 ## Testing a canonical change before publishing
 
-github/URL sources clone `main` unless `--ref` pins a tag, branch, or full commit sha — but any ref must exist on the remote, so the only way to try an *unpushed* change is a **local-path `--from`**: point a consumer at your local standards clone with uncommitted edits.
+`sync` with a github/URL source uses `sync-standards.local.json` unless `--ref` selects and persists another qualified ref — but any ref must exist on the remote, so the only way to try an *unpushed* change is a **local-path `--from`**: point a consumer at your local standards clone with uncommitted edits. A local path temporarily overrides the source without changing or applying the configured remote ref.
 
 ```sh
 # In the CONSUMER, sourcing from a local standards clone with uncommitted edits:

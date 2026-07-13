@@ -15,6 +15,7 @@ standards github --apply
 
 ## Configuration
 
+- **`sync-standards.local.json`** (optional for existing consumers) — checked-in repository policy with required `ref` and `scheduledSync` fields. Missing files default to `{"ref":"refs/heads/main","scheduledSync":true}`. `ref` accepts only a qualified branch, qualified tag, or full commit SHA. Setting `scheduledSync` to `false` skips scheduled GitHub Actions syncs but not manual or local runs.
 - **`GH_TOKEN` / `GITHUB_TOKEN`** (optional) — GitHub API token for the `github` command and the GitHub portion of `check`. When neither is set, the token from the local `gh` CLI is used; with no token at all, reads still work on public repositories. `--apply` and private-repo reads need an authenticated token, and repo merge settings are only visible (and thus verifiable) to admin tokens — non-admin runs report them as unverifiable.
 
 See the standards repository README for the ownership model and adoption workflow.

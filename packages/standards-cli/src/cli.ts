@@ -39,11 +39,14 @@ import { loadGithubSettings } from './github-settings';
 const { YAML: BunYaml } = await import('bun');
 
 const DEFAULT_UPSTREAM = 'github:davidvornholt/standards';
+const DEFAULT_REF = 'refs/heads/main';
+const LOCAL_POLICY_FILE = 'sync-standards.local.json';
 
 // Characters of a sha256 hex digest shown in drift reports; enough to identify.
 const HASH_PREVIEW_LENGTH = 12;
 
 const GITHUB_PREFIX = 'github:';
+const FULL_COMMIT_SHA = /^[0-9a-fA-F]{40}$/u;
 
 // Never mirrored, even under a managed directory path: build output, VCS
 // metadata, and installed dependencies would otherwise pollute the lock when
@@ -64,8 +67,14 @@ type Manifest = {
 
 type Lock = {
   readonly upstream: string;
+  readonly ref?: string;
   readonly sha: string;
   readonly files: Record<string, string>;
+};
+
+type SyncPolicy = {
+  readonly ref: string;
+  readonly scheduledSync: boolean;
 };
 
 type Source = {
@@ -142,6 +151,59 @@ const loadManifest = async (path: string): Promise<Manifest> => {
   return parseManifest(JSON.parse(await readFile(path, 'utf8')) as unknown);
 };
 
+const isFullCommitSha = (ref: string): boolean => FULL_COMMIT_SHA.test(ref);
+
+const assertSupportedRef = (ref: string): void => {
+  const isQualified =
+    ref.startsWith('refs/heads/') || ref.startsWith('refs/tags/');
+  if (!(isFullCommitSha(ref) || isQualified)) {
+    throw new Error(
+      `Unsupported ref "${ref}"; use refs/heads/<branch>, refs/tags/<tag>, or a full commit sha`,
+    );
+  }
+  if (!isQualified) {
+    return;
+  }
+  try {
+    execFileSync('git', ['check-ref-format', ref], { stdio: 'ignore' });
+  } catch (error) {
+    throw new Error(`Invalid qualified Git ref: ${ref}`, { cause: error });
+  }
+};
+
+const parseSyncPolicy = (raw: unknown): SyncPolicy => {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new Error(`${LOCAL_POLICY_FILE} must be a JSON object`);
+  }
+  const policy = raw as Record<string, unknown>;
+  if (typeof policy.ref !== 'string') {
+    throw new Error(`${LOCAL_POLICY_FILE} requires string "ref"`);
+  }
+  if (typeof policy.scheduledSync !== 'boolean') {
+    throw new Error(`${LOCAL_POLICY_FILE} requires boolean "scheduledSync"`);
+  }
+  assertSupportedRef(policy.ref);
+  return { ref: policy.ref, scheduledSync: policy.scheduledSync };
+};
+
+const loadSyncPolicy = async (consumer: string): Promise<SyncPolicy> => {
+  const path = join(consumer, LOCAL_POLICY_FILE);
+  if (!existsSync(path)) {
+    return { ref: DEFAULT_REF, scheduledSync: true };
+  }
+  return parseSyncPolicy(JSON.parse(await readFile(path, 'utf8')) as unknown);
+};
+
+const writeSyncPolicy = async (
+  consumer: string,
+  policy: SyncPolicy,
+): Promise<void> => {
+  await writeFile(
+    join(consumer, LOCAL_POLICY_FILE),
+    `${JSON.stringify(policy, null, 2)}\n`,
+  );
+};
+
 const readLock = async (dir: string): Promise<Lock | null> => {
   const path = join(dir, 'sync-standards.lock');
   if (!existsSync(path)) {
@@ -155,7 +217,12 @@ const writeLock = async (dir: string, lock: Lock): Promise<void> => {
   const files = Object.fromEntries(
     Object.entries(lock.files).sort(([a], [b]) => a.localeCompare(b)),
   );
-  const ordered = { upstream: lock.upstream, sha: lock.sha, files };
+  const ordered = {
+    upstream: lock.upstream,
+    ref: lock.ref ?? DEFAULT_REF,
+    sha: lock.sha,
+    files,
+  };
   await writeFile(
     join(dir, 'sync-standards.lock'),
     `${JSON.stringify(ordered, null, 2)}\n`,
@@ -164,8 +231,8 @@ const writeLock = async (dir: string, lock: Lock): Promise<void> => {
 
 // Fetch the template into a working directory. Accepts a local path (used to
 // prove the engine before the public repo exists and in tests), a github:
-// shorthand, or any git URL. Remote sources default to `main`; `ref` pins a
-// tag, branch, or full commit sha instead (`git fetch` accepts all three).
+// shorthand, or any git URL. Remote refs are namespace-qualified branches or
+// tags, or full commit shas, so a same-named branch and tag cannot collide.
 const resolveSource = (src: string, ref: string | undefined): Source => {
   if (existsSync(src)) {
     if (ref !== undefined) {
@@ -187,7 +254,8 @@ const resolveSource = (src: string, ref: string | undefined): Source => {
   const url = src.startsWith(GITHUB_PREFIX)
     ? `https://github.com/${src.slice(GITHUB_PREFIX.length)}.git`
     : src;
-  const target = ref ?? 'main';
+  const target = ref ?? DEFAULT_REF;
+  assertSupportedRef(target);
   const dir = mkdtempSync(join(tmpdir(), 'standards-'));
   const cleanup = (): void => rmSync(dir, { recursive: true, force: true });
   try {
@@ -207,7 +275,7 @@ const resolveSource = (src: string, ref: string | undefined): Source => {
   } catch (error) {
     cleanup();
     throw new Error(
-      `Cannot fetch "${target}" from ${url}; expected a tag, branch, or full commit sha reachable on the remote`,
+      `Cannot fetch "${target}" from ${url}; expected a qualified branch or tag, or a full commit sha reachable on the remote`,
       { cause: error },
     );
   }
@@ -412,6 +480,7 @@ const runInit = async (
   reportMirror(result, false);
   await writeLock(consumer, {
     upstream: manifest.upstream,
+    ref: DEFAULT_REF,
     sha: src.sha,
     files: result.files,
   });
@@ -420,12 +489,21 @@ const runInit = async (
   );
 };
 
-const runSync = async (
-  manifest: Manifest,
-  src: Source,
-  consumer: string,
-  dryRun: boolean,
-): Promise<void> => {
+type RunSyncOptions = {
+  readonly manifest: Manifest;
+  readonly src: Source;
+  readonly consumer: string;
+  readonly dryRun: boolean;
+  readonly requestedRef: string;
+};
+
+const runSync = async ({
+  manifest,
+  src,
+  consumer,
+  dryRun,
+  requestedRef,
+}: RunSyncOptions): Promise<void> => {
   const seeds = await seedTargets(src.dir, manifest.seedDir);
   assertDisjoint(manifest.paths, [...seeds.keys()]);
   const lock = await readLock(consumer);
@@ -442,6 +520,7 @@ const runSync = async (
   }
   await writeLock(consumer, {
     upstream: manifest.upstream,
+    ref: requestedRef,
     sha: src.sha,
     files: result.files,
   });
@@ -453,7 +532,10 @@ const runSync = async (
 // Offline drift detection: every locked file must still match its hash. Catches
 // local edits or deletions of canonical files. Does NOT detect upstream moving
 // on — see the "known limitation" in the standards repository README.
-const runCheck = async (consumer: string): Promise<boolean> => {
+const runCheck = async (
+  consumer: string,
+  policy: SyncPolicy,
+): Promise<boolean> => {
   const lock = await readLock(consumer);
   if (lock === null || Object.keys(lock.files).length === 0) {
     console.error(
@@ -463,6 +545,13 @@ const runCheck = async (consumer: string): Promise<boolean> => {
   }
   for (const rel of Object.keys(lock.files)) {
     assertSafeRelativePath(rel, 'sync-standards.lock file');
+  }
+  const lockedRef = lock.ref ?? DEFAULT_REF;
+  const policyMatchesLock = lockedRef === policy.ref;
+  if (!policyMatchesLock) {
+    console.error(
+      `standards: sync policy requests ${policy.ref}, but sync-standards.lock records ${lockedRef}; run \`bun standards sync\``,
+    );
   }
   const results = await Promise.all(
     Object.entries(lock.files).map(async ([rel, hash]) => {
@@ -486,6 +575,9 @@ const runCheck = async (consumer: string): Promise<boolean> => {
     console.error(
       'These files are read-only. Restore them with `bun standards sync`, or move your change upstream.',
     );
+    return false;
+  }
+  if (!policyMatchesLock) {
     return false;
   }
   console.log(
@@ -757,7 +849,7 @@ Commands:
 Options:
   --dir <path>   Consumer directory to operate on (default: current directory)
   --from <src>   Upstream override for init/sync (GitHub repo or local path)
-  --ref <ref>    Upstream tag, branch, or full commit sha for init/sync (remote Git/GitHub sources only; default: main)
+  --ref <ref>    Sync from refs/heads/<branch>, refs/tags/<tag>, or a full commit sha and persist that policy (remote sources only)
   --dry-run      Preview a sync without writing anything
   --check        With github: compare live settings to the declaration (default)
   --apply        With github: converge the live repository (needs admin auth)`;
@@ -847,8 +939,8 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
   if (apply && checkFlag) {
     throw new Error('github accepts exactly one of --check or --apply');
   }
-  if (ref !== undefined && command !== 'init' && command !== 'sync') {
-    throw new Error('--ref is only valid with the init and sync commands');
+  if (ref !== undefined && command !== 'sync') {
+    throw new Error('--ref is only valid with the sync command');
   }
 
   return {
@@ -862,7 +954,8 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
 };
 
 const runCheckCommand = async (consumer: string): Promise<boolean> => {
-  const driftIsClean = await runCheck(consumer);
+  const policy = await loadSyncPolicy(consumer);
+  const driftIsClean = await runCheck(consumer, policy);
   const integrationIsValid = await runDoctor(consumer);
   // The GitHub gate activates with the synced declaration and then fails
   // closed: once .github/settings.json exists, an unreachable API or an
@@ -876,7 +969,6 @@ const runCheckCommand = async (consumer: string): Promise<boolean> => {
 const runInitCommand = async (
   consumer: string,
   from: string | undefined,
-  ref: string | undefined,
 ): Promise<void> => {
   // Refuse before cloning upstream: re-initializing skips the lock, so it
   // would silently overwrite local canonical edits and orphan files that
@@ -888,7 +980,7 @@ const runInitCommand = async (
     process.exitCode = 1;
     return;
   }
-  const source = resolveSource(from ?? DEFAULT_UPSTREAM, ref);
+  const source = resolveSource(from ?? DEFAULT_UPSTREAM, undefined);
   try {
     const manifest = await loadManifest(
       join(source.dir, 'sync-standards.json'),
@@ -905,15 +997,44 @@ const runSyncCommand = async (
   ref: string | undefined,
   dryRun: boolean,
 ): Promise<void> => {
+  if (ref !== undefined) {
+    assertSupportedRef(ref);
+  }
+  const policy = await loadSyncPolicy(consumer);
+  if (
+    process.env.GITHUB_ACTIONS === 'true' &&
+    process.env.GITHUB_EVENT_NAME === 'schedule' &&
+    !policy.scheduledSync
+  ) {
+    console.log(
+      `standards: scheduled sync disabled by ${LOCAL_POLICY_FILE}; skipping`,
+    );
+    return;
+  }
   const consumerManifest = await loadManifest(
     join(consumer, 'sync-standards.json'),
   );
-  const source = resolveSource(from ?? consumerManifest.upstream, ref);
+  const sourceName = from ?? consumerManifest.upstream;
+  const sourceIsLocal = existsSync(sourceName);
+  const requestedRef = ref ?? policy.ref;
+  const source = resolveSource(
+    sourceName,
+    sourceIsLocal && ref === undefined ? undefined : requestedRef,
+  );
   try {
     const manifest = await loadManifest(
       join(source.dir, 'sync-standards.json'),
     );
-    await runSync(manifest, source, consumer, dryRun);
+    await runSync({
+      manifest,
+      src: source,
+      consumer,
+      dryRun,
+      requestedRef,
+    });
+    if (!dryRun && ref !== undefined) {
+      await writeSyncPolicy(consumer, { ...policy, ref });
+    }
   } finally {
     source.cleanup();
   }
@@ -961,7 +1082,7 @@ const main = async (): Promise<void> => {
   }
 
   if (command === 'init') {
-    await runInitCommand(consumer, from, ref);
+    await runInitCommand(consumer, from);
     return;
   }
 

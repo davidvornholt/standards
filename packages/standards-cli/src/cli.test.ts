@@ -13,12 +13,30 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import process from 'node:process';
 
 const ENGINE = join(import.meta.dir, 'cli.ts');
+const WORKFLOW = join(
+  import.meta.dir,
+  '../../../.github/workflows/standards-sync.yml',
+);
+const ROOT_MANIFEST = join(import.meta.dir, '../../../sync-standards.json');
+const POLICY_SEED = join(
+  import.meta.dir,
+  '../../../template/sync-standards.local.json',
+);
 const STD_PATHS: ReadonlyArray<string> = ['sync-standards.json', 'managed'];
+const DEFAULT_REF = 'refs/heads/main';
+const BARE_SYNC_STEP = /^\s+run: bun standards sync$/mu;
 
 type RunResult = { stdout: string; stderr: string; status: number };
-type Lock = { upstream: string; sha: string; files: Record<string, string> };
+type Lock = {
+  upstream: string;
+  ref?: string;
+  sha: string;
+  files: Record<string, string>;
+};
+type RunOptions = { readonly env?: Readonly<Record<string, string>> };
 
 const tmps: Array<string> = [];
 
@@ -37,11 +55,16 @@ const read = (root: string, rel: string): string =>
 const readLock = (root: string): Lock =>
   JSON.parse(read(root, 'sync-standards.lock')) as Lock;
 
-const run = (cwd: string, args: ReadonlyArray<string>): RunResult => {
+const run = (
+  cwd: string,
+  args: ReadonlyArray<string>,
+  options: RunOptions = {},
+): RunResult => {
   try {
     const stdout = execFileSync('bun', [ENGINE, ...args], {
       cwd,
       encoding: 'utf8',
+      env: { ...process.env, ...options.env },
     });
     return { stdout, stderr: '', status: 0 };
   } catch (error) {
@@ -63,6 +86,11 @@ const buildUpstream = (paths: ReadonlyArray<string> = STD_PATHS): string => {
     JSON.stringify({ upstream: up, seedDir: 'template', paths }),
   );
   write(up, 'template/seed.txt', 'seed original\n');
+  write(
+    up,
+    'template/sync-standards.local.json',
+    `${JSON.stringify({ ref: DEFAULT_REF, scheduledSync: true }, null, 2)}\n`,
+  );
   write(up, 'template/AGENTS.local.md', '# Local\n');
   write(up, 'template/biome.jsonc', '{"extends":["./biome.base.jsonc"]}\n');
   write(
@@ -95,6 +123,7 @@ const buildUpstream = (paths: ReadonlyArray<string> = STD_PATHS): string => {
   );
   write(up, 'managed/a.txt', 'alpha\n');
   write(up, 'managed/b.txt', 'beta\n');
+  write(up, 'managed/standards-sync.yml', 'run: bun standards sync\n');
   return up;
 };
 const initConsumer = (up: string): { consumer: string; result: RunResult } => {
@@ -126,9 +155,8 @@ const git = (dir: string, args: ReadonlyArray<string>): string =>
     { encoding: 'utf8' },
   ).trim();
 
-// A git-backed upstream with two commits: tag `v1` and branch `stable` hold
-// the original managed content while `main` has moved on. `file://` forces the
-// remote-source code path that a plain local path would bypass.
+// A git-backed upstream with two commits. The first is tagged `v1` and
+// `collision`; the second is main plus branches `stable` and `collision`.
 const buildGitUpstream = (): {
   up: string;
   url: string;
@@ -136,14 +164,32 @@ const buildGitUpstream = (): {
 } => {
   const up = buildUpstream();
   git(up, ['init', '--quiet', '-b', 'main']);
+  write(
+    up,
+    'sync-standards.json',
+    JSON.stringify({
+      upstream: `file://${up}`,
+      seedDir: 'template',
+      paths: STD_PATHS,
+    }),
+  );
+  rmSync(join(up, 'template/sync-standards.local.json'));
   git(up, ['add', '-A']);
   git(up, ['commit', '--quiet', '-m', 'v1']);
   git(up, ['tag', 'v1']);
-  git(up, ['branch', 'stable']);
+  git(up, ['tag', 'v0.4.0']);
+  git(up, ['tag', 'collision']);
   const taggedSha = git(up, ['rev-parse', 'HEAD']);
+  write(
+    up,
+    'template/sync-standards.local.json',
+    `${JSON.stringify({ ref: DEFAULT_REF, scheduledSync: true }, null, 2)}\n`,
+  );
   write(up, 'managed/a.txt', 'alpha v2\n');
   git(up, ['add', '-A']);
   git(up, ['commit', '--quiet', '-m', 'v2']);
+  git(up, ['branch', 'stable', taggedSha]);
+  git(up, ['branch', 'collision']);
   return { up, url: `file://${up}`, taggedSha };
 };
 
@@ -167,6 +213,10 @@ describe('init', () => {
       'package-ecosystem: bun',
     );
     expect(read(consumer, 'managed/a.txt')).toBe('alpha\n');
+    expect(read(consumer, 'sync-standards.local.json')).toContain(
+      '"refs/heads/main"',
+    );
+    expect(readLock(consumer).ref).toBe(DEFAULT_REF);
     expect(readLock(consumer).files['managed/a.txt']).toBeDefined();
   });
 
@@ -228,6 +278,46 @@ describe('check', () => {
     const check = run(consumer, ['check', '--dir', consumer]);
     expect(check.status).toBe(1);
     expect(check.stderr).toContain('no non-empty sync-standards.lock found');
+  });
+
+  it('accepts an old lock without ref only at the default policy', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    const { ref: _ref, ...oldLock } = readLock(consumer);
+    write(
+      consumer,
+      'sync-standards.lock',
+      `${JSON.stringify(oldLock, null, 2)}\n`,
+    );
+    rmSync(join(consumer, 'sync-standards.local.json'));
+
+    expect(run(consumer, ['check', '--dir', consumer]).status).toBe(0);
+
+    write(
+      consumer,
+      'sync-standards.local.json',
+      JSON.stringify({ ref: 'refs/tags/v1', scheduledSync: true }),
+    );
+    const pinnedCheck = run(consumer, ['check', '--dir', consumer]);
+    expect(pinnedCheck.status).toBe(1);
+    expect(pinnedCheck.stderr).toContain(
+      `policy requests refs/tags/v1, but sync-standards.lock records ${DEFAULT_REF}`,
+    );
+  });
+
+  it('rejects policy and lock disagreement', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    write(
+      consumer,
+      'sync-standards.local.json',
+      JSON.stringify({ ref: 'refs/heads/stable', scheduledSync: true }),
+    );
+
+    const check = run(consumer, ['check', '--dir', consumer]);
+
+    expect(check.status).toBe(1);
+    expect(check.stderr).toContain(
+      `policy requests refs/heads/stable, but sync-standards.lock records ${DEFAULT_REF}`,
+    );
   });
 });
 
@@ -407,20 +497,116 @@ describe('sync', () => {
 });
 
 describe('ref pinning', () => {
-  it('syncs the tagged snapshot with --ref and main without it', () => {
+  it('persists an explicit qualified tag and bare sync keeps using it', () => {
     const { up, url, taggedSha } = buildGitUpstream();
     const { consumer } = initConsumer(up);
 
-    const pinned = sync(url, consumer, ['--ref', 'v1']);
+    const pinned = sync(url, consumer, ['--ref', 'refs/tags/v1']);
     expect(pinned.status).toBe(0);
     expect(read(consumer, 'managed/a.txt')).toBe('alpha\n');
+    expect(readLock(consumer).ref).toBe('refs/tags/v1');
     expect(readLock(consumer).sha).toBe(taggedSha);
+    expect(JSON.parse(read(consumer, 'sync-standards.local.json'))).toEqual({
+      ref: 'refs/tags/v1',
+      scheduledSync: true,
+    });
 
-    const tracking = sync(url, consumer);
-    expect(tracking.status).toBe(0);
-    expect(read(consumer, 'managed/a.txt')).toBe('alpha v2\n');
+    const bare = run(consumer, ['sync', '--dir', consumer]);
+    expect(bare.status).toBe(0);
+    expect(read(consumer, 'managed/a.txt')).toBe('alpha\n');
+    expect(readLock(consumer).sha).toBe(taggedSha);
   });
 
+  it('missing policy defaults bare local and workflow sync to main', () => {
+    const { up } = buildGitUpstream();
+    const { consumer } = initConsumer(up);
+    rmSync(join(consumer, 'sync-standards.local.json'));
+    write(up, 'managed/a.txt', 'alpha v3\n');
+    git(up, ['add', '-A']);
+    git(up, ['commit', '--quiet', '-m', 'v3']);
+
+    const local = run(consumer, ['sync', '--dir', consumer]);
+    expect(local.status).toBe(0);
+    expect(read(consumer, 'managed/a.txt')).toBe('alpha v3\n');
+    expect(readLock(consumer).ref).toBe(DEFAULT_REF);
+
+    write(up, 'managed/a.txt', 'alpha v4\n');
+    git(up, ['add', '-A']);
+    git(up, ['commit', '--quiet', '-m', 'v4']);
+    const workflow = run(consumer, ['sync', '--dir', consumer], {
+      env: {
+        GITHUB_ACTIONS: 'true',
+        GITHUB_EVENT_NAME: 'workflow_dispatch',
+      },
+    });
+    expect(workflow.status).toBe(0);
+    expect(read(consumer, 'managed/a.txt')).toBe('alpha v4\n');
+    expect(existsSync(join(consumer, 'sync-standards.local.json'))).toBe(false);
+  });
+
+  it('bare local and workflow sync use the same configured ref', () => {
+    const { up, taggedSha } = buildGitUpstream();
+    const { consumer } = initConsumer(up);
+    write(
+      consumer,
+      'sync-standards.local.json',
+      JSON.stringify({ ref: 'refs/tags/v1', scheduledSync: true }),
+    );
+
+    expect(run(consumer, ['sync', '--dir', consumer]).status).toBe(0);
+    expect(readLock(consumer).sha).toBe(taggedSha);
+
+    write(consumer, 'managed/a.txt', 'force workflow restore\n');
+    const workflow = run(consumer, ['sync', '--dir', consumer], {
+      env: {
+        GITHUB_ACTIONS: 'true',
+        GITHUB_EVENT_NAME: 'workflow_dispatch',
+      },
+    });
+    expect(workflow.status).toBe(0);
+    expect(read(consumer, 'managed/a.txt')).toBe('alpha\n');
+    expect(readLock(consumer).sha).toBe(taggedSha);
+  });
+
+  it('dry-run with an override changes neither policy, lock, nor content', () => {
+    const { up, url } = buildGitUpstream();
+    const { consumer } = initConsumer(up);
+    const policyBefore = read(consumer, 'sync-standards.local.json');
+    const lockBefore = read(consumer, 'sync-standards.lock');
+
+    const dry = sync(url, consumer, ['--ref', 'refs/tags/v1', '--dry-run']);
+
+    expect(dry.status).toBe(0);
+    expect(dry.stdout).toContain('would update managed/a.txt');
+    expect(read(consumer, 'managed/a.txt')).toBe('alpha v2\n');
+    expect(read(consumer, 'sync-standards.local.json')).toBe(policyBefore);
+    expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
+  });
+});
+
+describe('policy validation', () => {
+  it('requires both policy fields and a supported ref', () => {
+    const { up } = buildGitUpstream();
+    const { consumer } = initConsumer(up);
+    const lockBefore = read(consumer, 'sync-standards.lock');
+
+    for (const invalidPolicy of [
+      { ref: DEFAULT_REF },
+      { ref: 'main', scheduledSync: true },
+    ]) {
+      write(
+        consumer,
+        'sync-standards.local.json',
+        JSON.stringify(invalidPolicy),
+      );
+      const result = run(consumer, ['sync', '--dir', consumer]);
+      expect(result.status).toBe(1);
+      expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
+    }
+  });
+});
+
+describe('ref resolution', () => {
   it('syncs a raw commit sha and records the exact pin', () => {
     const { up, url, taggedSha } = buildGitUpstream();
     const { consumer } = initConsumer(up);
@@ -429,74 +615,158 @@ describe('ref pinning', () => {
 
     expect(result.status).toBe(0);
     expect(read(consumer, 'managed/a.txt')).toBe('alpha\n');
+    expect(readLock(consumer).ref).toBe(taggedSha);
     expect(readLock(consumer).sha).toBe(taggedSha);
   });
 
-  it('syncs a named non-default branch', () => {
+  it('qualified branch and tag select different sides of a name collision', () => {
     const { up, url, taggedSha } = buildGitUpstream();
     const { consumer } = initConsumer(up);
+    const branchSha = git(up, ['rev-parse', 'refs/heads/collision']);
 
-    const result = sync(url, consumer, ['--ref', 'stable']);
-
-    expect(result.status).toBe(0);
+    const tag = sync(url, consumer, ['--ref', 'refs/tags/collision']);
+    expect(tag.status).toBe(0);
     expect(read(consumer, 'managed/a.txt')).toBe('alpha\n');
     expect(readLock(consumer).sha).toBe(taggedSha);
+
+    const branch = sync(url, consumer, ['--ref', 'refs/heads/collision']);
+    expect(branch.status).toBe(0);
+    expect(read(consumer, 'managed/a.txt')).toBe('alpha v2\n');
+    expect(readLock(consumer).sha).toBe(branchSha);
   });
 
-  it('init honors --ref for a pinned first mirror', () => {
-    const { url, taggedSha } = buildGitUpstream();
-    const consumer = mkTmp('sync-cons-');
-    const result = run(consumer, [
-      'init',
-      '--from',
-      url,
-      '--ref',
-      'v1',
-      '--dir',
-      consumer,
-    ]);
-    expect(result.status).toBe(0);
-    expect(read(consumer, 'managed/a.txt')).toBe('alpha\n');
-    expect(readLock(consumer).sha).toBe(taggedSha);
-  });
-
-  it('fails with an actionable error for an unknown ref', () => {
-    const { up, url } = buildGitUpstream();
-    const { consumer } = initConsumer(up);
-    const result = sync(url, consumer, ['--ref', 'v9']);
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('Cannot fetch "v9"');
-  });
-
-  it('rejects an option-like ref without changing the consumer', () => {
+  it('rejects invalid refs before changing consumer state', () => {
     const { up, url } = buildGitUpstream();
     const { consumer } = initConsumer(up);
     const managedBefore = read(consumer, 'managed/a.txt');
     const lockBefore = read(consumer, 'sync-standards.lock');
+    const policyBefore = read(consumer, 'sync-standards.local.json');
 
-    const result = sync(url, consumer, ['--ref', '-u']);
-
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('Cannot fetch "-u"');
-    expect(read(consumer, 'managed/a.txt')).toBe(managedBefore);
-    expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
+    for (const invalidRef of ['v1', 'stable', '-u', 'refs/tags/missing']) {
+      const result = sync(url, consumer, ['--ref', invalidRef]);
+      expect(result.status).toBe(1);
+      expect(read(consumer, 'managed/a.txt')).toBe(managedBefore);
+      expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
+      expect(read(consumer, 'sync-standards.local.json')).toBe(policyBefore);
+    }
   });
 
-  it('rejects --ref combined with a local path source', () => {
+  it('local-path testing ignores policy but an explicit local ref is rejected', () => {
     const up = buildUpstream();
     const { consumer } = initConsumer(up);
-    const result = sync(up, consumer, ['--ref', 'v1']);
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('--ref requires a git URL source');
+    write(
+      consumer,
+      'sync-standards.local.json',
+      JSON.stringify({ ref: 'refs/tags/v1', scheduledSync: true }),
+    );
+    write(up, 'managed/a.txt', 'local uncommitted change\n');
+
+    const local = sync(up, consumer);
+    expect(local.status).toBe(0);
+    expect(read(consumer, 'managed/a.txt')).toBe('local uncommitted change\n');
+    expect(readLock(consumer).ref).toBe('refs/tags/v1');
+    expect(JSON.parse(read(consumer, 'sync-standards.local.json'))).toEqual({
+      ref: 'refs/tags/v1',
+      scheduledSync: true,
+    });
+
+    const explicit = sync(up, consumer, ['--ref', 'refs/tags/v1']);
+    expect(explicit.status).toBe(1);
+    expect(explicit.stderr).toContain('--ref requires a git URL source');
   });
 
-  it('rejects --ref outside init and sync', () => {
+  it('rejects --ref outside sync, including init', () => {
     const consumer = mkTmp('sync-cons-');
-    const result = run(consumer, ['check', '--ref', 'v1', '--dir', consumer]);
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain(
-      '--ref is only valid with the init and sync commands',
+    for (const command of ['check', 'init']) {
+      const result = run(consumer, [
+        command,
+        '--ref',
+        'refs/tags/v1',
+        '--dir',
+        consumer,
+      ]);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        '--ref is only valid with the sync command',
+      );
+    }
+  });
+});
+
+describe('scheduled and legacy sync', () => {
+  it('scheduled false skips only scheduled Actions runs', () => {
+    const { up } = buildGitUpstream();
+    const { consumer } = initConsumer(up);
+    write(
+      consumer,
+      'sync-standards.local.json',
+      JSON.stringify({ ref: DEFAULT_REF, scheduledSync: false }),
     );
+    write(up, 'managed/a.txt', 'alpha v3\n');
+    git(up, ['add', '-A']);
+    git(up, ['commit', '--quiet', '-m', 'v3']);
+
+    const scheduled = run(consumer, ['sync', '--dir', consumer], {
+      env: { GITHUB_ACTIONS: 'true', GITHUB_EVENT_NAME: 'schedule' },
+    });
+    expect(scheduled.status).toBe(0);
+    expect(scheduled.stdout).toContain('scheduled sync disabled');
+    expect(read(consumer, 'managed/a.txt')).toBe('alpha v2\n');
+
+    const manual = run(consumer, ['sync', '--dir', consumer], {
+      env: {
+        GITHUB_ACTIONS: 'true',
+        GITHUB_EVENT_NAME: 'workflow_dispatch',
+      },
+    });
+    expect(manual.status).toBe(0);
+    expect(read(consumer, 'managed/a.txt')).toBe('alpha v3\n');
+
+    write(up, 'managed/a.txt', 'alpha v4\n');
+    git(up, ['add', '-A']);
+    git(up, ['commit', '--quiet', '-m', 'v4']);
+    const local = run(consumer, ['sync', '--dir', consumer]);
+    expect(local.status).toBe(0);
+    expect(read(consumer, 'managed/a.txt')).toBe('alpha v4\n');
+  });
+
+  it('keeps a pre-policy pinned workflow durable across two bare cycles', () => {
+    const { up, url } = buildGitUpstream();
+    const { consumer } = initConsumer(up);
+
+    const first = sync(url, consumer, ['--ref', 'refs/tags/v0.4.0']);
+    expect(first.status).toBe(0);
+    expect(read(consumer, 'managed/standards-sync.yml')).toBe(
+      'run: bun standards sync\n',
+    );
+    const policyAfterFirst = read(consumer, 'sync-standards.local.json');
+
+    const second = run(consumer, ['sync', '--dir', consumer]);
+    expect(second.status).toBe(0);
+    expect(read(consumer, 'managed/standards-sync.yml')).toBe(
+      'run: bun standards sync\n',
+    );
+    expect(read(consumer, 'sync-standards.local.json')).toBe(policyAfterFirst);
+    expect(readLock(consumer).ref).toBe('refs/tags/v0.4.0');
+  });
+});
+
+describe('canonical workflow', () => {
+  it('remains a policy-free bare sync delegator compatible with old CLIs', () => {
+    const workflow = readFileSync(WORKFLOW, 'utf8');
+    expect(workflow).toMatch(BARE_SYNC_STEP);
+    expect(workflow).not.toContain('bun standards sync --ref');
+    expect(workflow).not.toContain('STANDARDS_SYNC_REF');
+    expect(workflow).not.toContain('STANDARDS_AUTO_SYNC');
+  });
+
+  it('seeds policy once without adding it to the managed manifest', () => {
+    const policy = JSON.parse(readFileSync(POLICY_SEED, 'utf8'));
+    const manifest = JSON.parse(readFileSync(ROOT_MANIFEST, 'utf8')) as {
+      paths: ReadonlyArray<string>;
+    };
+    expect(policy).toEqual({ ref: DEFAULT_REF, scheduledSync: true });
+    expect(manifest.paths).not.toContain('sync-standards.local.json');
   });
 });
 
@@ -621,7 +891,8 @@ describe('help', () => {
       const result = run(consumer, [spelling]);
       expect(result.status).toBe(0);
       expect(result.stdout).toContain('Usage: standards <command>');
-      expect(result.stdout).toContain('remote Git/GitHub sources only');
+      expect(result.stdout).toContain('remote sources only');
+      expect(result.stdout).toContain('refs/heads/<branch>');
     }
   });
 });
