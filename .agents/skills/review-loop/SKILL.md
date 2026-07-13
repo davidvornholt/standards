@@ -1,13 +1,13 @@
 ---
 name: review-loop
-description: Use when the user asks for a review loop, review pass with fixes, or to keep fixing until review is clean. Runs against a pull request in a repo you control; findings live as PR review threads, fixes land as commits from thread-consuming workers, and broad diffs split into a stacked PR train. All agents run locally, never in CI.
+description: Use when the user asks for a review loop, a review pass with fixes, or to keep fixing until review is clean. Runs against a pull request in a repo you control.
 ---
 
 # Review loop
 
 Repeated review/fix passes over a pull request until convergence is evidenced, not asserted. The PR is the only durable state: its diff is the work under review, review threads are the findings ledger (unresolved threads block merge via the repository ruleset), pass summaries are PR comments, and the loop's own work is its commits. Any session can resume by reading the PR — there is no local ledger.
 
-This skill orchestrates the `review` skill. Every agent runs locally; nothing runs in CI.
+This skill orchestrates the `review` skill.
 
 ## Roles
 
@@ -19,8 +19,8 @@ If subagent tooling is unavailable, stop and report that blocker; do not substit
 
 ## PR setup
 
-1. The loop runs on a PR in a repo you control. For uncommitted work: commit on a feature branch, push, `gh pr create` with a Conventional Commit subject as the PR title — squash merge makes it the commit subject on main, and CI lints it; branch commit messages carry no format requirement. For a third-party contribution: run the loop on a PR inside your fork and open the upstream PR only after convergence — upstream sees one clean artifact, the review dialogue stays in your fork.
-2. The PR is a **draft** while the loop owns it; convergence flips it to ready for review. Draft state structurally blocks merging and auto-merge — the loop's status needs no label taxonomy beyond this plus the `needs-clarification` label below.
+1. The loop runs on a PR in a repo you control. For uncommitted work: commit on a feature branch, push, `gh pr create`. For a third-party contribution: run the loop on a PR inside your fork and open the upstream PR only after convergence — upstream sees one clean artifact, the review dialogue stays in your fork.
+2. The PR is a **draft** while the loop owns it; convergence flips it to ready for review. Draft state structurally blocks merging and auto-merge.
 3. Run the deterministic gate (root `bun run check:fix`), fix and commit what it reports, BEFORE any review pass. Mechanical issues belong to the gate: it finds every instance at once; a reviewer finds a stochastic subset per pass.
 4. Read `.agents/review/decisions.md` (if present); pass its content to every reviewer.
 5. Fixes are always new commits — never amend or force-push a branch under review (threads lose their anchors), except the restack step below. Never arm auto-merge; merging stays a human decision.
@@ -32,14 +32,14 @@ When the diff contains several unrelated changes, one review pass dilutes attent
 The gate has two modes:
 
 - **Unrelated themes** (several clusters): the parallel-reviewable stack below.
-- **One oversized coherent change** (a single cluster so large that whole-diff reading exhausts a reviewer context before enumeration starts): decompose along dependency layers into a sequential stack — schema, then service, then UI. This is the normal delivery path for large coherent work, not a last resort: implement and refine the whole change locally until the user is satisfied with the end result, then decompose for review. Nothing merges early — the whole stack can converge before the user merges bottom-up, so rejecting the end result costs closed PRs, not reverts on main. This is not sharding for isolation: reviews run down the stack in order, and each layer's review sees every ancestor layer as settled code in the checkout, so cross-layer relationships stay visible; a finding against an earlier layer becomes a thread on that layer's PR. Sequential review is the honest price of the coupling. For large-but-fitting coherent diffs, splitting is the wrong tool — partition attention with more, narrower lenses instead. Offer plan-first incremental delivery (landing early layers before later ones exist) only when the user explicitly wants early integration.
+- **One oversized coherent change** (a single cluster so large that whole-diff reading exhausts a reviewer context before enumeration starts): decompose along dependency layers into a sequential stack — schema, then service, then UI. This is the normal delivery path for large coherent work: implement and refine the whole change locally until the user is satisfied with the end result, then decompose for review. This is not sharding for isolation: reviews run down the stack in order, and each layer's review sees every ancestor layer as settled code in the checkout, so cross-layer relationships stay visible; a finding against an earlier layer becomes a thread on that layer's PR. Sequential review is the honest price of the coupling. For large-but-fitting coherent diffs, splitting is the wrong tool — partition attention with more, narrower lenses instead.
 
 1. Delegate the mapping to a subagent: themes, coupling edges, and clusters — or layer boundaries in layered mode. An unrelated-theme split requires that no file carries hunks of two clusters; a layered split requires each layer to be gate-clean on top of its ancestors. A single reviewable cluster or a trivially small diff skips the gate.
 2. Propose the split as an ordered branch-and-PR plan and wait for explicit user approval before restructuring anything.
-3. Build the stack in dependency order — one branch per cluster, each based on its parent — commit, push, and open every PR immediately as a draft (Conventional Commit subject as title) with its parent branch as base, so each PR shows exactly its cluster and CI runs from minute one. A child's base being the parent's branch also structurally enforces merge order: it cannot land in main before its parent.
+3. Build the stack in dependency order — one branch per cluster, each based on its parent — commit, push, and open every PR immediately as a draft with its parent branch as base, so each PR shows exactly its cluster and CI runs from minute one. A child's base being the parent's branch also structurally enforces merge order: it cannot land in main before its parent.
 4. The deterministic gate must pass per cluster in isolation. A failure the combined diff did not have is hidden coupling: merge those clusters and re-plan; do not patch around it.
 5. Review in convergence-gated order: run the full loop on PR 1; when it *converges* (dry counter — not when it merges), restack its child onto the converged head and start the child's loop while PR 1 awaits human merge. Clusters in disjoint stacks loop in parallel — one git worktree per concurrently active loop, because a loop owns its branch's checkout for gate runs and worker commits.
-6. Restack after each squash merge: branch deletion auto-retargets the child PR to main; rebase the child (`git rebase --onto main <merged-branch-head>`, the old head SHA is recorded on the merged PR) and force-push. Threads survive as "outdated" and stay merge-blocking. If a restack conflicts — a converged parent changed after the child based on it — collapse the remaining stack into one PR and continue the loop there; never hand-resolve a broken stack incrementally.
+6. Restack after each squash merge: branch deletion auto-retargets the child PR to main; rebase the child with `git rebase --onto main <merged-head>` — the merged PR records its old head SHA, and a plain rebase onto main replays the squashed commits as spurious conflicts — then force-push. Threads survive as "outdated" and stay merge-blocking. If a restack conflicts — a converged parent changed after the child based on it — collapse the remaining stack into one PR and continue the loop there.
 7. Seam check, proportional to residual risk: file-disjoint, independently gate-clean clusters with no shared runtime skip it (record that evidence in the PR); a shared surface (config, docs spanning clusters, cross-cluster naming) gets one reviewer over exactly that surface; only a judgment-based hunk assignment earns a catch-all pass over the combined diff.
 
 ## Passes
