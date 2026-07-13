@@ -5,7 +5,7 @@ export type ReleasePlan = {
 
 export type ReconciliationAction = 'create' | 'exists';
 
-type Decision<T> =
+export type Decision<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly error: string; readonly ok: false };
 
@@ -16,14 +16,10 @@ const parseVersion = (
   version: string,
 ): Decision<readonly [number, number, number]> => {
   const match = stableSemver.exec(version);
-  if (match === null) {
-    return { error: `Version ${version} must be a stable SemVer`, ok: false };
-  }
-  const { major, minor, patch } = match.groups ?? {};
+  const { major, minor, patch } = match?.groups ?? {};
   if (major === undefined || minor === undefined || patch === undefined) {
     return { error: `Version ${version} must be a stable SemVer`, ok: false };
   }
-
   return {
     ok: true,
     value: [Number(major), Number(minor), Number(patch)],
@@ -43,13 +39,43 @@ const compareVersions = (
   return 0;
 };
 
+export const classifyReleaseDeclaration = (input: {
+  readonly parentVersion: string | null;
+  readonly version: string;
+}): Decision<boolean> => {
+  const version = parseVersion(input.version);
+  if (!version.ok) {
+    return version;
+  }
+  if (input.parentVersion === null) {
+    return { ok: true, value: true };
+  }
+
+  const parentVersion = parseVersion(input.parentVersion);
+  if (!parentVersion.ok) {
+    return { ok: true, value: true };
+  }
+  const comparison = compareVersions(version.value, parentVersion.value);
+  if (comparison < 0) {
+    return {
+      error: `Declared version ${input.version} must not be older than first-parent version ${input.parentVersion}`,
+      ok: false,
+    };
+  }
+  return { ok: true, value: comparison > 0 };
+};
+
 export const decideRelease = (input: {
   readonly npmLatest: string | null;
   readonly npmVersionExists: boolean;
-  readonly parentVersion: string;
+  readonly parentVersion: string | null;
   readonly version: string;
 }): Decision<ReleasePlan> => {
-  if (input.version === input.parentVersion) {
+  const declaration = classifyReleaseDeclaration(input);
+  if (!declaration.ok) {
+    return declaration;
+  }
+  if (!declaration.value) {
     return { ok: true, value: { publish: false, reconcile: false } };
   }
 
@@ -57,30 +83,24 @@ export const decideRelease = (input: {
   if (!version.ok) {
     return version;
   }
-  const parentVersion = parseVersion(input.parentVersion);
-  if (!parentVersion.ok) {
-    return parentVersion;
-  }
-  if (compareVersions(version.value, parentVersion.value) <= 0) {
+  if (input.npmLatest !== null) {
+    const npmLatest = parseVersion(input.npmLatest);
+    if (!npmLatest.ok) {
+      return {
+        error: `npm latest ${input.npmLatest} must be a stable SemVer`,
+        ok: false,
+      };
+    }
+    if (compareVersions(version.value, npmLatest.value) < 0) {
+      return {
+        error: `Manifest version ${input.version} is behind npm latest ${input.npmLatest}`,
+        ok: false,
+      };
+    }
+  } else if (input.npmVersionExists) {
     return {
-      error: `Declared version ${input.version} must be newer than first-parent version ${input.parentVersion}`,
-      ok: false,
-    };
-  }
-  if (input.npmLatest === null) {
-    return {
-      error: 'npm latest is required for a release declaration',
-      ok: false,
-    };
-  }
-
-  const npmLatest = parseVersion(input.npmLatest);
-  if (!npmLatest.ok) {
-    return npmLatest;
-  }
-  if (compareVersions(version.value, npmLatest.value) < 0) {
-    return {
-      error: `Manifest version ${input.version} is behind npm latest ${input.npmLatest}`,
+      error:
+        'npm reports the declared version without an authoritative latest version',
       ok: false,
     };
   }
@@ -89,6 +109,34 @@ export const decideRelease = (input: {
     ok: true,
     value: { publish: !input.npmVersionExists, reconcile: true },
   };
+};
+
+export const decideArtifactIdentity = (input: {
+  readonly expectedIntegrity: string;
+  readonly expectedSha: string;
+  readonly npmGitHead: string | null;
+  readonly npmIntegrity: string | null;
+  readonly npmVersionExists: boolean;
+}): Decision<true> => {
+  if (!input.npmVersionExists) {
+    return { ok: true, value: true };
+  }
+  if (input.npmIntegrity === null) {
+    return { error: 'Existing npm version has no dist.integrity', ok: false };
+  }
+  if (input.npmIntegrity !== input.expectedIntegrity) {
+    return {
+      error: `Existing npm artifact integrity ${input.npmIntegrity} does not match expected ${input.expectedIntegrity}`,
+      ok: false,
+    };
+  }
+  if (input.npmGitHead !== null && input.npmGitHead !== input.expectedSha) {
+    return {
+      error: `Existing npm artifact gitHead ${input.npmGitHead} does not match expected ${input.expectedSha}`,
+      ok: false,
+    };
+  }
+  return { ok: true, value: true };
 };
 
 export const decideReconciliation = (input: {
@@ -114,6 +162,5 @@ export const decideReconciliation = (input: {
     }
     return { ok: true, value: 'exists' };
   }
-
   return { ok: true, value: 'create' };
 };

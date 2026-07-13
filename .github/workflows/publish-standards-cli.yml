@@ -30,10 +30,10 @@ jobs:
       contents: read
       id-token: write
     outputs:
-      publish: ${{ steps.release.outputs.publish }}
-      reconcile: ${{ steps.release.outputs.reconcile }}
-      tag: ${{ steps.release.outputs.tag }}
-      version: ${{ steps.release.outputs.version }}
+      publish: ${{ steps.npm.outputs.publish }}
+      reconcile: ${{ steps.npm.outputs.reconcile }}
+      tag: ${{ steps.declaration.outputs.tag }}
+      version: ${{ steps.declaration.outputs.version }}
       sha: ${{ github.event.workflow_run.head_sha }}
     steps:
       - name: Checkout tested commit
@@ -58,8 +58,8 @@ jobs:
         with:
           bun-version: 1.3.14
 
-      - name: Determine release state
-        id: release
+      - name: Determine release declaration
+        id: declaration
         env:
           PACKAGE_NAME: "@davidvornholt/standards"
           PACKAGE_PATH: packages/standards-cli/package.json
@@ -72,61 +72,19 @@ jobs:
           fi
 
           version="$(jq -er '.version | select(type == "string")' "$PACKAGE_PATH")"
-          parent_version="$(git show "$RELEASE_SHA^:$PACKAGE_PATH" | \
-            jq -er '.version | select(type == "string")')"
-
-          if [[ "$version" == "$parent_version" ]]; then
-            bun run --cwd packages/standards-cli release:state -- \
-              plan "$GITHUB_OUTPUT" "$version" "$parent_version" "" false
-            echo "version=$version" >>"$GITHUB_OUTPUT"
-            echo "tag=v$version" >>"$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          encoded_name="${PACKAGE_NAME/@/%40}"
-          encoded_name="${encoded_name//\//%2F}"
-          metadata="$(curl --fail --silent --show-error \
-            "https://registry.npmjs.org/$encoded_name")"
-          latest="$(jq -er '.["dist-tags"].latest' <<<"$metadata")"
-
-          if jq -e --arg version "$version" '.versions[$version] != null' \
-            <<<"$metadata" >/dev/null; then
-            npm_version_exists=true
-          else
-            npm_version_exists=false
+          parent_version=
+          if git cat-file -e "$RELEASE_SHA^:$PACKAGE_PATH" 2>/dev/null; then
+            parent_version="$(git show "$RELEASE_SHA^:$PACKAGE_PATH" | \
+              jq -r 'if (.version | type) == "string" then .version else "" end')"
           fi
 
           bun run --cwd packages/standards-cli release:state -- \
-            plan "$GITHUB_OUTPUT" "$version" "$parent_version" \
-            "$latest" "$npm_version_exists"
-
-          {
-            echo "version=$version"
-            echo "tag=v$version"
-          } >>"$GITHUB_OUTPUT"
-
-      - name: Setup Node for npm trusted publishing
-        if: steps.release.outputs.publish == 'true'
-        uses: actions/setup-node@v6
-        with:
-          node-version: "26"
-          package-manager-cache: false
-          registry-url: https://registry.npmjs.org
-
-      - name: Verify npm supports trusted publishing
-        if: steps.release.outputs.publish == 'true'
-        run: |
-          npm_version="$(npm --version)"
-          if ! bun -e \
-            'if (Bun.semver.order(process.argv[1], "11.5.1") < 0) process.exit(1)' \
-            "$npm_version"; then
-            echo "::error::npm 11.5.1 or newer is required for trusted publishing"
-            exit 1
-          fi
+            classify "$GITHUB_OUTPUT" "$version" "$parent_version"
+          printf '%s' "$parent_version" >"$RUNNER_TEMP/release-parent-version"
 
       - name: Pack and inspect package
         id: package
-        if: steps.release.outputs.publish == 'true'
+        if: steps.declaration.outputs.declared == 'true'
         run: |
           artifact_dir="$RUNNER_TEMP/standards-cli-package"
           mkdir "$artifact_dir"
@@ -143,8 +101,52 @@ jobs:
           tar -tzf "${artifacts[0]}"
           echo "artifact=${artifacts[0]}" >>"$GITHUB_OUTPUT"
 
+      - name: Inspect npm release boundary
+        id: npm
+        if: steps.declaration.outputs.declared == 'true'
+        env:
+          PACKAGE_ARTIFACT: ${{ steps.package.outputs.artifact }}
+          PACKAGE_NAME: "@davidvornholt/standards"
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+          RELEASE_VERSION: ${{ steps.declaration.outputs.version }}
+        run: >-
+          bun run --cwd packages/standards-cli release:state --
+          npm "$GITHUB_OUTPUT" "$PACKAGE_NAME" "$RELEASE_VERSION"
+          "$(<"$RUNNER_TEMP/release-parent-version")"
+          "$PACKAGE_ARTIFACT" "$RELEASE_SHA"
+
+      - name: Preflight GitHub release boundary
+        if: steps.npm.outputs.reconcile == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+          RELEASE_TAG: ${{ steps.declaration.outputs.tag }}
+        run: >-
+          bun run --cwd packages/standards-cli release:state --
+          github-inspect "$RUNNER_TEMP/github-release-state"
+          "$RELEASE_SHA" "$RELEASE_TAG"
+
+      - name: Setup Node for npm trusted publishing
+        if: steps.npm.outputs.publish == 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: "26"
+          package-manager-cache: false
+          registry-url: https://registry.npmjs.org
+
+      - name: Verify npm supports trusted publishing
+        if: steps.npm.outputs.publish == 'true'
+        run: |
+          npm_version="$(npm --version)"
+          if ! bun -e \
+            'if (Bun.semver.order(process.argv[1], "11.5.1") < 0) process.exit(1)' \
+            "$npm_version"; then
+            echo "::error::npm 11.5.1 or newer is required for trusted publishing"
+            exit 1
+          fi
+
       - name: Publish package
-        if: steps.release.outputs.publish == 'true'
+        if: steps.npm.outputs.publish == 'true'
         env:
           PACKAGE_TARBALL: ${{ steps.package.outputs.artifact }}
         run: >-
@@ -172,41 +174,17 @@ jobs:
           persist-credentials: false
           ref: ${{ needs.publish.outputs.sha }}
 
-      - name: Determine GitHub release state
-        id: release
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Reconcile verified GitHub tag and release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_SHA: ${{ needs.publish.outputs.sha }}
           RELEASE_TAG: ${{ needs.publish.outputs.tag }}
-        run: |
-          release_status=absent
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            is_draft="$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)"
-            if [[ "$is_draft" == "true" ]]; then
-              release_status=draft
-            else
-              release_status=published
-            fi
-          fi
-
-          tag_sha=
-          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" \
-            >/dev/null 2>&1; then
-            git fetch --force origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
-            tag_sha="$(git rev-list -n 1 "$RELEASE_TAG")"
-          fi
-
-          bun run --cwd packages/standards-cli release:state -- \
-            reconcile "$GITHUB_OUTPUT" "$RELEASE_SHA" "$release_status" "$tag_sha"
-
-      - name: Create GitHub release
-        if: steps.release.outputs.action == 'create'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_SHA: ${{ needs.publish.outputs.sha }}
-          RELEASE_TAG: ${{ needs.publish.outputs.tag }}
-        run: |
-          gh release create "$RELEASE_TAG" \
-            --generate-notes \
-            --target "$RELEASE_SHA" \
-            --title "$RELEASE_TAG"
+        run: >-
+          bun run --cwd packages/standards-cli release:state --
+          github-reconcile "$RUNNER_TEMP/github-release-state"
+          "$RELEASE_SHA" "$RELEASE_TAG"
