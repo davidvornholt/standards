@@ -109,6 +109,44 @@ const sync = (
 ): RunResult =>
   run(consumer, ['sync', ...extra, '--from', up, '--dir', consumer]);
 
+const git = (dir: string, args: ReadonlyArray<string>): string =>
+  execFileSync(
+    'git',
+    [
+      '-C',
+      dir,
+      '-c',
+      'user.name=test',
+      '-c',
+      'user.email=test@example.com',
+      '-c',
+      'commit.gpgsign=false',
+      ...args,
+    ],
+    { encoding: 'utf8' },
+  ).trim();
+
+// A git-backed upstream with two commits: tag `v1` and branch `stable` hold
+// the original managed content while `main` has moved on. `file://` forces the
+// remote-source code path that a plain local path would bypass.
+const buildGitUpstream = (): {
+  up: string;
+  url: string;
+  taggedSha: string;
+} => {
+  const up = buildUpstream();
+  git(up, ['init', '--quiet', '-b', 'main']);
+  git(up, ['add', '-A']);
+  git(up, ['commit', '--quiet', '-m', 'v1']);
+  git(up, ['tag', 'v1']);
+  git(up, ['branch', 'stable']);
+  const taggedSha = git(up, ['rev-parse', 'HEAD']);
+  write(up, 'managed/a.txt', 'alpha v2\n');
+  git(up, ['add', '-A']);
+  git(up, ['commit', '--quiet', '-m', 'v2']);
+  return { up, url: `file://${up}`, taggedSha };
+};
+
 afterEach(() => {
   while (tmps.length > 0) {
     const dir = tmps.pop();
@@ -369,43 +407,6 @@ describe('sync', () => {
 });
 
 describe('ref pinning', () => {
-  const git = (dir: string, args: ReadonlyArray<string>): string =>
-    execFileSync(
-      'git',
-      [
-        '-C',
-        dir,
-        '-c',
-        'user.name=test',
-        '-c',
-        'user.email=test@example.com',
-        '-c',
-        'commit.gpgsign=false',
-        ...args,
-      ],
-      { encoding: 'utf8' },
-    ).trim();
-
-  // A git-backed upstream with two commits: tag `v1` holds the original
-  // managed content, `main` has moved on. `file://` forces the remote-source
-  // code path that a plain local path would bypass.
-  const buildGitUpstream = (): {
-    up: string;
-    url: string;
-    taggedSha: string;
-  } => {
-    const up = buildUpstream();
-    git(up, ['init', '--quiet', '-b', 'main']);
-    git(up, ['add', '-A']);
-    git(up, ['commit', '--quiet', '-m', 'v1']);
-    git(up, ['tag', 'v1']);
-    const taggedSha = git(up, ['rev-parse', 'HEAD']);
-    write(up, 'managed/a.txt', 'alpha v2\n');
-    git(up, ['add', '-A']);
-    git(up, ['commit', '--quiet', '-m', 'v2']);
-    return { up, url: `file://${up}`, taggedSha };
-  };
-
   it('syncs the tagged snapshot with --ref and main without it', () => {
     const { up, url, taggedSha } = buildGitUpstream();
     const { consumer } = initConsumer(up);
@@ -418,6 +419,28 @@ describe('ref pinning', () => {
     const tracking = sync(url, consumer);
     expect(tracking.status).toBe(0);
     expect(read(consumer, 'managed/a.txt')).toBe('alpha v2\n');
+  });
+
+  it('syncs a raw commit sha and records the exact pin', () => {
+    const { up, url, taggedSha } = buildGitUpstream();
+    const { consumer } = initConsumer(up);
+
+    const result = sync(url, consumer, ['--ref', taggedSha]);
+
+    expect(result.status).toBe(0);
+    expect(read(consumer, 'managed/a.txt')).toBe('alpha\n');
+    expect(readLock(consumer).sha).toBe(taggedSha);
+  });
+
+  it('syncs a named non-default branch', () => {
+    const { up, url, taggedSha } = buildGitUpstream();
+    const { consumer } = initConsumer(up);
+
+    const result = sync(url, consumer, ['--ref', 'stable']);
+
+    expect(result.status).toBe(0);
+    expect(read(consumer, 'managed/a.txt')).toBe('alpha\n');
+    expect(readLock(consumer).sha).toBe(taggedSha);
   });
 
   it('init honors --ref for a pinned first mirror', () => {
@@ -443,6 +466,20 @@ describe('ref pinning', () => {
     const result = sync(url, consumer, ['--ref', 'v9']);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('Cannot fetch "v9"');
+  });
+
+  it('rejects an option-like ref without changing the consumer', () => {
+    const { up, url } = buildGitUpstream();
+    const { consumer } = initConsumer(up);
+    const managedBefore = read(consumer, 'managed/a.txt');
+    const lockBefore = read(consumer, 'sync-standards.lock');
+
+    const result = sync(url, consumer, ['--ref', '-u']);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Cannot fetch "-u"');
+    expect(read(consumer, 'managed/a.txt')).toBe(managedBefore);
+    expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
   });
 
   it('rejects --ref combined with a local path source', () => {
@@ -584,6 +621,7 @@ describe('help', () => {
       const result = run(consumer, [spelling]);
       expect(result.status).toBe(0);
       expect(result.stdout).toContain('Usage: standards <command>');
+      expect(result.stdout).toContain('remote Git/GitHub sources only');
     }
   });
 });

@@ -196,7 +196,7 @@ const resolveSource = (src: string, ref: string | undefined): Source => {
     execFileSync('git', ['init', '--quiet', dir], { stdio: 'ignore' });
     execFileSync(
       'git',
-      ['-C', dir, 'fetch', '--quiet', '--depth', '1', url, target],
+      ['-C', dir, 'fetch', '--quiet', '--depth', '1', '--', url, target],
       { stdio: 'ignore' },
     );
     execFileSync(
@@ -757,7 +757,7 @@ Commands:
 Options:
   --dir <path>   Consumer directory to operate on (default: current directory)
   --from <src>   Upstream override for init/sync (GitHub repo or local path)
-  --ref <ref>    Upstream tag, branch, or full commit sha for init/sync (default: main)
+  --ref <ref>    Upstream tag, branch, or full commit sha for init/sync (remote Git/GitHub sources only; default: main)
   --dry-run      Preview a sync without writing anything
   --check        With github: compare live settings to the declaration (default)
   --apply        With github: converge the live repository (needs admin auth)`;
