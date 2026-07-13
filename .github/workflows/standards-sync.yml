@@ -13,7 +13,8 @@ name: Standards sync
 on:
   schedule:
     - cron: "0 6 * * 1" # Mondays 06:00 UTC
-  workflow_dispatch:
+  repository_dispatch:
+    types: [standards-sync]
 
 permissions:
   contents: write
@@ -26,6 +27,7 @@ concurrency:
 jobs:
   sync:
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    environment: standards-sync
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -58,10 +60,12 @@ jobs:
       # consumer most needs to be visible — an open PR with a red required
       # check is the signal, and branch protection keeps it unmergeable.
       #
-      # Configure STANDARDS_SYNC_TOKEN (fine-grained PAT: contents + pull
-      # requests write) so the opened PR triggers workflows; PRs opened with
-      # the default GITHUB_TOKEN fallback do not, and need a manual nudge
-      # (push to the branch or close and reopen) to run the gate.
+      # Configure STANDARDS_SYNC_TOKEN in the protected `standards-sync`
+      # environment (fine-grained PAT: contents + pull requests write) so the
+      # opened PR triggers workflows. Restrict that environment to `main`; both
+      # schedule and repository_dispatch load this workflow from the default
+      # branch. PRs opened with the default GITHUB_TOKEN fallback do not trigger
+      # workflows and need a manual nudge (push or close/reopen) to run the gate.
       #
       # `gh pr create` is left to default `--base` to the repository's default
       # branch: the `schedule` event carries no payload, so expressions like

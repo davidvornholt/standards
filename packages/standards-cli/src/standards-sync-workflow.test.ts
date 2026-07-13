@@ -51,6 +51,18 @@ describe('canonical scheduled sync contract', () => {
     const checkoutStep = workflowStep(workflow, 'Checkout');
     expect(checkoutStep).toContain('uses: actions/checkout@v6');
     expect(checkoutStep).toContain('ref: main');
+    expect(workflow).toContain('repository_dispatch:');
+    expect(workflow).toContain('types: [standards-sync]');
+    expect(workflow).not.toContain('workflow_dispatch:');
+    expect(workflow).toContain('environment: standards-sync');
+    expect(
+      workflowStep(workflow, 'Open a pull request if the mirror changed'),
+    ).toContain(
+      [
+        'GH_TOKEN: $',
+        '{{ secrets.STANDARDS_SYNC_TOKEN || secrets.GITHUB_TOKEN }}',
+      ].join(''),
+    );
     const preflightStep = workflowStep(workflow, 'Check scheduled sync policy');
     expect(preflightStep).toContain(
       'uses: ./.github/actions/standards-sync-preflight',
@@ -73,8 +85,10 @@ describe('canonical scheduled sync contract', () => {
   it('syncs the complete local action as canonical content', () => {
     const manifest = JSON.parse(readFileSync(MANIFEST, 'utf8')) as {
       readonly paths: ReadonlyArray<string>;
+      readonly syncPolicyContractVersion: unknown;
     };
 
+    expect(manifest.syncPolicyContractVersion).toBe(1);
     expect(manifest.paths).toContain(
       '.github/actions/standards-sync-preflight',
     );
@@ -95,5 +109,19 @@ describe('canonical scheduled sync contract', () => {
     expect(readFileSync(SYNC_SKILL, 'utf8')).toContain(
       'real sync from configured remote ref',
     );
+    const rootDocumentation = readFileSync(join(ROOT, 'README.md'), 'utf8');
+    const templateDocumentation = readFileSync(
+      join(ROOT, 'template/README.md'),
+      'utf8',
+    );
+    for (const documentation of [
+      rootDocumentation,
+      templateDocumentation,
+      readFileSync(SYNC_SKILL, 'utf8'),
+    ]) {
+      expect(documentation).toContain('protected `standards-sync`');
+      expect(documentation).toContain('repository dispatch');
+      expect(documentation).toContain('syncPolicyContractVersion');
+    }
   });
 });

@@ -38,6 +38,7 @@ const STD_PATHS: ReadonlyArray<string> = [
   SYNC_POLICY_CONTRACT_PATH,
 ];
 const DEFAULT_REF = 'refs/heads/main';
+const SYNC_POLICY_CONTRACT_VERSION = 1;
 const BARE_SYNC_STEP = /^\s+run: bun standards sync$/mu;
 
 type RunResult = { stdout: string; stderr: string; status: number };
@@ -101,7 +102,12 @@ const buildUpstream = (paths: ReadonlyArray<string> = STD_PATHS): string => {
   write(
     up,
     'sync-standards.json',
-    JSON.stringify({ upstream: up, seedDir: 'template', paths }),
+    JSON.stringify({
+      upstream: up,
+      seedDir: 'template',
+      syncPolicyContractVersion: SYNC_POLICY_CONTRACT_VERSION,
+      paths,
+    }),
   );
   write(up, 'template/seed.txt', 'seed original\n');
   write(
@@ -136,7 +142,7 @@ const buildUpstream = (paths: ReadonlyArray<string> = STD_PATHS): string => {
         check: 'standards check',
         'check:fix': 'standards check',
       },
-      devDependencies: { '@davidvornholt/standards': '0.1.0' },
+      devDependencies: { '@davidvornholt/standards': '0.5.0' },
     }),
   );
   write(up, 'managed/a.txt', 'alpha\n');
@@ -178,8 +184,9 @@ const git = (dir: string, args: ReadonlyArray<string>): string =>
     { encoding: 'utf8' },
   ).trim();
 
-// A git-backed upstream with two commits. The first is tagged `v1` and
-// `collision`; the second is main plus branches `stable` and `collision`.
+// A git-backed upstream with a real pre-contract snapshot, then a compatible
+// tagged snapshot, then main. The compatibility marker and controller do not
+// exist in the historical v0.4.0 tree.
 const buildGitUpstream = (): {
   up: string;
   url: string;
@@ -187,22 +194,39 @@ const buildGitUpstream = (): {
 } => {
   const up = buildUpstream();
   git(up, ['init', '--quiet', '-b', 'main']);
+  const contract = read(up, SYNC_POLICY_CONTRACT_PATH);
   write(
     up,
     'sync-standards.json',
     JSON.stringify({
       upstream: `file://${up}`,
       seedDir: 'template',
-      paths: STD_PATHS,
+      paths: ['sync-standards.json', 'managed'],
     }),
   );
   rmSync(join(up, 'template/sync-standards.local.json'));
+  rmSync(join(up, '.github'), { recursive: true });
+  git(up, ['add', '-A']);
+  git(up, ['commit', '--quiet', '-m', 'v0.4.0']);
+  git(up, ['tag', 'v0.4.0']);
+
+  write(
+    up,
+    'sync-standards.json',
+    JSON.stringify({
+      upstream: `file://${up}`,
+      seedDir: 'template',
+      syncPolicyContractVersion: SYNC_POLICY_CONTRACT_VERSION,
+      paths: STD_PATHS,
+    }),
+  );
+  write(up, SYNC_POLICY_CONTRACT_PATH, contract);
   git(up, ['add', '-A']);
   git(up, ['commit', '--quiet', '-m', 'v1']);
   git(up, ['tag', 'v1']);
-  git(up, ['tag', 'v0.4.0']);
   git(up, ['tag', 'collision']);
   const taggedSha = git(up, ['rev-parse', 'HEAD']);
+  git(up, ['tag', '--annotate', 'annotated', '--message', 'annotated']);
   write(
     up,
     'template/sync-standards.local.json',
@@ -499,6 +523,7 @@ describe('sync', () => {
       JSON.stringify({
         upstream: up,
         seedDir: 'template',
+        syncPolicyContractVersion: SYNC_POLICY_CONTRACT_VERSION,
         paths: [...STD_PATHS, 'newly-managed.txt'],
       }),
     );
@@ -597,7 +622,7 @@ describe('ref pinning', () => {
     const workflow = run(consumer, ['sync', '--dir', consumer], {
       env: {
         GITHUB_ACTIONS: 'true',
-        GITHUB_EVENT_NAME: 'workflow_dispatch',
+        GITHUB_EVENT_NAME: 'repository_dispatch',
       },
     });
     expect(workflow.status).toBe(0);
@@ -621,7 +646,7 @@ describe('ref pinning', () => {
     const workflow = run(consumer, ['sync', '--dir', consumer], {
       env: {
         GITHUB_ACTIONS: 'true',
-        GITHUB_EVENT_NAME: 'workflow_dispatch',
+        GITHUB_EVENT_NAME: 'repository_dispatch',
       },
     });
     expect(workflow.status).toBe(0);
@@ -665,6 +690,42 @@ describe('policy validation', () => {
       expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
     }
   });
+
+  it('rejects incompatible effective policy before remote setup', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    const lockBefore = read(consumer, 'sync-standards.lock');
+    const managedBefore = read(consumer, 'managed/a.txt');
+    const policyBefore = read(consumer, 'sync-standards.local.json');
+
+    setStandardsVersion(consumer, '0.4.0');
+    const explicit = sync('file:///missing-standards', consumer, [
+      '--ref',
+      'refs/tags/v1',
+    ]);
+    expect(explicit.status).toBe(1);
+    expect(explicit.stderr).toContain('exact stable version >=0.5.0');
+    expect(explicit.stderr).not.toContain('Cannot fetch');
+    expect(read(consumer, 'sync-standards.local.json')).toBe(policyBefore);
+
+    setStandardsVersion(consumer, '^0.5.0');
+    write(
+      consumer,
+      'sync-standards.local.json',
+      JSON.stringify({ ref: 'refs/tags/v1', scheduledSync: true }),
+    );
+    const bare = run(consumer, [
+      'sync',
+      '--from',
+      'file:///missing-standards',
+      '--dir',
+      consumer,
+    ]);
+    expect(bare.status).toBe(1);
+    expect(bare.stderr).toContain('exact stable version >=0.5.0');
+    expect(bare.stderr).not.toContain('Cannot fetch');
+    expect(read(consumer, 'managed/a.txt')).toBe(managedBefore);
+    expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
+  });
 });
 
 describe('ref resolution', () => {
@@ -677,6 +738,30 @@ describe('ref resolution', () => {
     expect(result.status).toBe(0);
     expect(read(consumer, 'managed/a.txt')).toBe('alpha\n');
     expect(readLock(consumer).ref).toBe(taggedSha);
+    expect(readLock(consumer).sha).toBe(taggedSha);
+  });
+
+  it('rejects raw non-commit objects but accepts an annotated tag ref', () => {
+    const { up, url, taggedSha } = buildGitUpstream();
+    const { consumer } = initConsumer(up);
+    const lockBefore = read(consumer, 'sync-standards.lock');
+    const policyBefore = read(consumer, 'sync-standards.local.json');
+    const objectIds = [
+      git(up, ['rev-parse', 'refs/tags/annotated']),
+      git(up, ['rev-parse', 'refs/tags/v1^{tree}']),
+      git(up, ['rev-parse', 'refs/tags/v1:managed/a.txt']),
+    ];
+
+    for (const objectId of objectIds) {
+      const result = sync(url, consumer, ['--ref', objectId]);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('full object IDs must identify a commit');
+      expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
+      expect(read(consumer, 'sync-standards.local.json')).toBe(policyBefore);
+    }
+
+    const qualified = sync(url, consumer, ['--ref', 'refs/tags/annotated']);
+    expect(qualified.status).toBe(0);
     expect(readLock(consumer).sha).toBe(taggedSha);
   });
 
@@ -781,24 +866,36 @@ describe('scheduled and legacy sync', () => {
     expect(read(consumer, 'managed/a.txt')).toBe('alpha v4\n');
   });
 
-  it('keeps a pre-policy pinned workflow durable across two bare cycles', () => {
+  it('rejects a real pre-contract snapshot before changing the controller', () => {
     const { up, url } = buildGitUpstream();
     const { consumer } = initConsumer(up);
+    const historicalPaths = git(up, [
+      'ls-tree',
+      '-r',
+      '--name-only',
+      'refs/tags/v0.4.0',
+    ]);
+    const historicalManifest = git(up, [
+      'show',
+      'refs/tags/v0.4.0:sync-standards.json',
+    ]);
+    expect(historicalPaths).not.toContain(SYNC_POLICY_CONTRACT_PATH);
+    expect(historicalManifest).not.toContain('syncPolicyContractVersion');
+    const lockBefore = read(consumer, 'sync-standards.lock');
+    const policyBefore = read(consumer, 'sync-standards.local.json');
+    const controllerBefore = read(consumer, SYNC_POLICY_CONTRACT_PATH);
+    const managedBefore = read(consumer, 'managed/a.txt');
 
-    const first = sync(url, consumer, ['--ref', 'refs/tags/v0.4.0']);
-    expect(first.status).toBe(0);
-    expect(read(consumer, 'managed/standards-sync.yml')).toBe(
-      'run: bun standards sync\n',
-    );
-    const policyAfterFirst = read(consumer, 'sync-standards.local.json');
+    const result = sync(url, consumer, ['--ref', 'refs/tags/v0.4.0']);
 
-    const second = run(consumer, ['sync', '--dir', consumer]);
-    expect(second.status).toBe(0);
-    expect(read(consumer, 'managed/standards-sync.yml')).toBe(
-      'run: bun standards sync\n',
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      'must declare syncPolicyContractVersion: 1',
     );
-    expect(read(consumer, 'sync-standards.local.json')).toBe(policyAfterFirst);
-    expect(readLock(consumer).ref).toBe('refs/tags/v0.4.0');
+    expect(read(consumer, SYNC_POLICY_CONTRACT_PATH)).toBe(controllerBefore);
+    expect(read(consumer, 'managed/a.txt')).toBe(managedBefore);
+    expect(read(consumer, 'sync-standards.local.json')).toBe(policyBefore);
+    expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
   });
 });
 

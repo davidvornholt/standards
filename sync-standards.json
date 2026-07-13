@@ -1,6 +1,7 @@
 {
   "upstream": "github:davidvornholt/standards",
   "seedDir": "template",
+  "syncPolicyContractVersion": 1,
   "paths": [
     "sync-standards.json",
     "AGENTS.md",

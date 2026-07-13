@@ -73,7 +73,7 @@ bun standards github --apply  # converge the live repo (needs admin gh auth)
 bun standards help            # list commands and options
 ```
 
-The `Standards sync` workflow also runs `sync` weekly and opens a PR when upstream has moved, so you never have to remember to pull. The PR is validated by the required `Standards` gate like any other change; configure a `STANDARDS_SYNC_TOKEN` Actions secret (fine-grained PAT with contents and pull-requests write) so the opened PR triggers that gate automatically — with the default `GITHUB_TOKEN` it needs a manual nudge.
+The `Standards sync` workflow also runs `sync` weekly and opens a PR when upstream has moved, so you never have to remember to pull. The PR is validated by the required `Standards` gate like any other change. Create a protected `standards-sync` Actions environment restricted to the default `main` branch, then configure its `STANDARDS_SYNC_TOKEN` environment secret (fine-grained PAT with contents and pull-requests write) so the opened PR triggers that gate automatically — with the default `GITHUB_TOKEN` it needs a manual nudge. Manual runs use the default-branch-bound `standards-sync` repository dispatch: `gh api --method POST repos/OWNER/REPO/dispatches -f event_type=standards-sync`.
 
 ### Track main or pin a version
 
@@ -89,9 +89,9 @@ Non-default policy requires `@davidvornholt/standards` >=0.5.0 declared as an ex
 ```
 
 - **`ref`** — `refs/heads/<branch>`, `refs/tags/<tag>`, or a full commit SHA. Qualified names prevent a branch and tag with the same name from resolving ambiguously. A successful non-dry `sync --ref <ref>` updates this field; a dry run never does.
-- **`scheduledSync`** — set to `false` to skip only scheduled GitHub Actions runs. Manual `workflow_dispatch` and local sync still run.
+- **`scheduledSync`** — set to `false` to skip only scheduled GitHub Actions runs. Default-branch `standards-sync` repository dispatches and local sync still run.
 
-Missing policy files default to `refs/heads/main` with scheduled sync enabled, so existing consumers migrate without a flag day. Every CLI release already creates a `vX.Y.Z` tag and GitHub Release, so `refs/tags/vX.Y.Z` values are natural pin points — no separate content-release process exists or is needed. A pinned repo updates by running `sync --ref <newer-qualified-ref>` (or editing the policy and then running bare `sync`) and reviewing the resulting PR like a dependency upgrade. The lock records both the requested ref and exact resolved commit; `check` rejects policy/lock disagreement.
+Missing policy files default to `refs/heads/main` with scheduled sync enabled, so existing consumers migrate without a flag day. Every CLI release already creates a `vX.Y.Z` tag and GitHub Release, so compatible `refs/tags/vX.Y.Z` values are natural pin points — no separate content-release process exists or is needed. A source is compatible with ref-pinned policy only when its `sync-standards.json` declares `"syncPolicyContractVersion": 1`; the CLI checks this after fetching and before mirroring, so historical snapshots that predate the controller cannot delete or downgrade it. A pinned repo updates by running `sync --ref <newer-qualified-ref>` (or editing the policy and then running bare `sync`) and reviewing the resulting PR like a dependency upgrade. The lock records both the requested ref and exact resolved commit; `check` rejects policy/lock disagreement.
 
 ## Release the CLI
 
@@ -101,11 +101,12 @@ The version in `packages/standards-cli/package.json` is the release declaration.
 
 - **Canonical content tracks `main` by default.** The CLI is a normal package dependency; synced content follows `sync-standards.local.json`, defaulting to upstream `refs/heads/main`. Updates arrive the next time a repo runs `sync`; the resulting diff is still reviewed in a pull request.
 - **Mirror, including deletions.** `sync` reconciles managed paths against the lock three ways: files removed upstream are removed locally, so "canonical" never drifts into a pile of stale copies. `--dry-run` previews the plan (create / update / delete) and writes nothing.
+- **Controller compatibility is checked before mirroring.** Fetched sources must declare `"syncPolicyContractVersion": 1` in `sync-standards.json`. Pre-contract snapshots are rejected before any managed file, lock, or policy changes, keeping the consumer-side policy controller on one compatible generation.
 - **`check` is the CI gate.** It confirms every synced file still matches what `sync` last wrote (offline, hash-based), fails closed when the lock is absent, and runs `doctor` to verify the repo-owned extension seams. Once `.github/settings.json` is synced it also compares the live GitHub repository against the declaration via the API and fails on drift — repo merge settings that the CI token cannot see are reported as unverifiable instead of failing, since only admin tokens can read them. It runs first inside `bun run check`.
 
 ### Known limitation
 
-`check` detects **local tampering** with canonical files, not that **upstream has moved on**. Nothing local encodes "the template changed"; a repo only learns of upstream changes by running `sync`. The `Standards sync` workflow closes this for repos tracking `main`: it runs `sync` weekly (and on demand) and opens a PR when the mirror changes, so upstream updates surface as reviewable PRs instead of silent drift. A repo pinned to a ref has opted out of that signal by design — staying current becomes its own responsibility, like any pinned dependency.
+`check` detects **local tampering** with canonical files, not that **upstream has moved on**. Nothing local encodes "the template changed"; a repo only learns of upstream changes by running `sync`. The `Standards sync` workflow closes this for repos tracking `main`: it runs `sync` weekly (and through a default-branch repository dispatch) and opens a PR when the mirror changes, so upstream updates surface as reviewable PRs instead of silent drift. A repo pinned to a ref has opted out of that signal by design — staying current becomes its own responsibility, like any pinned dependency.
 
 ## Non-goals
 

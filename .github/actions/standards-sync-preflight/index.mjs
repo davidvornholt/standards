@@ -10,7 +10,7 @@ const main = () => {
   const eventName = process.env.GITHUB_EVENT_NAME;
   const outputFile = process.env.GITHUB_OUTPUT;
   const workspace = process.env.GITHUB_WORKSPACE;
-  if (eventName !== 'schedule' && eventName !== 'workflow_dispatch') {
+  if (eventName !== 'schedule' && eventName !== 'repository_dispatch') {
     throw new Error(
       `Unsupported Standards sync event: ${eventName ?? 'unset'}`,
     );
@@ -32,7 +32,7 @@ const main = () => {
   }
 
   const runSync =
-    eventName === 'workflow_dispatch' || inspection.policy.scheduledSync;
+    eventName === 'repository_dispatch' || inspection.policy.scheduledSync;
   appendFileSync(outputFile, `run_sync=${runSync}\n`);
   console.log(
     runSync

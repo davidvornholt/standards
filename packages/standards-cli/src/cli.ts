@@ -41,9 +41,14 @@ const { YAML: BunYaml } = await import('bun');
 
 const DEFAULT_UPSTREAM = 'github:davidvornholt/standards';
 const DEFAULT_REF = 'refs/heads/main';
+const DEFAULT_SYNC_POLICY: SyncPolicy = {
+  ref: DEFAULT_REF,
+  scheduledSync: true,
+};
 const LOCAL_POLICY_FILE = 'sync-standards.local.json';
 const SYNC_POLICY_CONTRACT_FILE =
   '.github/actions/standards-sync-preflight/sync-policy.mjs';
+const SYNC_POLICY_CONTRACT_VERSION = 1;
 
 // Characters of a sha256 hex digest shown in drift reports; enough to identify.
 const HASH_PREVIEW_LENGTH = 12;
@@ -65,6 +70,7 @@ const IGNORED_DIRS = new Set([
 type Manifest = {
   readonly upstream: string;
   readonly seedDir: string;
+  readonly syncPolicyContractVersion: unknown;
   readonly paths: ReadonlyArray<string>;
 };
 
@@ -88,6 +94,12 @@ type SyncPolicyInspection = {
 
 type SyncPolicyInspectionInput = {
   readonly packageText: string | undefined;
+  readonly policyText: string | undefined;
+  readonly requireDirectPackage: boolean;
+};
+
+type ConsumerSyncPolicyInspectionOptions = {
+  readonly allowMissingDefaultContract: boolean;
   readonly policyText: string | undefined;
   readonly requireDirectPackage: boolean;
 };
@@ -155,6 +167,7 @@ const parseManifest = (raw: unknown): Manifest => {
   return {
     upstream: o.upstream,
     seedDir: o.seedDir,
+    syncPolicyContractVersion: o.syncPolicyContractVersion,
     paths: o.paths as ReadonlyArray<string>,
   };
 };
@@ -164,6 +177,14 @@ const loadManifest = async (path: string): Promise<Manifest> => {
     throw new Error(`Manifest not found: ${path}`);
   }
   return parseManifest(JSON.parse(await readFile(path, 'utf8')) as unknown);
+};
+
+const assertCompatibleSyncSource = (manifest: Manifest): void => {
+  if (manifest.syncPolicyContractVersion !== SYNC_POLICY_CONTRACT_VERSION) {
+    throw new Error(
+      `Selected standards source must declare syncPolicyContractVersion: ${SYNC_POLICY_CONTRACT_VERSION}; choose a ref that includes the sync-policy controller contract`,
+    );
+  }
 };
 
 const isFullCommitSha = (ref: string): boolean => FULL_COMMIT_SHA.test(ref);
@@ -184,29 +205,6 @@ const assertSupportedRef = (ref: string): void => {
   } catch (error) {
     throw new Error(`Invalid qualified Git ref: ${ref}`, { cause: error });
   }
-};
-
-const parseSyncPolicy = (raw: unknown): SyncPolicy => {
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-    throw new Error(`${LOCAL_POLICY_FILE} must be a JSON object`);
-  }
-  const policy = raw as Record<string, unknown>;
-  if (typeof policy.ref !== 'string') {
-    throw new Error(`${LOCAL_POLICY_FILE} requires string "ref"`);
-  }
-  if (typeof policy.scheduledSync !== 'boolean') {
-    throw new Error(`${LOCAL_POLICY_FILE} requires boolean "scheduledSync"`);
-  }
-  assertSupportedRef(policy.ref);
-  return { ref: policy.ref, scheduledSync: policy.scheduledSync };
-};
-
-const loadSyncPolicy = async (consumer: string): Promise<SyncPolicy> => {
-  const path = join(consumer, LOCAL_POLICY_FILE);
-  if (!existsSync(path)) {
-    return { ref: DEFAULT_REF, scheduledSync: true };
-  }
-  return parseSyncPolicy(JSON.parse(await readFile(path, 'utf8')) as unknown);
 };
 
 const writeSyncPolicy = async (
@@ -242,6 +240,42 @@ const writeLock = async (dir: string, lock: Lock): Promise<void> => {
     join(dir, 'sync-standards.lock'),
     `${JSON.stringify(ordered, null, 2)}\n`,
   );
+};
+
+const assertFetchedCommitObject = (
+  dir: string,
+  target: string,
+  cleanup: () => void,
+): void => {
+  let fetchedObject: string;
+  let fetchedType: string;
+  try {
+    fetchedObject = execFileSync(
+      'git',
+      ['-C', dir, 'rev-parse', '--verify', 'FETCH_HEAD'],
+      { encoding: 'utf8' },
+    ).trim();
+    fetchedType = execFileSync(
+      'git',
+      ['-C', dir, 'cat-file', '-t', 'FETCH_HEAD'],
+      { encoding: 'utf8' },
+    ).trim();
+  } catch (error) {
+    cleanup();
+    throw new Error(`Cannot verify fetched object ${target}`, { cause: error });
+  }
+  if (fetchedObject.toLowerCase() !== target.toLowerCase()) {
+    cleanup();
+    throw new Error(
+      `Fetched object ${fetchedObject} does not match requested object ${target}`,
+    );
+  }
+  if (fetchedType !== 'commit') {
+    cleanup();
+    throw new Error(
+      `Raw object ${target} has type ${fetchedType}; full object IDs must identify a commit`,
+    );
+  }
 };
 
 // Fetch the template into a working directory. Accepts a local path (used to
@@ -282,6 +316,17 @@ const resolveSource = (src: string, ref: string | undefined): Source => {
       ['-C', dir, 'fetch', '--quiet', '--depth', '1', '--', url, target],
       { stdio: 'ignore' },
     );
+  } catch (error) {
+    cleanup();
+    throw new Error(
+      `Cannot fetch "${target}" from ${url}; expected a qualified branch or tag, or a full commit sha reachable on the remote`,
+      { cause: error },
+    );
+  }
+  if (isFullCommitSha(target)) {
+    assertFetchedCommitObject(dir, target, cleanup);
+  }
+  try {
     execFileSync(
       'git',
       ['-C', dir, 'checkout', '--quiet', '--detach', 'FETCH_HEAD'],
@@ -289,10 +334,9 @@ const resolveSource = (src: string, ref: string | undefined): Source => {
     );
   } catch (error) {
     cleanup();
-    throw new Error(
-      `Cannot fetch "${target}" from ${url}; expected a qualified branch or tag, or a full commit sha reachable on the remote`,
-      { cause: error },
-    );
+    throw new Error(`Cannot check out fetched ref "${target}" from ${url}`, {
+      cause: error,
+    });
   }
   const sha = execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], {
     encoding: 'utf8',
@@ -692,9 +736,25 @@ const loadSyncPolicyInspector = async (
 
 const inspectConsumerSyncPolicy = async (
   consumer: string,
+  options: ConsumerSyncPolicyInspectionOptions,
 ): Promise<SyncPolicyInspection> => {
   const contractPath = join(consumer, SYNC_POLICY_CONTRACT_FILE);
+  const storedPolicyText = await readTextIfPresent(
+    join(consumer, LOCAL_POLICY_FILE),
+  );
+  const effectivePolicyText =
+    options.policyText ?? storedPolicyText ?? undefined;
   if (!existsSync(contractPath)) {
+    if (
+      options.allowMissingDefaultContract &&
+      effectivePolicyText === undefined
+    ) {
+      return {
+        packageJson: undefined,
+        policy: DEFAULT_SYNC_POLICY,
+        problems: [],
+      };
+    }
     const packageInspection = inspectPackageWithoutPolicyContract(
       await readTextIfPresent(join(consumer, 'package.json')),
     );
@@ -711,14 +771,44 @@ const inspectConsumerSyncPolicy = async (
   const result = inspect({
     packageText:
       (await readTextIfPresent(join(consumer, 'package.json'))) ?? undefined,
-    policyText:
-      (await readTextIfPresent(join(consumer, LOCAL_POLICY_FILE))) ?? undefined,
-    requireDirectPackage: true,
+    policyText: effectivePolicyText,
+    requireDirectPackage: options.requireDirectPackage,
   });
   if (!isSyncPolicyInspection(result)) {
     throw new Error(`${SYNC_POLICY_CONTRACT_FILE} returned an invalid result`);
   }
   return result;
+};
+
+const requireValidSyncPolicy = (
+  inspection: SyncPolicyInspection,
+): SyncPolicy => {
+  if (inspection.policy === null || inspection.problems.length > 0) {
+    throw new Error(inspection.problems.join('\n'));
+  }
+  return inspection.policy;
+};
+
+const inspectEffectiveSyncPolicy = async (
+  consumer: string,
+  requestedRef: string | undefined,
+): Promise<SyncPolicy> => {
+  const currentInspection = await inspectConsumerSyncPolicy(consumer, {
+    allowMissingDefaultContract: true,
+    policyText: undefined,
+    requireDirectPackage: false,
+  });
+  const currentPolicy = requireValidSyncPolicy(currentInspection);
+  if (requestedRef === undefined) {
+    return currentPolicy;
+  }
+  const proposedPolicy = { ...currentPolicy, ref: requestedRef };
+  const proposedInspection = await inspectConsumerSyncPolicy(consumer, {
+    allowMissingDefaultContract: false,
+    policyText: JSON.stringify(proposedPolicy),
+    requireDirectPackage: false,
+  });
+  return requireValidSyncPolicy(proposedInspection);
 };
 
 const isNonEmptyString = (value: unknown): value is string =>
@@ -1064,7 +1154,11 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
 };
 
 const runCheckCommand = async (consumer: string): Promise<boolean> => {
-  const policyInspection = await inspectConsumerSyncPolicy(consumer);
+  const policyInspection = await inspectConsumerSyncPolicy(consumer, {
+    allowMissingDefaultContract: false,
+    policyText: undefined,
+    requireDirectPackage: true,
+  });
   const driftIsClean = await runCheck(consumer, policyInspection.policy);
   const integrationIsValid = await runDoctor(consumer, policyInspection);
   // The GitHub gate activates with the synced declaration and then fails
@@ -1095,6 +1189,7 @@ const runInitCommand = async (
     const manifest = await loadManifest(
       join(source.dir, 'sync-standards.json'),
     );
+    assertCompatibleSyncSource(manifest);
     await runInit(manifest, source, consumer);
   } finally {
     source.cleanup();
@@ -1107,10 +1202,7 @@ const runSyncCommand = async (
   ref: string | undefined,
   dryRun: boolean,
 ): Promise<void> => {
-  if (ref !== undefined) {
-    assertSupportedRef(ref);
-  }
-  const policy = await loadSyncPolicy(consumer);
+  const policy = await inspectEffectiveSyncPolicy(consumer, ref);
   const consumerManifest = await loadManifest(
     join(consumer, 'sync-standards.json'),
   );
@@ -1125,6 +1217,7 @@ const runSyncCommand = async (
     const manifest = await loadManifest(
       join(source.dir, 'sync-standards.json'),
     );
+    assertCompatibleSyncSource(manifest);
     await runSync({
       manifest,
       src: source,
@@ -1133,7 +1226,7 @@ const runSyncCommand = async (
       requestedRef,
     });
     if (!dryRun && ref !== undefined) {
-      await writeSyncPolicy(consumer, { ...policy, ref });
+      await writeSyncPolicy(consumer, policy);
     }
   } finally {
     source.cleanup();
@@ -1175,7 +1268,11 @@ const main = async (): Promise<void> => {
   }
 
   if (command === 'doctor') {
-    const policyInspection = await inspectConsumerSyncPolicy(consumer);
+    const policyInspection = await inspectConsumerSyncPolicy(consumer, {
+      allowMissingDefaultContract: false,
+      policyText: undefined,
+      requireDirectPackage: true,
+    });
     if (!(await runDoctor(consumer, policyInspection))) {
       process.exitCode = 1;
     }

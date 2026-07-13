@@ -30,7 +30,7 @@ type RunResult = {
 const temporaryDirectories: Array<string> = [];
 
 const runPreflight = (
-  eventName: 'schedule' | 'workflow_dispatch',
+  eventName: 'repository_dispatch' | 'schedule' | 'workflow_dispatch',
   policyJson: string | undefined,
   version?: string,
 ): RunResult => {
@@ -117,9 +117,9 @@ describe('scheduled sync preflight', () => {
     }
   });
 
-  it('keeps manual dispatch enabled when scheduled runs are disabled', () => {
+  it('keeps default-branch repository dispatch enabled when scheduled runs are disabled', () => {
     const result = runPreflight(
-      'workflow_dispatch',
+      'repository_dispatch',
       serializePolicy('refs/heads/main', false),
       '0.5.0',
     );
@@ -131,7 +131,7 @@ describe('scheduled sync preflight', () => {
   it('fails before run selection for an old or unverifiable CLI', () => {
     for (const [eventName, version] of [
       ['schedule', '0.4.0'],
-      ['workflow_dispatch', '^0.5.0'],
+      ['repository_dispatch', '^0.5.0'],
       ['schedule', undefined],
     ] as const) {
       const result = runPreflight(
@@ -167,5 +167,13 @@ describe('scheduled sync preflight', () => {
     );
     expect(aggregated.stderr).toContain('requires boolean "scheduledSync"');
     expect(aggregated.stderr).toContain('exact stable version >=0.5.0');
+  });
+
+  it('rejects direct workflow dispatch', () => {
+    const result = runPreflight('workflow_dispatch', undefined);
+
+    expect(result.status).toBe(1);
+    expect(result.output).toBe('');
+    expect(result.stderr).toContain('Unsupported Standards sync event');
   });
 });
