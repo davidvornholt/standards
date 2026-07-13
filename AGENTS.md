@@ -100,11 +100,6 @@ Before generating code, inspect the `description` frontmatter for every local sk
 - Internal logic should not use `async/await`; use `Effect.gen`.
 - Prefer Effect combinators for Effectful branching when they make control flow clearer.
 
-## Next.js notes
-
-- Server Components, Route Handlers, and Server Actions may be `async`; bridge Effect programs with `await Effect.runPromise(program)`.
-- Use Next.js Cache Components patterns. Do not add route segment config (`runtime`, `dynamic`, `revalidate`, etc.). Use `'use cache'` plus `cacheLife`/`cacheTag` for cacheable async data, and Suspense/request-time APIs for genuinely dynamic content.
-
 ## Writing style
 
 - Use sentence case where sensible for reader-facing text, including UI text, button labels, command-style actions, and Markdown headings, while preserving proper nouns, acronyms, filenames, package names, and domain terms.
