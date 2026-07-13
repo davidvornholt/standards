@@ -13,6 +13,11 @@ const WORKFLOW = join(ROOT, '.github/workflows/standards-sync.yml');
 const MANIFEST = join(ROOT, 'sync-standards.json');
 const AGENT_CONTRACT = join(ROOT, 'AGENTS.md');
 const SYNC_SKILL = join(ROOT, '.agents/skills/standards-sync/SKILL.md');
+const ZERO_INSTALL_EFFECT_BOUNDARIES = [
+  '`.github/actions/standards-sync-preflight` action and its dependency-free helper closure',
+  '`packages/standards-release/scripts/classify-release.ts` and its dependency-free helper closure',
+  'published `packages/standards-cli/src/cli.ts` executable and its built-in-only helper closure listed in the package `files` allowlist',
+] as const;
 const GATED_STEPS = [
   'Setup Bun',
   'Install dependencies',
@@ -37,19 +42,16 @@ const workflowStep = (workflow: string, name: string): string => {
 };
 
 describe('canonical scheduled sync contract', () => {
-  it('limits the zero-install Effect exception to canonical preconditions', () => {
+  it('enumerates the complete dependency-free Effect exception boundary', () => {
     const contract = readFileSync(AGENT_CONTRACT, 'utf8');
     expect(contract).toContain(
-      'Zero-install preconditions are the only exception to the Effect rules',
+      'Zero-install preconditions and the published standalone bootstrap CLI are the only exceptions to the Effect rules',
     );
+    for (const boundary of ZERO_INSTALL_EFFECT_BOUNDARIES) {
+      expect(contract).toContain(boundary);
+    }
     expect(contract).toContain(
-      '`.github/actions/standards-sync-preflight` action',
-    );
-    expect(contract).toContain(
-      '`packages/standards-release/scripts/classify-release.ts`',
-    );
-    expect(contract).toContain(
-      'After runtime setup, including release packing, registry inspection, publishing decisions, and GitHub reconciliation',
+      'All code outside those enumerated boundaries, including release packing, registry inspection, publishing decisions, and GitHub Release reconciliation',
     );
   });
 
