@@ -10,6 +10,7 @@ const ACTION = join(
   '.github/actions/standards-sync-preflight/action.yml',
 );
 const WORKFLOW = join(ROOT, '.github/workflows/standards-sync.yml');
+const SETTINGS = join(ROOT, '.github/settings.json');
 const MANIFEST = join(ROOT, 'sync-standards.json');
 const AGENT_CONTRACT = join(ROOT, 'AGENTS.md');
 const SYNC_SKILL = join(ROOT, '.agents/skills/standards-sync/SKILL.md');
@@ -69,7 +70,7 @@ describe('canonical scheduled sync contract', () => {
     expect(setup).toBeGreaterThan(preflight);
     const checkoutStep = workflowStep(workflow, 'Checkout');
     expect(checkoutStep).toContain('uses: actions/checkout@v6');
-    expect(checkoutStep).toContain('ref: main');
+    expect(checkoutStep).not.toContain('ref:');
     expect(workflow).toContain('repository_dispatch:');
     expect(workflow).toContain('types: [standards-sync]');
     expect(workflow).not.toContain('workflow_dispatch:');
@@ -90,11 +91,35 @@ describe('canonical scheduled sync contract', () => {
     expect(preflightStep).not.toContain('run: node');
     expect(action).toContain('using: node24');
     expect(action).toContain('main: index.mjs');
+    expect(
+      readFileSync(
+        join(ROOT, '.github/actions/standards-sync-preflight/index.mjs'),
+        'utf8',
+      ),
+    ).toContain('../../../packages/standards-cli/src/sync-policy.ts');
     for (const name of GATED_STEPS) {
       expect(workflowStep(workflow, name)).toContain(
         "if: steps.preflight.outputs.run_sync == 'true'",
       );
     }
+  });
+
+  it('supports a non-main default branch through event and protected-branch semantics', () => {
+    const workflow = readFileSync(WORKFLOW, 'utf8');
+    const settings = JSON.parse(readFileSync(SETTINGS, 'utf8')) as {
+      readonly rulesets: ReadonlyArray<Record<string, unknown>>;
+      readonly environments: ReadonlyArray<Record<string, unknown>>;
+    };
+    const checkoutStep = workflowStep(workflow, 'Checkout');
+    const [ruleset] = settings.rulesets;
+    const [environment] = settings.environments;
+
+    expect(checkoutStep).not.toContain('ref: main');
+    expect(JSON.stringify(ruleset)).toContain('~DEFAULT_BRANCH');
+    expect(environment?.deployment_branch_policy).toEqual(
+      JSON.parse('{"protected_branches":true,"custom_branch_policies":false}'),
+    );
+    expect(environment?.deployment_branch_policies).toEqual([]);
   });
 
   it('keeps workflow and action metadata valid YAML', () => {
@@ -111,6 +136,9 @@ describe('canonical scheduled sync contract', () => {
     expect(manifest.syncPolicyContractVersion).toBe(1);
     expect(manifest.paths).toContain(
       '.github/actions/standards-sync-preflight',
+    );
+    expect(manifest.paths).toContain(
+      'packages/standards-cli/src/sync-policy.ts',
     );
     expect(manifest.paths).not.toContain(
       '.github/scripts/standards-sync-preflight.mjs',
@@ -150,9 +178,11 @@ describe('standards sync documentation', () => {
       expect(documentation).toContain('STANDARDS_SYNC_ENVIRONMENT_TOKEN');
       expect(documentation).toContain('legacy repository-level');
       expect(documentation).toContain('STANDARDS_SYNC_TOKEN');
-      expect(documentation).toContain('main`-only deployment policy');
       expect(documentation).toContain(
-        'run a bare `bun standards sync` from main',
+        'protected-branch-only deployment policy',
+      );
+      expect(documentation).toContain(
+        "run a bare `bun standards sync` from the repository's default branch",
       );
       expect(documentation).toContain('bun standards github --apply');
     }

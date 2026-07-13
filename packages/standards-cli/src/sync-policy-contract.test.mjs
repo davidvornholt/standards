@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { inspectSyncPolicy } from '../../../.github/actions/standards-sync-preflight/sync-policy.mjs';
+import { inspectSyncPolicy } from './sync-policy.ts';
 
 const packageText = (version) =>
   JSON.stringify({
@@ -16,7 +16,6 @@ describe('sync policy controller contract', () => {
         scheduledSync: true,
         typo: false,
       }),
-      requireDirectPackage: true,
     });
 
     assert.ok(
@@ -30,7 +29,6 @@ describe('sync policy controller contract', () => {
     const inspection = inspectSyncPolicy({
       packageText: packageText('0.4.0'),
       policyText: undefined,
-      requireDirectPackage: true,
     });
 
     assert.equal(inspection.problems.length, 1);

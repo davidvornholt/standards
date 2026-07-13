@@ -1,7 +1,7 @@
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
-import { inspectSyncPolicy } from './sync-policy.mjs';
+import { inspectSyncPolicy } from '../../../packages/standards-cli/src/sync-policy.ts';
 
 const readIfPresent = (path) =>
   existsSync(path) ? readFileSync(path, 'utf8') : undefined;
@@ -25,7 +25,6 @@ const main = () => {
   const inspection = inspectSyncPolicy({
     packageText: readIfPresent(join(workspace, 'package.json')),
     policyText: readIfPresent(join(workspace, 'sync-standards.local.json')),
-    requireDirectPackage: true,
   });
   if (inspection.policy === null || inspection.problems.length > 0) {
     throw new Error(inspection.problems.join('\n'));

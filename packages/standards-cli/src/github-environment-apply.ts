@@ -128,18 +128,16 @@ export const applyEnvironment = async (
   const declaredPolicies = Array.isArray(declared[DEPLOYMENT_BRANCH_POLICIES])
     ? declared[DEPLOYMENT_BRANCH_POLICIES].filter(isRecord)
     : [];
+  const deleted = await deleteUndeclaredPolicies(
+    context,
+    livePolicies,
+    new Set(declaredPolicies.map(policyKey)),
+  );
   const protection = await updateProtection(context, declared, live);
-  return [
-    ...(protection === null ? [] : [protection]),
-    ...(await deleteUndeclaredPolicies(
-      context,
-      livePolicies,
-      new Set(declaredPolicies.map(policyKey)),
-    )),
-    ...(await createMissingPolicies(
-      context,
-      declaredPolicies,
-      new Set(livePolicies.map(policyKey)),
-    )),
-  ];
+  const created = await createMissingPolicies(
+    context,
+    declaredPolicies,
+    new Set(livePolicies.map(policyKey)),
+  );
+  return [...deleted, ...(protection === null ? [] : [protection]), ...created];
 };

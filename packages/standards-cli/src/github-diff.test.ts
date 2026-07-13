@@ -174,24 +174,21 @@ describe('diffEnvironment', () => {
     prevent_self_review: false,
     reviewers: [],
     deployment_branch_policy: {
-      protected_branches: false,
-      custom_branch_policies: true,
+      protected_branches: true,
+      custom_branch_policies: false,
     },
-    deployment_branch_policies: [{ name: 'main', type: 'branch' }],
+    deployment_branch_policies: [],
   };
 
-  it('accepts the exact declared main-only policy', () => {
+  it('accepts the exact declared protected-branch policy', () => {
     expect(diffEnvironment(declared, { id: 5, ...declared })).toEqual([]);
   });
 
-  it('flags additional deployment branches', () => {
+  it('flags a literal deployment branch', () => {
     expect(
       diffEnvironment(declared, {
         ...declared,
-        deployment_branch_policies: [
-          { name: 'main', type: 'branch', id: 1 },
-          { name: 'release', type: 'branch', id: 2 },
-        ],
+        deployment_branch_policies: [{ name: 'main', type: 'branch', id: 1 }],
       }),
     ).toEqual([
       'environment "standards-sync": deployment_branch_policies differs from the declared configuration',

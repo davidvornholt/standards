@@ -71,6 +71,7 @@ describe('published package contract', () => {
       'package/src/github-environment-settings.ts',
       'package/src/github-environments.ts',
       'package/src/github-settings.ts',
+      'package/src/sync-policy.ts',
     ]);
     const manifestArchive = run([
       'tar',

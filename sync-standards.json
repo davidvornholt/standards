@@ -23,6 +23,7 @@
     "packages/a11y-testing",
     ".github/workflows/standards.yml",
     ".github/actions/standards-sync-preflight",
+    "packages/standards-cli/src/sync-policy.ts",
     ".github/workflows/standards-sync.yml",
     ".github/workflows/pr-title.yml"
   ]

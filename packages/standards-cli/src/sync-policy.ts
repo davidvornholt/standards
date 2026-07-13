@@ -1,4 +1,20 @@
-export const DEFAULT_SYNC_POLICY = {
+export type SyncPolicy = {
+  readonly ref: string;
+  readonly scheduledSync: boolean;
+};
+
+export type SyncPolicyInspection = {
+  readonly packageJson: Record<string, unknown> | undefined;
+  readonly policy: SyncPolicy | null;
+  readonly problems: ReadonlyArray<string>;
+};
+
+type SyncPolicyInspectionInput = {
+  readonly packageText: string | undefined;
+  readonly policyText: string | undefined;
+};
+
+export const DEFAULT_SYNC_POLICY: SyncPolicy = {
   ref: 'refs/heads/main',
   scheduledSync: true,
 };
@@ -12,28 +28,31 @@ const FULL_COMMIT_SHA = /^[0-9a-fA-F]{40}$/u;
 const EXACT_STABLE_SEMVER =
   /^(?<major>0|[1-9]\d*)\.(?<minor>0|[1-9]\d*)\.(?<patch>0|[1-9]\d*)$/u;
 const REQUIRED_MINOR_VERSION = 5n;
-const REQUIRED_VERSION = [0n, REQUIRED_MINOR_VERSION, 0n];
+const REQUIRED_VERSION = [0n, REQUIRED_MINOR_VERSION, 0n] as const;
 const INVALID_REF_CHARACTERS = new Set(['~', '^', ':', '?', '*', '[', '\\']);
 const SPACE_CODE_POINT = 32;
 const DELETE_CODE_POINT = 127;
 const POLICY_KEYS = new Set(['ref', 'scheduledSync']);
 
-const compatiblePackageProblem = () =>
+const compatiblePackageProblem = (): string =>
   `${PACKAGE_FILE} must declare devDependencies["${STANDARDS_PACKAGE}"] as an exact stable version >=0.5.0; run \`bun add --dev --exact ${STANDARDS_PACKAGE}@0.5.0\` before using sync policy`;
 
-const parseJson = (text, label, problems) => {
+const parseJson = (
+  text: string,
+  label: string,
+  problems: Array<string>,
+): unknown => {
   try {
-    return JSON.parse(text);
+    return JSON.parse(text) as unknown;
   } catch {
     problems.push(`${label} must contain valid JSON`);
-    return undefined;
   }
 };
 
-const isRecord = (value) =>
+const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const isSupportedRef = (ref) => {
+const isSupportedRef = (ref: string): boolean => {
   if (FULL_COMMIT_SHA.test(ref)) {
     return true;
   }
@@ -69,30 +88,27 @@ const isSupportedRef = (ref) => {
     );
 };
 
-const inspectPolicy = (policyText, problems) => {
+const inspectPolicy = (
+  policyText: string | undefined,
+  problems: Array<string>,
+): SyncPolicy | null => {
   if (policyText === undefined) {
-    return { policy: DEFAULT_SYNC_POLICY, requestsNonDefault: false };
+    return DEFAULT_SYNC_POLICY;
   }
   const raw = parseJson(policyText, POLICY_FILE, problems);
   if (raw === undefined) {
-    return { policy: null, requestsNonDefault: false };
+    return null;
   }
   if (!isRecord(raw)) {
     problems.push(`${POLICY_FILE} must be a JSON object`);
-    return { policy: null, requestsNonDefault: false };
+    return null;
   }
-
   for (const key of Object.keys(raw)) {
     if (!POLICY_KEYS.has(key)) {
       problems.push(`${POLICY_FILE} has unknown key "${key}"`);
     }
   }
-
-  const requestsNonDefault =
-    (typeof raw.ref === 'string' && raw.ref !== DEFAULT_SYNC_POLICY.ref) ||
-    raw.scheduledSync === false;
-  const refIsValid =
-    typeof raw.ref === 'string' && isSupportedRef(raw.ref);
+  const refIsValid = typeof raw.ref === 'string' && isSupportedRef(raw.ref);
   const scheduledSyncIsValid = typeof raw.scheduledSync === 'boolean';
   if (!refIsValid) {
     problems.push(
@@ -102,16 +118,12 @@ const inspectPolicy = (policyText, problems) => {
   if (!scheduledSyncIsValid) {
     problems.push(`${POLICY_FILE} requires boolean "scheduledSync"`);
   }
-  if (!(refIsValid && scheduledSyncIsValid)) {
-    return { policy: null, requestsNonDefault };
-  }
-  return {
-    policy: { ref: raw.ref, scheduledSync: raw.scheduledSync },
-    requestsNonDefault,
-  };
+  return refIsValid && scheduledSyncIsValid
+    ? { ref: raw.ref as string, scheduledSync: raw.scheduledSync as boolean }
+    : null;
 };
 
-const versionIsCompatible = (version) => {
+const versionIsCompatible = (version: string): boolean => {
   const match = EXACT_STABLE_SEMVER.exec(version);
   if (match === null) {
     return false;
@@ -136,33 +148,26 @@ const versionIsCompatible = (version) => {
 export const inspectSyncPolicy = ({
   packageText,
   policyText,
-  requireDirectPackage,
-}) => {
-  const problems = [];
-  const { policy, requestsNonDefault } = inspectPolicy(policyText, problems);
-  const inspectPackage = requireDirectPackage || requestsNonDefault;
-  let packageJson;
-
-  if (inspectPackage) {
-    if (packageText === undefined) {
+}: SyncPolicyInspectionInput): SyncPolicyInspection => {
+  const problems: Array<string> = [];
+  const policy = inspectPolicy(policyText, problems);
+  if (packageText === undefined) {
+    problems.push(compatiblePackageProblem());
+    return { packageJson: undefined, policy, problems };
+  }
+  const parsedPackage = parseJson(packageText, PACKAGE_FILE, problems);
+  if (parsedPackage !== undefined && !isRecord(parsedPackage)) {
+    problems.push(`${PACKAGE_FILE} must be a JSON object`);
+  }
+  const packageJson = isRecord(parsedPackage) ? parsedPackage : undefined;
+  if (packageJson !== undefined) {
+    const devDependencies = isRecord(packageJson.devDependencies)
+      ? packageJson.devDependencies
+      : undefined;
+    const version = devDependencies?.[STANDARDS_PACKAGE];
+    if (typeof version !== 'string' || !versionIsCompatible(version)) {
       problems.push(compatiblePackageProblem());
-    } else {
-      packageJson = parseJson(packageText, PACKAGE_FILE, problems);
-      if (packageJson !== undefined && !isRecord(packageJson)) {
-        problems.push(`${PACKAGE_FILE} must be a JSON object`);
-        packageJson = undefined;
-      }
-      if (packageJson !== undefined) {
-        const devDependencies = isRecord(packageJson.devDependencies)
-          ? packageJson.devDependencies
-          : undefined;
-        const version = devDependencies?.[STANDARDS_PACKAGE];
-        if (typeof version !== 'string' || !versionIsCompatible(version)) {
-          problems.push(compatiblePackageProblem());
-        }
-      }
     }
   }
-
   return { packageJson, policy, problems };
 };

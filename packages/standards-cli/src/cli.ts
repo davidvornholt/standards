@@ -38,32 +38,27 @@ import {
   sep,
 } from 'node:path';
 import process from 'node:process';
-import { pathToFileURL } from 'node:url';
 import { CANONICAL_SETTINGS_FILE, LOCAL_SETTINGS_FILE } from './github-api';
 import { runGithubApply, runGithubCheck } from './github-commands';
 import { loadGithubSettings } from './github-settings';
+import {
+  DEFAULT_SYNC_POLICY,
+  inspectSyncPolicy,
+  SYNC_POLICY_CONTRACT_VERSION,
+  type SyncPolicy,
+  type SyncPolicyInspection,
+} from './sync-policy';
 
 const { YAML: BunYaml } = await import('bun');
 
 const DEFAULT_UPSTREAM = 'github:davidvornholt/standards';
 const DEFAULT_REF = 'refs/heads/main';
-const DEFAULT_SYNC_POLICY: SyncPolicy = {
-  ref: DEFAULT_REF,
-  scheduledSync: true,
-};
 const LOCAL_POLICY_FILE = 'sync-standards.local.json';
-const SYNC_POLICY_KEYS = new Set(['ref', 'scheduledSync']);
-const SYNC_POLICY_CONTRACT_FILE =
-  '.github/actions/standards-sync-preflight/sync-policy.mjs';
+const SYNC_POLICY_CONTRACT_FILE = 'packages/standards-cli/src/sync-policy.ts';
 const SYNC_POLICY_CONTROLLER_PATH = '.github/actions/standards-sync-preflight';
-const SYNC_POLICY_CONTROLLER_FILES = [
-  'action.yml',
-  'index.mjs',
-  'sync-policy.mjs',
-] as const;
+const SYNC_POLICY_CONTROLLER_FILES = ['action.yml', 'index.mjs'] as const;
 const SYNC_POLICY_GENERATION_EXPORT =
   /^export const SYNC_POLICY_CONTRACT_VERSION = (?<version>\d+);$/mu;
-const SYNC_POLICY_CONTRACT_VERSION = 1;
 
 // Characters of a sha256 hex digest shown in drift reports; enough to identify.
 const HASH_PREVIEW_LENGTH = 12;
@@ -96,27 +91,9 @@ type Lock = {
   readonly files: Record<string, string>;
 };
 
-type SyncPolicy = {
-  readonly ref: string;
-  readonly scheduledSync: boolean;
-};
-
-type SyncPolicyInspection = {
-  readonly packageJson: Record<string, unknown> | undefined;
-  readonly policy: SyncPolicy | null;
-  readonly problems: ReadonlyArray<string>;
-};
-
-type SyncPolicyInspectionInput = {
-  readonly packageText: string | undefined;
-  readonly policyText: string | undefined;
-  readonly requireDirectPackage: boolean;
-};
-
 type ConsumerSyncPolicyInspectionOptions = {
   readonly allowMissingDefaultContract: boolean;
   readonly policyText: string | undefined;
-  readonly requireDirectPackage: boolean;
 };
 
 type Source = {
@@ -206,6 +183,11 @@ const assertCompatibleSyncSource = (
   if (!manifest.paths.includes(SYNC_POLICY_CONTROLLER_PATH)) {
     throw new Error(
       `syncPolicyContractVersion ${SYNC_POLICY_CONTRACT_VERSION} requires managed path "${SYNC_POLICY_CONTROLLER_PATH}"`,
+    );
+  }
+  if (!manifest.paths.includes(SYNC_POLICY_CONTRACT_FILE)) {
+    throw new Error(
+      `syncPolicyContractVersion ${SYNC_POLICY_CONTRACT_VERSION} requires managed path "${SYNC_POLICY_CONTRACT_FILE}"`,
     );
   }
   for (const file of SYNC_POLICY_CONTROLLER_FILES) {
@@ -704,123 +686,9 @@ const DEPENDABOT_SCHEDULE_INTERVALS = new Set([
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const isSyncPolicyInspection = (
-  value: unknown,
-): value is SyncPolicyInspection => {
-  if (!isRecord(value)) {
-    return false;
-  }
-  const { packageJson, policy, problems } = value;
-  const policyIsValid =
-    policy === null ||
-    (isRecord(policy) &&
-      typeof policy.ref === 'string' &&
-      typeof policy.scheduledSync === 'boolean');
-  return (
-    (packageJson === undefined || isRecord(packageJson)) &&
-    policyIsValid &&
-    Array.isArray(problems) &&
-    problems.every((problem) => typeof problem === 'string')
-  );
-};
-
-const inspectPackageWithoutPolicyContract = (
-  packageText: string | null,
-): {
-  readonly packageJson: Record<string, unknown> | undefined;
-  readonly problems: ReadonlyArray<string>;
-} => {
-  if (packageText === null) {
-    return { packageJson: undefined, problems: ['package.json must exist'] };
-  }
-  let rawPackageJson: unknown;
-  try {
-    rawPackageJson = JSON.parse(packageText) as unknown;
-  } catch {
-    return {
-      packageJson: undefined,
-      problems: ['package.json must contain valid JSON'],
-    };
-  }
-  if (!isRecord(rawPackageJson)) {
-    return {
-      packageJson: undefined,
-      problems: ['package.json must be a JSON object'],
-    };
-  }
-  const devDependencies = isRecord(rawPackageJson.devDependencies)
-    ? rawPackageJson.devDependencies
-    : undefined;
-  const problems =
-    typeof devDependencies?.['@davidvornholt/standards'] === 'string'
-      ? []
-      : ['package.json must declare @davidvornholt/standards directly'];
-  return { packageJson: rawPackageJson, problems };
-};
-
-const inspectBootstrapPolicyWithoutContract = (
-  policyText: string | undefined,
-): {
-  readonly policy: SyncPolicy | null;
-  readonly problems: ReadonlyArray<string>;
-} => {
-  if (policyText === undefined) {
-    return { policy: DEFAULT_SYNC_POLICY, problems: [] };
-  }
-  let raw: unknown;
-  try {
-    raw = JSON.parse(policyText) as unknown;
-  } catch {
-    return {
-      policy: null,
-      problems: [
-        `${LOCAL_POLICY_FILE} must contain valid JSON before bootstrapping the controller`,
-      ],
-    };
-  }
-  if (isRecord(raw)) {
-    const unknownProblems = Object.keys(raw).flatMap((key) =>
-      SYNC_POLICY_KEYS.has(key)
-        ? []
-        : [`${LOCAL_POLICY_FILE} has unknown key "${key}"`],
-    );
-    if (unknownProblems.length > 0) {
-      return { policy: null, problems: unknownProblems };
-    }
-  }
-  const isExactDefault =
-    isRecord(raw) &&
-    Object.keys(raw).length === 2 &&
-    raw.ref === DEFAULT_SYNC_POLICY.ref &&
-    raw.scheduledSync === DEFAULT_SYNC_POLICY.scheduledSync;
-  if (!isExactDefault) {
-    return {
-      policy: null,
-      problems: [
-        `${LOCAL_POLICY_FILE} may be absent or contain only the exact default policy while ${SYNC_POLICY_CONTRACT_FILE} is missing; upgrade @davidvornholt/standards, run a bare main sync, then pin a non-default ref`,
-      ],
-    };
-  }
-  return { policy: DEFAULT_SYNC_POLICY, problems: [] };
-};
-
-const loadSyncPolicyInspector = async (
-  contractPath: string,
-): Promise<(input: SyncPolicyInspectionInput) => unknown> => {
-  const contractModule = (await import(
-    pathToFileURL(contractPath).href
-  )) as unknown;
-  if (!isRecord(contractModule)) {
-    throw new Error(`${SYNC_POLICY_CONTRACT_FILE} has invalid exports`);
-  }
-  const inspect = contractModule.inspectSyncPolicy as
-    | ((input: SyncPolicyInspectionInput) => unknown)
-    | undefined;
-  if (typeof inspect !== 'function') {
-    throw new Error(`${SYNC_POLICY_CONTRACT_FILE} has invalid exports`);
-  }
-  return inspect;
-};
+const isDefaultSyncPolicy = (policy: SyncPolicy): boolean =>
+  policy.ref === DEFAULT_SYNC_POLICY.ref &&
+  policy.scheduledSync === DEFAULT_SYNC_POLICY.scheduledSync;
 
 const inspectConsumerSyncPolicy = async (
   consumer: string,
@@ -832,37 +700,33 @@ const inspectConsumerSyncPolicy = async (
   );
   const effectivePolicyText =
     options.policyText ?? storedPolicyText ?? undefined;
-  if (!existsSync(contractPath)) {
-    const packageInspection = inspectPackageWithoutPolicyContract(
-      await readTextIfPresent(join(consumer, 'package.json')),
-    );
-    if (options.allowMissingDefaultContract) {
-      const bootstrapPolicy =
-        inspectBootstrapPolicyWithoutContract(effectivePolicyText);
-      return {
-        packageJson: packageInspection.packageJson,
-        policy: bootstrapPolicy.policy,
-        problems: [...bootstrapPolicy.problems, ...packageInspection.problems],
-      };
-    }
-    return {
-      packageJson: packageInspection.packageJson,
-      policy: null,
-      problems: [
-        `${SYNC_POLICY_CONTRACT_FILE} must exist; run \`bun standards sync\``,
-        ...packageInspection.problems,
-      ],
-    };
-  }
-  const inspect = await loadSyncPolicyInspector(contractPath);
-  const result = inspect({
+  const result = inspectSyncPolicy({
     packageText:
       (await readTextIfPresent(join(consumer, 'package.json'))) ?? undefined,
     policyText: effectivePolicyText,
-    requireDirectPackage: options.requireDirectPackage,
   });
-  if (!isSyncPolicyInspection(result)) {
-    throw new Error(`${SYNC_POLICY_CONTRACT_FILE} returned an invalid result`);
+  if (!existsSync(contractPath)) {
+    if (options.allowMissingDefaultContract) {
+      return {
+        ...result,
+        problems: [
+          ...result.problems,
+          ...(result.policy !== null && !isDefaultSyncPolicy(result.policy)
+            ? [
+                `${LOCAL_POLICY_FILE} may be absent or contain only the exact default policy while ${SYNC_POLICY_CONTRACT_FILE} is missing; upgrade @davidvornholt/standards, run a bare sync from the repository's default branch, then pin a non-default ref`,
+              ]
+            : []),
+        ],
+      };
+    }
+    return {
+      packageJson: result.packageJson,
+      policy: null,
+      problems: [
+        `${SYNC_POLICY_CONTRACT_FILE} must exist; run \`bun standards sync\``,
+        ...result.problems,
+      ],
+    };
   }
   return result;
 };
@@ -883,7 +747,6 @@ const inspectEffectiveSyncPolicy = async (
   const currentInspection = await inspectConsumerSyncPolicy(consumer, {
     allowMissingDefaultContract: true,
     policyText: undefined,
-    requireDirectPackage: false,
   });
   const currentPolicy = requireValidSyncPolicy(currentInspection);
   if (requestedRef === undefined) {
@@ -893,7 +756,6 @@ const inspectEffectiveSyncPolicy = async (
   const proposedInspection = await inspectConsumerSyncPolicy(consumer, {
     allowMissingDefaultContract: false,
     policyText: JSON.stringify(proposedPolicy),
-    requireDirectPackage: false,
   });
   return requireValidSyncPolicy(proposedInspection);
 };
@@ -1244,7 +1106,6 @@ const runCheckCommand = async (consumer: string): Promise<boolean> => {
   const policyInspection = await inspectConsumerSyncPolicy(consumer, {
     allowMissingDefaultContract: false,
     policyText: undefined,
-    requireDirectPackage: true,
   });
   const driftIsClean = await runCheck(consumer, policyInspection.policy);
   const integrationIsValid = await runDoctor(consumer, policyInspection);
@@ -1358,7 +1219,6 @@ const main = async (): Promise<void> => {
     const policyInspection = await inspectConsumerSyncPolicy(consumer, {
       allowMissingDefaultContract: false,
       policyText: undefined,
-      requireDirectPackage: true,
     });
     if (!(await runDoctor(consumer, policyInspection))) {
       process.exitCode = 1;

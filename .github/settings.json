@@ -54,12 +54,10 @@
       "prevent_self_review": false,
       "reviewers": [],
       "deployment_branch_policy": {
-        "protected_branches": false,
-        "custom_branch_policies": true
+        "protected_branches": true,
+        "custom_branch_policies": false
       },
-      "deployment_branch_policies": [
-        { "name": "main", "type": "branch" }
-      ]
+      "deployment_branch_policies": []
     }
   ]
 }

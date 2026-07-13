@@ -30,21 +30,23 @@ const POLICY_SEED = join(
   '../../../template/sync-standards.local.json',
 );
 const SYNC_POLICY_CONTROLLER_PATH = '.github/actions/standards-sync-preflight';
-const SYNC_POLICY_CONTROLLER_FILES = [
-  'action.yml',
-  'index.mjs',
-  'sync-policy.mjs',
-] as const;
-const SYNC_POLICY_CONTRACT_PATH = `${SYNC_POLICY_CONTROLLER_PATH}/sync-policy.mjs`;
+const SYNC_POLICY_CONTROLLER_FILES = ['action.yml', 'index.mjs'] as const;
+const SYNC_POLICY_CONTRACT_PATH = 'packages/standards-cli/src/sync-policy.ts';
 const SYNC_POLICY_CONTRACT = join(
   import.meta.dir,
   '../../../',
   SYNC_POLICY_CONTRACT_PATH,
 );
+const SYNC_POLICY_CONTROLLER_SOURCE = join(
+  import.meta.dir,
+  '../../../',
+  SYNC_POLICY_CONTROLLER_PATH,
+);
 const STD_PATHS: ReadonlyArray<string> = [
   'sync-standards.json',
   'managed',
   SYNC_POLICY_CONTROLLER_PATH,
+  SYNC_POLICY_CONTRACT_PATH,
 ];
 const DEFAULT_REF = 'refs/heads/main';
 const SYNC_POLICY_CONTRACT_VERSION = 1;
@@ -164,15 +166,24 @@ const buildUpstream = (paths: ReadonlyArray<string> = STD_PATHS): string => {
     write(
       up,
       `${SYNC_POLICY_CONTROLLER_PATH}/${file}`,
-      readFileSync(join(dirname(SYNC_POLICY_CONTRACT), file), 'utf8'),
+      readFileSync(join(SYNC_POLICY_CONTROLLER_SOURCE, file), 'utf8'),
     );
   }
+  write(
+    up,
+    SYNC_POLICY_CONTRACT_PATH,
+    readFileSync(SYNC_POLICY_CONTRACT, 'utf8'),
+  );
   return up;
 };
 const initConsumer = (up: string): { consumer: string; result: RunResult } => {
   const consumer = mkTmp('sync-cons-');
   const result = run(consumer, ['init', '--from', up, '--dir', consumer]);
   return { consumer, result };
+};
+const removeSyncPolicyController = (consumer: string): void => {
+  rmSync(join(consumer, SYNC_POLICY_CONTROLLER_PATH), { recursive: true });
+  rmSync(join(consumer, SYNC_POLICY_CONTRACT_PATH));
 };
 const sync = (
   up: string,
@@ -214,6 +225,7 @@ const buildGitUpstream = (): {
       read(up, `${SYNC_POLICY_CONTROLLER_PATH}/${file}`),
     ]),
   );
+  const syncPolicyContract = read(up, SYNC_POLICY_CONTRACT_PATH);
   write(
     up,
     'sync-standards.json',
@@ -225,6 +237,7 @@ const buildGitUpstream = (): {
   );
   rmSync(join(up, 'template/sync-standards.local.json'));
   rmSync(join(up, '.github'), { recursive: true });
+  rmSync(join(up, SYNC_POLICY_CONTRACT_PATH));
   git(up, ['add', '-A']);
   git(up, ['commit', '--quiet', '-m', 'v0.4.0']);
   git(up, ['tag', 'v0.4.0']);
@@ -242,6 +255,7 @@ const buildGitUpstream = (): {
   for (const [file, content] of Object.entries(controllerFiles)) {
     write(up, `${SYNC_POLICY_CONTROLLER_PATH}/${file}`, content);
   }
+  write(up, SYNC_POLICY_CONTRACT_PATH, syncPolicyContract);
   git(up, ['add', '-A']);
   git(up, ['commit', '--quiet', '-m', 'v1']);
   git(up, ['tag', 'v1']);
@@ -570,33 +584,40 @@ describe('sync policy integration', () => {
 });
 
 describe('sync source compatibility', () => {
-  it('rejects a v1 source that omits the managed controller before mutation', () => {
-    const up = buildUpstream();
-    const { consumer } = initConsumer(up);
-    const lockBefore = read(consumer, 'sync-standards.lock');
-    const managedBefore = read(consumer, 'managed/a.txt');
-    const controllerBefore = read(consumer, SYNC_POLICY_CONTRACT_PATH);
-    const policyBefore = read(consumer, 'sync-standards.local.json');
-    write(up, 'managed/a.txt', 'should not apply\n');
-    write(
-      up,
-      'sync-standards.json',
-      JSON.stringify({
-        upstream: up,
-        seedDir: 'template',
-        syncPolicyContractVersion: SYNC_POLICY_CONTRACT_VERSION,
-        paths: STD_PATHS.filter((path) => path !== SYNC_POLICY_CONTROLLER_PATH),
-      }),
-    );
+  it('rejects a v1 source that omits a managed controller boundary', () => {
+    for (const requiredPath of [
+      SYNC_POLICY_CONTROLLER_PATH,
+      SYNC_POLICY_CONTRACT_PATH,
+    ]) {
+      const up = buildUpstream();
+      const { consumer } = initConsumer(up);
+      const lockBefore = read(consumer, 'sync-standards.lock');
+      const managedBefore = read(consumer, 'managed/a.txt');
+      const controllerBefore = read(consumer, SYNC_POLICY_CONTRACT_PATH);
+      const policyBefore = read(consumer, 'sync-standards.local.json');
+      write(up, 'managed/a.txt', 'should not apply\n');
+      write(
+        up,
+        'sync-standards.json',
+        JSON.stringify({
+          upstream: up,
+          seedDir: 'template',
+          syncPolicyContractVersion: SYNC_POLICY_CONTRACT_VERSION,
+          paths: STD_PATHS.filter((path) => path !== requiredPath),
+        }),
+      );
 
-    const result = sync(up, consumer);
+      const result = sync(up, consumer);
 
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('requires managed path');
-    expect(read(consumer, 'managed/a.txt')).toBe(managedBefore);
-    expect(read(consumer, SYNC_POLICY_CONTRACT_PATH)).toBe(controllerBefore);
-    expect(read(consumer, 'sync-standards.local.json')).toBe(policyBefore);
-    expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        `requires managed path "${requiredPath}"`,
+      );
+      expect(read(consumer, 'managed/a.txt')).toBe(managedBefore);
+      expect(read(consumer, SYNC_POLICY_CONTRACT_PATH)).toBe(controllerBefore);
+      expect(read(consumer, 'sync-standards.local.json')).toBe(policyBefore);
+      expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
+    }
   });
 
   it('rejects v1 sources missing any required controller file before mutation', () => {
@@ -879,12 +900,38 @@ describe('policy validation', () => {
     expect(read(consumer, 'managed/a.txt')).toBe(managedBefore);
     expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
   });
+
+  it('rejects a v0.4 default policy before source resolution with or without the controller', () => {
+    for (const controllerPresent of [true, false]) {
+      const { consumer } = initConsumer(buildUpstream());
+      setStandardsVersion(consumer, '0.4.0');
+      if (!controllerPresent) {
+        removeSyncPolicyController(consumer);
+      }
+      const lockBefore = read(consumer, 'sync-standards.lock');
+      const managedBefore = read(consumer, 'managed/a.txt');
+      const policyBefore = read(consumer, 'sync-standards.local.json');
+
+      const result = sync('file:///missing-standards', consumer);
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('exact stable version >=0.5.0');
+      expect(result.stderr).not.toContain('Cannot fetch');
+      expect(read(consumer, 'managed/a.txt')).toBe(managedBefore);
+      expect(read(consumer, 'sync-standards.local.json')).toBe(policyBefore);
+      expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
+      expect(existsSync(join(consumer, SYNC_POLICY_CONTRACT_PATH))).toBe(
+        controllerPresent,
+      );
+    }
+  });
 });
 
 describe('legacy policy bootstrap exactness', () => {
   it('rejects unknown policy keys before remote setup without a controller', () => {
     const { consumer } = initConsumer(buildUpstream());
-    rmSync(join(consumer, SYNC_POLICY_CONTROLLER_PATH), { recursive: true });
+    removeSyncPolicyController(consumer);
+    setStandardsVersion(consumer, '0.4.0');
     write(
       consumer,
       'sync-standards.local.json',
@@ -897,6 +944,7 @@ describe('legacy policy bootstrap exactness', () => {
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('has unknown key "typo"');
+    expect(result.stderr).toContain('exact stable version >=0.5.0');
     expect(result.stderr).not.toContain('Cannot fetch');
     expect(read(consumer, 'managed/a.txt')).toBe(managedBefore);
     expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
@@ -1018,7 +1066,7 @@ describe('scheduled and legacy sync', () => {
   it('bootstraps a missing controller only from the exact default policy before pinning', () => {
     const { up, url } = buildGitUpstream();
     const { consumer } = initConsumer(up);
-    rmSync(join(consumer, SYNC_POLICY_CONTROLLER_PATH), { recursive: true });
+    removeSyncPolicyController(consumer);
     write(
       consumer,
       'sync-standards.local.json',
@@ -1034,6 +1082,7 @@ describe('scheduled and legacy sync', () => {
         existsSync(join(consumer, SYNC_POLICY_CONTROLLER_PATH, file)),
       ).toBe(true);
     }
+    expect(existsSync(join(consumer, SYNC_POLICY_CONTRACT_PATH))).toBe(true);
     expect(sync(url, consumer, ['--ref', 'refs/tags/v1']).status).toBe(0);
     expect(JSON.parse(read(consumer, 'sync-standards.local.json'))).toEqual({
       ref: 'refs/tags/v1',
@@ -1043,7 +1092,7 @@ describe('scheduled and legacy sync', () => {
 
   it('rejects non-default policy while the controller is missing before remote setup', () => {
     const { consumer } = initConsumer(buildUpstream());
-    rmSync(join(consumer, SYNC_POLICY_CONTROLLER_PATH), { recursive: true });
+    removeSyncPolicyController(consumer);
     write(
       consumer,
       'sync-standards.local.json',
@@ -1056,7 +1105,7 @@ describe('scheduled and legacy sync', () => {
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(
-      'upgrade @davidvornholt/standards, run a bare main sync, then pin',
+      "upgrade @davidvornholt/standards, run a bare sync from the repository's default branch, then pin",
     );
     expect(result.stderr).not.toContain('Cannot fetch');
     expect(read(consumer, 'managed/a.txt')).toBe(managedBefore);

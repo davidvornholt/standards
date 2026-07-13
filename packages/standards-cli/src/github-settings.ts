@@ -1,11 +1,10 @@
-// Declarative GitHub repository settings: parsing and seam merging for the
-// canonical `.github/settings.json` and the repo-owned
-// `.github/settings.local.json` extension. Pure logic only; drift comparison
-// lives in github-diff.ts and the API interaction in github-api.ts. Like
-// cli.ts, this module is zero-dependency so `bunx` can execute the published
-// package.
+// Parse and merge the canonical GitHub declaration with its additive local
+// seam. This stays dependency-free because the published CLI imports it.
 
-import { environmentListProblems } from './github-environment-settings';
+import {
+  environmentIdentity,
+  environmentListProblems,
+} from './github-environment-settings';
 
 export type GithubSettings = {
   readonly repository: Readonly<Record<string, unknown>>;
@@ -123,10 +122,16 @@ const mergeSettings = (
     }
   }
   const canonicalEnvironmentNames = new Set(
-    canonical.environments.map((environment) => environment.name),
+    canonical.environments.map((environment) =>
+      environmentIdentity(String(environment.name)),
+    ),
   );
   for (const environment of local.environments) {
-    if (canonicalEnvironmentNames.has(environment.name)) {
+    if (
+      canonicalEnvironmentNames.has(
+        environmentIdentity(String(environment.name)),
+      )
+    ) {
       problems.push(
         `.github/settings.local.json environment "${environment.name}" collides with a canonical environment; canonical settings are read-only`,
       );

@@ -31,8 +31,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-        with:
-          ref: main
 
       - name: Check scheduled sync policy
         id: preflight
@@ -63,8 +61,9 @@ jobs:
       # Configure STANDARDS_SYNC_ENVIRONMENT_TOKEN in the protected
       # `standards-sync` environment (fine-grained PAT: contents + pull requests
       # write) so the opened PR triggers workflows. Declarative GitHub settings
-      # restrict that environment to `main`; both schedule and
-      # repository_dispatch load this workflow from the default branch. PRs
+      # restrict that environment to branches protected by the canonical
+      # default-branch ruleset; both schedule and repository_dispatch load
+      # this workflow from the default branch. PRs
       # opened with the default GITHUB_TOKEN fallback do not trigger workflows
       # and need a manual nudge (push or close/reopen) to run the gate.
       #

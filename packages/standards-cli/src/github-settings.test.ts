@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { loadGithubSettings } from './github-settings';
 
 const canonicalEnvironment = JSON.parse(
-  '{"name":"standards-sync","wait_timer":0,"prevent_self_review":false,"reviewers":[],"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true},"deployment_branch_policies":[{"name":"main","type":"branch"}]}',
+  '{"name":"standards-sync","wait_timer":0,"prevent_self_review":false,"reviewers":[],"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false},"deployment_branch_policies":[]}',
 ) as Record<string, unknown>;
 
 const canonical = JSON.stringify({
@@ -55,14 +55,14 @@ describe('loadGithubSettings', () => {
     const local = JSON.stringify({
       repository: { allow_auto_merge: false },
       rulesets: [{ name: 'Protect main' }],
-      environments: [canonicalEnvironment],
+      environments: [{ ...canonicalEnvironment, name: 'Standards-Sync' }],
     });
     const loaded = loadGithubSettings(canonical, local);
     expect(loaded.merged).toBeNull();
     expect(loaded.problems).toEqual([
       '.github/settings.local.json repository."allow_auto_merge" would override a canonical value; canonical settings are read-only',
       '.github/settings.local.json ruleset "Protect main" collides with a canonical ruleset; add a separately named ruleset to tighten further',
-      '.github/settings.local.json environment "standards-sync" collides with a canonical environment; canonical settings are read-only',
+      '.github/settings.local.json environment "Standards-Sync" collides with a canonical environment; canonical settings are read-only',
     ]);
   });
 
@@ -96,6 +96,23 @@ describe('loadGithubSettings', () => {
     expect(loaded.problems).toEqual([]);
     expect(loaded.merged?.rulesets).toHaveLength(1);
   });
+
+  it('rejects mixed-case duplicate environment identities', () => {
+    const loaded = loadGithubSettings(
+      JSON.stringify({
+        environments: [
+          canonicalEnvironment,
+          { ...canonicalEnvironment, name: 'Standards-Sync' },
+        ],
+      }),
+      emptySeam,
+    );
+
+    expect(loaded.merged).toBeNull();
+    expect(loaded.problems).toEqual([
+      '.github/settings.json declares environment "Standards-Sync" more than once',
+    ]);
+  });
 });
 
 describe('environment settings validation', () => {
@@ -127,7 +144,7 @@ describe('environment settings validation', () => {
     );
     expect(loaded.merged).toBeNull();
     expect(loaded.problems).toEqual([
-      '.github/settings.json environments[0].wait_timer must be a non-negative integer',
+      '.github/settings.json environments[0].wait_timer must be an integer from 0 to 43200',
       '.github/settings.json environments[0].prevent_self_review must be a boolean',
       '.github/settings.json environments[0].reviewers must be an array',
       '.github/settings.json environments[0].deployment_branch_policy must enable exactly one branch-policy mode',

@@ -17,6 +17,11 @@ const BRANCH_POLICY_MODE_KEYS = new Set([
   'custom_branch_policies',
 ]);
 const DEPLOYMENT_POLICY_KEYS = new Set(['name', 'type']);
+const MAX_ENVIRONMENT_NAME_LENGTH = 255;
+const MAX_WAIT_TIMER = 43_200;
+const MAX_REVIEWERS = 6;
+
+export const environmentIdentity = (name: string): string => name.toLowerCase();
 
 const unknownKeyProblems = (
   record: Readonly<Record<string, unknown>>,
@@ -34,23 +39,28 @@ const reviewerProblems = (
   if (!Array.isArray(reviewers)) {
     return [`${prefix}.reviewers must be an array`];
   }
-  return reviewers.flatMap((reviewer, index) => {
-    const reviewerPrefix = `${prefix}.reviewers[${index}]`;
-    if (!isRecord(reviewer)) {
+  return [
+    ...(reviewers.length <= MAX_REVIEWERS
+      ? []
+      : [`${prefix}.reviewers must contain at most ${MAX_REVIEWERS} entries`]),
+    ...reviewers.flatMap((reviewer, index) => {
+      const reviewerPrefix = `${prefix}.reviewers[${index}]`;
+      if (!isRecord(reviewer)) {
+        return [
+          `${reviewerPrefix} must have type "User" or "Team" and an integer id`,
+        ];
+      }
       return [
-        `${reviewerPrefix} must have type "User" or "Team" and an integer id`,
+        ...unknownKeyProblems(reviewer, REVIEWER_KEYS, reviewerPrefix),
+        ...((reviewer.type === 'User' || reviewer.type === 'Team') &&
+        Number.isInteger(reviewer.id)
+          ? []
+          : [
+              `${reviewerPrefix} must have type "User" or "Team" and an integer id`,
+            ]),
       ];
-    }
-    return [
-      ...unknownKeyProblems(reviewer, REVIEWER_KEYS, reviewerPrefix),
-      ...((reviewer.type === 'User' || reviewer.type === 'Team') &&
-      Number.isInteger(reviewer.id)
-        ? []
-        : [
-            `${reviewerPrefix} must have type "User" or "Team" and an integer id`,
-          ]),
-    ];
-  });
+    }),
+  ];
 };
 
 const branchPolicyModeProblems = (
@@ -81,26 +91,35 @@ const deploymentPolicyProblems = (
   const names = new Set<string>();
   return policies.flatMap((policy, index) => {
     const policyPrefix = `${prefix}.deployment_branch_policies[${index}]`;
-    if (
-      !(
-        isRecord(policy) &&
-        typeof policy.name === 'string' &&
-        policy.name.length > 0 &&
-        (policy.type === 'branch' || policy.type === 'tag')
-      )
-    ) {
+    if (!isRecord(policy)) {
       return [
         `${policyPrefix} must have a non-empty name and type "branch" or "tag"`,
       ];
     }
+    const validShape =
+      typeof policy.name === 'string' &&
+      policy.name.length > 0 &&
+      (policy.type === 'branch' || policy.type === 'tag');
+    const problems = [
+      ...unknownKeyProblems(policy, DEPLOYMENT_POLICY_KEYS, policyPrefix),
+      ...(validShape
+        ? []
+        : [
+            `${policyPrefix} must have a non-empty name and type "branch" or "tag"`,
+          ]),
+    ];
+    if (!validShape) {
+      return problems;
+    }
     const key = `${policy.type}:${policy.name}`;
     if (names.has(key)) {
-      return [
+      problems.push(
         `${prefix} declares deployment policy "${policy.name}" more than once`,
-      ];
+      );
+    } else {
+      names.add(key);
     }
-    names.add(key);
-    return unknownKeyProblems(policy, DEPLOYMENT_POLICY_KEYS, policyPrefix);
+    return problems;
   });
 };
 
@@ -126,9 +145,10 @@ const environmentProblems = (
 ): ReadonlyArray<string> => [
   ...unknownKeyProblems(environment, ENVIRONMENT_KEYS, prefix),
   ...(Number.isInteger(environment.wait_timer) &&
-  Number(environment.wait_timer) >= 0
+  Number(environment.wait_timer) >= 0 &&
+  Number(environment.wait_timer) <= MAX_WAIT_TIMER
     ? []
-    : [`${prefix}.wait_timer must be a non-negative integer`]),
+    : [`${prefix}.wait_timer must be an integer from 0 to ${MAX_WAIT_TIMER}`]),
   ...(typeof environment.prevent_self_review === 'boolean'
     ? []
     : [`${prefix}.prevent_self_review must be a boolean`]),
@@ -145,18 +165,27 @@ export const environmentListProblems = (
   const names = new Set<string>();
   return environments.flatMap((environment, index) => {
     const prefix = `${label} environments[${index}]`;
-    if (
-      !(
-        isRecord(environment) &&
-        typeof environment.name === 'string' &&
-        environment.name.length > 0
-      )
-    ) {
+    if (!isRecord(environment)) {
       return [`${prefix} must be an object with a non-empty "name"`];
     }
-    const duplicate = names.has(environment.name);
-    names.add(environment.name);
+    const validName =
+      typeof environment.name === 'string' &&
+      environment.name.length > 0 &&
+      environment.name.length <= MAX_ENVIRONMENT_NAME_LENGTH;
+    const identity =
+      typeof environment.name === 'string'
+        ? environmentIdentity(environment.name)
+        : null;
+    const duplicate = identity !== null && names.has(identity);
+    if (identity !== null) {
+      names.add(identity);
+    }
     return [
+      ...(validName
+        ? []
+        : [
+            `${prefix}.name must be a non-empty string of at most ${MAX_ENVIRONMENT_NAME_LENGTH} characters`,
+          ]),
       ...(duplicate
         ? [`${label} declares environment "${environment.name}" more than once`]
         : []),
