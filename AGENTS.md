@@ -6,6 +6,8 @@ Quality gates (lint, types, tests, a11y) are deliberately strict so agents can v
 
 Check an expensive or irreversible operation's cheap preconditions before starting it, so work already certain to fail does so before paying its setup cost. This is distinct from validation, which must still gather and report all errors together.
 
+Treat duplication as a design signal: when a change needs to copy configuration, environment, or logic that another component already owns, stop — the responsibility is probably misplaced. Fix the owner or move the need instead of pasting the copy; if the duplication seems forced by the architecture, surface that instead of proceeding.
+
 ## Research first
 
 - Check whether the request conflicts with repo architecture or standards.

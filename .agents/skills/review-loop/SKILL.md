@@ -45,7 +45,7 @@ The gate has two modes:
 
 ## Passes
 
-Invent the lens set per diff with one-line charters (see the `review` skill's lens contract); include `catch-all` unless an unscoped reviewer runs. A diff with database mutations and no data-integrity lens, or auth surfaces and no security lens, is a selection error. Post the lens set and justification as a PR comment before pass 1.
+Invent the lens set per diff with one-line charters (see the `review` skill's lens contract); include `catch-all` unless an unscoped reviewer runs. A diff with database mutations and no data-integrity lens, or auth surfaces and no security lens, is a selection error. Always consider a `premise` lens — charter: restate the problem the diff solves, then ask whether this location is that problem's home and whether the diff duplicates machinery another component owns; a locally flawless change built on a wrong premise is the flaw diff-scoped lenses cannot see. Post the lens set and justification as a PR comment before pass 1.
 
 A pass is one fan-out of reviewers over the FULL PR diff (branch vs base) — never over just the latest fix delta. Run it as the saved `review-pass` workflow:
 
