@@ -3,6 +3,7 @@ import { isFailure } from 'effect/Exit';
 import { isSome } from 'effect/Option';
 import type { ArtifactIdentityError } from '../src/artifact-identity-error';
 import type { GithubApiError } from '../src/github-api-error';
+import { appendGithubOutput } from '../src/github-output';
 import type { GithubStateError } from '../src/github-state-error';
 import type { NpmRegistryError } from '../src/npm-registry-error';
 import {
@@ -20,10 +21,11 @@ import {
 import { ReleaseInputError } from '../src/release-input-error';
 import { inspectNpmRelease } from '../src/release-npm';
 import { ReleaseOutputError } from '../src/release-output-error';
+import { packReleaseArtifact } from '../src/release-package';
+import type { ReleasePackageError } from '../src/release-package-error';
 import {
   argv,
   env,
-  file,
   runtimeProcess,
   stderr,
   write,
@@ -39,6 +41,7 @@ type ReleaseError =
   | NpmRegistryError
   | ReleaseInputError
   | ReleaseOutputError
+  | ReleasePackageError
   | ReleaseValidationError;
 
 const requireValue = (value: string | undefined, name: string) =>
@@ -59,22 +62,14 @@ const firstNonEmpty = (
 const writeOutput = (
   output: string,
   values: Readonly<Record<string, string | boolean>>,
-) => {
-  const content = Object.entries(values)
-    .map(([key, value]) => `${key}=${value}\n`)
-    .join('');
-  return tryPromise({
-    try: () =>
-      file(output)
-        .exists()
-        .then((exists) => (exists ? file(output).text() : Promise.resolve('')))
-        .then((current) => write(output, `${current}${content}`)),
+) =>
+  tryPromise({
+    try: () => appendGithubOutput(output, values),
     catch: (cause) =>
       new ReleaseOutputError({
         message: `Writing GitHub outputs failed: ${String(cause)}`,
       }),
   });
-};
 
 const inspectNpm = (args: ReadonlyArray<string>) =>
   gen(function* () {
@@ -88,6 +83,18 @@ const inspectNpm = (args: ReadonlyArray<string>) =>
       version: yield* requireValue(version, 'release version'),
     });
     yield* writeOutput(outputPath, inspection);
+  });
+
+const pack = (args: ReadonlyArray<string>) =>
+  gen(function* () {
+    const [output, packagePath, destination, expectedSha] = args;
+    const outputPath = yield* requireValue(output, 'GitHub output path');
+    const artifact = yield* packReleaseArtifact({
+      destination: yield* requireValue(destination, 'artifact destination'),
+      expectedSha: yield* requireValue(expectedSha, 'release sha'),
+      packagePath: yield* requireValue(packagePath, 'package path'),
+    });
+    yield* writeOutput(outputPath, { artifact });
   });
 
 const github = (mode: 'inspect' | 'reconcile', args: ReadonlyArray<string>) =>
@@ -114,6 +121,9 @@ const github = (mode: 'inspect' | 'reconcile', args: ReadonlyArray<string>) =>
 
 const main = (): Effect<void, ReleaseError> => {
   const [command, ...args] = argv.slice(2);
+  if (command === 'pack') {
+    return pack(args);
+  }
   if (command === 'npm') {
     return inspectNpm(args);
   }
@@ -126,7 +136,7 @@ const main = (): Effect<void, ReleaseError> => {
   return fail(
     new ReleaseInputError({
       message:
-        'Expected release-state command npm, github-inspect, or github-reconcile',
+        'Expected release-state command pack, npm, github-inspect, or github-reconcile',
     }),
   );
 };

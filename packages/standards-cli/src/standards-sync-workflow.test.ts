@@ -11,6 +11,7 @@ const ACTION = join(
 );
 const WORKFLOW = join(ROOT, '.github/workflows/standards-sync.yml');
 const MANIFEST = join(ROOT, 'sync-standards.json');
+const AGENT_CONTRACT = join(ROOT, 'AGENTS.md');
 const SYNC_SKILL = join(ROOT, '.agents/skills/standards-sync/SKILL.md');
 const GATED_STEPS = [
   'Setup Bun',
@@ -36,6 +37,22 @@ const workflowStep = (workflow: string, name: string): string => {
 };
 
 describe('canonical scheduled sync contract', () => {
+  it('limits the zero-install Effect exception to canonical preconditions', () => {
+    const contract = readFileSync(AGENT_CONTRACT, 'utf8');
+    expect(contract).toContain(
+      'Zero-install preconditions are the only exception to the Effect rules',
+    );
+    expect(contract).toContain(
+      '`.github/actions/standards-sync-preflight` action',
+    );
+    expect(contract).toContain(
+      '`packages/standards-release/scripts/classify-release.ts`',
+    );
+    expect(contract).toContain(
+      'After runtime setup, including release packing, registry inspection, publishing decisions, and GitHub reconciliation',
+    );
+  });
+
   it('uses a runner-managed JavaScript action before every paid step', () => {
     const workflow = readFileSync(WORKFLOW, 'utf8');
     const action = readFileSync(ACTION, 'utf8');

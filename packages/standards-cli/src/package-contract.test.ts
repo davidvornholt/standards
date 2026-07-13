@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'bun';
 
 const packageRoot = join(import.meta.dir, '..');
+const templatePackage = join(packageRoot, '../../template/package.json');
 const directories: Array<string> = [];
 
 afterEach(() => {
@@ -23,6 +24,20 @@ const run = (command: ReadonlyArray<string>) => {
 };
 
 describe('published package contract', () => {
+  it('matches the exact CLI version seeded for new consumers', () => {
+    const publicManifest = JSON.parse(
+      readFileSync(join(packageRoot, 'package.json'), 'utf8'),
+    ) as { readonly name: string; readonly version: string };
+    const templateManifest = JSON.parse(
+      readFileSync(templatePackage, 'utf8'),
+    ) as {
+      readonly devDependencies: Readonly<Record<string, string>>;
+    };
+    expect(templateManifest.devDependencies[publicManifest.name]).toBe(
+      publicManifest.version,
+    );
+  });
+
   it('packs only the zero-dependency public CLI', () => {
     const directory = mkdtempSync(join(tmpdir(), 'standards-package-'));
     directories.push(directory);
@@ -63,9 +78,11 @@ describe('published package contract', () => {
     expect(manifestArchive.exitCode).toBe(0);
     const manifest = JSON.parse(manifestArchive.output) as {
       readonly dependencies?: unknown;
+      readonly files?: ReadonlyArray<string>;
       readonly scripts?: Readonly<Record<string, string>>;
     };
     expect(manifest.dependencies).toBeUndefined();
+    expect(manifest.files).toContain('SOURCE_COMMIT');
     expect(manifest.scripts).not.toHaveProperty('release:state');
   });
 });

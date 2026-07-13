@@ -19,6 +19,7 @@
   "files": [
     "LICENSE",
     "README.md",
+    "SOURCE_COMMIT",
     "src/cli.ts",
     "src/github-api.ts",
     "src/github-apply.ts",

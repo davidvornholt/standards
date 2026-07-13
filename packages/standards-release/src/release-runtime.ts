@@ -8,6 +8,6 @@ const processModule = (await import(['node', 'process'].join(':'))) as {
   readonly default: RuntimeProcess;
 };
 
-export const { argv, env, file, stderr, write } = runtime;
+export const { argv, env, file, spawn, stderr, write } = runtime;
 export const BunCryptoHasher = runtime.CryptoHasher;
 export const runtimeProcess = processModule.default;

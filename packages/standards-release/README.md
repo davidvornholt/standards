@@ -2,6 +2,8 @@
 
 This private workspace owns the repository-only npm and GitHub release boundary. It is not part of the published `@davidvornholt/standards` package.
 
+Release packing generates `packages/standards-cli/SOURCE_COMMIT`, includes the tested commit in the tarball, verifies that marker, and removes the working-tree file on both success and failure. Matching npm SRI therefore binds an artifact without `gitHead` metadata to the tested commit; legacy unmarked artifacts fail closed.
+
 ## Configuration
 
 - **`GITHUB_REPOSITORY`** (required by GitHub release commands) — repository identifier in `owner/repository` form. GitHub Actions supplies it automatically.

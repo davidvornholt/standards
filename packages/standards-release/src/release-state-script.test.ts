@@ -105,7 +105,7 @@ describe('release workflow wrappers', () => {
     const result = await run('release-state.ts', ['unknown']);
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain(
-      '::error::Expected release-state command npm, github-inspect, or github-reconcile',
+      '::error::Expected release-state command pack, npm, github-inspect, or github-reconcile',
     );
   });
 });

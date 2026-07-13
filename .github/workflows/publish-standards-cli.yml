@@ -30,10 +30,8 @@ jobs:
       contents: read
       id-token: write
     outputs:
-      publish: ${{ steps.npm.outputs.publish }}
       reconcile: ${{ steps.npm.outputs.reconcile }}
       tag: ${{ steps.declaration.outputs.tag }}
-      version: ${{ steps.declaration.outputs.version }}
       sha: ${{ github.event.workflow_run.head_sha }}
     steps:
       - name: Checkout tested commit
@@ -64,6 +62,7 @@ jobs:
           PACKAGE_NAME: "@davidvornholt/standards"
           PACKAGE_PATH: packages/standards-cli/package.json
           RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+          TEMPLATE_PACKAGE_PATH: template/package.json
         run: |
           name="$(jq -er '.name | select(type == "string")' "$PACKAGE_PATH")"
           if [[ "$name" != "$PACKAGE_NAME" ]]; then
@@ -72,6 +71,13 @@ jobs:
           fi
 
           version="$(jq -er '.version | select(type == "string")' "$PACKAGE_PATH")"
+          template_version="$(jq -er --arg name "$PACKAGE_NAME" \
+            '.devDependencies[$name] | select(type == "string")' \
+            "$TEMPLATE_PACKAGE_PATH")"
+          if [[ "$template_version" != "$version" ]]; then
+            echo "::error::$TEMPLATE_PACKAGE_PATH must declare $PACKAGE_NAME@$version exactly; received $template_version"
+            exit 1
+          fi
           parent_version=
           if git cat-file -e "$RELEASE_SHA^:$PACKAGE_PATH" 2>/dev/null; then
             parent_version="$(git show "$RELEASE_SHA^:$PACKAGE_PATH" | \
@@ -89,21 +95,14 @@ jobs:
       - name: Pack and inspect package
         id: package
         if: steps.declaration.outputs.declared == 'true'
+        env:
+          PACKAGE_PATH: ${{ github.workspace }}/packages/standards-cli
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           artifact_dir="$RUNNER_TEMP/standards-cli-package"
           mkdir "$artifact_dir"
-          bun pm pack \
-            --cwd packages/standards-cli \
-            --destination "$artifact_dir" \
-            --ignore-scripts
-
-          mapfile -t artifacts < <(find "$artifact_dir" -maxdepth 1 -type f -name '*.tgz')
-          if [[ "${#artifacts[@]}" -ne 1 ]]; then
-            echo "::error::Expected exactly one package tarball"
-            exit 1
-          fi
-          tar -tzf "${artifacts[0]}"
-          echo "artifact=${artifacts[0]}" >>"$GITHUB_OUTPUT"
+          bun run --cwd packages/standards-release release:state -- \
+            pack "$GITHUB_OUTPUT" "$PACKAGE_PATH" "$artifact_dir" "$RELEASE_SHA"
 
       - name: Inspect npm release boundary
         id: npm

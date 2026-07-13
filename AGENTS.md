@@ -97,6 +97,7 @@ Before generating code, inspect the `description` frontmatter for every local sk
 
 ## Effect standards
 
+- Zero-install preconditions are the only exception to the Effect rules below. The exception is limited to the canonical `.github/actions/standards-sync-preflight` action and `packages/standards-release/scripts/classify-release.ts`, plus their dependency-free helpers: they may use explicit result values, raw Promises, and boundary throws because they run before dependencies are installed. They must remain dependency-free and may only decide whether setup should proceed or classify a release declaration. After runtime setup, including release packing, registry inspection, publishing decisions, and GitHub reconciliation, all application logic, async work, validation, and recoverable failures follow the Effect and tagged-error rules below.
 - Use Effect for application logic, async work, recoverable errors, and validation.
 - Do not `throw` for expected failures; return typed Effect errors.
 - Recoverable Effect errors must be specific `Data.TaggedError` classes with stable `_tag` values and actionable `message` fields.

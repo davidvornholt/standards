@@ -13,6 +13,7 @@ import {
   tryPromise,
   Unknown,
 } from './release-effect';
+import { verifyArtifactSourceCommit } from './release-package';
 import { BunCryptoHasher, file } from './release-runtime';
 import {
   decideRelease,
@@ -154,6 +155,10 @@ export const inspectNpmRelease = (input: {
   readonly version: string;
 }) =>
   gen(function* () {
+    yield* verifyArtifactSourceCommit({
+      artifact: input.artifact,
+      expectedSha: input.expectedSha,
+    });
     const expectedIntegrity = yield* npmIntegrity(input.artifact);
     const state = yield* loadNpmState({
       fetcher: input.fetcher ?? fetch,

@@ -1,11 +1,6 @@
+import { appendGithubOutput } from '../src/github-output';
 import { classifyReleaseDeclaration } from '../src/release-declaration';
-import {
-  argv,
-  file,
-  runtimeProcess,
-  stderr,
-  write,
-} from '../src/release-runtime';
+import { argv, runtimeProcess, stderr, write } from '../src/release-runtime';
 
 const FAILURE_EXIT_CODE = 1;
 const SUCCESS_EXIT_CODE = 0;
@@ -14,13 +9,6 @@ const required = (value: string | undefined, name: string) =>
   value === undefined || value === ''
     ? { message: `${name} is required`, ok: false as const }
     : { ok: true as const, value };
-
-const appendOutput = (output: string, content: string): Promise<void> =>
-  file(output)
-    .exists()
-    .then((exists) => (exists ? file(output).text() : Promise.resolve('')))
-    .then((current) => write(output, `${current}${content}`))
-    .then(() => undefined);
 
 const reportError = (message: string): Promise<typeof FAILURE_EXIT_CODE> =>
   write(stderr, `::error::${message}\n`).then(() => FAILURE_EXIT_CODE);
@@ -47,10 +35,11 @@ const main = (): Promise<
   if (!classification.ok) {
     return reportError(classification.message);
   }
-  return appendOutput(
-    outputPath.value,
-    `declared=${classification.declared}\ntag=v${releaseVersion.value}\nversion=${releaseVersion.value}\n`,
-  )
+  return appendGithubOutput(outputPath.value, {
+    declared: classification.declared,
+    tag: `v${releaseVersion.value}`,
+    version: releaseVersion.value,
+  })
     .then((): typeof SUCCESS_EXIT_CODE => SUCCESS_EXIT_CODE)
     .catch((cause: unknown) =>
       reportError(`Writing GitHub outputs failed: ${String(cause)}`),

@@ -95,7 +95,7 @@ Missing policy files default to `refs/heads/main` with scheduled sync enabled, s
 
 ## Release the CLI
 
-The version in `packages/standards-cli/package.json` is the release declaration. Change it to a new stable SemVer in a pull request and update the version seeded by `template/package.json` at the same time. After the exact merge commit passes the `Standards` workflow on `main`, `Publish standards CLI` packs and publishes that version through npm trusted publishing, then creates the matching `vX.Y.Z` Git tag and GitHub Release. An unchanged version is a no-op; a version behind npm or a conflicting tag fails closed.
+The version in `packages/standards-cli/package.json` is the release declaration. Change it to a new stable SemVer in a pull request and update the exact version seeded by `template/package.json` at the same time; the release preflight requires them to match. After the exact merge commit passes the `Standards` workflow on `main`, `Publish standards CLI` embeds that tested commit in the package artifact, publishes the version through npm trusted publishing, then creates the matching `vX.Y.Z` Git tag and GitHub Release. An unchanged version is a no-op. An unpublished version behind npm latest or a conflicting tag fails closed; an existing historical artifact whose source identity is verified may reconcile a missing GitHub tag or release.
 
 ## How sync works
 

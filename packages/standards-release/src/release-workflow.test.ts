@@ -4,6 +4,11 @@ import { file } from './release-runtime';
 const workflow = await file(
   `${import.meta.dir}/../../../.github/workflows/publish-standards-cli.yml`,
 ).text();
+const classifier = await file(
+  `${import.meta.dir}/../scripts/classify-release.ts`,
+).text();
+const ABSOLUTE_PACKAGE_PATH =
+  /PACKAGE_PATH: \$\{\{ github\.workspace \}\}\/packages\/standards-cli/u;
 
 const position = (text: string): number => workflow.indexOf(text);
 
@@ -32,6 +37,16 @@ describe('CLI release workflow', () => {
     expect(workflow).toContain(
       'bun run --cwd packages/standards-release release:classify',
     );
+    expect(workflow).toContain(
+      '.devDependencies[$name] | select(type == "string")',
+    );
+    expect(workflow).toContain('"$template_version" != "$version"');
+    expect(workflow).toContain(
+      'pack "$GITHUB_OUTPUT" "$PACKAGE_PATH" "$artifact_dir" "$RELEASE_SHA"',
+    );
+    expect(workflow).toMatch(ABSOLUTE_PACKAGE_PATH);
+    expect(classifier).not.toContain('release-effect');
+    expect(classifier).not.toContain("from 'effect");
   });
 
   it('represents a missing parent without making git show fatal', () => {
@@ -62,5 +77,17 @@ describe('CLI release workflow', () => {
     expect(workflow).toContain(
       'bun run --cwd packages/standards-release release:state',
     );
+  });
+
+  it('exports only values consumed by the release job', () => {
+    const outputs = workflow.slice(
+      position('    outputs:'),
+      position('    steps:'),
+    );
+    expect(outputs).toContain('reconcile:');
+    expect(outputs).toContain('tag:');
+    expect(outputs).toContain('sha:');
+    expect(outputs).not.toContain('publish:');
+    expect(outputs).not.toContain('version:');
   });
 });
