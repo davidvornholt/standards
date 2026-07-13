@@ -1,107 +1,131 @@
 import { describe, expect, it } from 'bun:test';
+import { type Effect, flip, runSync } from './release-effect';
 import {
   classifyReleaseDeclaration,
-  decideArtifactIdentity,
-  decideReconciliation,
   decideRelease,
+  verifyArtifactIdentity,
 } from './release-state';
+
+const succeed = <A, E>(effect: Effect<A, E>): A => runSync(effect);
+
+const fail = <A, E>(effect: Effect<A, E>): E => runSync(flip(effect));
 
 describe('release planning', () => {
   it('publishes a new declaration and reconciles an existing one', () => {
     expect(
-      decideRelease({
-        npmLatest: '0.4.0',
-        npmVersionExists: false,
-        parentVersion: '0.4.0',
-        version: '0.5.0',
-      }),
-    ).toEqual({ ok: true, value: { publish: true, reconcile: true } });
+      succeed(
+        decideRelease({
+          npmLatest: '0.4.0',
+          npmVersionExists: false,
+          parentVersion: '0.4.0',
+          version: '0.5.0',
+        }),
+      ),
+    ).toEqual({ publish: true, reconcile: true });
     expect(
-      decideRelease({
-        npmLatest: '0.5.0',
-        npmVersionExists: true,
-        parentVersion: '0.4.0',
-        version: '0.5.0',
-      }),
-    ).toEqual({ ok: true, value: { publish: false, reconcile: true } });
-  });
-
-  it('treats initial, moved, and invalid-parent declarations as recoverable', () => {
-    for (const parentVersion of [null, 'not-semver']) {
-      expect(
+      succeed(
         decideRelease({
           npmLatest: '0.5.0',
           npmVersionExists: true,
-          parentVersion,
+          parentVersion: '0.4.0',
           version: '0.5.0',
         }),
-      ).toEqual({ ok: true, value: { publish: false, reconcile: true } });
+      ),
+    ).toEqual({ publish: false, reconcile: true });
+  });
+
+  it('recovers initial, moved, and invalid-parent declarations', () => {
+    for (const parentVersion of [null, 'not-semver']) {
+      expect(
+        succeed(
+          decideRelease({
+            npmLatest: '0.5.0',
+            npmVersionExists: true,
+            parentVersion,
+            version: '0.5.0',
+          }),
+        ),
+      ).toEqual({ publish: false, reconcile: true });
     }
     expect(
-      decideRelease({
-        npmLatest: null,
-        npmVersionExists: false,
-        parentVersion: null,
-        version: '0.1.0',
-      }),
-    ).toEqual({ ok: true, value: { publish: true, reconcile: true } });
+      succeed(
+        decideRelease({
+          npmLatest: null,
+          npmVersionExists: false,
+          parentVersion: null,
+          version: '0.1.0',
+        }),
+      ),
+    ).toEqual({ publish: true, reconcile: true });
   });
 
-  it('validates current stable SemVer before an unchanged no-op', () => {
+  it('validates current SemVer before unchanged no-op', () => {
     expect(
-      classifyReleaseDeclaration({
-        parentVersion: 'not-semver',
-        version: 'not-semver',
-      }),
-    ).toEqual({
-      error: 'Version not-semver must be a stable SemVer',
-      ok: false,
+      fail(
+        classifyReleaseDeclaration({
+          parentVersion: 'not-semver',
+          version: 'not-semver',
+        }),
+      ),
+    ).toMatchObject({
+      _tag: 'ReleaseValidationError',
+      message: 'Version not-semver must be a stable SemVer',
     });
     expect(
-      decideRelease({
-        npmLatest: null,
-        npmVersionExists: false,
-        parentVersion: 'not-semver',
-        version: 'not-semver',
-      }),
-    ).toEqual({
-      error: 'Version not-semver must be a stable SemVer',
-      ok: false,
-    });
-    expect(
-      decideRelease({
-        npmLatest: null,
-        npmVersionExists: false,
-        parentVersion: '0.5.0',
-        version: '0.5.0',
-      }),
-    ).toEqual({ ok: true, value: { publish: false, reconcile: false } });
+      succeed(
+        decideRelease({
+          npmLatest: null,
+          npmVersionExists: false,
+          parentVersion: '0.5.0',
+          version: '0.5.0',
+        }),
+      ),
+    ).toEqual({ publish: false, reconcile: false });
   });
 
-  it('fails closed for regressions and inconsistent npm metadata', () => {
+  it('compares arbitrary-size SemVer components exactly', () => {
     expect(
-      decideRelease({
-        npmLatest: '0.6.0',
-        npmVersionExists: false,
-        parentVersion: null,
-        version: '0.5.0',
-      }),
-    ).toEqual({
-      error: 'Manifest version 0.5.0 is behind npm latest 0.6.0',
-      ok: false,
+      succeed(
+        classifyReleaseDeclaration({
+          parentVersion: '9007199254740992.0.0',
+          version: '9007199254740993.0.0',
+        }),
+      ),
+    ).toBeTrue();
+    expect(
+      succeed(
+        classifyReleaseDeclaration({
+          parentVersion: '999999999999999999999999999999.1.0',
+          version: '999999999999999999999999999999.2.0',
+        }),
+      ),
+    ).toBeTrue();
+  });
+
+  it('fails closed for regressions and malformed npm latest', () => {
+    expect(
+      fail(
+        decideRelease({
+          npmLatest: '0.6.0',
+          npmVersionExists: false,
+          parentVersion: null,
+          version: '0.5.0',
+        }),
+      ),
+    ).toMatchObject({
+      _tag: 'ReleaseValidationError',
+      message: 'Manifest version 0.5.0 is behind npm latest 0.6.0',
     });
     expect(
-      decideRelease({
-        npmLatest: null,
-        npmVersionExists: true,
-        parentVersion: null,
-        version: '0.5.0',
-      }),
-    ).toEqual({
-      error:
-        'npm reports the declared version without an authoritative latest version',
-      ok: false,
-    });
+      fail(
+        decideRelease({
+          npmLatest: 'invalid',
+          npmVersionExists: false,
+          parentVersion: null,
+          version: '0.5.0',
+        }),
+      ),
+    ).toMatchObject({ _tag: 'ReleaseValidationError' });
   });
 });
 
@@ -114,84 +138,31 @@ describe('artifact identity', () => {
     npmVersionExists: true,
   } as const;
 
-  it('accepts a matching existing artifact and absent new artifact', () => {
-    expect(decideArtifactIdentity(matching)).toEqual({ ok: true, value: true });
+  it('accepts matching or absent artifacts', () => {
+    expect(succeed(verifyArtifactIdentity(matching))).toBeUndefined();
     expect(
-      decideArtifactIdentity({
-        ...matching,
-        npmGitHead: null,
-        npmIntegrity: null,
-        npmVersionExists: false,
-      }),
-    ).toEqual({ ok: true, value: true });
+      succeed(
+        verifyArtifactIdentity({
+          ...matching,
+          npmGitHead: null,
+          npmIntegrity: null,
+          npmVersionExists: false,
+        }),
+      ),
+    ).toBeUndefined();
   });
 
-  it('rejects unknown, mismatched, or wrong-source existing artifacts', () => {
-    expect(decideArtifactIdentity({ ...matching, npmIntegrity: null })).toEqual(
-      { error: 'Existing npm version has no dist.integrity', ok: false },
-    );
+  it('rejects unknown, mismatched, or wrong-source artifacts', () => {
     expect(
-      decideArtifactIdentity({ ...matching, npmIntegrity: 'sha512-other' }),
-    ).toEqual({
-      error:
-        'Existing npm artifact integrity sha512-other does not match expected sha512-expected',
-      ok: false,
-    });
+      fail(verifyArtifactIdentity({ ...matching, npmIntegrity: null })),
+    ).toMatchObject({ _tag: 'ArtifactIdentityError' });
     expect(
-      decideArtifactIdentity({ ...matching, npmGitHead: 'other' }),
-    ).toEqual({
-      error:
-        'Existing npm artifact gitHead other does not match expected expected',
-      ok: false,
-    });
-  });
-});
-
-describe('GitHub reconciliation decisions', () => {
-  it('creates absent state and accepts an exact published release', () => {
+      fail(
+        verifyArtifactIdentity({ ...matching, npmIntegrity: 'sha512-other' }),
+      ),
+    ).toMatchObject({ _tag: 'ArtifactIdentityError' });
     expect(
-      decideReconciliation({
-        expectedSha: 'expected',
-        releaseStatus: 'absent',
-        tagSha: null,
-      }),
-    ).toEqual({ ok: true, value: 'create' });
-    expect(
-      decideReconciliation({
-        expectedSha: 'expected',
-        releaseStatus: 'published',
-        tagSha: 'expected',
-      }),
-    ).toEqual({ ok: true, value: 'exists' });
-  });
-
-  it('rejects drafts, missing published tags, and wrong-SHA tags', () => {
-    expect(
-      decideReconciliation({
-        expectedSha: 'expected',
-        releaseStatus: 'draft',
-        tagSha: 'expected',
-      }),
-    ).toEqual({ error: 'Release already exists as a draft', ok: false });
-    expect(
-      decideReconciliation({
-        expectedSha: 'expected',
-        releaseStatus: 'published',
-        tagSha: null,
-      }),
-    ).toEqual({
-      error: 'Published release has no matching remote tag',
-      ok: false,
-    });
-    expect(
-      decideReconciliation({
-        expectedSha: 'expected',
-        releaseStatus: 'absent',
-        tagSha: 'other',
-      }),
-    ).toEqual({
-      error: 'Release tag points to other, expected expected',
-      ok: false,
-    });
+      fail(verifyArtifactIdentity({ ...matching, npmGitHead: 'other' })),
+    ).toMatchObject({ _tag: 'ArtifactIdentityError' });
   });
 });

@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { flip, runPromise } from './release-effect';
 import {
   inspectNpmRelease,
   npmIntegrity,
@@ -18,7 +19,7 @@ beforeAll(async () => {
   directory = await mkdtemp(join(tmpdir(), 'release-npm-'));
   artifact = join(directory, 'package.tgz');
   await writeFile(artifact, 'exact package bytes');
-  integrity = await npmIntegrity(artifact);
+  integrity = await runPromise(npmIntegrity(artifact));
 });
 
 afterAll(async () => {
@@ -41,7 +42,7 @@ const fetchJson =
   () =>
     Promise.resolve(Response.json(body, { status }));
 
-const inspect = (fetcher: ReleaseFetcher) =>
+const effect = (fetcher: ReleaseFetcher) =>
   inspectNpmRelease({
     artifact,
     expectedSha: 'expected',
@@ -53,56 +54,91 @@ const inspect = (fetcher: ReleaseFetcher) =>
 
 describe('npm release inspection', () => {
   it('accepts matching registry bytes and source metadata', async () => {
-    expect(await inspect(fetchJson(metadata()))).toEqual({
-      ok: true,
-      value: { integrity, publish: false, reconcile: true },
+    expect(await runPromise(effect(fetchJson(metadata())))).toEqual({
+      integrity,
+      publish: false,
+      reconcile: true,
     });
   });
 
-  it('publishes a packed initial artifact after a verified 404', async () => {
+  it('publishes a packed initial artifact only after package 404', async () => {
     expect(
-      await inspectNpmRelease({
-        artifact,
-        expectedSha: 'expected',
-        fetcher: fetchJson({ error: 'Not found' }, HTTP_NOT_FOUND),
-        name: '@davidvornholt/new-package',
-        parentVersion: null,
-        version: '0.1.0',
-      }),
-    ).toEqual({
-      ok: true,
-      value: { integrity, publish: true, reconcile: true },
-    });
+      await runPromise(
+        inspectNpmRelease({
+          artifact,
+          expectedSha: 'expected',
+          fetcher: fetchJson({ error: 'Not found' }, HTTP_NOT_FOUND),
+          name: '@davidvornholt/new-package',
+          parentVersion: null,
+          version: '0.1.0',
+        }),
+      ),
+    ).toEqual({ integrity, publish: true, reconcile: true });
+  });
+
+  it('rejects missing or invalid latest on package metadata 200', async () => {
+    const cases = [
+      { expectedTag: 'NpmRegistryError', tags: {} },
+      { expectedTag: 'NpmRegistryError', tags: { latest: 42 } },
+      {
+        expectedTag: 'ReleaseValidationError',
+        tags: { latest: 'not-semver' },
+      },
+    ] as const;
+    const failures = await Promise.all(
+      cases.map(({ tags }) =>
+        runPromise(
+          flip(
+            effect(
+              fetchJson({
+                'dist-tags': tags,
+                versions: {},
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
+    for (const [index, failure] of failures.entries()) {
+      expect(failure).toMatchObject({
+        _tag: cases[index]?.expectedTag,
+      });
+    }
   });
 
   it('rejects mismatched registry bytes and source metadata', async () => {
-    expect(
-      await inspect(
-        fetchJson(metadata({ dist: { integrity: 'sha512-other' } })),
+    const integrityFailure = await runPromise(
+      flip(
+        effect(fetchJson(metadata({ dist: { integrity: 'sha512-other' } }))),
       ),
-    ).toEqual({
-      error: `Existing npm artifact integrity sha512-other does not match expected ${integrity}`,
-      ok: false,
+    );
+    expect(integrityFailure).toMatchObject({
+      _tag: 'ArtifactIdentityError',
+      message: `Existing npm artifact integrity sha512-other does not match expected ${integrity}`,
     });
-    expect(await inspect(fetchJson(metadata({ gitHead: 'other' })))).toEqual({
-      error:
+    const sourceFailure = await runPromise(
+      flip(effect(fetchJson(metadata({ gitHead: 'other' })))),
+    );
+    expect(sourceFailure).toMatchObject({
+      _tag: 'ArtifactIdentityError',
+      message:
         'Existing npm artifact gitHead other does not match expected expected',
-      ok: false,
     });
   });
 
-  it('fails closed on registry errors and malformed metadata', async () => {
-    expect(
-      await inspect(fetchJson({ error: 'unavailable' }, HTTP_UNAVAILABLE)),
-    ).toEqual({
-      error: 'Reading npm metadata: HTTP 503 unavailable',
-      ok: false,
+  it('fails closed on registry and transport errors', async () => {
+    const apiFailure = await runPromise(
+      flip(effect(fetchJson({ error: 'unavailable' }, HTTP_UNAVAILABLE))),
+    );
+    expect(apiFailure).toMatchObject({
+      _tag: 'NpmRegistryError',
+      message: 'Reading npm metadata failed with HTTP 503',
     });
     const failingFetch: ReleaseFetcher = () =>
       Promise.reject(new Error('network down'));
-    expect(await inspect(failingFetch)).toEqual({
-      error: 'Reading npm metadata failed: Error: network down',
-      ok: false,
+    expect(await runPromise(flip(effect(failingFetch)))).toMatchObject({
+      _tag: 'NpmRegistryError',
+      message: 'Reading npm metadata failed: Error: network down',
     });
   });
 });

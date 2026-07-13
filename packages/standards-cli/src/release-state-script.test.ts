@@ -46,50 +46,29 @@ describe('release-state workflow wrapper', () => {
     });
   });
 
-  it('plans initial publication with an explicit missing parent', () => {
-    expect(run(['plan', '$OUTPUT', '0.1.0', '', '', 'false'])).toEqual({
-      exitCode: 0,
-      output: 'publish=true\nreconcile=true\n',
-      stderr: '',
-    });
-  });
-
-  it('writes reconciliation output and reports conflicts', () => {
-    expect(run(['reconcile', '$OUTPUT', 'expected', 'absent', ''])).toEqual({
-      exitCode: 0,
-      output: 'action=create\n',
-      stderr: '',
-    });
-    const conflict = run([
-      'reconcile',
+  it('surfaces tagged validation and argument failures', () => {
+    const invalidVersion = run([
+      'classify',
       '$OUTPUT',
-      'expected',
-      'absent',
-      'other',
+      'not-semver',
+      'not-semver',
     ]);
-    expect(conflict.exitCode).toBe(1);
-    expect(conflict.stderr).toContain(
-      '::error::Release tag points to other, expected expected',
+    expect(invalidVersion.exitCode).toBe(1);
+    expect(invalidVersion.stderr).toContain(
+      '::error::Version not-semver must be a stable SemVer',
+    );
+    const missingOutput = run(['classify', '', '0.5.0', '0.4.0']);
+    expect(missingOutput.exitCode).toBe(1);
+    expect(missingOutput.stderr).toContain(
+      '::error::GitHub output path is required',
     );
   });
 
-  it('fails on invalid arguments and unsupported commands', () => {
-    const invalidBoolean = run([
-      'plan',
-      '$OUTPUT',
-      '0.5.0',
-      '0.4.0',
-      '0.4.0',
-      'maybe',
-    ]);
-    expect(invalidBoolean.exitCode).toBe(1);
-    expect(invalidBoolean.stderr).toContain(
-      '::error::npm version existence must be true or false',
-    );
-    const unsupported = run(['unknown']);
-    expect(unsupported.exitCode).toBe(1);
-    expect(unsupported.stderr).toContain(
-      '::error::Expected release-state command',
+  it('rejects an unknown command', () => {
+    const result = run(['unknown']);
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      '::error::Expected release-state command classify, npm, github-inspect, or github-reconcile',
     );
   });
 });

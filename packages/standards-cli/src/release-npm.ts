@@ -1,10 +1,24 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { ArtifactIdentityError } from './artifact-identity-error';
+import { NpmRegistryError } from './npm-registry-error';
 import {
-  type Decision,
-  decideArtifactIdentity,
+  decodeUnknown,
+  fail,
+  gen,
+  map,
+  mapError,
+  optional,
+  SchemaRecord,
+  SchemaString,
+  Struct,
+  tryPromise,
+  Unknown,
+} from './release-effect';
+import {
   decideRelease,
   type ReleasePlan,
+  verifyArtifactIdentity,
 } from './release-state';
 
 export type ReleaseFetcher = (
@@ -23,124 +37,113 @@ type NpmState = {
 const HTTP_NOT_FOUND = 404;
 const HTTP_OK = 200;
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
+const packageMetadataSchema = Struct({
+  'dist-tags': Struct({ latest: SchemaString }),
+  versions: SchemaRecord({ key: SchemaString, value: Unknown }),
+});
 
-const responseMessage = (body: unknown): string =>
-  isRecord(body) && typeof body.error === 'string'
-    ? body.error
-    : 'unexpected response';
+const declaredVersionSchema = Struct({
+  dist: Struct({ integrity: optional(SchemaString) }),
+  gitHead: optional(SchemaString),
+});
 
-const parseDeclaredVersion = (
-  declared: unknown,
-): Decision<Pick<NpmState, 'gitHead' | 'integrity'>> => {
-  if (!isRecord(declared)) {
-    return { error: 'Declared npm version metadata is invalid', ok: false };
-  }
-  const { dist, gitHead } = declared;
-  if (!isRecord(dist)) {
-    return { error: 'Declared npm version has no dist metadata', ok: false };
-  }
-  if ('gitHead' in declared && typeof gitHead !== 'string') {
-    return { error: 'Declared npm version has invalid gitHead', ok: false };
-  }
-  return {
-    ok: true,
-    value: {
-      gitHead: typeof gitHead === 'string' ? gitHead : null,
-      integrity: typeof dist.integrity === 'string' ? dist.integrity : null,
-    },
-  };
-};
+const decodePackageMetadata = (body: unknown) =>
+  decodeUnknown(packageMetadataSchema)(body).pipe(
+    mapError(
+      () =>
+        new NpmRegistryError({
+          message:
+            'npm metadata requires string dist-tags.latest and a versions object',
+        }),
+    ),
+  );
 
-const parseMetadata = (body: unknown, version: string): Decision<NpmState> => {
-  if (!isRecord(body)) {
-    return { error: 'npm returned invalid package metadata', ok: false };
-  }
-  const { 'dist-tags': tags, versions } = body;
-  if (!(isRecord(tags) && isRecord(versions))) {
-    return {
-      error: 'npm metadata is missing dist-tags or versions',
-      ok: false,
-    };
-  }
-  const { latest } = tags;
-  const declared = versions[version];
-  if (declared === undefined) {
-    return {
-      ok: true,
-      value: {
+const parseMetadata = (body: unknown, version: string) =>
+  gen(function* () {
+    const metadata = yield* decodePackageMetadata(body);
+    const declared = metadata.versions[version];
+    if (declared === undefined) {
+      return {
         gitHead: null,
         integrity: null,
-        latest: typeof latest === 'string' ? latest : null,
+        latest: metadata['dist-tags'].latest,
         versionExists: false,
-      },
-    };
-  }
-  const identity = parseDeclaredVersion(declared);
-  return identity.ok
-    ? {
-        ok: true,
-        value: {
-          ...identity.value,
-          latest: typeof latest === 'string' ? latest : null,
-          versionExists: true,
-        },
-      }
-    : identity;
-};
+      } satisfies NpmState;
+    }
+    const identity = yield* decodeUnknown(declaredVersionSchema)(declared).pipe(
+      mapError(
+        () =>
+          new NpmRegistryError({
+            message: `npm metadata for ${version} requires dist metadata and a string gitHead when present`,
+          }),
+      ),
+    );
+    return {
+      gitHead: identity.gitHead ?? null,
+      integrity: identity.dist.integrity ?? null,
+      latest: metadata['dist-tags'].latest,
+      versionExists: true,
+    } satisfies NpmState;
+  });
 
-const loadNpmState = async (input: {
+const loadNpmState = (input: {
   readonly fetcher: ReleaseFetcher;
   readonly name: string;
   readonly registryUrl: string;
   readonly version: string;
-}): Promise<Decision<NpmState>> => {
-  let response: Response;
-  try {
-    response = await input.fetcher(
-      `${input.registryUrl}/${encodeURIComponent(input.name)}`,
-      { headers: { accept: 'application/json' } },
-    );
-  } catch (error) {
-    return {
-      error: `Reading npm metadata failed: ${String(error)}`,
-      ok: false,
-    };
-  }
-  if (response.status === HTTP_NOT_FOUND) {
-    return {
-      ok: true,
-      value: {
+}) =>
+  gen(function* () {
+    const response = yield* tryPromise({
+      try: () =>
+        input.fetcher(
+          `${input.registryUrl}/${encodeURIComponent(input.name)}`,
+          {
+            headers: { accept: 'application/json' },
+          },
+        ),
+      catch: (cause) =>
+        new NpmRegistryError({
+          message: `Reading npm metadata failed: ${String(cause)}`,
+        }),
+    });
+    if (response.status === HTTP_NOT_FOUND) {
+      return {
         gitHead: null,
         integrity: null,
         latest: null,
         versionExists: false,
-      },
-    };
-  }
-  let body: unknown;
-  try {
-    body = (await response.json()) as unknown;
-  } catch {
-    return { error: 'npm returned invalid JSON metadata', ok: false };
-  }
-  return response.status === HTTP_OK
-    ? parseMetadata(body, input.version)
-    : {
-        error: `Reading npm metadata: HTTP ${response.status} ${responseMessage(body)}`,
-        ok: false,
-      };
-};
+      } satisfies NpmState;
+    }
+    if (response.status !== HTTP_OK) {
+      return yield* fail(
+        new NpmRegistryError({
+          message: `Reading npm metadata failed with HTTP ${response.status}`,
+        }),
+      );
+    }
+    const body = yield* tryPromise({
+      try: () => response.json() as Promise<unknown>,
+      catch: () =>
+        new NpmRegistryError({ message: 'npm returned invalid JSON metadata' }),
+    });
+    return yield* parseMetadata(body, input.version);
+  });
 
-export const npmIntegrity = async (artifact: string): Promise<string> => {
-  const digest = createHash('sha512')
-    .update(await readFile(artifact))
-    .digest('base64');
-  return `sha512-${digest}`;
-};
+export const npmIntegrity = (artifact: string) =>
+  tryPromise({
+    try: () => readFile(artifact),
+    catch: (cause) =>
+      new ArtifactIdentityError({
+        message: `Reading package artifact failed: ${String(cause)}`,
+      }),
+  }).pipe(
+    map((bytes) => {
+      const digest = createHash('sha512').update(bytes).digest('base64');
+      return `sha512-${digest}`;
+    }),
+  );
 
-export const inspectNpmRelease = async (input: {
+export const inspectNpmRelease = (input: {
   readonly artifact: string;
   readonly expectedSha: string;
   readonly fetcher?: ReleaseFetcher;
@@ -148,34 +151,27 @@ export const inspectNpmRelease = async (input: {
   readonly parentVersion: string | null;
   readonly registryUrl?: string;
   readonly version: string;
-}): Promise<Decision<NpmInspection>> => {
-  const expectedIntegrity = await npmIntegrity(input.artifact);
-  const state = await loadNpmState({
-    fetcher: input.fetcher ?? fetch,
-    name: input.name,
-    registryUrl: input.registryUrl ?? 'https://registry.npmjs.org',
-    version: input.version,
+}) =>
+  gen(function* () {
+    const expectedIntegrity = yield* npmIntegrity(input.artifact);
+    const state = yield* loadNpmState({
+      fetcher: input.fetcher ?? fetch,
+      name: input.name,
+      registryUrl: input.registryUrl ?? 'https://registry.npmjs.org',
+      version: input.version,
+    });
+    yield* verifyArtifactIdentity({
+      expectedIntegrity,
+      expectedSha: input.expectedSha,
+      npmGitHead: state.gitHead,
+      npmIntegrity: state.integrity,
+      npmVersionExists: state.versionExists,
+    });
+    const plan = yield* decideRelease({
+      npmLatest: state.latest,
+      npmVersionExists: state.versionExists,
+      parentVersion: input.parentVersion,
+      version: input.version,
+    });
+    return { ...plan, integrity: expectedIntegrity } satisfies NpmInspection;
   });
-  if (!state.ok) {
-    return state;
-  }
-  const identity = decideArtifactIdentity({
-    expectedIntegrity,
-    expectedSha: input.expectedSha,
-    npmGitHead: state.value.gitHead,
-    npmIntegrity: state.value.integrity,
-    npmVersionExists: state.value.versionExists,
-  });
-  if (!identity.ok) {
-    return identity;
-  }
-  const plan = decideRelease({
-    npmLatest: state.value.latest,
-    npmVersionExists: state.value.versionExists,
-    parentVersion: input.parentVersion,
-    version: input.version,
-  });
-  return plan.ok
-    ? { ok: true, value: { ...plan.value, integrity: expectedIntegrity } }
-    : plan;
-};

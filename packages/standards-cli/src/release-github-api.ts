@@ -1,189 +1,145 @@
-import type { Decision } from './release-state';
+import { GithubApiError } from './github-api-error';
+import {
+  decodeUnknown,
+  type Effect,
+  fail,
+  flatMap,
+  gen,
+  map,
+  mapError,
+  SchemaBoolean,
+  SchemaString,
+  Struct,
+  succeed,
+} from './release-effect';
+import {
+  type ApiResponse,
+  apiMessage,
+  type GithubClient,
+  get,
+} from './release-github-request';
 
-export type ReleaseFetcher = (
-  input: RequestInfo | URL,
-  init?: RequestInit,
-) => Promise<Response>;
+export type { GithubClient, ReleaseFetcher } from './release-github-request';
 
 export type GithubState = {
   readonly releaseStatus: 'absent' | 'draft' | 'published';
   readonly tagSha: string | null;
 };
 
-export type ApiResponse = {
-  readonly body: unknown;
-  readonly status: number;
-};
-
-export type GithubClient = {
-  readonly apiUrl: string;
-  readonly fetcher: ReleaseFetcher;
-  readonly repo: string;
-  readonly token: string;
-};
-
 const HTTP_NOT_FOUND = 404;
 const HTTP_OK = 200;
 const MAX_TAG_DEPTH = 8;
+const TAG_NAME_FIELD = 'tag_name';
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
+const apiObjectSchema = Struct({
+  object: Struct({ sha: SchemaString, type: SchemaString }),
+});
 
-export const apiMessage = (response: ApiResponse): string =>
-  isRecord(response.body) && typeof response.body.message === 'string'
-    ? response.body.message
-    : 'unexpected response';
+const releaseSchema = Struct({
+  draft: SchemaBoolean,
+  [TAG_NAME_FIELD]: SchemaString,
+});
 
-const request = async (input: {
-  readonly body: unknown | null;
-  readonly client: GithubClient;
-  readonly method: 'GET' | 'POST';
-  readonly path: string;
-}): Promise<Decision<ApiResponse>> => {
-  let response: Response;
-  try {
-    response = await input.client.fetcher(
-      `${input.client.apiUrl}${input.path}`,
-      {
-        body: input.body === null ? undefined : JSON.stringify(input.body),
-        headers: {
-          accept: 'application/vnd.github+json',
-          authorization: `Bearer ${input.client.token}`,
-          'x-github-api-version': '2022-11-28',
-          ...(input.body === null
-            ? {}
-            : { 'content-type': 'application/json' }),
-        },
-        method: input.method,
-      },
-    );
-  } catch (error) {
-    return { error: `GitHub API request failed: ${String(error)}`, ok: false };
-  }
-  const text = await response.text();
-  try {
-    return {
-      ok: true,
-      value: {
-        body: text.length === 0 ? null : (JSON.parse(text) as unknown),
-        status: response.status,
-      },
-    };
-  } catch {
-    return {
-      error: `GitHub API returned invalid JSON with HTTP ${response.status}`,
-      ok: false,
-    };
-  }
-};
+const decodeObject = (response: ApiResponse, context: string) =>
+  decodeUnknown(apiObjectSchema)(response.body).pipe(
+    mapError(
+      () =>
+        new GithubApiError({
+          message: `${context} returned invalid object identity`,
+        }),
+    ),
+    map(({ object }) => object),
+  );
 
-export const get = (client: GithubClient, path: string) =>
-  request({ body: null, client, method: 'GET', path });
-
-export const post = (client: GithubClient, path: string, body: unknown) =>
-  request({ body, client, method: 'POST', path });
-
-const objectIdentity = (
-  response: ApiResponse,
-  context: string,
-): Decision<{ readonly sha: string; readonly type: string }> => {
-  if (!(isRecord(response.body) && isRecord(response.body.object))) {
-    return { error: `${context} returned invalid object metadata`, ok: false };
-  }
-  const { sha, type } = response.body.object;
-  return typeof sha === 'string' && typeof type === 'string'
-    ? { ok: true, value: { sha, type } }
-    : { error: `${context} returned invalid object identity`, ok: false };
-};
-
-const peelTag = async (
+const peelTag = (
   client: GithubClient,
   identity: { readonly sha: string; readonly type: string },
   depth: number,
-): Promise<Decision<string>> => {
+): Effect<string, GithubApiError> => {
   if (identity.type === 'commit') {
-    return { ok: true, value: identity.sha };
+    return succeed(identity.sha);
   }
   if (identity.type !== 'tag') {
-    return {
-      error: `GitHub tag resolves to ${identity.type}, expected commit`,
-      ok: false,
-    };
+    return fail(
+      new GithubApiError({
+        message: `GitHub tag resolves to ${identity.type}, expected commit`,
+      }),
+    );
   }
   if (depth === MAX_TAG_DEPTH) {
-    return { error: 'GitHub annotated tag chain is too deep', ok: false };
+    return fail(
+      new GithubApiError({ message: 'GitHub annotated tag chain is too deep' }),
+    );
   }
-  const tagObject = await get(
-    client,
-    `/repos/${client.repo}/git/tags/${identity.sha}`,
+  return get(client, `/repos/${client.repo}/git/tags/${identity.sha}`).pipe(
+    flatMap((response) =>
+      response.status === HTTP_OK
+        ? decodeObject(response, 'GitHub annotated tag')
+        : fail(
+            new GithubApiError({
+              message: `Reading annotated GitHub tag: HTTP ${response.status} ${apiMessage(response)}`,
+            }),
+          ),
+    ),
+    flatMap((next) => peelTag(client, next, depth + 1)),
   );
-  if (!tagObject.ok) {
-    return tagObject;
-  }
-  if (tagObject.value.status !== HTTP_OK) {
-    return {
-      error: `Reading annotated GitHub tag: HTTP ${tagObject.value.status} ${apiMessage(tagObject.value)}`,
-      ok: false,
-    };
-  }
-  const next = objectIdentity(tagObject.value, 'GitHub annotated tag');
-  return next.ok ? peelTag(client, next.value, depth + 1) : next;
 };
 
-export const loadTagSha = async (
-  client: GithubClient,
-  tag: string,
-): Promise<Decision<string | null>> => {
-  const reference = await get(
+export const loadTagSha = (client: GithubClient, tag: string) =>
+  get(
     client,
     `/repos/${client.repo}/git/ref/tags/${encodeURIComponent(tag)}`,
+  ).pipe(
+    flatMap((response) => {
+      if (response.status === HTTP_NOT_FOUND) {
+        return succeed(null);
+      }
+      if (response.status !== HTTP_OK) {
+        return fail(
+          new GithubApiError({
+            message: `Reading GitHub tag: HTTP ${response.status} ${apiMessage(response)}`,
+          }),
+        );
+      }
+      return decodeObject(response, 'GitHub tag reference').pipe(
+        flatMap((identity) => peelTag(client, identity, 0)),
+      );
+    }),
   );
-  if (!reference.ok) {
-    return reference;
-  }
-  if (reference.value.status === HTTP_NOT_FOUND) {
-    return { ok: true, value: null };
-  }
-  if (reference.value.status !== HTTP_OK) {
-    return {
-      error: `Reading GitHub tag: HTTP ${reference.value.status} ${apiMessage(reference.value)}`,
-      ok: false,
-    };
-  }
-  const identity = objectIdentity(reference.value, 'GitHub tag reference');
-  return identity.ok ? peelTag(client, identity.value, 0) : identity;
-};
 
-export const loadGithubState = async (
-  client: GithubClient,
-  tag: string,
-): Promise<Decision<GithubState>> => {
-  const release = await get(
-    client,
-    `/repos/${client.repo}/releases/tags/${encodeURIComponent(tag)}`,
-  );
-  if (!release.ok) {
-    return release;
-  }
-  let releaseStatus: GithubState['releaseStatus'];
-  if (release.value.status === HTTP_NOT_FOUND) {
-    releaseStatus = 'absent';
-  } else if (release.value.status === HTTP_OK && isRecord(release.value.body)) {
-    if (typeof release.value.body.draft !== 'boolean') {
-      return {
-        error: 'GitHub release returned invalid draft state',
-        ok: false,
-      };
+export const loadGithubState = (client: GithubClient, tag: string) =>
+  gen(function* () {
+    const response = yield* get(
+      client,
+      `/repos/${client.repo}/releases/tags/${encodeURIComponent(tag)}`,
+    );
+    let releaseStatus: GithubState['releaseStatus'];
+    if (response.status === HTTP_NOT_FOUND) {
+      releaseStatus = 'absent';
+    } else if (response.status === HTTP_OK) {
+      const release = yield* decodeUnknown(releaseSchema)(response.body).pipe(
+        mapError(
+          () =>
+            new GithubApiError({
+              message: 'GitHub release returned invalid release state',
+            }),
+        ),
+      );
+      if (release[TAG_NAME_FIELD] !== tag) {
+        return yield* fail(
+          new GithubApiError({
+            message: `GitHub release returned tag ${release[TAG_NAME_FIELD]}, expected ${tag}`,
+          }),
+        );
+      }
+      releaseStatus = release.draft ? 'draft' : 'published';
+    } else {
+      return yield* fail(
+        new GithubApiError({
+          message: `Reading GitHub release: HTTP ${response.status} ${apiMessage(response)}`,
+        }),
+      );
     }
-    releaseStatus = release.value.body.draft ? 'draft' : 'published';
-  } else {
-    return {
-      error: `Reading GitHub release: HTTP ${release.value.status} ${apiMessage(release.value)}`,
-      ok: false,
-    };
-  }
-  const tagSha = await loadTagSha(client, tag);
-  return tagSha.ok
-    ? { ok: true, value: { releaseStatus, tagSha: tagSha.value } }
-    : tagSha;
-};
+    const tagSha = yield* loadTagSha(client, tag);
+    return { releaseStatus, tagSha } satisfies GithubState;
+  });
