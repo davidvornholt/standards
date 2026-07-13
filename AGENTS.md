@@ -12,6 +12,7 @@ Treat duplication as a design signal: when a change needs to copy configuration,
 
 - Check whether the request conflicts with repo architecture or standards.
 - Ask before broad product, UX, architectural, naming, workflow, scope, or business-logic decisions.
+- Propose before changing CI workflows, quality gates, or canonical synced files, even to unblock a failure. The file class is the trigger, not whether the change feels architectural.
 - Prefer cleaner architecture when justified. Do not preserve messy code only to avoid churn.
 
 ## Skill routing
