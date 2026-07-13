@@ -8,6 +8,7 @@
     ".agents/skills/database",
     ".agents/skills/declarative-infra",
     ".agents/skills/frontend-design",
+    ".agents/skills/nextjs",
     ".agents/skills/review",
     ".agents/skills/review-loop",
     ".agents/skills/standards-sync",
