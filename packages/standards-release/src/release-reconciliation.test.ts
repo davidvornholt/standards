@@ -28,11 +28,16 @@ describe('GitHub reconciliation decisions', () => {
     ).toBe('exists');
   });
 
-  it('rejects drafts, missing published tags, and wrong tags', () => {
+  it('rejects drafts, prereleases, missing published tags, and wrong tags', () => {
     const inputs = [
       {
         expectedSha: 'expected',
         releaseStatus: 'draft' as const,
+        tagSha: 'expected',
+      },
+      {
+        expectedSha: 'expected',
+        releaseStatus: 'prerelease' as const,
         tagSha: 'expected',
       },
       {

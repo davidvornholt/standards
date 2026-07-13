@@ -111,12 +111,19 @@ export const verifyArtifactIdentity = (input: {
 
 export const decideReconciliation = (input: {
   readonly expectedSha: string;
-  readonly releaseStatus: 'absent' | 'draft' | 'published';
+  readonly releaseStatus: 'absent' | 'draft' | 'prerelease' | 'published';
   readonly tagSha: string | null;
 }) => {
   if (input.releaseStatus === 'draft') {
     return fail(
       new GithubStateError({ message: 'Release already exists as a draft' }),
+    );
+  }
+  if (input.releaseStatus === 'prerelease') {
+    return fail(
+      new GithubStateError({
+        message: 'Release already exists as a prerelease',
+      }),
     );
   }
   if (input.tagSha !== null && input.tagSha !== input.expectedSha) {

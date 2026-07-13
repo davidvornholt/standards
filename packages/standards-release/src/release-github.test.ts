@@ -7,7 +7,7 @@ import {
 } from './release-github';
 
 type RemoteState = {
-  release: 'absent' | 'draft' | 'published';
+  release: 'absent' | 'draft' | 'prerelease' | 'published';
   tagSha: string | null;
 };
 
@@ -40,6 +40,7 @@ const remote = (
         : json(
             {
               draft: state.release === 'draft',
+              prerelease: state.release === 'prerelease',
               [TAG_NAME_FIELD]: 'v0.5.0',
             },
             HTTP_OK,
@@ -164,10 +165,11 @@ describe('GitHub release boundary', () => {
     }
   });
 
-  it('rejects drafts, missing published tags, and remote errors', async () => {
+  it('rejects drafts, prereleases, missing published tags, and remote errors', async () => {
     const stateFailures = await Promise.all(
       [
         { release: 'draft' as const, tagSha: 'expected' },
+        { release: 'prerelease' as const, tagSha: 'expected' },
         { release: 'published' as const, tagSha: null },
       ].map((state) => {
         const github = remote(state);

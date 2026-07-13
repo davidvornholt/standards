@@ -22,7 +22,7 @@ import {
 export type { GithubClient, ReleaseFetcher } from './release-github-request';
 
 export type GithubState = {
-  readonly releaseStatus: 'absent' | 'draft' | 'published';
+  readonly releaseStatus: 'absent' | 'draft' | 'prerelease' | 'published';
   readonly tagSha: string | null;
 };
 
@@ -37,6 +37,7 @@ const apiObjectSchema = Struct({
 
 const releaseSchema = Struct({
   draft: SchemaBoolean,
+  prerelease: SchemaBoolean,
   [TAG_NAME_FIELD]: SchemaString,
 });
 
@@ -132,7 +133,12 @@ export const loadGithubState = (client: GithubClient, tag: string) =>
           }),
         );
       }
-      releaseStatus = release.draft ? 'draft' : 'published';
+      releaseStatus = 'published';
+      if (release.prerelease) {
+        releaseStatus = 'prerelease';
+      } else if (release.draft) {
+        releaseStatus = 'draft';
+      }
     } else {
       return yield* fail(
         new GithubApiError({

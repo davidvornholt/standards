@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import { flip, runPromise } from './release-effect';
-import { loadTagSha, type ReleaseFetcher } from './release-github-api';
+import {
+  loadGithubState,
+  loadTagSha,
+  type ReleaseFetcher,
+} from './release-github-api';
 
 type GitIdentity = { readonly sha: string; readonly type: string };
 
@@ -8,6 +12,7 @@ const HTTP_NOT_FOUND = 404;
 const HTTP_OK = 200;
 const MAX_TAG_HOPS = 8;
 const REF_LOOKUP_COUNT = 1;
+const TAG_NAME_FIELD = 'tag_name';
 
 const json = (body: unknown, status: number): Response =>
   Response.json(body, { status });
@@ -104,5 +109,75 @@ describe('GitHub tag peeling', () => {
       message: 'GitHub annotated tag chain is too deep',
     });
     expect(remote.calls).toHaveLength(MAX_TAG_HOPS + REF_LOOKUP_COUNT);
+  });
+});
+
+describe('GitHub release state', () => {
+  it('decodes absent, draft, prerelease, and published independently', async () => {
+    const cases = [
+      {
+        body: { message: 'Not Found' },
+        expected: 'absent',
+        status: HTTP_NOT_FOUND,
+      },
+      {
+        body: {
+          draft: true,
+          prerelease: false,
+          [TAG_NAME_FIELD]: 'v0.5.0',
+        },
+        expected: 'draft',
+        status: HTTP_OK,
+      },
+      {
+        body: {
+          draft: false,
+          prerelease: true,
+          [TAG_NAME_FIELD]: 'v0.5.0',
+        },
+        expected: 'prerelease',
+        status: HTTP_OK,
+      },
+      {
+        body: {
+          draft: true,
+          prerelease: true,
+          [TAG_NAME_FIELD]: 'v0.5.0',
+        },
+        expected: 'prerelease',
+        status: HTTP_OK,
+      },
+      {
+        body: {
+          draft: false,
+          prerelease: false,
+          [TAG_NAME_FIELD]: 'v0.5.0',
+        },
+        expected: 'published',
+        status: HTTP_OK,
+      },
+    ] as const;
+    const statuses = await Promise.all(
+      cases.map(({ body, status }) => {
+        const fetcher: ReleaseFetcher = (requestInput) =>
+          Promise.resolve(
+            new URL(String(requestInput)).pathname.includes('/releases/tags/')
+              ? json(body, status)
+              : json({ object: { sha: 'expected', type: 'commit' } }, HTTP_OK),
+          );
+        return runPromise(
+          loadGithubState(
+            {
+              apiUrl: 'https://github.test',
+              fetcher,
+              repo: 'owner/repo',
+              token: 'token',
+            },
+            'v0.5.0',
+          ),
+        ).then(({ releaseStatus }) => releaseStatus);
+      }),
+    );
+    expect(statuses).toEqual(cases.map(({ expected }) => expected));
   });
 });
