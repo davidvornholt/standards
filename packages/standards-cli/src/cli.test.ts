@@ -14,6 +14,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import process from 'node:process';
+import { DEFAULT_SYNC_POLICY } from './sync-policy';
 
 const ENGINE = join(import.meta.dir, 'cli.ts');
 const LEGACY_ENGINE = join(
@@ -48,7 +49,6 @@ const STD_PATHS: ReadonlyArray<string> = [
   SYNC_POLICY_CONTROLLER_PATH,
   SYNC_POLICY_CONTRACT_PATH,
 ];
-const DEFAULT_REF = 'refs/heads/main';
 const SYNC_POLICY_CONTRACT_VERSION = 1;
 const BARE_SYNC_STEP = /^\s+run: bun standards sync$/mu;
 
@@ -127,7 +127,7 @@ const buildUpstream = (paths: ReadonlyArray<string> = STD_PATHS): string => {
   write(
     up,
     'template/sync-standards.local.json',
-    `${JSON.stringify({ ref: DEFAULT_REF, scheduledSync: true }, null, 2)}\n`,
+    `${JSON.stringify(DEFAULT_SYNC_POLICY, null, 2)}\n`,
   );
   write(up, 'template/AGENTS.local.md', '# Local\n');
   write(up, 'template/biome.jsonc', '{"extends":["./biome.base.jsonc"]}\n');
@@ -265,7 +265,7 @@ const buildGitUpstream = (): {
   write(
     up,
     'template/sync-standards.local.json',
-    `${JSON.stringify({ ref: DEFAULT_REF, scheduledSync: true }, null, 2)}\n`,
+    `${JSON.stringify(DEFAULT_SYNC_POLICY, null, 2)}\n`,
   );
   write(up, 'managed/a.txt', 'alpha v2\n');
   git(up, ['add', '-A']);
@@ -296,9 +296,9 @@ describe('init', () => {
     );
     expect(read(consumer, 'managed/a.txt')).toBe('alpha\n');
     expect(read(consumer, 'sync-standards.local.json')).toContain(
-      '"refs/heads/main"',
+      JSON.stringify(DEFAULT_SYNC_POLICY.ref),
     );
-    expect(readLock(consumer).ref).toBe(DEFAULT_REF);
+    expect(readLock(consumer).ref).toBe(DEFAULT_SYNC_POLICY.ref);
     expect(readLock(consumer).files['managed/a.txt']).toBeDefined();
   });
 
@@ -384,7 +384,7 @@ describe('check', () => {
     const pinnedCheck = run(consumer, ['check', '--dir', consumer]);
     expect(pinnedCheck.status).toBe(1);
     expect(pinnedCheck.stderr).toContain(
-      `policy requests refs/tags/v1, but sync-standards.lock records ${DEFAULT_REF}`,
+      `policy requests refs/tags/v1, but sync-standards.lock records ${DEFAULT_SYNC_POLICY.ref}`,
     );
   });
 
@@ -400,7 +400,7 @@ describe('check', () => {
 
     expect(check.status).toBe(1);
     expect(check.stderr).toContain(
-      `policy requests refs/heads/stable, but sync-standards.lock records ${DEFAULT_REF}`,
+      `policy requests refs/heads/stable, but sync-standards.lock records ${DEFAULT_SYNC_POLICY.ref}`,
     );
   });
 });
@@ -772,7 +772,7 @@ describe('ref pinning', () => {
     const local = run(consumer, ['sync', '--dir', consumer]);
     expect(local.status).toBe(0);
     expect(read(consumer, 'managed/a.txt')).toBe('alpha v3\n');
-    expect(readLock(consumer).ref).toBe(DEFAULT_REF);
+    expect(readLock(consumer).ref).toBe(DEFAULT_SYNC_POLICY.ref);
 
     write(up, 'managed/a.txt', 'alpha v4\n');
     git(up, ['add', '-A']);
@@ -835,7 +835,7 @@ describe('policy validation', () => {
     const lockBefore = read(consumer, 'sync-standards.lock');
 
     for (const invalidPolicy of [
-      { ref: DEFAULT_REF },
+      { ref: DEFAULT_SYNC_POLICY.ref },
       { ref: 'main', scheduledSync: true },
     ]) {
       write(
@@ -855,7 +855,7 @@ describe('policy validation', () => {
     write(
       consumer,
       'sync-standards.local.json',
-      JSON.stringify({ ref: DEFAULT_REF, scheduledSync: true, typo: false }),
+      JSON.stringify({ ...DEFAULT_SYNC_POLICY, typo: false }),
     );
 
     const result = run(consumer, ['sync', '--dir', consumer]);
@@ -935,7 +935,7 @@ describe('legacy policy bootstrap exactness', () => {
     write(
       consumer,
       'sync-standards.local.json',
-      JSON.stringify({ ref: DEFAULT_REF, scheduledSync: true, typo: false }),
+      JSON.stringify({ ...DEFAULT_SYNC_POLICY, typo: false }),
     );
     const lockBefore = read(consumer, 'sync-standards.lock');
     const managedBefore = read(consumer, 'managed/a.txt');
@@ -1070,7 +1070,7 @@ describe('scheduled and legacy sync', () => {
     write(
       consumer,
       'sync-standards.local.json',
-      JSON.stringify({ ref: DEFAULT_REF, scheduledSync: true }),
+      JSON.stringify(DEFAULT_SYNC_POLICY),
     );
     setStandardsVersion(consumer, '0.5.0');
 
@@ -1118,7 +1118,7 @@ describe('scheduled and legacy sync', () => {
     write(
       consumer,
       'sync-standards.local.json',
-      JSON.stringify({ ref: DEFAULT_REF, scheduledSync: false }),
+      JSON.stringify({ ...DEFAULT_SYNC_POLICY, scheduledSync: false }),
     );
     write(up, 'managed/a.txt', 'alpha v3\n');
     git(up, ['add', '-A']);
@@ -1185,7 +1185,7 @@ describe('canonical workflow', () => {
     const manifest = JSON.parse(readFileSync(ROOT_MANIFEST, 'utf8')) as {
       paths: ReadonlyArray<string>;
     };
-    expect(policy).toEqual({ ref: DEFAULT_REF, scheduledSync: true });
+    expect(policy).toEqual(DEFAULT_SYNC_POLICY);
     expect(manifest.paths).not.toContain('sync-standards.local.json');
   });
 });

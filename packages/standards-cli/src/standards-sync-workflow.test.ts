@@ -75,6 +75,10 @@ describe('canonical scheduled sync contract', () => {
     expect(workflow).toContain('types: [standards-sync]');
     expect(workflow).not.toContain('workflow_dispatch:');
     expect(workflow).toContain('environment: standards-sync');
+    expect(workflow).toContain('The environment admits');
+    expect(workflow).toContain('protected branches generally');
+    expect(workflow).toContain("repository's default branch");
+    expect(workflow).toContain('canonical default-branch ruleset protects');
     expect(
       workflowStep(workflow, 'Open a pull request if the mirror changed'),
     ).toContain(
@@ -178,9 +182,15 @@ describe('standards sync documentation', () => {
       expect(documentation).toContain('STANDARDS_SYNC_ENVIRONMENT_TOKEN');
       expect(documentation).toContain('legacy repository-level');
       expect(documentation).toContain('STANDARDS_SYNC_TOKEN');
+      expect(documentation).toContain('admits protected branches generally');
       expect(documentation).toContain(
-        'protected-branch-only deployment policy',
+        "bind the workflow to the repository's default branch",
       );
+      expect(documentation).toContain(
+        'canonical default-branch ruleset protects that branch',
+      );
+      expect(documentation).not.toContain('protected-branch-only');
+      expect(documentation).not.toContain('permits only branches protected');
       expect(documentation).toContain(
         "run a bare `bun standards sync` from the repository's default branch",
       );

@@ -60,10 +60,10 @@ jobs:
       #
       # Configure STANDARDS_SYNC_ENVIRONMENT_TOKEN in the protected
       # `standards-sync` environment (fine-grained PAT: contents + pull requests
-      # write) so the opened PR triggers workflows. Declarative GitHub settings
-      # restrict that environment to branches protected by the canonical
-      # default-branch ruleset; both schedule and repository_dispatch load
-      # this workflow from the default branch. PRs
+      # write) so the opened PR triggers workflows. The environment admits
+      # protected branches generally. The schedule and repository_dispatch
+      # bind this workflow to the repository's default branch, which the
+      # canonical default-branch ruleset protects. PRs
       # opened with the default GITHUB_TOKEN fallback do not trigger workflows
       # and need a manual nudge (push or close/reopen) to run the gate.
       #

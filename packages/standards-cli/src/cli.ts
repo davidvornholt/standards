@@ -52,7 +52,6 @@ import {
 const { YAML: BunYaml } = await import('bun');
 
 const DEFAULT_UPSTREAM = 'github:davidvornholt/standards';
-const DEFAULT_REF = 'refs/heads/main';
 const LOCAL_POLICY_FILE = 'sync-standards.local.json';
 const SYNC_POLICY_CONTRACT_FILE = 'packages/standards-cli/src/sync-policy.ts';
 const SYNC_POLICY_CONTROLLER_PATH = '.github/actions/standards-sync-preflight';
@@ -256,7 +255,7 @@ const writeLock = async (dir: string, lock: Lock): Promise<void> => {
   );
   const ordered = {
     upstream: lock.upstream,
-    ref: lock.ref ?? DEFAULT_REF,
+    ref: lock.ref ?? DEFAULT_SYNC_POLICY.ref,
     sha: lock.sha,
     files,
   };
@@ -327,7 +326,7 @@ const resolveSource = (src: string, ref: string | undefined): Source => {
   const url = src.startsWith(GITHUB_PREFIX)
     ? `https://github.com/${src.slice(GITHUB_PREFIX.length)}.git`
     : src;
-  const target = ref ?? DEFAULT_REF;
+  const target = ref ?? DEFAULT_SYNC_POLICY.ref;
   assertSupportedRef(target);
   const dir = mkdtempSync(join(tmpdir(), 'standards-'));
   const cleanup = (): void => rmSync(dir, { recursive: true, force: true });
@@ -563,7 +562,7 @@ const runInit = async (
   reportMirror(result, false);
   await writeLock(consumer, {
     upstream: manifest.upstream,
-    ref: DEFAULT_REF,
+    ref: DEFAULT_SYNC_POLICY.ref,
     sha: src.sha,
     files: result.files,
   });
@@ -629,7 +628,7 @@ const runCheck = async (
   for (const rel of Object.keys(lock.files)) {
     assertSafeRelativePath(rel, 'sync-standards.lock file');
   }
-  const lockedRef = lock.ref ?? DEFAULT_REF;
+  const lockedRef = lock.ref ?? DEFAULT_SYNC_POLICY.ref;
   const policyMatchesLock = policy === null || lockedRef === policy.ref;
   if (policy !== null && !policyMatchesLock) {
     console.error(

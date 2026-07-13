@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { inspectSyncPolicy } from './sync-policy.ts';
+import { DEFAULT_SYNC_POLICY, inspectSyncPolicy } from './sync-policy.ts';
 
 const packageText = (version) =>
   JSON.stringify({
@@ -12,8 +12,7 @@ describe('sync policy controller contract', () => {
     const inspection = inspectSyncPolicy({
       packageText: packageText('0.5.0'),
       policyText: JSON.stringify({
-        ref: 'refs/heads/main',
-        scheduledSync: true,
+        ...DEFAULT_SYNC_POLICY,
         typo: false,
       }),
     });
@@ -32,6 +31,7 @@ describe('sync policy controller contract', () => {
     });
 
     assert.equal(inspection.problems.length, 1);
+    assert.deepEqual(inspection.policy, DEFAULT_SYNC_POLICY);
     assert.ok(inspection.problems[0].includes('exact stable version >=0.5.0'));
   });
 });

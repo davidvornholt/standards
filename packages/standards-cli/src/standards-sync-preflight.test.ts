@@ -10,6 +10,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
+import { DEFAULT_SYNC_POLICY } from './sync-policy';
 
 const ROOT = join(import.meta.dir, '../../..');
 const PREFLIGHT = join(
@@ -68,6 +69,7 @@ const serializePolicy = (ref: string, scheduledSync: boolean): string =>
   JSON.stringify({ ref, scheduledSync });
 const packageWithStandards = (version: string): string =>
   JSON.stringify({ devDependencies: { [STANDARDS_PACKAGE]: version } });
+const DEFAULT_POLICY_TEXT = JSON.stringify(DEFAULT_SYNC_POLICY);
 
 afterEach(() => {
   while (temporaryDirectories.length > 0) {
@@ -82,7 +84,7 @@ describe('scheduled sync preflight', () => {
   it('disables a scheduled run before dependency setup when policy opts out', () => {
     const result = runPreflight(
       'schedule',
-      serializePolicy('refs/heads/main', false),
+      serializePolicy(DEFAULT_SYNC_POLICY.ref, false),
       packageWithStandards('0.5.0'),
     );
 
@@ -100,7 +102,7 @@ describe('scheduled sync preflight', () => {
   it('enables default policy with a compatible direct standards version', () => {
     const configured = runPreflight(
       'schedule',
-      serializePolicy('refs/heads/main', true),
+      DEFAULT_POLICY_TEXT,
       packageWithStandards('0.5.0'),
     );
     const missing = runPreflight(
@@ -128,7 +130,7 @@ describe('scheduled sync preflight', () => {
   it('keeps default-branch repository dispatch enabled when scheduled runs are disabled', () => {
     const result = runPreflight(
       'repository_dispatch',
-      serializePolicy('refs/heads/main', false),
+      serializePolicy(DEFAULT_SYNC_POLICY.ref, false),
       packageWithStandards('0.5.0'),
     );
 
@@ -159,8 +161,8 @@ describe('scheduled sync preflight', () => {
       '{}',
       serializePolicy('main', true),
       serializePolicy('refs/heads/bad..ref', true),
-      JSON.stringify({ ref: 'refs/heads/main' }),
-      JSON.stringify({ ref: 'refs/heads/main', scheduledSync: 'false' }),
+      JSON.stringify({ ref: DEFAULT_SYNC_POLICY.ref }),
+      JSON.stringify({ ref: DEFAULT_SYNC_POLICY.ref, scheduledSync: 'false' }),
     ]) {
       const result = runPreflight('schedule', invalidPolicy);
       expect(result.status).not.toBe(0);
@@ -187,11 +189,7 @@ describe('scheduled sync package preflight', () => {
       packageWithStandards('0.4.0'),
       JSON.stringify({ dependencies: { [STANDARDS_PACKAGE]: '0.5.0' } }),
     ]) {
-      const result = runPreflight(
-        'schedule',
-        serializePolicy('refs/heads/main', true),
-        packageJson,
-      );
+      const result = runPreflight('schedule', DEFAULT_POLICY_TEXT, packageJson);
       expect(result.status).not.toBe(0);
       expect(result.output).toBe('');
       expect(result.stderr).toContain('package.json');
