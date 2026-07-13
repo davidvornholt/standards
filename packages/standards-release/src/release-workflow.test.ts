@@ -79,6 +79,20 @@ describe('CLI release workflow', () => {
     );
   });
 
+  it('keeps push-visible draft preflight in the publishing job', () => {
+    const publishJob = workflow.slice(
+      position('  publish:'),
+      position('  release:'),
+    );
+    expect(publishJob).toContain('contents: write');
+    expect(publishJob).toContain('id-token: write');
+    const preflight = position('- name: Preflight GitHub release boundary');
+    const publish = position('- name: Publish package');
+    expect(preflight).toBeGreaterThan(position('  publish:'));
+    expect(preflight).toBeLessThan(position('  release:'));
+    expect(preflight).toBeLessThan(publish);
+  });
+
   it('exports only values consumed by the release job', () => {
     const outputs = workflow.slice(
       position('    outputs:'),

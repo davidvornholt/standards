@@ -7,6 +7,7 @@ import {
   gen,
   map,
   mapError,
+  SchemaArray,
   SchemaBoolean,
   SchemaString,
   Struct,
@@ -29,6 +30,8 @@ export type GithubState = {
 const HTTP_NOT_FOUND = 404;
 const HTTP_OK = 200;
 const MAX_TAG_DEPTH = 8;
+const MAX_RELEASE_PAGES = 100;
+const RELEASES_PER_PAGE = 100;
 const TAG_NAME_FIELD = 'tag_name';
 
 const apiObjectSchema = Struct({
@@ -40,6 +43,7 @@ const releaseSchema = Struct({
   prerelease: SchemaBoolean,
   [TAG_NAME_FIELD]: SchemaString,
 });
+const releaseListSchema = SchemaArray(releaseSchema);
 
 const decodeObject = (response: ApiResponse, context: string) =>
   decodeUnknown(apiObjectSchema)(response.body).pipe(
@@ -108,43 +112,56 @@ export const loadTagSha = (client: GithubClient, tag: string) =>
     }),
   );
 
-export const loadGithubState = (client: GithubClient, tag: string) =>
+const findRelease = (client: GithubClient, tag: string) =>
   gen(function* () {
-    const response = yield* get(
-      client,
-      `/repos/${client.repo}/releases/tags/${encodeURIComponent(tag)}`,
-    );
-    let releaseStatus: GithubState['releaseStatus'];
-    if (response.status === HTTP_NOT_FOUND) {
-      releaseStatus = 'absent';
-    } else if (response.status === HTTP_OK) {
-      const release = yield* decodeUnknown(releaseSchema)(response.body).pipe(
-        mapError(
-          () =>
-            new GithubApiError({
-              message: 'GitHub release returned invalid release state',
-            }),
-        ),
+    for (let page = 1; page <= MAX_RELEASE_PAGES; page += 1) {
+      const response = yield* get(
+        client,
+        `/repos/${client.repo}/releases?per_page=${RELEASES_PER_PAGE}&page=${page}`,
       );
-      if (release[TAG_NAME_FIELD] !== tag) {
+      if (response.status !== HTTP_OK) {
         return yield* fail(
           new GithubApiError({
-            message: `GitHub release returned tag ${release[TAG_NAME_FIELD]}, expected ${tag}`,
+            message: `Listing GitHub releases page ${page}: HTTP ${response.status} ${apiMessage(response)}`,
           }),
         );
       }
+      const releases = yield* decodeUnknown(releaseListSchema)(
+        response.body,
+      ).pipe(
+        mapError(
+          () =>
+            new GithubApiError({
+              message: `GitHub release list page ${page} returned invalid release state`,
+            }),
+        ),
+      );
+      const exact = releases.find((release) => release[TAG_NAME_FIELD] === tag);
+      if (exact !== undefined) {
+        return exact;
+      }
+      if (releases.length < RELEASES_PER_PAGE) {
+        return null;
+      }
+    }
+    return yield* fail(
+      new GithubApiError({
+        message: `GitHub release listing exceeded ${MAX_RELEASE_PAGES} pages`,
+      }),
+    );
+  });
+
+export const loadGithubState = (client: GithubClient, tag: string) =>
+  gen(function* () {
+    const release = yield* findRelease(client, tag);
+    let releaseStatus: GithubState['releaseStatus'] = 'absent';
+    if (release !== null) {
       releaseStatus = 'published';
       if (release.prerelease) {
         releaseStatus = 'prerelease';
       } else if (release.draft) {
         releaseStatus = 'draft';
       }
-    } else {
-      return yield* fail(
-        new GithubApiError({
-          message: `Reading GitHub release: HTTP ${response.status} ${apiMessage(response)}`,
-        }),
-      );
     }
     const tagSha = yield* loadTagSha(client, tag);
     return { releaseStatus, tagSha } satisfies GithubState;

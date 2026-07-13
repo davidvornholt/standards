@@ -34,15 +34,17 @@ const remote = (
   const calls: Array<string> = [];
   const bodies: Array<unknown> = [];
   const readResponse = (path: string): Response => {
-    if (path.includes('/releases/tags/')) {
+    if (path.endsWith('/releases')) {
       return state.release === 'absent'
-        ? json({ message: 'Not Found' }, HTTP_NOT_FOUND)
+        ? json([], HTTP_OK)
         : json(
-            {
-              draft: state.release === 'draft',
-              prerelease: state.release === 'prerelease',
-              [TAG_NAME_FIELD]: 'v0.5.0',
-            },
+            [
+              {
+                draft: state.release === 'draft',
+                prerelease: state.release === 'prerelease',
+                [TAG_NAME_FIELD]: 'v0.5.0',
+              },
+            ],
             HTTP_OK,
           );
     }

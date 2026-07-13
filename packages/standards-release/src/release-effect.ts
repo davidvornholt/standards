@@ -27,6 +27,7 @@ export const {
 export const { isLeft } = eitherModule;
 
 export const {
+  Array: SchemaArray,
   Boolean: SchemaBoolean,
   decodeUnknown,
   optional,

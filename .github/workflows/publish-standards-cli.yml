@@ -27,7 +27,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: read
+      # Push-capable repository access is required because GitHub only exposes
+      # draft releases to List releases callers with push access. The draft
+      # preflight runs before the irreversible npm publish step. Keep both in
+      # this job: passing release state from a separate job would make that
+      # authorization decision stale and widen the race before publication.
+      contents: write
       id-token: write
     outputs:
       reconcile: ${{ steps.npm.outputs.reconcile }}
