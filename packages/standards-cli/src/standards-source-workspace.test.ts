@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
@@ -15,6 +15,8 @@ const LOCK = join(ROOT, 'sync-standards.lock');
 const EVENT_NAME_VARIABLE = 'GITHUB_EVENT_NAME';
 const OUTPUT_VARIABLE = 'GITHUB_OUTPUT';
 const WORKSPACE_VARIABLE = 'GITHUB_WORKSPACE';
+const readLock = (): string | undefined =>
+  existsSync(LOCK) ? readFileSync(LOCK, 'utf8') : undefined;
 
 describe('standards source workspace', () => {
   it('passes real-root scheduled and repository-dispatch preflight', () => {
@@ -41,7 +43,7 @@ describe('standards source workspace', () => {
   });
 
   it('keeps a real-root local dry run as a no-op', () => {
-    const lockBefore = readFileSync(LOCK, 'utf8');
+    const lockBefore = readLock();
     const result = spawnSync('bun', [CLI, 'sync', '--from', '.', '--dry-run'], {
       cwd: ROOT,
       encoding: 'utf8',
@@ -49,6 +51,6 @@ describe('standards source workspace', () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('dry run: already in sync; no changes');
-    expect(readFileSync(LOCK, 'utf8')).toBe(lockBefore);
+    expect(readLock()).toBe(lockBefore);
   });
 });
