@@ -1,7 +1,9 @@
 import {
   type Cause,
   defects,
+  die,
   failures,
+  interrupt,
   interruptors,
   pretty,
 } from 'effect/Cause';
@@ -19,10 +21,12 @@ const escapeGithubCommand = (message: string): string =>
 export const renderReleaseCause = <E extends MessageFailure>(
   cause: Cause<E>,
 ): string => {
-  const messages = [...failures(cause)].map((failure) => failure.message);
-  const hasUntypedCause =
-    [...defects(cause)].length > 0 || [...interruptors(cause)].length > 0;
-  if (messages.length === 0 || hasUntypedCause) {
+  const messages = [
+    ...[...failures(cause)].map((failure) => failure.message),
+    ...[...defects(cause)].map((defect) => pretty(die(defect))),
+    ...[...interruptors(cause)].map((fiberId) => pretty(interrupt(fiberId))),
+  ];
+  if (messages.length === 0) {
     messages.push(pretty(cause));
   }
   return messages

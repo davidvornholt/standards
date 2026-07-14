@@ -12,7 +12,11 @@ import {
   uninterruptibleMask,
 } from './release-effect';
 import { ReleasePackageError } from './release-package-error';
-import { file, nodeOpenFile } from './release-runtime';
+import {
+  type MarkerIdentity,
+  removeOwnedMarker,
+} from './release-package-marker-cleanup';
+import { nodeOpenFile } from './release-runtime';
 
 type MarkerEffect<A> = Effect<A, ReleasePackageError>;
 type MarkerHandle = Awaited<ReturnType<typeof nodeOpenFile>>;
@@ -24,8 +28,14 @@ export type MarkerOwnership = {
 
 export type MarkerOperations = {
   readonly close: (ownership: MarkerOwnership) => MarkerEffect<void>;
+  readonly identify: (
+    ownership: MarkerOwnership,
+  ) => MarkerEffect<MarkerIdentity>;
   readonly open: (marker: string) => MarkerEffect<MarkerOwnership>;
-  readonly remove: (ownership: MarkerOwnership) => MarkerEffect<void>;
+  readonly remove: (
+    ownership: MarkerOwnership,
+    identity: MarkerIdentity,
+  ) => MarkerEffect<void>;
   readonly write: (
     ownership: MarkerOwnership,
     contents: string,
@@ -43,16 +53,23 @@ export const markerOperations: MarkerOperations = {
       try: () => ownership.handle.close(),
       catch: (cause) => markerError('closing the source marker', cause),
     }),
+  identify: (ownership) =>
+    tryPromise({
+      try: () => ownership.handle.stat({ bigint: true }),
+      catch: (cause) => markerError('identifying the source marker', cause),
+    }).pipe(
+      map((identity) => ({
+        device: identity.dev.toString(),
+        inode: identity.ino.toString(),
+      })),
+    ),
   open: (marker) =>
     tryPromise({
       try: () => nodeOpenFile(marker, 'wx'),
       catch: (cause) => markerError('opening the source marker', cause),
     }).pipe(map((handle) => ({ handle, marker }))),
-  remove: (ownership) =>
-    tryPromise({
-      try: () => file(ownership.marker).delete(),
-      catch: (cause) => markerError('cleaning the source marker', cause),
-    }),
+  remove: (ownership, identity) =>
+    removeOwnedMarker(ownership.marker, identity),
   write: (ownership, contents) =>
     tryPromise({
       try: () => ownership.handle.writeFile(contents),
@@ -67,13 +84,13 @@ const appendCause = (
   first === null ? second : causeSequential(first, second);
 
 const preparationFailureCause = (
+  identityResult: Exit<MarkerIdentity, ReleasePackageError>,
   writeResult: Exit<void, ReleasePackageError>,
-  closeResult: Exit<void, ReleasePackageError>,
 ): Cause<ReleasePackageError> | null => {
   let combined: Cause<ReleasePackageError> | null =
-    writeResult._tag === 'Failure' ? writeResult.cause : null;
-  if (closeResult._tag === 'Failure') {
-    combined = appendCause(combined, closeResult.cause);
+    identityResult._tag === 'Failure' ? identityResult.cause : null;
+  if (writeResult._tag === 'Failure') {
+    combined = appendCause(combined, writeResult.cause);
   }
   return combined;
 };
@@ -81,34 +98,48 @@ const preparationFailureCause = (
 const cleanupPreparationFailure = (
   cause: Cause<ReleasePackageError>,
   ownership: MarkerOwnership,
+  identityResult: Exit<MarkerIdentity, ReleasePackageError>,
   operations: MarkerOperations,
 ): MarkerEffect<never> =>
   gen(function* () {
-    const cleanupResult = yield* exit(operations.remove(ownership));
-    return yield* failCause(
-      cleanupResult._tag === 'Failure'
-        ? causeSequential(cause, cleanupResult.cause)
-        : cause,
+    const cleanupResult = yield* exit(
+      identityResult._tag === 'Failure'
+        ? succeed(undefined)
+        : operations.remove(ownership, identityResult.value),
     );
+    const closeResult = yield* exit(operations.close(ownership));
+    let combined = cause;
+    if (cleanupResult._tag === 'Failure') {
+      combined = causeSequential(combined, cleanupResult.cause);
+    }
+    if (closeResult._tag === 'Failure') {
+      combined = causeSequential(combined, closeResult.cause);
+    }
+    return yield* failCause(combined);
   });
 
 const completeOperation = <A>(
   operationResult: Exit<A, ReleasePackageError>,
   cleanupResult: Exit<void, ReleasePackageError>,
+  closeResult: Exit<void, ReleasePackageError>,
 ): MarkerEffect<A> => {
+  let combined: Cause<ReleasePackageError> | null =
+    operationResult._tag === 'Failure' ? operationResult.cause : null;
   if (cleanupResult._tag === 'Failure') {
-    return failCause(
-      operationResult._tag === 'Failure'
-        ? causeSequential(operationResult.cause, cleanupResult.cause)
-        : cleanupResult.cause,
-    );
+    combined = appendCause(combined, cleanupResult.cause);
+  }
+  if (closeResult._tag === 'Failure') {
+    combined = appendCause(combined, closeResult.cause);
+  }
+  if (combined !== null) {
+    return failCause(combined);
   }
   return operationResult._tag === 'Failure'
     ? failCause(operationResult.cause)
     : succeed(operationResult.value);
 };
 
-// Effect's standard bracket requires an infallible finalizer. This variant retains typed write, close, and cleanup failures after exclusive-open ownership is established.
+// Effect's standard bracket requires an infallible finalizer. This variant retains typed identity, write, cleanup, and close failures while holding ownership through cleanup.
 const acquireUseReleaseTyped = <A>(
   marker: string,
   contents: string,
@@ -118,22 +149,37 @@ const acquireUseReleaseTyped = <A>(
   uninterruptibleMask((restore) =>
     gen(function* () {
       const ownership = yield* operations.open(marker);
-      const writeResult = yield* exit(operations.write(ownership, contents));
-      const closeResult = yield* exit(operations.close(ownership));
+      const identityResult = yield* exit(operations.identify(ownership));
+      const writeResult = yield* exit(
+        identityResult._tag === 'Failure'
+          ? succeed(undefined)
+          : operations.write(ownership, contents),
+      );
       const preparationCause = preparationFailureCause(
+        identityResult,
         writeResult,
-        closeResult,
       );
       if (preparationCause !== null) {
         return yield* cleanupPreparationFailure(
           preparationCause,
           ownership,
+          identityResult,
           operations,
         );
       }
+      if (identityResult._tag === 'Failure') {
+        return yield* failCause(identityResult.cause);
+      }
       const operationResult = yield* exit(restore(use(marker)));
-      const cleanupResult = yield* exit(operations.remove(ownership));
-      return yield* completeOperation(operationResult, cleanupResult);
+      const cleanupResult = yield* exit(
+        operations.remove(ownership, identityResult.value),
+      );
+      const closeResult = yield* exit(operations.close(ownership));
+      return yield* completeOperation(
+        operationResult,
+        cleanupResult,
+        closeResult,
+      );
     }),
   );
 

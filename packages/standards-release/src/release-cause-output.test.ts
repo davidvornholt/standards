@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'bun:test';
-import { fail as causeFail, die, parallel } from 'effect/Cause';
+import {
+  fail as causeFail,
+  interrupt as causeInterrupt,
+  die,
+  parallel,
+} from 'effect/Cause';
+import { none } from 'effect/FiberId';
 import { renderReleaseCause } from './release-cause-output';
 import { ReleasePackageError } from './release-package-error';
 
@@ -26,5 +32,19 @@ describe('release cause output', () => {
     expect(output).toStartWith('::error::typed failure\n::error::');
     expect(output).toContain('defect%25%0Acontinued');
     expect(output).not.toContain('defect%\ncontinued');
+    expect(output.indexOf('typed failure')).toBe(
+      output.lastIndexOf('typed failure'),
+    );
+  });
+
+  it('renders interruption context without repeating a mixed typed failure', () => {
+    const failure = new ReleasePackageError({
+      message: 'typed failure',
+    });
+    expect(
+      renderReleaseCause(parallel(causeFail(failure), causeInterrupt(none))),
+    ).toBe(
+      '::error::typed failure\n::error::All fibers interrupted without errors.\n',
+    );
   });
 });

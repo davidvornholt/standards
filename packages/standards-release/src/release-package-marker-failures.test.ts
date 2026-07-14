@@ -4,15 +4,19 @@ import {
   causeFailures,
   fail,
   flatMap,
+  flip,
+  gen,
+  runPromise,
   runPromiseExit,
   succeed,
+  tryPromise,
 } from './release-effect';
 import { ReleasePackageError } from './release-package-error';
 import {
   markerOperations,
   withGeneratedMarkerOperations,
 } from './release-package-marker';
-import { file } from './release-runtime';
+import { file, write } from './release-runtime';
 
 const directories: Array<string> = [];
 
@@ -56,7 +60,7 @@ describe('release package marker failure composition', () => {
     const failures =
       outcome._tag === 'Failure' ? [...causeFailures(outcome.cause)] : [];
     expect(outcome._tag).toBe('Failure');
-    expect(failures).toEqual([writeFailure, closeFailure, cleanupFailure]);
+    expect(failures).toEqual([writeFailure, cleanupFailure, closeFailure]);
     expect(await file(marker).exists()).toBe(true);
   });
 
@@ -82,5 +86,43 @@ describe('release package marker failure composition', () => {
       outcome._tag === 'Failure' ? [...causeFailures(outcome.cause)] : [];
     expect(outcome._tag).toBe('Failure');
     expect(failures).toEqual([operationFailure, cleanupFailure]);
+  });
+});
+
+describe('release package marker ownership safety', () => {
+  it('restores a caller-owned replacement without deleting its contents', async () => {
+    const marker = temporaryMarker();
+    const callerContents = 'owned by caller\n';
+    const failure = await runPromise(
+      flip(
+        withGeneratedMarkerOperations(
+          marker,
+          'sha\n',
+          () =>
+            gen(function* () {
+              yield* tryPromise({
+                try: () => file(marker).delete(),
+                catch: (cause) =>
+                  new ReleasePackageError({
+                    message: `Replacing marker failed while removing it: ${String(cause)}`,
+                  }),
+              });
+              yield* tryPromise({
+                try: () => write(marker, callerContents),
+                catch: (cause) =>
+                  new ReleasePackageError({
+                    message: `Replacing marker failed while writing it: ${String(cause)}`,
+                  }),
+              });
+            }),
+          markerOperations,
+        ),
+      ),
+    );
+    expect(failure).toMatchObject({
+      _tag: 'ReleasePackageError',
+    });
+    expect(failure.message).toContain('recovery link');
+    expect(await file(marker).text()).toBe(callerContents);
   });
 });

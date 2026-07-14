@@ -53,7 +53,7 @@ describe('release package marker lifecycle', () => {
     expect(removalAttempts).toBe(0);
   });
 
-  it('closes and removes its marker after a post-open write failure', async () => {
+  it('removes its marker and closes after a post-open write failure', async () => {
     const marker = `${temporaryDirectory()}/SOURCE_COMMIT`;
     const writeFailure = new ReleasePackageError({
       message: 'marker write failed',
@@ -76,9 +76,9 @@ describe('release package marker lifecycle', () => {
               closeAttempts += 1;
               return markerOperations.close(ownership);
             },
-            remove: (ownership) => {
+            remove: (ownership, identity) => {
               removalAttempts += 1;
-              return markerOperations.remove(ownership);
+              return markerOperations.remove(ownership, identity);
             },
             write: () => fail(writeFailure),
           },
@@ -91,12 +91,15 @@ describe('release package marker lifecycle', () => {
     expect(operationAttempts).toBe(0);
     expect(await file(marker).exists()).toBe(false);
   });
+});
 
-  it('removes its marker after a close failure and does not run the use phase', async () => {
+describe('release package marker finalization', () => {
+  it('removes its marker and returns a close failure after the use phase', async () => {
     const marker = `${temporaryDirectory()}/SOURCE_COMMIT`;
     const closeFailure = new ReleasePackageError({
       message: 'marker close failed',
     });
+    const events: Array<string> = [];
     let operationAttempts = 0;
     const failure = await runPromise(
       flip(
@@ -105,20 +108,30 @@ describe('release package marker lifecycle', () => {
           'sha\n',
           () => {
             operationAttempts += 1;
+            events.push('use');
             return succeed(undefined);
           },
           {
             ...markerOperations,
             close: (ownership) =>
-              markerOperations
-                .close(ownership)
-                .pipe(flatMap(() => fail(closeFailure))),
+              succeed(undefined).pipe(
+                flatMap(() => {
+                  events.push('close');
+                  return markerOperations.close(ownership);
+                }),
+                flatMap(() => fail(closeFailure)),
+              ),
+            remove: (ownership, identity) => {
+              events.push('cleanup');
+              return markerOperations.remove(ownership, identity);
+            },
           },
         ),
       ),
     );
     expect(failure).toBe(closeFailure);
-    expect(operationAttempts).toBe(0);
+    expect(operationAttempts).toBe(1);
+    expect(events).toEqual(['use', 'cleanup', 'close']);
     expect(await file(marker).exists()).toBe(false);
   });
 

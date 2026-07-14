@@ -19,6 +19,9 @@ const releasePackageSource = await file(
 const releasePackageMarkerSource = await file(
   `${import.meta.dir}/release-package-marker.ts`,
 ).text();
+const releasePackageMarkerCleanupSource = await file(
+  `${import.meta.dir}/release-package-marker-cleanup.ts`,
+).text();
 
 const temporaryDirectory = (label: string): string => {
   const directory = spawnSync(['mktemp', '-d', `/tmp/${label}-XXXXXX`])
@@ -49,7 +52,7 @@ afterEach(() => {
 
 describe('release package', () => {
   it('keeps packing application logic inside the Effect boundary', () => {
-    const boundarySource = `${releasePackageSource}\n${releasePackageMarkerSource}`;
+    const boundarySource = `${releasePackageSource}\n${releasePackageMarkerSource}\n${releasePackageMarkerCleanupSource}`;
     expect(boundarySource).toContain('acquireUseReleaseTyped(');
     expect(boundarySource).toContain('tryPromise({');
     expect(boundarySource).toContain("nodeOpenFile(marker, 'wx')");
