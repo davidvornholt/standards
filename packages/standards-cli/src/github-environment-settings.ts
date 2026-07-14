@@ -18,8 +18,8 @@ const BRANCH_POLICY_MODE_KEYS = new Set([
 ]);
 const DEPLOYMENT_POLICY_KEYS = new Set(['name', 'type']);
 const MAX_ENVIRONMENT_NAME_LENGTH = 255;
-const MAX_WAIT_TIMER = 43_200;
-const MAX_REVIEWERS = 6;
+export const MAX_WAIT_TIMER = 43_200;
+export const MAX_REVIEWERS = 6;
 
 export const environmentIdentity = (name: string): string => name.toLowerCase();
 

@@ -3,16 +3,16 @@
 // values are never listed, read, or written.
 
 import { apiError, HTTP_NOT_FOUND, HTTP_OK, request } from './github-api';
-import { isRecord } from './github-settings';
+import {
+  decodeEnvironmentResponse,
+  decodePolicyPage,
+} from './github-environment-response';
 
 const WAIT_TIMER = 'wait_timer';
 const PREVENT_SELF_REVIEW = 'prevent_self_review';
 const DEPLOYMENT_BRANCH_POLICY = 'deployment_branch_policy';
 const DEPLOYMENT_BRANCH_POLICIES = 'deployment_branch_policies';
-const PROTECTION_RULES = 'protection_rules';
 const CUSTOM_BRANCH_POLICIES = 'custom_branch_policies';
-const BRANCH_POLICIES = 'branch_policies';
-const TOTAL_COUNT = 'total_count';
 const POLICIES_PER_PAGE = 100;
 
 export type LiveEnvironment = {
@@ -23,30 +23,6 @@ export type LiveEnvironment = {
 
 export const environmentPath = (repo: string, name: string): string =>
   `/repos/${repo}/environments/${encodeURIComponent(name)}`;
-
-const protectionRule = (
-  rules: unknown,
-  type: string,
-): Readonly<Record<string, unknown>> | undefined =>
-  Array.isArray(rules)
-    ? rules.filter(isRecord).find((rule) => rule.type === type)
-    : undefined;
-
-const normalizeReviewers = (
-  rule: Readonly<Record<string, unknown>> | undefined,
-): ReadonlyArray<Readonly<Record<string, unknown>>> => {
-  if (!Array.isArray(rule?.reviewers)) {
-    return [];
-  }
-  return rule.reviewers.filter(isRecord).flatMap((entry) => {
-    const reviewer = isRecord(entry.reviewer) ? entry.reviewer : undefined;
-    return typeof entry.type === 'string' &&
-      reviewer !== undefined &&
-      Number.isInteger(reviewer.id)
-      ? [{ type: entry.type, id: reviewer.id }]
-      : [];
-  });
-};
 
 type DeploymentPoliciesRead = {
   readonly policies: ReadonlyArray<Readonly<Record<string, unknown>>> | null;
@@ -68,12 +44,7 @@ const fetchDeploymentPolicies = async (
       'GET',
       `${path}/deployment-branch-policies?per_page=${POLICIES_PER_PAGE}&page=${page}`,
     );
-    if (
-      response.status !== HTTP_OK ||
-      !isRecord(response.body) ||
-      !Number.isInteger(response.body[TOTAL_COUNT]) ||
-      !Array.isArray(response.body[BRANCH_POLICIES])
-    ) {
+    if (response.status !== HTTP_OK) {
       return {
         policies: null,
         problem: apiError(
@@ -82,12 +53,28 @@ const fetchDeploymentPolicies = async (
         ),
       };
     }
-    totalCount ??= Number(response.body[TOTAL_COUNT]);
-    const pagePolicies = response.body[BRANCH_POLICIES].filter(isRecord);
+    const decoded = decodePolicyPage(response.body, name);
+    if (decoded.value === null) {
+      return { policies: null, problem: decoded.problem };
+    }
+    if (totalCount !== null && decoded.value.totalCount !== totalCount) {
+      return {
+        policies: null,
+        problem: `listing deployment policies for environment "${name}": GitHub changed total_count during pagination`,
+      };
+    }
+    totalCount ??= decoded.value.totalCount;
+    const pagePolicies = decoded.value.policies;
     if (pagePolicies.length === 0 && collected.length < totalCount) {
       return {
         policies: null,
         problem: `listing deployment policies for environment "${name}": GitHub returned fewer policies than total_count`,
+      };
+    }
+    if (collected.length + pagePolicies.length > totalCount) {
+      return {
+        policies: null,
+        problem: `listing deployment policies for environment "${name}": GitHub returned more policies than total_count`,
       };
     }
     collected.push(...pagePolicies);
@@ -106,23 +93,24 @@ export const fetchLiveEnvironment = async (
   if (response.status === HTTP_NOT_FOUND) {
     return { environment: null, missing: true, problem: null };
   }
-  if (response.status !== HTTP_OK || !isRecord(response.body)) {
+  if (response.status !== HTTP_OK) {
     return {
       environment: null,
       missing: false,
       problem: apiError(`reading environment "${name}"`, response),
     };
   }
-  const waitRule = protectionRule(response.body[PROTECTION_RULES], WAIT_TIMER);
-  const reviewRule = protectionRule(
-    response.body[PROTECTION_RULES],
-    'required_reviewers',
-  );
-  const branchPolicy = isRecord(response.body[DEPLOYMENT_BRANCH_POLICY])
-    ? response.body[DEPLOYMENT_BRANCH_POLICY]
-    : {};
+  const decoded = decodeEnvironmentResponse(response.body, name);
+  if (decoded.value === null) {
+    return {
+      environment: null,
+      missing: false,
+      problem: decoded.problem,
+    };
+  }
+  const { branchPolicy } = decoded.value;
   let deploymentBranchPolicies: ReadonlyArray<Record<string, unknown>> = [];
-  if (branchPolicy[CUSTOM_BRANCH_POLICIES] === true) {
+  if (branchPolicy?.[CUSTOM_BRANCH_POLICIES] === true) {
     const policies = await fetchDeploymentPolicies(token, path, name);
     if (policies.policies === null) {
       return {
@@ -131,18 +119,14 @@ export const fetchLiveEnvironment = async (
         problem: policies.problem,
       };
     }
-    deploymentBranchPolicies = policies.policies.map((policy) => ({
-      id: policy.id,
-      name: policy.name,
-      type: policy.type ?? 'branch',
-    }));
+    deploymentBranchPolicies = policies.policies;
   }
   return {
     environment: {
       name,
-      [WAIT_TIMER]: waitRule?.[WAIT_TIMER] ?? 0,
-      [PREVENT_SELF_REVIEW]: reviewRule?.[PREVENT_SELF_REVIEW] ?? false,
-      reviewers: normalizeReviewers(reviewRule),
+      [WAIT_TIMER]: decoded.value.waitTimer,
+      [PREVENT_SELF_REVIEW]: decoded.value.preventSelfReview,
+      reviewers: decoded.value.reviewers,
       [DEPLOYMENT_BRANCH_POLICY]: branchPolicy,
       [DEPLOYMENT_BRANCH_POLICIES]: deploymentBranchPolicies,
     },

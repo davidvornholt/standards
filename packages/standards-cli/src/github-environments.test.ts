@@ -3,6 +3,13 @@ import { HTTP_NO_CONTENT, HTTP_NOT_FOUND, HTTP_OK } from './github-api';
 import { applyEnvironment } from './github-environment-apply';
 
 const originalFetch = globalThis.fetch;
+const DEPLOYMENT_BRANCH_POLICY = 'deployment_branch_policy';
+const PROTECTION_RULES = 'protection_rules';
+const PROTECTED_BRANCHES = 'protected_branches';
+const CUSTOM_BRANCH_POLICIES = 'custom_branch_policies';
+const TOTAL_COUNT = 'total_count';
+const BRANCH_POLICIES = 'branch_policies';
+const PAGE_SIZE = 100;
 
 const declared = JSON.parse(
   '{"name":"standards-sync","wait_timer":0,"prevent_self_review":false,"reviewers":[],"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false},"deployment_branch_policies":[]}',
@@ -22,6 +29,18 @@ const response = (status: number, body: unknown = null): Response =>
     status,
     headers: { 'content-type': 'application/json' },
   });
+
+const liveEnvironment = (
+  overrides: Readonly<Record<string, unknown>> = {},
+): Record<string, unknown> => ({
+  name: 'standards-sync',
+  [PROTECTION_RULES]: [],
+  [DEPLOYMENT_BRANCH_POLICY]: {
+    [PROTECTED_BRANCHES]: true,
+    [CUSTOM_BRANCH_POLICIES]: false,
+  },
+  ...overrides,
+});
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
@@ -59,12 +78,7 @@ describe('applyEnvironment', () => {
     const methods: Array<string> = [];
     globalThis.fetch = mockFetch((_input, init) => {
       methods.push(init?.method ?? 'GET');
-      return response(
-        HTTP_OK,
-        JSON.parse(
-          '{"name":"standards-sync","protection_rules":[],"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false}}',
-        ),
-      );
+      return response(HTTP_OK, liveEnvironment());
     });
 
     expect(await applyEnvironment('token', 'owner/repo', declared)).toEqual([]);
@@ -88,9 +102,12 @@ describe('applyEnvironment', () => {
       }
       return response(
         HTTP_OK,
-        JSON.parse(
-          '{"name":"standards-sync","protection_rules":[],"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}',
-        ),
+        liveEnvironment({
+          [DEPLOYMENT_BRANCH_POLICY]: {
+            [PROTECTED_BRANCHES]: false,
+            [CUSTOM_BRANCH_POLICIES]: true,
+          },
+        }),
       );
     });
 
@@ -101,5 +118,80 @@ describe('applyEnvironment', () => {
       'deleted undeclared deployment policy "main" from environment "standards-sync"',
       'updated environment "standards-sync" protection',
     ]);
+  });
+});
+
+describe('applyEnvironment validation', () => {
+  it('fails without writes when protection rules are malformed', async () => {
+    const methods: Array<string> = [];
+    globalThis.fetch = mockFetch((_input, init) => {
+      methods.push(init?.method ?? 'GET');
+      return response(
+        HTTP_OK,
+        liveEnvironment({ [PROTECTION_RULES]: 'corrupt' }),
+      );
+    });
+
+    await expect(
+      applyEnvironment('token', 'owner/repo', declared),
+    ).rejects.toThrow('invalid environment response');
+    expect(methods).toEqual(['GET']);
+  });
+
+  it('fails without writes when a deployment policy is malformed', async () => {
+    const calls: Array<string> = [];
+    globalThis.fetch = mockFetch((input, init) => {
+      calls.push(`${init?.method ?? 'GET'} ${String(input)}`);
+      return String(input).includes('deployment-branch-policies')
+        ? response(HTTP_OK, { [TOTAL_COUNT]: 1, [BRANCH_POLICIES]: [{}] })
+        : response(
+            HTTP_OK,
+            liveEnvironment({
+              [DEPLOYMENT_BRANCH_POLICY]: {
+                [PROTECTED_BRANCHES]: false,
+                [CUSTOM_BRANCH_POLICIES]: true,
+              },
+            }),
+          );
+    });
+
+    await expect(
+      applyEnvironment('token', 'owner/repo', declared),
+    ).rejects.toThrow('invalid deployment policy');
+    expect(calls).toHaveLength(2);
+    expect(calls.every((call) => call.startsWith('GET '))).toBe(true);
+  });
+
+  it('fails when deployment-policy totals change between pages', async () => {
+    let page = 0;
+    globalThis.fetch = mockFetch((input) => {
+      if (!String(input).includes('deployment-branch-policies')) {
+        return response(
+          HTTP_OK,
+          liveEnvironment({
+            [DEPLOYMENT_BRANCH_POLICY]: {
+              [PROTECTED_BRANCHES]: false,
+              [CUSTOM_BRANCH_POLICIES]: true,
+            },
+          }),
+        );
+      }
+      page += 1;
+      return response(HTTP_OK, {
+        [TOTAL_COUNT]: page === 1 ? PAGE_SIZE + 1 : PAGE_SIZE,
+        [BRANCH_POLICIES]: Array.from(
+          { length: page === 1 ? PAGE_SIZE : 1 },
+          (_, index) => ({
+            id: page * PAGE_SIZE * PAGE_SIZE + index,
+            name: `p-${page}-${index}`,
+            type: 'branch',
+          }),
+        ),
+      });
+    });
+
+    await expect(
+      applyEnvironment('token', 'owner/repo', declared),
+    ).rejects.toThrow('changed total_count during pagination');
   });
 });
