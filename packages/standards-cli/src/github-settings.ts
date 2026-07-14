@@ -26,6 +26,14 @@ const SETTINGS_KEYS = new Set([
   'rulesets',
   'environments',
 ]);
+const REPOSITORY_IDENTITY_KEYS = new Set([
+  'archived',
+  'default_branch',
+  'is_template',
+  'name',
+  'private',
+  'visibility',
+]);
 
 type ParseResult = {
   readonly settings: GithubSettings | null;
@@ -60,6 +68,22 @@ const rulesetListProblems = (
   return problems;
 };
 
+const repositoryProblems = (
+  repository: unknown,
+  label: string,
+): ReadonlyArray<string> => {
+  if (!isRecord(repository)) {
+    return [`${label} "repository" must be an object`];
+  }
+  return Object.keys(repository).flatMap((key) =>
+    REPOSITORY_IDENTITY_KEYS.has(key)
+      ? [
+          `${label} repository."${key}" cannot manage repository identity or lifecycle`,
+        ]
+      : [],
+  );
+};
+
 const parseSettings = (raw: unknown, label: string): ParseResult => {
   if (!isRecord(raw)) {
     return { settings: null, problems: [`${label} must be a JSON object`] };
@@ -80,9 +104,7 @@ const parseSettings = (raw: unknown, label: string): ParseResult => {
     }
   }
   const repository = raw.repository ?? {};
-  if (!isRecord(repository)) {
-    problems.push(`${label} "repository" must be an object`);
-  }
+  problems.push(...repositoryProblems(repository, label));
   const rulesets = raw.rulesets ?? [];
   if (Array.isArray(rulesets)) {
     problems.push(...rulesetListProblems(rulesets, label));

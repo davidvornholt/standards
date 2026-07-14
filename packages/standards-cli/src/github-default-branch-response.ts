@@ -131,8 +131,16 @@ export const decodeDefaultBranchProtection = (
   if (!isRecord(body)) {
     return invalid('an invalid default-branch protection response');
   }
-  const status = decodeChecks(body.required_status_checks);
-  const reviews = decodeReviews(body.required_pull_request_reviews);
+  const statusValue = body.required_status_checks;
+  const status =
+    statusValue === undefined || statusValue === null
+      ? null
+      : decodeChecks(statusValue);
+  const reviewsValue = body.required_pull_request_reviews;
+  const reviews =
+    reviewsValue === undefined || reviewsValue === null
+      ? null
+      : decodeReviews(reviewsValue);
   const restrictions =
     body.restrictions === undefined || body.restrictions === null
       ? null
@@ -151,8 +159,8 @@ export const decodeDefaultBranchProtection = (
     ].map((key) => [key, enabled(body, key)]),
   );
   if (
-    status === null ||
-    reviews === null ||
+    (status === null && statusValue !== undefined && statusValue !== null) ||
+    (reviews === null && reviewsValue !== undefined && reviewsValue !== null) ||
     (restrictions === null &&
       body.restrictions !== null &&
       body.restrictions !== undefined) ||

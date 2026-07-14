@@ -142,6 +142,11 @@ export const defaultBranchProtectionProblems = (
       problems.push(`${label}.${key} must be a boolean`);
     }
   }
+  if (value.required_signatures === true) {
+    problems.push(
+      `${label}.required_signatures must be false; enabling required signatures is outside the canonical policy`,
+    );
+  }
   problems.push(
     ...statusProblems(
       value.required_status_checks,

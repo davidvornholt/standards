@@ -81,7 +81,9 @@ export const fetchDefaultBranchProtection = async (
     };
   }
   const detailVisibilityDenied =
-    detail.status === HTTP_UNAUTHORIZED || detail.status === HTTP_FORBIDDEN;
+    detail.status === HTTP_UNAUTHORIZED ||
+    detail.status === HTTP_FORBIDDEN ||
+    detail.status === HTTP_NOT_FOUND;
   if (detailVisibilityDenied && !detailRequired && classicProtection) {
     return {
       branch,
