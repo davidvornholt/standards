@@ -10,6 +10,6 @@ const processModule = (await import(['node', 'process'].join(':'))) as {
 };
 
 export const { argv, env, file, spawn, stderr, write } = runtime;
-export const nodeWriteFile = fileSystem.writeFile;
+export const nodeOpenFile = fileSystem.open;
 export const BunCryptoHasher = runtime.CryptoHasher;
 export const runtimeProcess = processModule.default;

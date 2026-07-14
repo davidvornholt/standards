@@ -1,11 +1,10 @@
-import { failureOption, pretty } from 'effect/Cause';
 import { isFailure } from 'effect/Exit';
-import { isSome } from 'effect/Option';
 import type { ArtifactIdentityError } from '../src/artifact-identity-error';
 import type { GithubApiError } from '../src/github-api-error';
 import { appendGithubOutput } from '../src/github-output';
 import type { GithubStateError } from '../src/github-state-error';
 import type { NpmRegistryError } from '../src/npm-registry-error';
+import { renderReleaseCause } from '../src/release-cause-output';
 import {
   type Effect,
   fail,
@@ -143,8 +142,6 @@ const main = (): Effect<void, ReleaseError> => {
 
 const exit = await runPromiseExit(main());
 if (isFailure(exit)) {
-  const failure = failureOption(exit.cause);
-  const message = isSome(failure) ? failure.value.message : pretty(exit.cause);
-  await write(stderr, `::error::${message}\n`);
+  await write(stderr, renderReleaseCause(exit.cause));
   runtimeProcess.exitCode = 1;
 }

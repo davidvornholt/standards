@@ -52,7 +52,7 @@ describe('release package', () => {
     const boundarySource = `${releasePackageSource}\n${releasePackageMarkerSource}`;
     expect(boundarySource).toContain('acquireUseReleaseTyped(');
     expect(boundarySource).toContain('tryPromise({');
-    expect(boundarySource).toContain("{ flag: 'wx' }");
+    expect(boundarySource).toContain("nodeOpenFile(marker, 'wx')");
     for (const forbidden of [
       ': Promise<',
       'Promise.all(',

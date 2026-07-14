@@ -2,7 +2,7 @@
 
 This private workspace owns the repository-only npm and GitHub release boundary. It is not part of the published `@davidvornholt/standards` package.
 
-Release packing exclusively creates `packages/standards-cli/SOURCE_COMMIT` without overwriting a caller-owned file, includes the tested commit in the tarball, verifies that marker, and requires cleanup after both success and failure. Marker creation and cleanup failures remain tagged release errors, and simultaneous packing and cleanup failures retain both causes. Matching npm SRI therefore binds an artifact without `gitHead` metadata to the tested commit; legacy unmarked artifacts fail closed.
+Release packing acquires ownership of `packages/standards-cli/SOURCE_COMMIT` only after a successful exclusive open, without overwriting or removing a caller-owned file. It writes and closes the owned marker before packing, includes the tested commit in the tarball, verifies that marker, and requires cleanup after both success and failure. Marker open, write, close, and cleanup failures remain tagged release errors, and simultaneous operation and cleanup failures retain every cause. Matching npm SRI therefore binds an artifact without `gitHead` metadata to the tested commit; legacy unmarked artifacts fail closed.
 
 ## Configuration
 

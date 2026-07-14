@@ -1,13 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { spawnSync } from 'bun';
-import {
-  causeFailures,
-  fail,
-  flip,
-  runPromise,
-  runPromiseExit,
-  succeed,
-} from './release-effect';
+import { fail, flatMap, flip, runPromise, succeed } from './release-effect';
 import { ReleasePackageError } from './release-package-error';
 import {
   type MarkerOperations,
@@ -33,13 +26,14 @@ afterEach(() => {
 });
 
 describe('release package marker lifecycle', () => {
-  it('does not release a marker whose creation failed', async () => {
-    const creationFailure = new ReleasePackageError({
-      message: 'marker creation failed',
+  it('does not release a marker whose exclusive open failed', async () => {
+    const openFailure = new ReleasePackageError({
+      message: 'marker open failed',
     });
     let removalAttempts = 0;
     const operations: MarkerOperations = {
-      create: () => fail(creationFailure),
+      ...markerOperations,
+      open: () => fail(openFailure),
       remove: () => {
         removalAttempts += 1;
         return succeed(undefined);
@@ -55,8 +49,77 @@ describe('release package marker lifecycle', () => {
         ),
       ),
     );
-    expect(failure).toBe(creationFailure);
+    expect(failure).toBe(openFailure);
     expect(removalAttempts).toBe(0);
+  });
+
+  it('closes and removes its marker after a post-open write failure', async () => {
+    const marker = `${temporaryDirectory()}/SOURCE_COMMIT`;
+    const writeFailure = new ReleasePackageError({
+      message: 'marker write failed',
+    });
+    let closeAttempts = 0;
+    let removalAttempts = 0;
+    let operationAttempts = 0;
+    const failure = await runPromise(
+      flip(
+        withGeneratedMarkerOperations(
+          marker,
+          'sha\n',
+          () => {
+            operationAttempts += 1;
+            return succeed(undefined);
+          },
+          {
+            ...markerOperations,
+            close: (ownership) => {
+              closeAttempts += 1;
+              return markerOperations.close(ownership);
+            },
+            remove: (ownership) => {
+              removalAttempts += 1;
+              return markerOperations.remove(ownership);
+            },
+            write: () => fail(writeFailure),
+          },
+        ),
+      ),
+    );
+    expect(failure).toBe(writeFailure);
+    expect(closeAttempts).toBe(1);
+    expect(removalAttempts).toBe(1);
+    expect(operationAttempts).toBe(0);
+    expect(await file(marker).exists()).toBe(false);
+  });
+
+  it('removes its marker after a close failure and does not run the use phase', async () => {
+    const marker = `${temporaryDirectory()}/SOURCE_COMMIT`;
+    const closeFailure = new ReleasePackageError({
+      message: 'marker close failed',
+    });
+    let operationAttempts = 0;
+    const failure = await runPromise(
+      flip(
+        withGeneratedMarkerOperations(
+          marker,
+          'sha\n',
+          () => {
+            operationAttempts += 1;
+            return succeed(undefined);
+          },
+          {
+            ...markerOperations,
+            close: (ownership) =>
+              markerOperations
+                .close(ownership)
+                .pipe(flatMap(() => fail(closeFailure))),
+          },
+        ),
+      ),
+    );
+    expect(failure).toBe(closeFailure);
+    expect(operationAttempts).toBe(0);
+    expect(await file(marker).exists()).toBe(false);
   });
 
   it('returns marker deletion failure through the typed channel', async () => {
@@ -79,31 +142,5 @@ describe('release package marker lifecycle', () => {
     );
     expect(failure).toBe(deletionFailure);
     expect(await file(marker).text()).toBe('sha\n');
-  });
-});
-
-describe('release package marker failure composition', () => {
-  it('retains operation and cleanup failures in sequence', async () => {
-    const operationFailure = new ReleasePackageError({
-      message: 'packing failed',
-    });
-    const cleanupFailure = new ReleasePackageError({
-      message: 'cleanup failed',
-    });
-    const outcome = await runPromiseExit(
-      withGeneratedMarkerOperations(
-        'SOURCE_COMMIT',
-        'sha\n',
-        () => fail(operationFailure),
-        {
-          create: () => succeed('SOURCE_COMMIT'),
-          remove: () => fail(cleanupFailure),
-        },
-      ),
-    );
-    const failures =
-      outcome._tag === 'Failure' ? [...causeFailures(outcome.cause)] : [];
-    expect(outcome._tag).toBe('Failure');
-    expect(failures).toEqual([operationFailure, cleanupFailure]);
   });
 });
