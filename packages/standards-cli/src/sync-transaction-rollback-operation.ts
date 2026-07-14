@@ -52,7 +52,7 @@ const restoreBackup = async ({
   await syncPinnedDirectory(target.parent);
   await unlinkPinnedIdentity({
     afterBind: () => fault('rollback-restore-bind', target.rel, 'after'),
-    bindingName: rollbackBindingName(backup.name),
+    bindingName: rollbackBindingName(backup.name, 'backup'),
     expected: backupIdentity,
     message: `Recovery backup changed before cleanup: ${target.rel}`,
     target: backup,
@@ -99,13 +99,19 @@ const rollbackPresent = async ({
   readonly target: PinnedTarget;
   readonly transaction: PinnedDirectory;
 }): Promise<void> => {
-  const { backupState, backupTarget, bindingState, stageState, targetState } =
-    await inspectPresentRollbackState(transaction, operation, target);
+  const {
+    backupBindingState,
+    backupState,
+    backupTarget,
+    installedBindingState,
+    stageState,
+    targetState,
+  } = await inspectPresentRollbackState(transaction, operation, target);
   if (
     await resumePresentRollbackBinding({
       backupState,
-      backupTarget,
-      bindingState,
+      backupBindingState,
+      installedBindingState,
       operation,
       restore: (backupIdentity) =>
         restoreBackup({
@@ -116,9 +122,7 @@ const rollbackPresent = async ({
           transaction,
         }),
       stageState,
-      target,
       targetState,
-      transaction,
     })
   ) {
     return;

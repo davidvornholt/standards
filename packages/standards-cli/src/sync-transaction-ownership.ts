@@ -11,8 +11,8 @@ import {
   storedNodeIdentity,
 } from './sync-node-identity';
 import { publishAtomicTransactionRecord } from './sync-transaction-atomic-record';
-import { resolveRemovalEntryName } from './sync-transaction-bound-remove';
 import { bindOwnerPublicationToken } from './sync-transaction-owner-reservation';
+import { resolveRemovalEntryName } from './sync-transaction-quarantine-read';
 import { TRANSACTION_OWNER } from './sync-transaction-types';
 
 const OWNER_VERSION = 1;
@@ -67,11 +67,12 @@ const parseOwner = (contents: string): TransactionOwner => {
 
 export const readTransactionOwner = async (
   transaction: PinnedDirectory,
+  expected?: NodeIdentity,
 ): Promise<TransactionOwner> => {
   const handle = await open(
     directoryEntryPath(
       transaction,
-      await resolveRemovalEntryName(transaction, TRANSACTION_OWNER),
+      await resolveRemovalEntryName(transaction, TRANSACTION_OWNER, expected),
     ),
     constants.O_RDONLY + constants.O_NOFOLLOW + constants.O_NONBLOCK,
   );

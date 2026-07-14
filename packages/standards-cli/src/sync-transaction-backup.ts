@@ -1,12 +1,18 @@
-import { link, unlink } from 'node:fs/promises';
+import { link } from 'node:fs/promises';
 import {
   directoryEntryPath,
   type PinnedDirectory,
   type PinnedTarget,
   syncPinnedDirectory,
 } from './sync-directory-handles';
+import { bindAndRemoveEntry } from './sync-transaction-bound-remove';
 import { assertPinnedFileExpected } from './sync-transaction-files';
-import type { JournalOperation, MutationFault } from './sync-transaction-types';
+import {
+  expectedIdentity,
+  type JournalOperation,
+  type MutationFault,
+  removedBackupName,
+} from './sync-transaction-types';
 
 export const backupTargetForRemoval = async ({
   fault,
@@ -36,7 +42,18 @@ export const backupTargetForRemoval = async ({
   await fault('backup-transaction-fsync', operation.rel, 'after');
   await fault('backup-unlink', operation.rel, 'before');
   await assertPinnedFileExpected(target, operation.before);
-  await unlink(directoryEntryPath(target.parent, target.name));
+  const identity = expectedIdentity(operation.before);
+  if (identity === null) {
+    throw new Error(`Backup identity is missing: ${operation.rel}`);
+  }
+  await bindAndRemoveEntry({
+    directory: transaction,
+    expected: identity,
+    kind: 'file',
+    name: removedBackupName(operation.backup),
+    sourceDirectory: target.parent,
+    sourceName: target.name,
+  });
   await fault('backup-unlink', operation.rel, 'after');
   await fault('backup-parent-fsync', operation.rel, 'before');
   await syncPinnedDirectory(target.parent);

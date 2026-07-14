@@ -1,6 +1,7 @@
 import { type BigIntStats, constants } from 'node:fs';
 import { lstat, open, realpath } from 'node:fs/promises';
 import { isAbsolute, join, normalize, relative, resolve, sep } from 'node:path';
+import { assertFilesystemIdentityComponent } from './sync-node-identity';
 export type NodeIdentity = {
   readonly dev: bigint;
   readonly ino: bigint;
@@ -31,7 +32,10 @@ const missing = (error: unknown): boolean =>
 export const identityOf = (info: {
   readonly dev: bigint;
   readonly ino: bigint;
-}): NodeIdentity => ({ dev: info.dev, ino: info.ino });
+}): NodeIdentity => ({
+  dev: assertFilesystemIdentityComponent(info.dev, 'filesystem device'),
+  ino: assertFilesystemIdentityComponent(info.ino, 'filesystem inode'),
+});
 
 export const identitiesMatch = (
   left: NodeIdentity | null,

@@ -103,14 +103,14 @@ describe('bound transaction cleanup', () => {
       ).rejects.toThrow('reservation crash');
       writeFixture(rootPath, TRANSACTION_RESERVATION, 'actor\n');
       await expect(removeTransactionReservation(directory, id)).rejects.toThrow(
-        'both exist',
+        'invalid',
       );
       expect(readFixture(rootPath, TRANSACTION_RESERVATION)).toBe('actor\n');
       const actor = join(rootPath, '.actor-reservation');
       renameSync(join(rootPath, TRANSACTION_RESERVATION), actor);
       await removeTransactionReservation(directory, id);
       expect(readFixture(rootPath, '.actor-reservation')).toBe('actor\n');
-      expect(() =>
+      expect(
         statSync(
           join(
             rootPath,
@@ -119,8 +119,8 @@ describe('bound transaction cleanup', () => {
               ino: info.ino,
             }),
           ),
-        ),
-      ).toThrow();
+        ).isFile(),
+      ).toBe(true);
     } finally {
       await directory.handle.close();
     }

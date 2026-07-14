@@ -22,6 +22,7 @@ import {
   verifyCreatedParentMarker,
 } from './sync-transaction-parent-state';
 import type { ParentCleanupReservation } from './sync-transaction-reservation-record';
+import { reservationIdentity } from './sync-transaction-reservation-record';
 import type {
   MutationFault,
   TransactionJournal,
@@ -120,7 +121,12 @@ export const finishCreatedParent = async ({
   const binding = await readParentBinding(rootDirectory, journal, index);
   const opened: Array<PinnedDirectory> = [];
   try {
-    const parent = await openCreatedParent(root, rel, opened);
+    const expectedParent =
+      binding?.parent ??
+      (reservation === null
+        ? undefined
+        : reservationIdentity(reservation.parent, 'created parent'));
+    const parent = await openCreatedParent(root, rel, opened, expectedParent);
     if (parent.directory === null) {
       await finishMissingCreatedParent({
         binding,

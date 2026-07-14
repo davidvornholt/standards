@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { identitiesMatch, type NodeIdentity } from './sync-filesystem';
 import {
+  MAX_FILESYSTEM_IDENTITY,
   parseStoredNodeIdentity,
   storedNodeIdentity,
 } from './sync-node-identity';
@@ -50,5 +51,26 @@ describe('exact filesystem identities', () => {
     expect(() =>
       parseStoredNodeIdentity({ dev: 1, ino: 2 }, 'current'),
     ).toThrow('canonical decimal filesystem identity');
+  });
+
+  it('accepts uint64 maximum identities and rejects larger values', () => {
+    expect(
+      parseStoredNodeIdentity(
+        {
+          dev: MAX_FILESYSTEM_IDENTITY.toString(),
+          ino: MAX_FILESYSTEM_IDENTITY.toString(),
+        },
+        'maximum',
+      ),
+    ).toEqual({
+      dev: MAX_FILESYSTEM_IDENTITY,
+      ino: MAX_FILESYSTEM_IDENTITY,
+    });
+    expect(() =>
+      parseStoredNodeIdentity(
+        { dev: (MAX_FILESYSTEM_IDENTITY + 1n).toString(), ino: '1' },
+        'overflow',
+      ),
+    ).toThrow('outside the supported uint64 range');
   });
 });

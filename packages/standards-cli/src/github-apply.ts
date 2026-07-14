@@ -2,14 +2,9 @@
 // delete live rulesets so they converge on exactly the declared set. Mutations
 // throw on the first API failure so a partial apply is reported, not hidden.
 
-import {
-  apiError,
-  HTTP_CREATED,
-  HTTP_NO_CONTENT,
-  HTTP_OK,
-  request,
-} from './github-api';
+import { apiError, HTTP_CREATED, HTTP_OK, request } from './github-api';
 import { diffRuleset, diffRulesets } from './github-diff';
+import { deleteVerifiedUndeclaredRuleset } from './github-ruleset-deletion';
 import { fetchLiveRulesets, type LiveRulesets } from './github-rulesets';
 import type { GithubSettings } from './github-settings';
 
@@ -48,23 +43,6 @@ const reconcileRuleset = async (
     throw new Error(apiError(`updating ruleset "${name}"`, updated));
   }
   return `updated ruleset "${name}"`;
-};
-
-const deleteRuleset = async (
-  token: string,
-  repo: string,
-  name: string,
-  liveRuleset: Readonly<Record<string, unknown>>,
-): Promise<string> => {
-  const deleted = await request(
-    token,
-    'DELETE',
-    `/repos/${repo}/rulesets/${liveRuleset.id}`,
-  );
-  if (deleted.status !== HTTP_NO_CONTENT) {
-    throw new Error(apiError(`deleting ruleset "${name}"`, deleted));
-  }
-  return `deleted undeclared ruleset "${name}"`;
 };
 
 type ApplyRulesetsInput = {
@@ -165,8 +143,20 @@ export const applyPrefetchedRulesets = async ({
   let deletionOccurred = false;
   for (const [name, liveRuleset] of freshByName) {
     if (!declaredNames.has(name)) {
-      // biome-ignore lint/performance/noAwaitInLoops: GitHub advises against concurrent write requests (secondary rate limits); mutations run sequentially on purpose.
-      const action = await deleteRuleset(token, repo, name, liveRuleset);
+      if (declared.defaultBranchProtection === null) {
+        throw new Error(
+          `refusing to delete undeclared ruleset "${name}" without declared classic default-branch protection`,
+        );
+      }
+      // biome-ignore lint/performance/noAwaitInLoops: GitHub writes and their fresh safety proofs are intentionally serialized.
+      const action = await deleteVerifiedUndeclaredRuleset({
+        declaredNames,
+        defaultBranchProtection: declared.defaultBranchProtection,
+        liveRuleset,
+        name,
+        repo,
+        token,
+      });
       deletionOccurred = true;
       actions.push(action);
       reportAction(action);

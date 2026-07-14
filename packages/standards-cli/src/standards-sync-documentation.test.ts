@@ -6,6 +6,7 @@ import {
   REPOSITORY_OWNED_CONTROL_SEAMS,
   SYNC_LOCK_FILE,
 } from './sync-control-seams';
+import { RESERVED_TRANSACTION_NAMESPACE_PATTERNS } from './sync-transaction-artifact-names';
 
 const ROOT = join(import.meta.dir, '../../..');
 const SYNC_SKILL = join(ROOT, '.agents/skills/standards-sync/SKILL.md');
@@ -26,18 +27,31 @@ const PREFLIGHT_RUNTIME_VARIABLES = [
 ] as const;
 const CONTROL_SEAM_PREFIX =
   'Contract-v1 sources must not manage the repository-owned control seams ';
-const formatList = (values: ReadonlyArray<string>): string => {
+const formatList = (
+  values: ReadonlyArray<string>,
+  conjunction: 'and' | 'or' = 'or',
+): string => {
   const quoted = values.map((value) => `\`${value}\``);
   const last = quoted.at(-1);
   return last === undefined
     ? ''
-    : `${quoted.slice(0, -1).join(', ')}, or ${last}`;
+    : `${quoted.slice(0, -1).join(', ')}, ${conjunction} ${last}`;
 };
 const CONTROL_SEAM_SENTENCE = `${CONTROL_SEAM_PREFIX}${formatList(REPOSITORY_OWNED_CONTROL_SEAMS)}.`;
-const CLI_TARGET_SENTENCE = `Managed outputs and seed targets must not claim the CLI-owned \`${SYNC_LOCK_FILE}\` or exact reserved transaction artifacts in the \`.standards-transaction*\`, \`.standards-owner-publication-*\`, and created-parent \`.standards-parent-*\` namespaces.`;
+const RESERVED_NAMESPACE_LIST = formatList(
+  RESERVED_TRANSACTION_NAMESPACE_PATTERNS,
+);
+const CLI_TARGET_SENTENCE = `Managed outputs and seed targets must not claim the CLI-owned \`${SYNC_LOCK_FILE}\` or exact reserved transaction artifacts in the ${RESERVED_NAMESPACE_LIST} namespaces.`;
+const TRANSACTION_CONTRACT_SENTENCE = `The ${formatList(RESERVED_TRANSACTION_NAMESPACE_PATTERNS, 'and')} artifact namespaces are exclusively CLI-owned; another process or user must not create or modify those artifacts while a transaction or recovery journal exists.`;
 
 describe('standards sync documentation', () => {
   it('documents the current policy and configured-ref recovery accurately', () => {
+    expect(RESERVED_TRANSACTION_NAMESPACE_PATTERNS).toEqual([
+      '.standards-transaction*',
+      '.standards-owner-publication-*',
+      '.standards-parent-*',
+      '.standards-removal-*',
+    ]);
     for (const path of CURRENT_POLICY_DOCS) {
       const documentation = readFileSync(path, 'utf8');
       expect(documentation).toContain('@davidvornholt/standards` >=0.5.0');
@@ -90,6 +104,9 @@ describe('standards sync documentation', () => {
     }
     expect(readFileSync(SYNC_SKILL, 'utf8')).toContain(
       'real sync from configured remote ref',
+    );
+    expect(readFileSync(PACKAGE_README, 'utf8')).toContain(
+      TRANSACTION_CONTRACT_SENTENCE,
     );
   });
 

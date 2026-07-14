@@ -107,5 +107,5 @@ it('recovers repeatedly after a publisher crash at the post-bind boundary', asyn
     readdirSync(rootPath).some((name) =>
       name.startsWith('.standards-removal-'),
     ),
-  ).toBe(false);
+  ).toBe(true);
 });

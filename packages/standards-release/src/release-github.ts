@@ -2,11 +2,10 @@ import { GithubStateError } from './github-state-error';
 import { effectVoid, fail, flatMap, gen } from './release-effect';
 import { loadGithubState, loadTagSha } from './release-github-api';
 import {
-  apiMessage,
-  type GithubClient,
-  post,
-  type ReleaseFetcher,
-} from './release-github-request';
+  type GithubConnectionInput,
+  githubClientFrom,
+} from './release-github-client';
+import { apiMessage, type GithubClient, post } from './release-github-request';
 import { decideReconciliation } from './release-state';
 
 export type { ReleaseFetcher } from './release-github-request';
@@ -17,24 +16,13 @@ const RELEASE_NOTES_FIELD = 'generate_release_notes';
 const TAG_NAME_FIELD = 'tag_name';
 const TARGET_COMMIT_FIELD = 'target_commitish';
 
-type GithubInput = {
-  readonly apiUrl?: string;
+type GithubInput = GithubConnectionInput & {
   readonly expectedSha: string;
-  readonly fetcher?: ReleaseFetcher;
-  readonly repo: string;
   readonly tag: string;
-  readonly token: string;
 };
 
-const clientFrom = (input: GithubInput): GithubClient => ({
-  apiUrl: input.apiUrl ?? 'https://api.github.com',
-  fetcher: input.fetcher ?? fetch,
-  repo: input.repo,
-  token: input.token,
-});
-
 export const inspectGithubRelease = (input: GithubInput) =>
-  loadGithubState(clientFrom(input), input.tag).pipe(
+  loadGithubState(githubClientFrom(input), input.tag).pipe(
     flatMap((state) =>
       decideReconciliation({ expectedSha: input.expectedSha, ...state }),
     ),
@@ -100,7 +88,7 @@ export const reconcileGithubRelease = (input: GithubInput) =>
     if (initial === 'exists') {
       return initial;
     }
-    const client = clientFrom(input);
+    const client = githubClientFrom(input);
     yield* createAndVerifyTag(client, input);
     const beforeRelease = yield* inspectGithubRelease(input);
     if (beforeRelease === 'exists') {

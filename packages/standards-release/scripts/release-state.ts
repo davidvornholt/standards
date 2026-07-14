@@ -4,6 +4,7 @@ import type { GithubApiError } from '../src/github-api-error';
 import { appendGithubOutput } from '../src/github-output';
 import type { GithubStateError } from '../src/github-state-error';
 import type { NpmRegistryError } from '../src/npm-registry-error';
+import { authorizeReleaseSha } from '../src/release-authorization';
 import { renderReleaseCause } from '../src/release-cause-output';
 import {
   type Effect,
@@ -130,6 +131,22 @@ const github = (mode: 'inspect' | 'reconcile', args: ReadonlyArray<string>) =>
     yield* writeOutput(outputPath, { action });
   });
 
+const authorize = (args: ReadonlyArray<string>) =>
+  gen(function* () {
+    const [expectedSha] = args;
+    yield* authorizeReleaseSha({
+      expectedSha: yield* requireValue(expectedSha, 'release sha'),
+      token: yield* requireValue(
+        firstNonEmpty([environment.GH_TOKEN, environment.GITHUB_TOKEN]),
+        'GitHub token',
+      ),
+      repo: yield* requireValue(
+        environment.GITHUB_REPOSITORY,
+        'GitHub repository',
+      ),
+    });
+  });
+
 const main = (): Effect<void, ReleaseError> => {
   const [command, ...args] = argv.slice(2);
   if (command === 'pack') {
@@ -144,10 +161,13 @@ const main = (): Effect<void, ReleaseError> => {
   if (command === 'github-reconcile') {
     return github('reconcile', args);
   }
+  if (command === 'github-authorize') {
+    return authorize(args);
+  }
   return fail(
     new ReleaseInputError({
       message:
-        'Expected release-state command pack, npm, github-inspect, or github-reconcile',
+        'Expected release-state command pack, npm, github-authorize, github-inspect, or github-reconcile',
     }),
   );
 };

@@ -8,6 +8,7 @@ import {
 } from './sync-directory-handles';
 import { pinTarget } from './sync-directory-traversal';
 import { identitiesMatch, type RepositoryRoot } from './sync-filesystem';
+import { parseStoredNodeIdentity } from './sync-node-identity';
 import {
   inspectLegacyProcess,
   inspectLinuxProcessIdentity,
@@ -136,10 +137,10 @@ export const recoverRepositoryTransactions = async (
       throw new Error('Transaction ownership records disagree');
     }
     if (
-      !identitiesMatch(root.identity, {
-        dev: BigInt(journal.root.dev),
-        ino: BigInt(journal.root.ino),
-      })
+      !identitiesMatch(
+        root.identity,
+        parseStoredNodeIdentity(journal.root, 'Transaction journal root'),
+      )
     ) {
       throw new Error(
         `Transaction journal belongs to a different repository root: ${TRANSACTION_DIRECTORY}`,

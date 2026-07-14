@@ -23,7 +23,7 @@ export const rollbackMissing = async (
     parent: transaction,
     rel: operation.rel,
   });
-  const bindingTarget = rollbackBindingTarget(
+  const bindingTarget = await rollbackBindingTarget(
     transaction,
     operation.backup,
     operation.rel,
@@ -47,7 +47,7 @@ export const rollbackMissing = async (
       );
     }
     await unlinkPinnedIdentity({
-      bindingName: bindingTarget.name,
+      bindingName: rollbackBindingName(operation.backup),
       expected: stageState.identity,
       message: `Recovery installed target binding changed: ${operation.rel}`,
       target,

@@ -45,16 +45,33 @@ describe('CLI release workflow authorization', () => {
     expect(qualityWorkflow).toContain(
       `github.ref_name == ${DEFAULT_BRANCH_IDENTITY}`,
     );
-    expect(workflow).toContain(
-      `DEFAULT_BRANCH: ${githubExpression(DEFAULT_BRANCH_IDENTITY)}`,
-    );
-    expect(workflow).toContain(
-      'git fetch --no-tags origin "refs/heads/$DEFAULT_BRANCH:$remote_ref"',
-    );
-    expect(workflow).toContain(
-      'git merge-base --is-ancestor "$RELEASE_SHA" "$remote_ref"',
-    );
+    expect(workflow).not.toContain('DEFAULT_BRANCH:');
+    expect(workflow).not.toContain('git merge-base --is-ancestor');
     expect(workflow).not.toContain("head_branch == 'main'");
     expect(workflow).not.toContain('origin/main');
+  });
+
+  it('freshly authorizes both mutation paths through tested release tooling', () => {
+    expect(workflow.match(/github-authorize "\$RELEASE_SHA"/gu)).toHaveLength(
+      2,
+    );
+    const publishAuthorization = workflow.slice(
+      position('- name: Authorize release SHA on the live default branch'),
+      position('- name: Publish package'),
+    );
+    expect(publishAuthorization).toContain(
+      `RELEASE_SHA: ${githubExpression('steps.npm.outputs.release_sha')}`,
+    );
+    const releaseJob = position('  release:');
+    const releaseAuthorization = workflow.slice(
+      workflow.indexOf(
+        '- name: Authorize release SHA on the live default branch',
+        releaseJob,
+      ),
+      position('- name: Reconcile verified GitHub tag and release'),
+    );
+    expect(releaseAuthorization).toContain(
+      `RELEASE_SHA: ${githubExpression('needs.publish.outputs.release_sha')}`,
+    );
   });
 });

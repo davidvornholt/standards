@@ -1,13 +1,6 @@
-import {
-  type PinnedDirectory,
-  type PinnedTarget,
-  syncPinnedDirectory,
-} from './sync-directory-handles';
+import type { PinnedDirectory, PinnedTarget } from './sync-directory-handles';
 import type { FileState, NodeIdentity } from './sync-filesystem';
-import {
-  rollbackBindingTarget,
-  unlinkPinnedIdentity,
-} from './sync-transaction-bound-unlink';
+import { rollbackBindingTarget } from './sync-transaction-bound-unlink';
 import {
   fileMatchesExpected,
   inspectPinnedFile,
@@ -25,84 +18,83 @@ export const inspectPresentRollbackState = async (
     rel: operation.rel,
   });
   const backupTarget = artifact(operation.backup);
-  const [backupState, bindingState, targetState, stageState] =
-    await Promise.all([
-      inspectPinnedFile(backupTarget),
-      inspectPinnedFile(
-        rollbackBindingTarget(transaction, operation.backup, operation.rel),
-      ),
-      inspectPinnedFile(target),
-      operation.stage === null
-        ? Promise.resolve(null)
-        : inspectPinnedFile(artifact(operation.stage)),
-    ]);
-  return { backupState, backupTarget, bindingState, stageState, targetState };
+  const [installedBinding, backupBinding] = await Promise.all([
+    rollbackBindingTarget(transaction, operation.backup, operation.rel),
+    rollbackBindingTarget(
+      transaction,
+      operation.backup,
+      operation.rel,
+      'backup',
+    ),
+  ]);
+  const [
+    backupState,
+    installedBindingState,
+    backupBindingState,
+    targetState,
+    stageState,
+  ] = await Promise.all([
+    inspectPinnedFile(backupTarget),
+    inspectPinnedFile(installedBinding),
+    inspectPinnedFile(backupBinding),
+    inspectPinnedFile(target),
+    operation.stage === null
+      ? Promise.resolve(null)
+      : inspectPinnedFile(artifact(operation.stage)),
+  ]);
+  return {
+    backupBindingState,
+    backupState,
+    backupTarget,
+    installedBindingState,
+    stageState,
+    targetState,
+  };
 };
 
 export const resumePresentRollbackBinding = async ({
   backupState,
-  backupTarget,
-  bindingState,
+  backupBindingState,
+  installedBindingState,
   operation,
   stageState,
-  target,
   targetState,
-  transaction,
   restore,
 }: {
   readonly backupState: FileState;
-  readonly backupTarget: PinnedTarget;
-  readonly bindingState: FileState;
+  readonly backupBindingState: FileState;
+  readonly installedBindingState: FileState;
   readonly operation: JournalOperation;
   readonly stageState: FileState | null;
-  readonly target: PinnedTarget;
   readonly targetState: FileState;
-  readonly transaction: PinnedDirectory;
   readonly restore: (backupIdentity: NodeIdentity) => Promise<void>;
 }): Promise<boolean> => {
-  if (bindingState.identity === null) {
-    return false;
-  }
-  const bindingTarget = rollbackBindingTarget(
-    transaction,
-    operation.backup,
-    operation.rel,
-  );
   if (
+    backupBindingState.identity !== null &&
     backupState.contents === null &&
     fileMatchesExpected(targetState, operation.before) &&
     targetState.identity !== null
   ) {
-    await unlinkPinnedIdentity({
-      bindingName: bindingTarget.name,
-      expected: targetState.identity,
-      message: `Recovery backup binding changed: ${operation.rel}`,
-      target: backupTarget,
-      transaction,
-    });
-    await syncPinnedDirectory(transaction);
     return true;
   }
   if (
+    installedBindingState.identity !== null &&
     fileMatchesExpected(backupState, operation.before) &&
     targetState.contents === null &&
     stageState !== null &&
     stageState.identity !== null
   ) {
-    await unlinkPinnedIdentity({
-      bindingName: bindingTarget.name,
-      expected: stageState.identity,
-      message: `Recovery installed target binding changed: ${operation.rel}`,
-      target,
-      transaction,
-    });
-    await syncPinnedDirectory(target.parent);
-    await syncPinnedDirectory(transaction);
     if (backupState.identity === null) {
       throw new Error(`Recovery backup has no identity: ${operation.rel}`);
     }
     await restore(backupState.identity);
     return true;
+  }
+  if (
+    backupBindingState.identity === null &&
+    installedBindingState.identity === null
+  ) {
+    return false;
   }
   throw new Error(
     `Recovery rollback binding is inconsistent: ${operation.rel}`,

@@ -1,4 +1,4 @@
-import { REMOVAL_BINDING_PREFIX } from './sync-transaction-bound-remove';
+import { REMOVAL_BINDING_PREFIX } from './sync-transaction-quarantine-schema';
 import {
   TRANSACTION_CLEANUP,
   TRANSACTION_DIRECTORY,
@@ -17,6 +17,13 @@ const PARENT_BINDING_TAIL = new RegExp(
   `^\\.standards-parent-binding-${UUID_V4_SOURCE}-(?:0|[1-9]\\d*)\\.${UUID_V4_SOURCE}\\.tmp$`,
   'u',
 );
+
+export const RESERVED_TRANSACTION_NAMESPACE_PATTERNS = [
+  '.standards-transaction*',
+  '.standards-owner-publication-*',
+  '.standards-parent-*',
+  '.standards-removal-*',
+] as const;
 
 export const isUuidV4 = (value: string): boolean => UUID_V4.test(value);
 

@@ -48,7 +48,6 @@ describe('durable created-parent cleanup', () => {
   for (const operation of [
     'parent-cleanup-token-write',
     'parent-cleanup-token',
-    'parent-cleanup-marker-unlink',
     'parent-cleanup-directory-fsync',
     'parent-cleanup-rmdir',
     'parent-cleanup-parent-fsync',
@@ -78,7 +77,7 @@ describe('durable created-parent cleanup', () => {
 
   it('rejects a valid-shaped replacement parent inode', async () => {
     const root = setup();
-    expect(crashAt(root, 'rollback-after-parent-cleanup-marker-unlink')).toBe(
+    expect(crashAt(root, 'rollback-after-parent-cleanup-directory-fsync')).toBe(
       'SIGKILL',
     );
     const parent = join(root, 'new-parent');

@@ -3,9 +3,10 @@ import {
   type PinnedDirectory,
 } from './sync-directory-handles';
 import type { RepositoryRoot } from './sync-filesystem';
-import { openRemovalBindingDirectory } from './sync-transaction-bound-remove';
 import { scavengeDurableCleanup } from './sync-transaction-cleanup';
+import { openRemovalBindingDirectory } from './sync-transaction-quarantine-read';
 import type { TransactionReservation } from './sync-transaction-reservation';
+import { reservationIdentity } from './sync-transaction-reservation-record';
 import { TRANSACTION_CLEANUP } from './sync-transaction-types';
 
 const missing = (error: unknown): boolean =>
@@ -20,12 +21,7 @@ export const hasCompletedCleanup = async (
     return true;
   } catch (error) {
     if (missing(error)) {
-      const bound = await openRemovalBindingDirectory(
-        root,
-        TRANSACTION_CLEANUP,
-      );
-      await bound?.handle.close();
-      return bound !== null;
+      return false;
     }
     throw error;
   }
@@ -46,6 +42,9 @@ export const scavengeCompletedCleanup = async (
     const bound = await openRemovalBindingDirectory(
       rootDirectory,
       TRANSACTION_CLEANUP,
+      reservation.phase === 'cleanup'
+        ? reservationIdentity(reservation.transaction, 'transaction')
+        : undefined,
     );
     if (bound === null) {
       throw error;

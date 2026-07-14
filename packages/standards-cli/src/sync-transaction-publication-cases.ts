@@ -1,5 +1,8 @@
 import type { PinnedDirectory } from './sync-directory-handles';
-import { removeOwnedTransaction } from './sync-transaction-artifact-cleanup';
+import {
+  assertTransactionDirectoryEmpty,
+  removeOwnedTransaction,
+} from './sync-transaction-artifact-cleanup';
 import {
   isUnpublishedTransaction,
   unpublishedArtifactNames,
@@ -77,6 +80,7 @@ const removeEmptyUnboundPublication = async (
   transaction: PinnedDirectory,
   reservationId: string,
 ): Promise<void> => {
+  await assertTransactionDirectoryEmpty(transaction);
   await removeOwnedTransaction({
     allowed: new Set(),
     reservedName: TRANSACTION_DIRECTORY,

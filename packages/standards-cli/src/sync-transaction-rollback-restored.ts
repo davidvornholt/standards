@@ -38,7 +38,7 @@ export const cleanupRestoredBackup = async ({
   }
   await syncPinnedDirectory(target.parent);
   await unlinkPinnedIdentity({
-    bindingName: rollbackBindingName(operation.backup),
+    bindingName: rollbackBindingName(operation.backup, 'backup'),
     expected: backupState.identity,
     message: `Recovery backup changed before cleanup: ${operation.rel}`,
     target: backupTarget,

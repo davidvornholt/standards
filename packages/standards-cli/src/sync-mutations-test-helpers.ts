@@ -37,7 +37,11 @@ export const readFixture = (root: string, rel: string): string =>
 
 export const transactionArtifacts = (root: string): ReadonlyArray<string> =>
   readdirSync(root)
-    .filter((name) => name.startsWith('.standards-'))
+    .filter(
+      (name) =>
+        name.startsWith('.standards-') &&
+        !name.startsWith('.standards-removal-'),
+    )
     .sort();
 
 const assertIdentityChanged = (

@@ -681,6 +681,7 @@ const prepareMirror = ({
 const reportDryRun = (
   result: MirrorResult,
   lockMetadataChanged: boolean,
+  policyChanged: boolean,
 ): void => {
   for (const rel of result.created) {
     console.log(`  would create ${rel}`);
@@ -699,12 +700,15 @@ const reportDryRun = (
   if (lockMetadataChanged) {
     console.log('  would update sync-standards.lock (metadata)');
   }
+  if (policyChanged) {
+    console.log('  would update sync-standards.local.json (sync policy)');
+  }
   const changes =
     result.created.length + result.updated.length + result.deleted.length;
   console.log(
-    changes === 0 && !lockMetadataChanged
+    changes === 0 && !lockMetadataChanged && !policyChanged
       ? 'dry run: already in sync; no changes'
-      : `dry run: ${result.created.length} to create, ${result.updated.length} to update, ${result.deleted.length} to delete, ${lockMetadataChanged ? 1 : 0} lock metadata update(s)`,
+      : `dry run: ${result.created.length} to create, ${result.updated.length} to update, ${result.deleted.length} to delete, ${lockMetadataChanged ? 1 : 0} lock metadata update(s), ${policyChanged ? 1 : 0} sync policy update(s)`,
   );
 };
 
@@ -712,9 +716,10 @@ const reportMirror = (
   result: MirrorResult,
   dryRun: boolean,
   lockMetadataChanged = false,
+  policyChanged = false,
 ): void => {
   if (dryRun) {
-    reportDryRun(result, lockMetadataChanged);
+    reportDryRun(result, lockMetadataChanged, policyChanged);
     return;
   }
   for (const rel of result.deleted) {
@@ -905,7 +910,12 @@ const runSync = async ({
   });
   const lockMetadataChanged =
     currentLock.contents === null || !currentLock.contents.equals(lock);
-  reportMirror(mirror.result, dryRun, lockMetadataChanged);
+  const policyContents =
+    policyWrite === null ? null : syncPolicyContents(policyWrite);
+  const policyChanged =
+    policyContents !== null &&
+    !requiredState(states, SYNC_POLICY_FILE).contents?.equals(policyContents);
+  reportMirror(mirror.result, dryRun, lockMetadataChanged, policyChanged);
   if (dryRun) {
     return;
   }
@@ -917,11 +927,11 @@ const runSync = async ({
       rel: SYNC_LOCK_FILE,
     },
   ];
-  if (policyWrite !== null) {
+  if (policyWrite !== null && policyContents !== null) {
     const before = requiredState(states, SYNC_POLICY_FILE);
     controlWrites.push({
       before,
-      contents: syncPolicyContents(policyWrite),
+      contents: policyContents,
       mode: before.mode,
       rel: SYNC_POLICY_FILE,
     });

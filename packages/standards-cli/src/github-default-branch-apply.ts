@@ -20,6 +20,14 @@ type ApplyDefaultBranchInput = {
   readonly token: string;
 };
 
+type FreshDefaultBranchInput = Pick<
+  ApplyDefaultBranchInput,
+  'declared' | 'repo' | 'token'
+> & {
+  readonly context: string;
+  readonly expectedBranch: string | null;
+};
+
 const updateBody = (declared: Readonly<Record<string, unknown>>) => {
   const status = isRecord(declared[REQUIRED_CHECKS])
     ? declared[REQUIRED_CHECKS]
@@ -38,29 +46,28 @@ const updateBody = (declared: Readonly<Record<string, unknown>>) => {
   };
 };
 
-const verifyUpdate = async (
-  input: ApplyDefaultBranchInput,
-  branch: string,
-): Promise<void> => {
+export const assertFreshDefaultBranchProtection = async (
+  input: FreshDefaultBranchInput,
+): Promise<string> => {
   const repository = await request(input.token, 'GET', `/repos/${input.repo}`);
   if (repository.status !== HTTP_OK) {
     throw new Error(
-      apiError(
-        'verifying repository default branch after protection update',
-        repository,
-      ),
+      apiError('verifying repository default branch protection', repository),
     );
   }
   const currentDefault = decodeDefaultBranch(repository.body);
   if (currentDefault.value === null) {
     throw new Error(
       currentDefault.problem ??
-        'GitHub returned an invalid repository default branch after protection update',
+        'GitHub returned an invalid repository default branch during protection verification',
     );
   }
-  if (currentDefault.value !== branch) {
+  if (
+    input.expectedBranch !== null &&
+    currentDefault.value !== input.expectedBranch
+  ) {
     throw new Error(
-      `Repository default branch changed from "${branch}" to "${currentDefault.value}" during protection update`,
+      `Repository default branch changed from "${input.expectedBranch}" to "${currentDefault.value}" during protection update`,
     );
   }
   const verified = await fetchDefaultBranchProtection(
@@ -77,9 +84,21 @@ const verifyUpdate = async (
   ) {
     throw new Error(
       verified.problem ??
-        `default branch "${branch}" did not match declared protection after update`,
+        `default branch "${currentDefault.value}" did not match declared protection ${input.context}`,
     );
   }
+  return currentDefault.value;
+};
+
+const verifyUpdate = async (
+  input: ApplyDefaultBranchInput,
+  branch: string,
+): Promise<void> => {
+  await assertFreshDefaultBranchProtection({
+    ...input,
+    context: 'after update',
+    expectedBranch: branch,
+  });
 };
 
 export const applyDefaultBranchProtection = async (

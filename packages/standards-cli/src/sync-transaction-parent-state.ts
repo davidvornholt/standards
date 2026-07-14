@@ -5,10 +5,7 @@ import {
   type PinnedDirectory,
 } from './sync-directory-handles';
 import { identityOf, type NodeIdentity } from './sync-filesystem';
-import {
-  removalBindingIdentity,
-  resolveRemovalEntryName,
-} from './sync-transaction-bound-remove';
+import { resolveRemovalEntryName } from './sync-transaction-quarantine-read';
 import {
   assertTransactionReservation,
   type ParentCleanupReservation,
@@ -90,8 +87,7 @@ export const assertOnlyCreatedParentMarker = async (
   marker: string,
 ): Promise<void> => {
   const unexpected = (await readdir(directoryEntryPath(directory, '.'))).filter(
-    (entry) =>
-      entry !== marker && removalBindingIdentity(marker, entry) === null,
+    (entry) => entry !== marker,
   );
   if (unexpected.length > 0) {
     throw new Error('Created parent contains unexpected descendants');

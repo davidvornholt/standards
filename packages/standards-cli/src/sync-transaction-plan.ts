@@ -1,8 +1,6 @@
-import { rmdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import {
   type CreatedDirectory,
-  directoryEntryPath,
   openPinnedChild,
   type PinnedDirectory,
   type PinnedTarget,
@@ -14,6 +12,7 @@ import {
   type PreparedDirectory,
   type RepositoryRoot,
 } from './sync-filesystem';
+import { bindAndRemoveEntry } from './sync-transaction-bound-remove';
 import {
   assertPinnedDirectoryUnchanged,
   assertPinnedFileUnchanged,
@@ -117,7 +116,12 @@ export const preparePrunes = async (
   prunes: ReadonlyArray<PreparedDirectory>,
   opened: Array<PinnedDirectory>,
   created: Array<CreatedDirectory>,
-): Promise<ReadonlyArray<PinnedTarget>> => {
+): Promise<
+  ReadonlyArray<{
+    readonly directory: PinnedDirectory;
+    readonly target: PinnedTarget;
+  }>
+> => {
   const targets = await Promise.all(
     prunes.map((prune) =>
       pinTarget({
@@ -129,7 +133,7 @@ export const preparePrunes = async (
       }),
     ),
   );
-  await Promise.all(
+  const directories = await Promise.all(
     targets.map(async (target, index) => {
       const directory = await openPinnedChild(target.parent, target.name);
       opened.push(directory);
@@ -138,9 +142,13 @@ export const preparePrunes = async (
         (prunes[index] as PreparedDirectory).identity,
         target.rel,
       );
+      return directory;
     }),
   );
-  return targets;
+  return targets.map((target, index) => ({
+    directory: directories[index] as PinnedDirectory,
+    target,
+  }));
 };
 
 export const removeCreatedDirectories = async (
@@ -149,6 +157,18 @@ export const removeCreatedDirectories = async (
   await Promise.allSettled(
     [...created]
       .sort((left, right) => right.rel.length - left.rel.length)
-      .map(({ name, parent }) => rmdir(directoryEntryPath(parent, name))),
+      .map(async ({ name, parent }) => {
+        const directory = await openPinnedChild(parent, name);
+        try {
+          await bindAndRemoveEntry({
+            directory: parent,
+            expected: directory.identity,
+            kind: 'directory',
+            name,
+          });
+        } finally {
+          await directory.handle.close();
+        }
+      }),
   );
 };

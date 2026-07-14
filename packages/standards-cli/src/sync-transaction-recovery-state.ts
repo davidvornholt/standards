@@ -3,7 +3,6 @@ import {
   type PinnedDirectory,
 } from './sync-directory-handles';
 import type { RepositoryRoot } from './sync-filesystem';
-import { openRemovalBindingDirectory } from './sync-transaction-bound-remove';
 import { scavengeDurableCleanup } from './sync-transaction-cleanup';
 import {
   hasCompletedCleanup,
@@ -28,7 +27,7 @@ const openTransaction = async (
     return await openPinnedChild(root, TRANSACTION_DIRECTORY);
   } catch (error) {
     if (missing(error)) {
-      return openRemovalBindingDirectory(root, TRANSACTION_DIRECTORY);
+      return null;
     }
     throw error;
   }

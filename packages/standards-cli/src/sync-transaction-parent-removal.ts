@@ -40,13 +40,15 @@ export const removeCreatedParent = async ({
 }): Promise<void> => {
   const marker = createdParentMarkerName(journal.id);
   const markerIdentity = await createdParentMarkerIdentity(directory, journal);
-  if (markerIdentity !== null) {
+  if (committed && markerIdentity !== null) {
     await bindAndRemoveEntry({
       afterRemove: () => fault('parent-cleanup-marker-unlink', rel, 'after'),
-      directory,
+      directory: rootDirectory,
       expected: markerIdentity,
       kind: 'file',
-      name: marker,
+      name: `.standards-parent-marker-${journal.id}-${index}`,
+      sourceDirectory: directory,
+      sourceName: marker,
     });
   }
   await syncPinnedDirectory(directory);

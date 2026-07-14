@@ -1,11 +1,12 @@
-import { rmdir } from 'node:fs/promises';
+import { readdir } from 'node:fs/promises';
 import {
   type CreatedDirectory,
   directoryEntryPath,
+  openPinnedChild,
   type PinnedDirectory,
   type PinnedTarget,
-  syncPinnedDirectory,
 } from './sync-directory-handles';
+import { bindAndRemoveEntry } from './sync-transaction-bound-remove';
 
 export const transactionTargetMap = (
   writes: ReadonlyArray<PinnedTarget>,
@@ -41,18 +42,51 @@ export const assertSingleFilesystem = (
 };
 
 export const applyPrunes = async (
-  targets: ReadonlyArray<PinnedTarget>,
+  targets: ReadonlyArray<{
+    readonly directory: PinnedDirectory;
+    readonly target: PinnedTarget;
+  }>,
 ): Promise<void> => {
   const deepestFirst = [...targets].sort(
-    (left, right) => right.rel.length - left.rel.length,
+    (left, right) => left.target.rel.length - right.target.rel.length,
   );
-  for (const target of deepestFirst) {
+  for (const { directory, target } of deepestFirst) {
     try {
       // biome-ignore lint/performance/noAwaitInLoops: parents can become empty only after their children are pruned
-      await rmdir(directoryEntryPath(target.parent, target.name));
-      await syncPinnedDirectory(target.parent);
-    } catch {
+      await bindAndRemoveEntry({
+        directory: target.parent,
+        expected: directory.identity,
+        kind: 'directory',
+        name: target.name,
+        validateBound: async () => {
+          await assertDirectoryTreeEmpty(directory);
+        },
+      });
+    } catch (error) {
       // Pruning is best-effort; a non-empty directory remains repository-owned.
+      if (!String(error).includes('Prune target is not empty')) {
+        throw error;
+      }
+    }
+  }
+};
+
+const assertDirectoryTreeEmpty = async (
+  directory: PinnedDirectory,
+): Promise<void> => {
+  const entries = await readdir(directoryEntryPath(directory, '.'), {
+    withFileTypes: true,
+  });
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      throw new Error('Prune target is not empty');
+    }
+    // biome-ignore lint/performance/noAwaitInLoops: every descendant is pinned and validated before logical removal
+    const child = await openPinnedChild(directory, entry.name);
+    try {
+      await assertDirectoryTreeEmpty(child);
+    } finally {
+      await child.handle.close();
     }
   }
 };

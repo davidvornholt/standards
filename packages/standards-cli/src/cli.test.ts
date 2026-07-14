@@ -1508,7 +1508,7 @@ describe('sync lock metadata preview', () => {
       'would update sync-standards.lock (metadata)',
     );
     expect(preview.stdout).toContain(
-      'dry run: 0 to create, 0 to update, 0 to delete, 1 lock metadata update(s)',
+      'dry run: 0 to create, 0 to update, 0 to delete, 1 lock metadata update(s), 0 sync policy update(s)',
     );
     expect(existsSync(join(consumer, 'future-seed.txt'))).toBe(false);
     expect(read(consumer, 'sync-standards.lock')).toBe(lockBeforeObservation);
@@ -1555,7 +1555,7 @@ describe('sync lock metadata preview', () => {
       'would update sync-standards.lock (metadata)',
     );
     expect(preview.stdout).toContain(
-      'dry run: 0 to create, 0 to update, 0 to delete, 1 lock metadata update(s)',
+      'dry run: 0 to create, 0 to update, 0 to delete, 1 lock metadata update(s), 0 sync policy update(s)',
     );
     expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
 
@@ -1769,6 +1769,7 @@ describe('ref pinning', () => {
   it('dry-run with an override changes neither policy, lock, nor content', () => {
     const { up, url } = buildGitUpstream();
     const { consumer } = initConsumer(up);
+    const filesBefore = listRelativeFiles(consumer);
     const policyBefore = read(consumer, SYNC_POLICY_FILE);
     const lockBefore = read(consumer, 'sync-standards.lock');
 
@@ -1776,9 +1777,16 @@ describe('ref pinning', () => {
 
     expect(dry.status).toBe(0);
     expect(dry.stdout).toContain('would update managed/a.txt');
+    expect(dry.stdout).toContain(
+      'would update sync-standards.local.json (sync policy)',
+    );
+    expect(dry.stdout).toContain(
+      'dry run: 0 to create, 1 to update, 0 to delete, 1 lock metadata update(s), 1 sync policy update(s)',
+    );
     expect(read(consumer, 'managed/a.txt')).toBe('alpha v2\n');
     expect(read(consumer, SYNC_POLICY_FILE)).toBe(policyBefore);
     expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
+    expect(listRelativeFiles(consumer)).toEqual(filesBefore);
   });
 });
 

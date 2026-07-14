@@ -6,51 +6,66 @@ import {
 import { identitiesMatch, type NodeIdentity } from './sync-filesystem';
 import { isAtomicRecordTemporaryName } from './sync-transaction-artifact-names';
 import { regularAtomicRecordIdentity } from './sync-transaction-atomic-record';
-import {
-  bindAndRemoveEntry,
-  parseRemovalBinding,
-} from './sync-transaction-bound-remove';
+import { bindAndRemoveEntry } from './sync-transaction-bound-remove';
+import { findRemovalBinding } from './sync-transaction-quarantine-read';
+import { readQuarantineRecords } from './sync-transaction-quarantine-record';
 
 const temporaryNames = async (
   directory: PinnedDirectory,
   finalName: string,
 ): Promise<ReadonlyArray<string>> =>
   (await readdir(directoryEntryPath(directory, '.')))
-    .map((name) => {
-      const binding = parseRemovalBinding(name);
-      return binding === null ? name : binding.original;
-    })
     .filter((name) => isAtomicRecordTemporaryName(name, finalName))
     .sort();
 
 const snapshotTails = async (
   directory: PinnedDirectory,
   finalName: string,
+  expected?: NodeIdentity | null,
 ): Promise<ReadonlyMap<string, NodeIdentity>> => {
-  const names = await temporaryNames(directory, finalName);
+  const [rawNames, records] = await Promise.all([
+    temporaryNames(directory, finalName),
+    readQuarantineRecords(directory),
+  ]);
+  const retained = records.filter(({ original }) =>
+    isAtomicRecordTemporaryName(original, finalName),
+  );
+  const names = [
+    ...new Set([...rawNames, ...retained.map(({ original }) => original)]),
+  ];
   if (new Set(names).size !== names.length) {
     throw new Error('Atomic transaction record tail and binding both exist');
   }
-  const entries = await readdir(directoryEntryPath(directory, '.'));
-  return new Map(
-    await Promise.all(
-      names.map(async (name) => {
-        const binding = entries.find(
-          (entry) => parseRemovalBinding(entry)?.original === name,
+  const snapshots = await Promise.all(
+    names.map(async (name) => {
+      const generations = retained.filter((record) => record.original === name);
+      const binding =
+        expected === undefined || expected === null
+          ? null
+          : await findRemovalBinding(directory, name, expected);
+      if (binding !== null) {
+        return [name, binding.identity] as const;
+      }
+      if (!rawNames.includes(name)) {
+        return null;
+      }
+      const identity = await regularAtomicRecordIdentity(directory, name);
+      if (generations.length > 0 && expected === undefined) {
+        return null;
+      }
+      if (
+        expected !== undefined &&
+        expected !== null &&
+        !identitiesMatch(identity, expected)
+      ) {
+        throw new Error(
+          `Atomic transaction record tail changed after binding: ${name}`,
         );
-        const actual = binding ?? name;
-        const identity = await regularAtomicRecordIdentity(directory, actual);
-        const encoded =
-          binding === undefined ? null : parseRemovalBinding(binding);
-        if (encoded !== null && !identitiesMatch(encoded.identity, identity)) {
-          throw new Error(
-            `Atomic transaction record removal binding changed: ${name}`,
-          );
-        }
-        return [name, identity] as const;
-      }),
-    ),
+      }
+      return [name, identity] as const;
+    }),
   );
+  return new Map(snapshots.filter((entry) => entry !== null));
 };
 
 const removeNames = async (
@@ -97,7 +112,7 @@ export const removeBoundAtomicPartialTails = async (
   finalName: string,
   expected?: NodeIdentity | null,
 ): Promise<void> => {
-  const tails = await snapshotTails(directory, finalName);
+  const tails = await snapshotTails(directory, finalName, expected);
   if (tails.size === 0) {
     return;
   }

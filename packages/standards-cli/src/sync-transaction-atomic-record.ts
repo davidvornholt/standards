@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { link, open } from 'node:fs/promises';
+import { open } from 'node:fs/promises';
 import { writeCompleteDescriptor } from './sync-descriptor-write';
 import {
   directoryEntryPath,
@@ -8,6 +8,8 @@ import {
   syncPinnedDirectory,
 } from './sync-directory-handles';
 import type { NodeIdentity } from './sync-filesystem';
+import { identitiesMatch, identityOf } from './sync-filesystem';
+import { linkDescriptorNoReplace } from './sync-linux-link';
 import { atomicRecordTemporaryName } from './sync-transaction-artifact-names';
 import { bindAndRemoveEntry } from './sync-transaction-bound-remove';
 
@@ -20,27 +22,38 @@ export const publishAtomicTransactionRecord = async ({
   afterPartialWrite,
   afterTemporaryBind,
   afterTemporaryOpen,
+  afterFinalPublish,
+  beforeFinalPublish,
+  beforeTemporaryOpen,
   contents,
   directory,
   finalName,
   maximumBytes,
+  temporaryName: requestedTemporaryName,
 }: {
+  readonly afterFinalPublish?: () => Promise<void>;
   readonly afterFinalSync?: () => Promise<void>;
   readonly afterPartialWrite?: () => Promise<void>;
   readonly afterTemporaryBind?: (name: string) => Promise<void>;
   readonly afterTemporaryOpen?: (identity: NodeIdentity) => Promise<void>;
+  readonly beforeFinalPublish?: () => Promise<void>;
+  readonly beforeTemporaryOpen?: () => Promise<void>;
   readonly contents: string;
   readonly directory: PinnedDirectory;
   readonly finalName: string;
   readonly maximumBytes: number;
+  readonly temporaryName?: string;
 }): Promise<void> => {
   const encoded = Buffer.from(contents);
   if (encoded.byteLength > maximumBytes) {
     throw new Error(`Transaction record exceeds its size limit: ${finalName}`);
   }
-  const temporaryName = atomicRecordTemporaryName(finalName, randomUUID());
+  const temporaryName =
+    requestedTemporaryName ??
+    atomicRecordTemporaryName(finalName, randomUUID());
   const temporaryPath = directoryEntryPath(directory, temporaryName);
   const finalPath = directoryEntryPath(directory, finalName);
+  await beforeTemporaryOpen?.();
   const handle = await open(
     temporaryPath,
     constants.O_CREAT +
@@ -50,9 +63,10 @@ export const publishAtomicTransactionRecord = async ({
     PRIVATE_MODE,
   );
   let temporaryIdentity: NodeIdentity | null = null;
+  let published = false;
   try {
     const info = await handle.stat({ bigint: true });
-    temporaryIdentity = { dev: info.dev, ino: info.ino };
+    temporaryIdentity = identityOf(info);
     await afterTemporaryOpen?.(temporaryIdentity);
     await writeCompleteDescriptor({
       afterPartialWrite,
@@ -61,21 +75,53 @@ export const publishAtomicTransactionRecord = async ({
       partialOffset: Math.max(1, Math.floor(encoded.byteLength / 2)),
     });
     await handle.sync();
-  } catch (error) {
-    await handle.close();
-    if (temporaryIdentity !== null) {
-      await cleanupTemporary(directory, temporaryName, temporaryIdentity);
+    await beforeFinalPublish?.();
+    try {
+      linkDescriptorNoReplace(handle.fd, directory.handle.fd, finalName);
+    } catch (error) {
+      let existing: Awaited<ReturnType<typeof open>>;
+      try {
+        existing = await open(
+          finalPath,
+          constants.O_RDONLY + constants.O_NOFOLLOW + constants.O_NONBLOCK,
+        );
+      } catch (inspectionError) {
+        // biome-ignore lint/style/useErrorCause: AggregateError retains both publication and inspection failures.
+        throw new AggregateError(
+          [error, inspectionError],
+          `Could not inspect existing record: ${finalName}`,
+          { cause: inspectionError },
+        );
+      }
+      await existing.close();
+      throw Object.assign(
+        new Error(`Transaction record already exists: ${finalName}`, {
+          cause: error,
+        }),
+        { code: 'EEXIST' },
+      );
     }
-    throw error;
-  }
-  await handle.close();
-  if (temporaryIdentity === null) {
-    throw new Error(
-      `Atomic transaction record identity is missing: ${finalName}`,
+    published = true;
+    await afterFinalPublish?.();
+    const final = await open(
+      finalPath,
+      constants.O_RDONLY + constants.O_NOFOLLOW + constants.O_NONBLOCK,
     );
-  }
-  try {
-    await link(temporaryPath, finalPath);
+    try {
+      const finalInfo = await final.stat({ bigint: true });
+      const finalContents = await final.readFile();
+      if (
+        !(
+          finalInfo.isFile() &&
+          identitiesMatch(temporaryIdentity, identityOf(finalInfo)) &&
+          finalContents.equals(encoded)
+        )
+      ) {
+        throw new Error(`Published transaction record changed: ${finalName}`);
+      }
+    } finally {
+      await final.close();
+    }
     await syncPinnedDirectory(directory);
     await afterFinalSync?.();
     await bindAndRemoveEntry({
@@ -85,9 +131,11 @@ export const publishAtomicTransactionRecord = async ({
       kind: 'file',
       name: temporaryName,
     });
-  } catch (error) {
-    await cleanupTemporary(directory, temporaryName, temporaryIdentity);
-    throw error;
+  } finally {
+    await handle.close();
+    if (!published && temporaryIdentity !== null) {
+      await cleanupTemporary(directory, temporaryName, temporaryIdentity);
+    }
   }
 };
 
@@ -104,7 +152,7 @@ export const regularAtomicRecordIdentity = async (
     if (!info.isFile()) {
       throw new Error(`Atomic transaction record must be regular: ${name}`);
     }
-    return { dev: info.dev, ino: info.ino };
+    return identityOf(info);
   } finally {
     await handle.close();
   }

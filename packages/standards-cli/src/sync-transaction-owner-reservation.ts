@@ -7,15 +7,24 @@ import {
 } from './sync-directory-handles';
 import { identitiesMatch, type NodeIdentity } from './sync-filesystem';
 import { renameDirectoryNoReplace } from './sync-linux-rename';
-import {
-  parseRemovalBinding,
-  resolveRemovalEntryName,
-} from './sync-transaction-bound-remove';
+import { assertFilesystemIdentityComponent } from './sync-node-identity';
+import { resolveRemovalEntryName } from './sync-transaction-quarantine-read';
 import { TRANSACTION_OWNER_PUBLICATION_PREFIX } from './sync-transaction-types';
 
 const PRIVATE_MODE = 0o600;
 const TOKEN =
   /^\.standards-owner-publication-(?<id>[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})-(?<dev>\d+)-(?<ino>\d+)(?:-(?<ownerDev>\d+)-(?<ownerIno>\d+))?$/u;
+
+const tokenIdentity = (dev: string, ino: string): NodeIdentity => ({
+  dev: assertFilesystemIdentityComponent(
+    BigInt(dev),
+    'Owner publication token dev',
+  ),
+  ino: assertFilesystemIdentityComponent(
+    BigInt(ino),
+    'Owner publication token ino',
+  ),
+});
 
 export type OwnerPublicationToken = {
   readonly id: string;
@@ -38,12 +47,7 @@ export const assertOwnerPublicationNamespaceAvailable = async (
   root: PinnedDirectory,
 ): Promise<void> => {
   const entries = (await readdir(directoryEntryPath(root, '.'))).filter(
-    (entry) => {
-      const binding = parseRemovalBinding(entry);
-      return (binding === null ? entry : binding.original).startsWith(
-        TRANSACTION_OWNER_PUBLICATION_PREFIX,
-      );
-    },
+    (entry) => entry.startsWith(TRANSACTION_OWNER_PUBLICATION_PREFIX),
   );
   if (entries.length > 0) {
     throw new Error('Owner publication token namespace is occupied');
@@ -103,12 +107,9 @@ export const createOwnerPublicationToken = async (
 export const findOwnerPublicationTokenEntry = async (
   root: PinnedDirectory,
 ): Promise<OwnerPublicationToken | null> => {
-  const candidates = (await readdir(directoryEntryPath(root, '.')))
-    .map((entry) => {
-      const binding = parseRemovalBinding(entry);
-      return binding === null ? entry : binding.original;
-    })
-    .filter((entry) => entry.startsWith(TRANSACTION_OWNER_PUBLICATION_PREFIX));
+  const candidates = (await readdir(directoryEntryPath(root, '.'))).filter(
+    (entry) => entry.startsWith(TRANSACTION_OWNER_PUBLICATION_PREFIX),
+  );
   if (candidates.length === 0) {
     return null;
   }
@@ -124,11 +125,11 @@ export const findOwnerPublicationTokenEntry = async (
   const ownerRecord =
     groups.ownerDev === undefined || groups.ownerIno === undefined
       ? null
-      : { dev: BigInt(groups.ownerDev), ino: BigInt(groups.ownerIno) };
-  const exactTransaction = {
-    dev: BigInt(groups.dev as string),
-    ino: BigInt(groups.ino as string),
-  };
+      : tokenIdentity(groups.ownerDev, groups.ownerIno);
+  const exactTransaction = tokenIdentity(
+    groups.dev as string,
+    groups.ino as string,
+  );
   if (
     exactTransaction.dev.toString() !== groups.dev ||
     exactTransaction.ino.toString() !== groups.ino ||

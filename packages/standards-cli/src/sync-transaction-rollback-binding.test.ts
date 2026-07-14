@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
 import { openRepositoryRoot } from './sync-filesystem';
@@ -19,6 +19,7 @@ import {
 } from './sync-transaction-types';
 
 const fixture = join(import.meta.dir, 'sync-transaction-crash-fixture.ts');
+const JSON_SUFFIX = /\.json$/u;
 
 afterEach(cleanupFixtures);
 
@@ -50,12 +51,24 @@ const crashAtBinding = (phase: string, rel: string) => {
   if (operation === undefined) {
     throw new Error(`Missing journal operation for ${rel}`);
   }
+  const transaction = join(rootPath, TRANSACTION_DIRECTORY);
+  const logical = `${operation.backup.replace('old-', 'rollback-')}-${phase.includes('restore') ? 'backup' : 'installed'}`;
+  const record = readdirSync(transaction).find((name) => {
+    if (!name.endsWith('.json')) {
+      return false;
+    }
+    const contents = JSON.parse(
+      readFileSync(join(transaction, name), 'utf8'),
+    ) as {
+      readonly original?: unknown;
+    };
+    return contents.original === logical;
+  });
+  if (record === undefined) {
+    throw new Error(`Missing rollback quarantine for ${rel}`);
+  }
   return {
-    binding: join(
-      rootPath,
-      TRANSACTION_DIRECTORY,
-      operation.backup.replace('old-', 'rollback-'),
-    ),
+    binding: join(transaction, record.replace(JSON_SUFFIX, '.entry')),
     operation,
     rootPath,
   };

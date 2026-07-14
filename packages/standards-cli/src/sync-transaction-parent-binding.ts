@@ -7,10 +7,7 @@ import {
 import { identitiesMatch, type NodeIdentity } from './sync-filesystem';
 import { publishAtomicTransactionRecord } from './sync-transaction-atomic-record';
 import { removeBoundAtomicPartialTails } from './sync-transaction-atomic-recovery';
-import {
-  parseRemovalBinding,
-  resolveRemovalEntryName,
-} from './sync-transaction-bound-remove';
+import { resolveRemovalEntryName } from './sync-transaction-quarantine-read';
 import {
   reservationIdentity,
   storedIdentity,
@@ -41,12 +38,7 @@ export const assertParentBindingNamespaceAvailable = async (
   root: PinnedDirectory,
 ): Promise<void> => {
   const entries = (await readdir(directoryEntryPath(root, '.'))).filter(
-    (entry) => {
-      const binding = parseRemovalBinding(entry);
-      return (binding === null ? entry : binding.original).startsWith(
-        TRANSACTION_PARENT_BINDING_PREFIX,
-      );
-    },
+    (entry) => entry.startsWith(TRANSACTION_PARENT_BINDING_PREFIX),
   );
   if (entries.length > 0) {
     throw new Error('Created-parent binding namespace is occupied');

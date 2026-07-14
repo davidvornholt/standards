@@ -6,7 +6,7 @@ import {
 import type { RepositoryRoot } from './sync-filesystem';
 import { journalArtifactNames } from './sync-transaction-artifact-policy';
 import { assertTransactionArtifacts } from './sync-transaction-artifact-validation';
-import { findRemovalBinding } from './sync-transaction-bound-remove';
+import { cleanupOwnerOnlyTail } from './sync-transaction-cleanup-tail';
 import { removeOwnedTransactionDurably } from './sync-transaction-durable-cleanup';
 import { readJournal } from './sync-transaction-journal';
 import {
@@ -14,6 +14,7 @@ import {
   readTransactionOwner,
 } from './sync-transaction-ownership';
 import { finishCreatedParents } from './sync-transaction-parents';
+import { readQuarantineRecords } from './sync-transaction-quarantine-record';
 import {
   assertCleanupReservation,
   type CleanupReservation,
@@ -22,12 +23,8 @@ import {
 import {
   TRANSACTION_DIRECTORY,
   TRANSACTION_JOURNAL,
-  TRANSACTION_OWNER,
   type TransactionJournal,
 } from './sync-transaction-types';
-
-const missing = (error: unknown): boolean =>
-  (error as { readonly code?: unknown }).code === 'ENOENT';
 
 const assertOwnedTransaction = async (
   root: RepositoryRoot,
@@ -38,20 +35,6 @@ const assertOwnedTransaction = async (
   assertTransactionOwner(owner, root.identity, transaction);
   if (owner.id !== journalId) {
     throw new Error('Transaction owner does not match its journal');
-  }
-};
-
-const optionalOwner = async (
-  root: RepositoryRoot,
-  transaction: PinnedDirectory,
-  id: string,
-): Promise<void> => {
-  try {
-    await assertOwnedTransaction(root, transaction, id);
-  } catch (error) {
-    if (!missing(error)) {
-      throw error;
-    }
   }
 };
 
@@ -78,9 +61,10 @@ export const scavengeDurableCleanup = async ({
   assertCleanupReservation(ownership);
   const cleanupReservation = ownership.reservation;
   const entries = await readdir(directoryEntryPath(transaction, '.'));
+  const records = await readQuarantineRecords(transaction);
   if (
     entries.includes(TRANSACTION_JOURNAL) ||
-    (await findRemovalBinding(transaction, TRANSACTION_JOURNAL)) !== null
+    records.some(({ original }) => original === TRANSACTION_JOURNAL)
   ) {
     const journal = await readJournal(transaction);
     if (journal.id !== cleanupReservation.id) {
@@ -113,22 +97,12 @@ export const scavengeDurableCleanup = async ({
     });
     return;
   }
-  const ownerBinding = await findRemovalBinding(transaction, TRANSACTION_OWNER);
-  const unexpected = entries.filter(
-    (entry) => entry !== TRANSACTION_OWNER && entry !== ownerBinding?.name,
-  );
-  if (unexpected.length > 0) {
-    throw new Error('Cleanup tail contains unexpected transaction artifacts');
-  }
-  await optionalOwner(root, transaction, cleanupReservation.id);
-  await removeOwnedTransactionDurably({
-    allowed: new Set([TRANSACTION_OWNER]),
-    decision: cleanupReservation.decision,
-    id: cleanupReservation.id,
+  await cleanupOwnerOnlyTail({
+    cleanup: cleanupReservation,
     reservedName,
-    root: rootDirectory,
+    root,
+    rootDirectory,
     transaction,
-    validate: () => optionalOwner(root, transaction, cleanupReservation.id),
   });
 };
 

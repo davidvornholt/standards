@@ -7,10 +7,8 @@ import {
 } from './sync-directory-handles';
 import { identitiesMatch, type NodeIdentity } from './sync-filesystem';
 import { publishAtomicTransactionRecord } from './sync-transaction-atomic-record';
-import {
-  bindAndRemoveEntry,
-  resolveRemovalEntryName,
-} from './sync-transaction-bound-remove';
+import { bindAndRemoveEntry } from './sync-transaction-bound-remove';
+import { hasRemovedTransactionReservation } from './sync-transaction-reservation-quarantine';
 import {
   type CleanupReservation,
   type PublicationReservation,
@@ -36,10 +34,7 @@ export const readTransactionReservationEntry = async (
   root: PinnedDirectory,
 ) => {
   const handle = await open(
-    directoryEntryPath(
-      root,
-      await resolveRemovalEntryName(root, TRANSACTION_RESERVATION),
-    ),
+    directoryEntryPath(root, TRANSACTION_RESERVATION),
     constants.O_RDONLY + constants.O_NOFOLLOW + constants.O_NONBLOCK,
   );
   try {
@@ -171,7 +166,18 @@ export const removeTransactionReservation = async (
     readonly afterUnlink?: () => Promise<void>;
   } = {},
 ): Promise<void> => {
-  const before = await readTransactionReservationEntry(root);
+  let before: Awaited<ReturnType<typeof readTransactionReservationEntry>>;
+  try {
+    before = await readTransactionReservationEntry(root);
+  } catch (error) {
+    if (!reservationMissing(error)) {
+      throw error;
+    }
+    if (await hasRemovedTransactionReservation(root, expectedId)) {
+      return;
+    }
+    throw error;
+  }
   assertTransactionReservation(before.reservation, root.identity, expectedId);
   const after = await readTransactionReservationEntry(root);
   if (!identitiesMatch(before.identity, after.identity)) {

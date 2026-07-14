@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { dirname } from 'node:path';
 import process from 'node:process';
 import type { FileState, NodeIdentity } from './sync-filesystem';
+import { assertFilesystemIdentityComponent } from './sync-node-identity';
 import type { LinuxProcessIdentity } from './sync-process-identity';
 
 export const TRANSACTION_DIRECTORY = '.standards-transaction';
@@ -115,11 +116,23 @@ export const expectedFile = (state: FileState): ExpectedFile => ({
 export const expectedIdentity = (state: ExpectedFile): NodeIdentity | null =>
   state.dev === null || state.ino === null
     ? null
-    : { dev: BigInt(state.dev), ino: BigInt(state.ino) };
+    : {
+        dev: assertFilesystemIdentityComponent(
+          BigInt(state.dev),
+          'Expected file dev',
+        ),
+        ino: assertFilesystemIdentityComponent(
+          BigInt(state.ino),
+          'Expected file ino',
+        ),
+      };
 
 export const effectiveMode = (mode: number | null): number =>
   // biome-ignore lint/suspicious/noBitwiseOperators: applying a Unix umask is intentionally bitwise
   mode ?? 0o666 & ~process.umask();
+
+export const removedBackupName = (backup: string): string =>
+  backup.replace('old-', 'removed-');
 
 export const journalParentPaths = (rel: string): ReadonlyArray<string> => {
   const parts = dirname(rel)

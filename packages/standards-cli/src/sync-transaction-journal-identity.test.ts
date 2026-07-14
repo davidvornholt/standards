@@ -1,4 +1,5 @@
 import { expect, it } from 'bun:test';
+import { MAX_FILESYSTEM_IDENTITY } from './sync-node-identity';
 import { parseJournal } from './sync-transaction-journal-parser';
 import { expectedIdentity } from './sync-transaction-types';
 
@@ -7,6 +8,8 @@ const HASH = '0'.repeat(SHA256_LENGTH);
 const UNSAFE_INTEGER = Number.MAX_SAFE_INTEGER + 1;
 const HIGH_IDENTITY = '9007199254740992';
 const ADJACENT_IDENTITY = '9007199254740993';
+const UINT64_MAX = MAX_FILESYSTEM_IDENTITY.toString();
+const UINT64_OVERFLOW = (MAX_FILESYSTEM_IDENTITY + 1n).toString();
 const currentJournal = {
   createdParents: [],
   id: '00000000-0000-4000-8000-000000000000',
@@ -141,4 +144,50 @@ it('normalizes only safe numeric identities in a legacy journal', () => {
       }),
     ),
   ).toThrow('canonical decimal filesystem identity');
+});
+
+it('bounds current and legacy journal identities to uint64', () => {
+  const [currentOperation] = currentJournal.operations;
+  const [legacyOperation] = legacyJournal.operations;
+  expect(
+    parseJournal(
+      JSON.stringify({
+        ...currentJournal,
+        operations: [
+          {
+            ...currentOperation,
+            before: { ...currentOperation.before, ino: UINT64_MAX },
+          },
+        ],
+        root: { dev: UINT64_MAX, ino: UINT64_MAX },
+      }),
+    ).root.dev,
+  ).toBe(UINT64_MAX);
+  for (const journal of [
+    {
+      ...currentJournal,
+      root: { ...currentJournal.root, dev: UINT64_OVERFLOW },
+    },
+    { ...legacyJournal, root: { dev: UINT64_OVERFLOW, ino: '1' } },
+    {
+      ...currentJournal,
+      operations: [
+        {
+          ...currentOperation,
+          before: { ...currentOperation.before, ino: UINT64_OVERFLOW },
+        },
+      ],
+    },
+    {
+      ...legacyJournal,
+      operations: [
+        {
+          ...legacyOperation,
+          before: { ...legacyOperation.before, ino: UINT64_OVERFLOW },
+        },
+      ],
+    },
+  ]) {
+    expect(() => parseJournal(JSON.stringify(journal))).toThrow('uint64');
+  }
 });

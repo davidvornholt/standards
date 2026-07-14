@@ -1,13 +1,12 @@
 import { constants } from 'node:fs';
-import { open, rename } from 'node:fs/promises';
-import { writeCompleteDescriptor } from './sync-descriptor-write';
+import { open } from 'node:fs/promises';
 import {
   directoryEntryPath,
   type PinnedDirectory,
-  syncPinnedDirectory,
 } from './sync-directory-handles';
-import { resolveRemovalEntryName } from './sync-transaction-bound-remove';
+import { publishAtomicTransactionRecord } from './sync-transaction-atomic-record';
 import { parseJournal } from './sync-transaction-journal-parser';
+import { resolveRemovalEntryName } from './sync-transaction-quarantine-read';
 import {
   TRANSACTION_COMMITTED,
   TRANSACTION_JOURNAL,
@@ -15,7 +14,6 @@ import {
   type TransactionJournal,
 } from './sync-transaction-types';
 
-const PRIVATE_MODE = 0o600;
 const MAX_JOURNAL_BYTES = 1_048_576;
 const missing = (error: unknown): boolean =>
   (error as { readonly code?: unknown }).code === 'ENOENT';
@@ -71,37 +69,17 @@ export const publishJournal = async (
   hooks: JournalPublicationHooks = {},
 ): Promise<void> => {
   const contents = Buffer.from(`${JSON.stringify(journal)}\n`);
-  if (contents.byteLength > MAX_JOURNAL_BYTES) {
-    throw new Error('Transaction journal exceeds its size limit');
-  }
-  await hooks.beforeJournalTempOpen?.();
-  const handle = await open(
-    directoryEntryPath(transaction, TRANSACTION_JOURNAL_TEMP),
-    constants.O_CREAT +
-      constants.O_EXCL +
-      constants.O_WRONLY +
-      constants.O_NOFOLLOW,
-    PRIVATE_MODE,
-  );
-  try {
-    const split = Math.max(1, Math.floor(contents.byteLength / 2));
-    await writeCompleteDescriptor({
-      afterPartialWrite: hooks.afterJournalPartialWrite,
-      contents,
-      handle,
-      partialOffset: split,
-    });
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-  await hooks.beforeJournalRename?.();
-  await rename(
-    directoryEntryPath(transaction, TRANSACTION_JOURNAL_TEMP),
-    directoryEntryPath(transaction, TRANSACTION_JOURNAL),
-  );
-  await hooks.afterJournalRename?.();
-  await syncPinnedDirectory(transaction);
+  await publishAtomicTransactionRecord({
+    afterFinalPublish: hooks.afterJournalRename,
+    afterPartialWrite: hooks.afterJournalPartialWrite,
+    beforeFinalPublish: hooks.beforeJournalRename,
+    beforeTemporaryOpen: hooks.beforeJournalTempOpen,
+    contents: contents.toString(),
+    directory: transaction,
+    finalName: TRANSACTION_JOURNAL,
+    maximumBytes: MAX_JOURNAL_BYTES,
+    temporaryName: TRANSACTION_JOURNAL_TEMP,
+  });
 };
 
 export const readJournal = async (

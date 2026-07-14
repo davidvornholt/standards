@@ -4,8 +4,8 @@ import {
   type PinnedTarget,
 } from './sync-directory-handles';
 import { pinTarget } from './sync-directory-traversal';
-import type { RepositoryRoot } from './sync-filesystem';
-import { openRemovalBindingDirectory } from './sync-transaction-bound-remove';
+import type { NodeIdentity, RepositoryRoot } from './sync-filesystem';
+import { openRemovalBindingDirectory } from './sync-transaction-quarantine-read';
 
 const missing = (error: unknown): boolean =>
   (error as { readonly code?: unknown }).code === 'ENOENT';
@@ -14,6 +14,7 @@ export const openCreatedParent = async (
   root: RepositoryRoot,
   rel: string,
   opened: Array<PinnedDirectory>,
+  expected?: NodeIdentity,
 ): Promise<
   | { readonly directory: null; readonly target: PinnedTarget | null }
   | { readonly directory: PinnedDirectory; readonly target: PinnedTarget }
@@ -39,9 +40,13 @@ export const openCreatedParent = async (
     return { directory, target };
   } catch (error) {
     if (missing(error)) {
+      if (expected === undefined) {
+        return { directory: null, target };
+      }
       const directory = await openRemovalBindingDirectory(
         target.parent,
         target.name,
+        expected,
       );
       if (directory === null) {
         return { directory: null, target };

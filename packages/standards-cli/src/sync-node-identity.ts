@@ -1,5 +1,17 @@
 import type { NodeIdentity } from './sync-filesystem';
 
+export const MAX_FILESYSTEM_IDENTITY = 18_446_744_073_709_551_615n;
+
+export const assertFilesystemIdentityComponent = (
+  value: bigint,
+  label: string,
+): bigint => {
+  if (value < 0n || value > MAX_FILESYSTEM_IDENTITY) {
+    throw new Error(`${label} is outside the supported uint64 range`);
+  }
+  return value;
+};
+
 export type StoredNodeIdentity = {
   readonly dev: string;
   readonly ino: string;
@@ -20,7 +32,7 @@ const identityComponent = (
   allowLegacyNumber: boolean,
 ): bigint => {
   if (typeof value === 'string' && DECIMAL_IDENTITY.test(value)) {
-    return BigInt(value);
+    return assertFilesystemIdentityComponent(BigInt(value), label);
   }
   if (
     allowLegacyNumber &&
@@ -28,7 +40,7 @@ const identityComponent = (
     Number.isSafeInteger(value) &&
     value >= 0
   ) {
-    return BigInt(value);
+    return assertFilesystemIdentityComponent(BigInt(value), label);
   }
   throw new Error(`${label} must be a canonical decimal filesystem identity`);
 };
