@@ -56,6 +56,7 @@ export const createReleaseNpmTestFixture = async () => {
     `${packagePath}/package.json`,
     JSON.stringify({
       files: ['index.js', SOURCE_COMMIT_FILE],
+      gitHead: 'caller-owned-stale-sha',
       name: '@test/npm-inspection',
       version: '0.5.0',
     }),

@@ -1,6 +1,9 @@
 import { effectTry, flatMap, succeed, tryPromise } from './release-effect';
 import { ReleasePackageError } from './release-package-error';
-import { appendSourceCommitTar } from './release-package-tar';
+import {
+  rewriteReleaseTar,
+  verifyReleaseTarGitHead,
+} from './release-package-tar';
 import { file, nodeGunzipSync, nodeGzipSync, write } from './release-runtime';
 
 const GZIP_LEVEL = 9;
@@ -26,7 +29,7 @@ export const rewritePackedArtifact = (input: {
           rewriteError('decompressing the packed artifact', cause),
       }),
     ),
-    flatMap((archive) => appendSourceCommitTar(archive, input.expectedSha)),
+    flatMap((archive) => rewriteReleaseTar(archive, input.expectedSha)),
     flatMap((archive) =>
       effectTry({
         try: () =>
@@ -42,5 +45,19 @@ export const rewritePackedArtifact = (input: {
           rewriteError('writing the source-bound artifact', cause),
       }),
     ),
+    flatMap(() =>
+      tryPromise({
+        try: () => file(input.artifact).arrayBuffer(),
+        catch: (cause) => rewriteError('reading the rewritten artifact', cause),
+      }),
+    ),
+    flatMap((compressed) =>
+      effectTry({
+        try: () => nodeGunzipSync(new Uint8Array(compressed)),
+        catch: (cause) =>
+          rewriteError('decompressing the rewritten artifact', cause),
+      }),
+    ),
+    flatMap((archive) => verifyReleaseTarGitHead(archive, input.expectedSha)),
     flatMap(() => succeed(input.artifact)),
   );

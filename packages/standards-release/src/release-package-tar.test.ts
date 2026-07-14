@@ -7,11 +7,10 @@ import {
   releasePackageTestEnvironment,
 } from './release-package.fixture';
 import { rewritePackedArtifact } from './release-package-rewrite';
-import { appendSourceCommitTar } from './release-package-tar';
-import { file, nodeGunzipSync } from './release-runtime';
+import { rewriteReleaseTar } from './release-package-tar';
+import { file } from './release-runtime';
 
 const SHA_LENGTH = 40;
-const TAR_BLOCK_SIZE = 512;
 const EXPECTED_SHA = 'a'.repeat(SHA_LENGTH);
 const testEnvironment = releasePackageTestEnvironment();
 const releasePackageSource = await file(
@@ -20,18 +19,15 @@ const releasePackageSource = await file(
 const releasePackageTarSource = await file(
   `${import.meta.dir}/release-package-tar.ts`,
 ).text();
+const releasePackageTarReaderSource = await file(
+  `${import.meta.dir}/release-package-tar-reader.ts`,
+).text();
 const releasePackageRewriteSource = await file(
   `${import.meta.dir}/release-package-rewrite.ts`,
 ).text();
-const markerHeaderOffset = (archive: Uint8Array): number => {
-  const marker = new TextEncoder().encode('package/SOURCE_COMMIT');
-  for (let offset = 0; offset < archive.length; offset += TAR_BLOCK_SIZE) {
-    if (marker.every((byte, index) => archive[offset + index] === byte)) {
-      return offset;
-    }
-  }
-  return -1;
-};
+const releaseTarHeaderSource = await file(
+  `${import.meta.dir}/release-tar-header.ts`,
+).text();
 
 afterEach(() => {
   testEnvironment.cleanup();
@@ -39,7 +35,7 @@ afterEach(() => {
 
 describe('release package tar rewrite', () => {
   it('keeps packing application logic inside the Effect boundary', () => {
-    const boundarySource = `${releasePackageSource}\n${releasePackageTarSource}\n${releasePackageRewriteSource}`;
+    const boundarySource = `${releasePackageSource}\n${releasePackageTarSource}\n${releasePackageTarReaderSource}\n${releasePackageRewriteSource}\n${releaseTarHeaderSource}`;
     expect(boundarySource).toContain('nodeLstat(marker)');
     expect(boundarySource).toContain('nodeGzipSync(');
     expect(boundarySource).toContain('tryPromise({');
@@ -109,14 +105,24 @@ describe('release package tar contents', () => {
         'package/package.json',
       ].sort(),
     );
+    const rewrittenManifest = spawnSync([
+      'tar',
+      '-xOzf',
+      artifact,
+      'package/package.json',
+    ]).stdout.toString();
+    expect(JSON.parse(rewrittenManifest)).toEqual({
+      ...JSON.parse(baselineManifest),
+      gitHead: EXPECTED_SHA,
+    });
     expect(
       spawnSync([
         'tar',
         '-xOzf',
         artifact,
-        'package/package.json',
+        'package/index.js',
       ]).stdout.toString(),
-    ).toBe(baselineManifest);
+    ).toBe('export const value = true;\n');
     expect(JSON.parse(baselineManifest)).toMatchObject({
       gitHead: 'caller-owned-git-head',
     });
@@ -137,26 +143,13 @@ describe('release package tar contents', () => {
     expect(await file(`${packagePath}/package.json`).text()).toBe(
       sourceManifest,
     );
-    const baselineTar = nodeGunzipSync(
-      new Uint8Array(await file(baselineArtifact).arrayBuffer()),
-    );
-    const rewrittenTar = nodeGunzipSync(
-      new Uint8Array(await file(artifact).arrayBuffer()),
-    );
-    const markerOffset = markerHeaderOffset(rewrittenTar);
-    expect(markerOffset).toBeGreaterThan(0);
-    expect(rewrittenTar.subarray(0, markerOffset)).toEqual(
-      baselineTar.subarray(0, markerOffset),
-    );
   });
 });
 
 describe('release package tar failures', () => {
   it('reports invalid payloads and artifact reads as typed failures', async () => {
     expect(
-      await runPromise(
-        flip(appendSourceCommitTar(new Uint8Array(), EXPECTED_SHA)),
-      ),
+      await runPromise(flip(rewriteReleaseTar(new Uint8Array(), EXPECTED_SHA))),
     ).toMatchObject({ _tag: 'ReleasePackageError' });
     expect(
       await runPromise(
