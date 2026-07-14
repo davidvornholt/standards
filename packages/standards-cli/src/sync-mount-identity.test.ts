@@ -27,11 +27,23 @@ it('accepts root mount parents and unknown optional fields', () => {
   expect(mountIdForPath('/repo/managed', entries)).toBe(10);
 });
 
+it('accepts a dash mount source after the framing separator', () => {
+  const entries = parseMountInfo('10 1 0:1 / /repo rw - tmpfs - rw');
+
+  expect(mountIdForPath('/repo/managed', entries)).toBe(10);
+});
+
 it('fails closed on malformed or truncated mountinfo records', () => {
   expect(() => parseMountInfo('1e2 bad bad bad /')).toThrow(
     'Linux mountinfo contains an invalid mount entry',
   );
   expect(() => parseMountInfo('10 1 0:1 / / rw rootfs rootfs rw')).toThrow(
+    'Linux mountinfo contains an invalid mount entry',
+  );
+  expect(() =>
+    parseMountInfo('10 1 0:1 / / rw future:tag - - tmpfs - rw'),
+  ).toThrow('Linux mountinfo contains an invalid mount entry');
+  expect(() => parseMountInfo('10 1 0:1 / / - tmpfs - rw')).toThrow(
     'Linux mountinfo contains an invalid mount entry',
   );
   expect(() =>

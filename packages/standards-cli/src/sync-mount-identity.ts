@@ -35,8 +35,9 @@ export const parseMountInfo = (contents: string): ReadonlyArray<MountEntry> =>
     .map((line) => {
       const fields = line.split(' ');
       const [idField, parentField, device, root, mountPoint, options] = fields;
-      const separator = fields.indexOf('-');
-      const separators = fields.filter((field) => field === '-').length;
+      const separator = fields.findIndex(
+        (field, index) => index >= REQUIRED_PREFIX_FIELDS && field === '-',
+      );
       const optionalFields = fields.slice(REQUIRED_PREFIX_FIELDS, separator);
       const suffix = fields.slice(separator + 1);
       const id = Number(idField);
@@ -60,7 +61,6 @@ export const parseMountInfo = (contents: string): ReadonlyArray<MountEntry> =>
           mountPoint?.startsWith('/') &&
           options !== undefined &&
           options.length > 0 &&
-          separators === 1 &&
           separator >= REQUIRED_PREFIX_FIELDS &&
           optionalFields.every((field) => field.length > 0) &&
           suffix.length === REQUIRED_SUFFIX_FIELDS &&
