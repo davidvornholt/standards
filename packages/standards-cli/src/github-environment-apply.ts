@@ -81,16 +81,24 @@ const deleteCustomProtectionRules = async (
   return actions;
 };
 
-export const applyEnvironment = async (
-  token: string,
-  repo: string,
-  declared: Readonly<Record<string, unknown>>,
-  reportAction: ReportAction = () => undefined,
-): Promise<ReadonlyArray<string>> => {
+type ApplyEnvironmentInput = {
+  readonly declared: Readonly<Record<string, unknown>>;
+  readonly live: LiveEnvironment;
+  readonly reportAction: ReportAction;
+  readonly repo: string;
+  readonly token: string;
+};
+
+export const applyPrefetchedEnvironment = async ({
+  declared,
+  live,
+  reportAction,
+  repo,
+  token,
+}: ApplyEnvironmentInput): Promise<ReadonlyArray<string>> => {
   const name = String(declared.name);
   const path = environmentPath(repo, name);
   const context = { token, path, name };
-  const live = await fetchLiveEnvironment(token, repo, name);
   if (live.problem !== null) {
     throw new Error(live.problem);
   }
@@ -113,3 +121,17 @@ export const applyEnvironment = async (
   actions.push(...deletedCustom);
   return actions;
 };
+
+export const applyEnvironment = async (
+  token: string,
+  repo: string,
+  declared: Readonly<Record<string, unknown>>,
+  reportAction: ReportAction = () => undefined,
+): Promise<ReadonlyArray<string>> =>
+  applyPrefetchedEnvironment({
+    declared,
+    live: await fetchLiveEnvironment(token, repo, String(declared.name)),
+    reportAction,
+    repo,
+    token,
+  });

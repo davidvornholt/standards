@@ -37,7 +37,7 @@ const liveEnvironment = (
   overrides: Readonly<Record<string, unknown>> = {},
 ): Record<string, unknown> => ({
   name: 'standards-sync',
-  [PROTECTION_RULES]: [],
+  [PROTECTION_RULES]: [{ id: 1, type: 'branch_policy' }],
   [DEPLOYMENT_BRANCH_POLICY]: {
     [PROTECTED_BRANCHES]: true,
     [CUSTOM_BRANCH_POLICIES]: false,

@@ -3,10 +3,10 @@ name: Standards
 on:
   pull_request:
     branches:
-      - main
+      - "**"
   push:
     branches:
-      - main
+      - "**"
 
 permissions:
   actions: read
@@ -43,6 +43,9 @@ jobs:
   # an `if:` whereas a service cannot. So gating it keeps one uniform file while
   # skipping a pointless download in repos with nothing to render.
   check:
+    if: >-
+      (github.event_name == 'pull_request' && github.base_ref == github.event.repository.default_branch) ||
+      (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch)
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     services:
       postgres:

@@ -9,7 +9,7 @@ on:
   pull_request:
     types: [opened, edited, reopened, synchronize]
     branches:
-      - main
+      - "**"
 
 permissions: {}
 
@@ -19,6 +19,7 @@ concurrency:
 
 jobs:
   pr-title:
+    if: github.base_ref == github.event.repository.default_branch
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - name: Lint PR title as a Conventional Commit subject

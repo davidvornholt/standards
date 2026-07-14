@@ -115,6 +115,22 @@ describe('loadGithubSettings', () => {
   });
 });
 
+describe('default branch protection ownership', () => {
+  it('reserves default-branch protection for the canonical owner', () => {
+    const protection = JSON.parse(
+      '{"allow_deletions":false,"allow_force_pushes":false,"allow_fork_syncing":false,"block_creations":false,"enforce_admins":true,"lock_branch":false,"required_conversation_resolution":true,"required_linear_history":true,"required_pull_request_reviews":{"bypass_pull_request_allowances":{"apps":[],"teams":[],"users":[]},"dismiss_stale_reviews":true,"require_code_owner_reviews":false,"require_last_push_approval":false,"required_approving_review_count":0},"required_signatures":false,"required_status_checks":{"checks":[{"app_id":15368,"context":"check"}],"strict":true},"restrictions":null}',
+    ) as unknown;
+    const loaded = loadGithubSettings(
+      JSON.stringify({ default_branch_protection: protection }),
+      JSON.stringify({ default_branch_protection: protection }),
+    );
+    expect(loaded.merged).toBeNull();
+    expect(loaded.problems).toContain(
+      '.github/settings.local.json default_branch_protection cannot override the canonical default-branch owner; add a local ruleset to tighten policy',
+    );
+  });
+});
+
 describe('environment settings validation', () => {
   it('rejects unknown keys at every environment record boundary', () => {
     const withUnknownKeys = JSON.parse(

@@ -7,6 +7,12 @@ import { isRecord } from './github-settings';
 
 const WAIT_TIMER = 'wait_timer';
 const REQUIRED_REVIEWERS = 'required_reviewers';
+const BRANCH_POLICY = 'branch_policy';
+const PROTECTION_TYPES = new Set([
+  WAIT_TIMER,
+  REQUIRED_REVIEWERS,
+  BRANCH_POLICY,
+]);
 
 type DecodeResult<T> = {
   readonly problem: string | null;
@@ -82,13 +88,24 @@ const decodeRequiredReviewers = (
 const decodeProtectionRules = (
   rules: ReadonlyArray<unknown>,
   context: string,
+  branchPolicy: Readonly<Record<string, unknown>> | null,
 ): DecodeResult<DecodedProtectionRules> => {
   const typedRules = rules.filter(isRecord);
   if (
     typedRules.length !== rules.length ||
-    typedRules.some((rule) => typeof rule.type !== 'string')
+    typedRules.some(
+      (rule) =>
+        typeof rule.type !== 'string' || !PROTECTION_TYPES.has(rule.type),
+    )
   ) {
-    return invalid(context, 'an invalid protection rule');
+    return invalid(context, 'an unsupported or invalid protection rule');
+  }
+  const branchRules = typedRules.filter((rule) => rule.type === BRANCH_POLICY);
+  if (
+    branchRules.length !== (branchPolicy === null ? 0 : 1) ||
+    branchRules.some((rule) => !isPositiveSafeInteger(rule.id))
+  ) {
+    return invalid(context, 'an inconsistent branch_policy protection rule');
   }
   const waitRules = typedRules.filter((rule) => rule.type === WAIT_TIMER);
   if (waitRules.length > 1) {
@@ -133,10 +150,6 @@ export const decodeEnvironmentResponse = (
   ) {
     return invalid(context, 'an invalid environment response');
   }
-  const protection = decodeProtectionRules(body.protection_rules, context);
-  if (protection.value === null) {
-    return { problem: protection.problem, value: null };
-  }
   const policy = body.deployment_branch_policy;
   if (
     policy !== null &&
@@ -146,6 +159,14 @@ export const decodeEnvironmentResponse = (
       policy.protected_branches === policy.custom_branch_policies)
   ) {
     return invalid(context, 'an invalid deployment branch policy');
+  }
+  const protection = decodeProtectionRules(
+    body.protection_rules,
+    context,
+    policy as Readonly<Record<string, unknown>> | null,
+  );
+  if (protection.value === null) {
+    return { problem: protection.problem, value: null };
   }
   return {
     problem: null,

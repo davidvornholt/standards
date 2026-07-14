@@ -63,7 +63,7 @@ jobs:
       # write) so the opened PR triggers workflows. The environment admits
       # protected branches generally. The schedule and repository_dispatch
       # bind this workflow to the repository's default branch, which the
-      # canonical default-branch ruleset protects. PRs
+      # canonical classic protection protects. PRs
       # opened with the default GITHUB_TOKEN fallback do not trigger workflows
       # and need a manual nudge (push or close/reopen) to run the gate.
       #

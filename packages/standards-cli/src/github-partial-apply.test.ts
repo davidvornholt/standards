@@ -49,7 +49,7 @@ const environment = JSON.parse(
 ) as Record<string, unknown>;
 
 const environmentFailureRead = (url: string): Response => {
-  if (url.endsWith('/rulesets')) {
+  if (url.includes('/rulesets?')) {
     return response(HTTP_OK, []);
   }
   if (url.includes('deployment_protection_rules')) {
@@ -64,7 +64,7 @@ const environmentFailureRead = (url: string): Response => {
     return response(
       HTTP_OK,
       JSON.parse(
-        '{"name":"production","protection_rules":[{"type":"wait_timer","wait_timer":5}],"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false}}',
+        '{"name":"production","protection_rules":[{"id":1,"type":"branch_policy"},{"type":"wait_timer","wait_timer":5}],"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false}}',
       ) as unknown,
     );
   }
@@ -143,7 +143,7 @@ describe('partial GitHub apply reporting', () => {
           );
         }
         return Promise.resolve(
-          url.endsWith('/rulesets')
+          url.includes('/rulesets?')
             ? response(HTTP_OK, [])
             : response(HTTP_OK, {}),
         );

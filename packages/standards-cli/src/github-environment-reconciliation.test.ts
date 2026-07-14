@@ -22,7 +22,10 @@ const response = (status: number, body: unknown = null): Response =>
 
 const environment = (usesCustomBranches: boolean, waitTimer = 5) => ({
   name: 'production',
-  [PROTECTION_RULES]: [{ type: WAIT_TIMER, [WAIT_TIMER]: waitTimer }],
+  [PROTECTION_RULES]: [
+    { id: 1, type: 'branch_policy' },
+    { type: WAIT_TIMER, [WAIT_TIMER]: waitTimer },
+  ],
   [DEPLOYMENT_BRANCH_POLICY]: {
     [PROTECTED_BRANCHES]: !usesCustomBranches,
     [CUSTOM_BRANCH_POLICIES]: usesCustomBranches,

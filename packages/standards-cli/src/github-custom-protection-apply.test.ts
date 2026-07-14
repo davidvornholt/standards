@@ -26,7 +26,7 @@ describe('custom deployment protection validation', () => {
                   '{"total_count":1,"custom_deployment_protection_rules":[{"app":{"id":9,"slug":"gate"},"enabled":true,"id":0}]}',
                 ) as unknown)
               : (JSON.parse(
-                  '{"name":"production","protection_rules":[],"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false}}',
+                  '{"name":"production","protection_rules":[{"id":1,"type":"branch_policy"}],"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false}}',
                 ) as unknown),
           ),
         );

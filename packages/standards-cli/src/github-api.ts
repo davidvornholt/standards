@@ -110,36 +110,3 @@ export const loadDeclared = async (
     existsSync(localPath) ? await readFile(localPath, 'utf8') : null,
   );
 };
-
-export type LiveRulesets = {
-  readonly rulesets: ReadonlyArray<Record<string, unknown>> | null;
-  readonly problem: string | null;
-};
-
-// Only repository-sourced rulesets are managed; org-level rulesets a consumer
-// inherits are outside this declaration's authority.
-export const fetchLiveRulesets = async (
-  token: string | null,
-  repo: string,
-): Promise<LiveRulesets> => {
-  const list = await request(token, 'GET', `/repos/${repo}/rulesets`);
-  if (list.status !== HTTP_OK || !Array.isArray(list.body)) {
-    return { rulesets: null, problem: apiError('listing rulesets', list) };
-  }
-  const repoOwned = list.body
-    .filter(isRecord)
-    .filter((ruleset) => ruleset.source_type === 'Repository');
-  const detailed = await Promise.all(
-    repoOwned.map((ruleset) =>
-      request(token, 'GET', `/repos/${repo}/rulesets/${ruleset.id}`),
-    ),
-  );
-  const failed = detailed.find((response) => response.status !== HTTP_OK);
-  if (failed !== undefined) {
-    return { rulesets: null, problem: apiError('reading a ruleset', failed) };
-  }
-  return {
-    rulesets: detailed.map((response) => response.body).filter(isRecord),
-    problem: null,
-  };
-};

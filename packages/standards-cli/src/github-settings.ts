@@ -1,12 +1,12 @@
 // Parse and merge the canonical GitHub declaration with its additive local
 // seam. This stays dependency-free because the published CLI imports it.
 
-import {
-  environmentIdentity,
-  environmentListProblems,
-} from './github-environment-settings';
+import { defaultBranchProtectionProblems } from './github-default-branch-settings';
+import { environmentListProblems } from './github-environment-settings';
+import { mergeGithubSettings } from './github-settings-merge';
 
 export type GithubSettings = {
+  readonly defaultBranchProtection: Readonly<Record<string, unknown>> | null;
   readonly repository: Readonly<Record<string, unknown>>;
   readonly rulesets: ReadonlyArray<Readonly<Record<string, unknown>>>;
   readonly environments: ReadonlyArray<Readonly<Record<string, unknown>>>;
@@ -20,7 +20,12 @@ export type LoadedGithubSettings = {
 export const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const SETTINGS_KEYS = new Set(['repository', 'rulesets', 'environments']);
+const SETTINGS_KEYS = new Set([
+  'default_branch_protection',
+  'repository',
+  'rulesets',
+  'environments',
+]);
 
 type ParseResult = {
   readonly settings: GithubSettings | null;
@@ -60,6 +65,15 @@ const parseSettings = (raw: unknown, label: string): ParseResult => {
     return { settings: null, problems: [`${label} must be a JSON object`] };
   }
   const problems: Array<string> = [];
+  const defaultBranchProtection = raw.default_branch_protection ?? null;
+  if (defaultBranchProtection !== null) {
+    problems.push(
+      ...defaultBranchProtectionProblems(
+        defaultBranchProtection,
+        `${label} default_branch_protection`,
+      ),
+    );
+  }
   for (const key of Object.keys(raw)) {
     if (!SETTINGS_KEYS.has(key)) {
       problems.push(`${label} has unknown key "${key}"`);
@@ -86,65 +100,13 @@ const parseSettings = (raw: unknown, label: string): ParseResult => {
   }
   return {
     settings: {
+      defaultBranchProtection: defaultBranchProtection as Record<
+        string,
+        unknown
+      > | null,
       repository: repository as Record<string, unknown>,
       rulesets: rulesets as ReadonlyArray<Record<string, unknown>>,
       environments: environments as ReadonlyArray<Record<string, unknown>>,
-    },
-    problems: [],
-  };
-};
-
-type MergeResult = {
-  readonly merged: GithubSettings | null;
-  readonly problems: ReadonlyArray<string>;
-};
-
-// The seam may only add. Overriding a canonical repository key or redefining a
-// canonical ruleset or environment could weaken the canonical floor.
-const mergeSettings = (
-  canonical: GithubSettings,
-  local: GithubSettings,
-): MergeResult => {
-  const problems: Array<string> = [];
-  for (const key of Object.keys(local.repository)) {
-    if (key in canonical.repository) {
-      problems.push(
-        `.github/settings.local.json repository."${key}" would override a canonical value; canonical settings are read-only`,
-      );
-    }
-  }
-  const canonicalNames = new Set(canonical.rulesets.map((r) => r.name));
-  for (const ruleset of local.rulesets) {
-    if (canonicalNames.has(ruleset.name)) {
-      problems.push(
-        `.github/settings.local.json ruleset "${ruleset.name}" collides with a canonical ruleset; add a separately named ruleset to tighten further`,
-      );
-    }
-  }
-  const canonicalEnvironmentNames = new Set(
-    canonical.environments.map((environment) =>
-      environmentIdentity(String(environment.name)),
-    ),
-  );
-  for (const environment of local.environments) {
-    if (
-      canonicalEnvironmentNames.has(
-        environmentIdentity(String(environment.name)),
-      )
-    ) {
-      problems.push(
-        `.github/settings.local.json environment "${environment.name}" collides with a canonical environment; canonical settings are read-only`,
-      );
-    }
-  }
-  if (problems.length > 0) {
-    return { merged: null, problems };
-  }
-  return {
-    merged: {
-      repository: { ...canonical.repository, ...local.repository },
-      rulesets: [...canonical.rulesets, ...local.rulesets],
-      environments: [...canonical.environments, ...local.environments],
     },
     problems: [],
   };
@@ -194,6 +156,6 @@ export const loadGithubSettings = (
   if (canonical.settings === null || local.settings === null) {
     return { merged: null, problems };
   }
-  const merged = mergeSettings(canonical.settings, local.settings);
+  const merged = mergeGithubSettings(canonical.settings, local.settings);
   return { merged: merged.merged, problems: [...problems, ...merged.problems] };
 };

@@ -49,7 +49,7 @@ describe('custom deployment protection check', () => {
     globalThis.fetch = Object.assign(
       (input: URL | RequestInfo) => {
         const url = String(input);
-        if (url.endsWith('/rulesets')) {
+        if (url.includes('/rulesets?')) {
           return Promise.resolve(response([]));
         }
         if (url.includes('deployment_protection_rules')) {
@@ -65,7 +65,7 @@ describe('custom deployment protection check', () => {
           return Promise.resolve(
             response(
               JSON.parse(
-                '{"name":"production","protection_rules":[],"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false}}',
+                '{"name":"production","protection_rules":[{"id":1,"type":"branch_policy"}],"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false}}',
               ) as unknown,
             ),
           );

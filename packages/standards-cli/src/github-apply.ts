@@ -4,13 +4,13 @@
 
 import {
   apiError,
-  fetchLiveRulesets,
   HTTP_CREATED,
   HTTP_NO_CONTENT,
   HTTP_OK,
   request,
 } from './github-api';
 import { diffRuleset } from './github-diff';
+import { fetchLiveRulesets, type LiveRulesets } from './github-rulesets';
 import type { GithubSettings } from './github-settings';
 
 type ReportAction = (action: string) => void;
@@ -67,13 +67,21 @@ const deleteRuleset = async (
   return `deleted undeclared ruleset "${name}"`;
 };
 
-export const applyRulesets = async (
-  token: string,
-  repo: string,
-  declared: GithubSettings,
-  reportAction: ReportAction = () => undefined,
-): Promise<ReadonlyArray<string>> => {
-  const live = await fetchLiveRulesets(token, repo);
+type ApplyRulesetsInput = {
+  readonly declared: GithubSettings;
+  readonly live: LiveRulesets;
+  readonly reportAction: ReportAction;
+  readonly repo: string;
+  readonly token: string;
+};
+
+export const applyPrefetchedRulesets = async ({
+  declared,
+  live,
+  reportAction,
+  repo,
+  token,
+}: ApplyRulesetsInput): Promise<ReadonlyArray<string>> => {
   if (live.rulesets === null) {
     throw new Error(live.problem ?? 'unable to read rulesets');
   }
@@ -103,3 +111,17 @@ export const applyRulesets = async (
   }
   return actions;
 };
+
+export const applyRulesets = async (
+  token: string,
+  repo: string,
+  declared: GithubSettings,
+  reportAction: ReportAction = () => undefined,
+): Promise<ReadonlyArray<string>> =>
+  applyPrefetchedRulesets({
+    declared,
+    live: await fetchLiveRulesets(token, repo),
+    reportAction,
+    repo,
+    token,
+  });

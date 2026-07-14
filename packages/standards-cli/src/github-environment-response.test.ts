@@ -6,7 +6,7 @@ const PREVENT_SELF_REVIEW = 'prevent_self_review';
 
 const environment = (protectionRules: unknown): unknown =>
   JSON.parse(
-    `{"name":"standards-sync","protection_rules":${JSON.stringify(protectionRules)},"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false}}`,
+    `{"name":"standards-sync","protection_rules":${JSON.stringify([{ id: 1, type: 'branch_policy' }, ...(Array.isArray(protectionRules) ? protectionRules : [])])},"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false}}`,
   ) as unknown;
 
 describe('decodeEnvironmentResponse', () => {
@@ -41,7 +41,7 @@ describe('decodeEnvironmentResponse', () => {
 
   it('preserves live custom branch mode as driftable data', () => {
     const body = JSON.parse(
-      '{"name":"standards-sync","protection_rules":[],"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}',
+      '{"name":"standards-sync","protection_rules":[{"id":1,"type":"branch_policy"}],"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}',
     ) as unknown;
 
     expect(
@@ -49,6 +49,24 @@ describe('decodeEnvironmentResponse', () => {
     ).toEqual(
       JSON.parse('{"protected_branches":false,"custom_branch_policies":true}'),
     );
+  });
+
+  it('rejects unknown, duplicate, or missing branch-policy protection rules', () => {
+    for (const rules of [
+      [{ id: 1, type: 'future_gate' }],
+      [
+        { id: 1, type: 'branch_policy' },
+        { id: 2, type: 'branch_policy' },
+      ],
+      [],
+    ]) {
+      const body = JSON.parse(
+        `{"deployment_branch_policy":{"custom_branch_policies":false,"protected_branches":true},"name":"standards-sync","protection_rules":${JSON.stringify(rules)}}`,
+      ) as unknown;
+      expect(
+        decodeEnvironmentResponse(body, 'standards-sync').value,
+      ).toBeNull();
+    }
   });
 });
 
