@@ -24,6 +24,7 @@ import {
   TRANSACTION_DIRECTORY,
   TRANSACTION_JOURNAL,
   TRANSACTION_OWNER,
+  TRANSACTION_RESERVATION,
 } from './sync-transaction-types';
 
 const ENGINE = join(import.meta.dir, 'cli.ts');
@@ -65,6 +66,9 @@ const BARE_SYNC_STEP = /^\s+run: bun standards sync$/mu;
 const FILE_TYPE_MODE_BASE = 0o1000;
 const COMMIT_SHA_LENGTH = 40;
 const SHA256_LENGTH = 64;
+const TRANSACTION_ID = '11111111-1111-4111-8111-111111111111';
+const RESERVED_ATOMIC_TAIL = `${TRANSACTION_RESERVATION}.${TRANSACTION_ID}.tmp`;
+const ATOMIC_TAIL_LOOKALIKE = `${TRANSACTION_RESERVATION}.11111111-1111-3111-8111-111111111111.tmp`;
 
 type RunResult = { stdout: string; stderr: string; status: number };
 type Lock = {
@@ -1266,6 +1270,91 @@ describe('sync controller compatibility', () => {
     );
     expect(read(consumer, 'managed/a.txt')).toBe(managedBefore);
     expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
+  });
+});
+
+describe('source reserved sync targets', () => {
+  const conflicts = [
+    {
+      expected: 'CLI-owned lock "sync-standards.lock"',
+      label: 'managed lock',
+      prepare: (up: string): void => {
+        const manifest = JSON.parse(read(up, 'sync-standards.json')) as {
+          paths: Array<string>;
+        };
+        manifest.paths.push('sync-standards.lock');
+        write(up, 'sync-standards.lock', 'source-owned lock\n');
+        write(up, 'sync-standards.json', JSON.stringify(manifest));
+      },
+    },
+    {
+      expected: `CLI-owned transaction namespace "managed/${RESERVED_ATOMIC_TAIL}"`,
+      label: 'managed transaction artifact',
+      prepare: (up: string): void => {
+        write(up, `managed/${RESERVED_ATOMIC_TAIL}`, 'source-owned tail\n');
+      },
+    },
+    {
+      expected: 'CLI-owned lock "sync-standards.lock"',
+      label: 'seed lock',
+      prepare: (up: string): void => {
+        write(up, 'template/sync-standards.lock', 'source-owned lock seed\n');
+      },
+    },
+    {
+      expected: `CLI-owned transaction namespace "nested/${RESERVED_ATOMIC_TAIL}"`,
+      label: 'seed transaction artifact',
+      prepare: (up: string): void => {
+        write(
+          up,
+          `template/nested/${RESERVED_ATOMIC_TAIL}`,
+          'source-owned tail seed\n',
+        );
+      },
+    },
+  ] as const;
+
+  it.each([
+    { args: [] as ReadonlyArray<string>, mode: 'real sync' },
+    { args: ['--dry-run'], mode: 'dry-run' },
+  ])('rejects lock and transaction conflicts before reporting during $mode', ({
+    args,
+  }) => {
+    for (const conflict of conflicts) {
+      const up = buildUpstream();
+      const { consumer } = initConsumer(up);
+      const lockBefore = read(consumer, 'sync-standards.lock');
+      const managedBefore = read(consumer, 'managed/a.txt');
+      conflict.prepare(up);
+      write(up, 'managed/a.txt', 'must not report or apply\n');
+
+      const result = sync(up, consumer, args);
+
+      expect(result.status, conflict.label).toBe(1);
+      expect(result.stderr, conflict.label).toContain(conflict.expected);
+      expect(result.stdout, conflict.label).not.toContain('would update');
+      expect(result.stdout, conflict.label).not.toContain('updated managed');
+      expect(read(consumer, 'managed/a.txt'), conflict.label).toBe(
+        managedBefore,
+      );
+      expect(read(consumer, 'sync-standards.lock'), conflict.label).toBe(
+        lockBefore,
+      );
+    }
+  });
+
+  it('keeps repository-owned seeds and non-reserved atomic lookalikes valid', () => {
+    const up = buildUpstream();
+    const { consumer } = initConsumer(up);
+    write(up, `template/nested/${ATOMIC_TAIL_LOOKALIKE}`, 'lookalike seed\n');
+
+    const result = sync(up, consumer);
+
+    expect(result.status).toBe(0);
+    expect(readLock(consumer).seeds).toContain(
+      `nested/${ATOMIC_TAIL_LOOKALIKE}`,
+    );
+    expect(readLock(consumer).seeds).toContain(SYNC_POLICY_FILE);
   });
 });
 

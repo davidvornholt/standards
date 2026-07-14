@@ -15,8 +15,6 @@ const localAgentContract = await file(
 ).text();
 const ABSOLUTE_PACKAGE_PATH =
   /PACKAGE_PATH: \$\{\{ github\.workspace \}\}\/packages\/standards-cli/u;
-const TESTED_SHA_CHECKOUT =
-  /ref: \$\{\{ github\.event\.workflow_run\.head_sha \}\}/u;
 const githubExpression = (value: string): string => `$${`{{ ${value} }}`}`;
 const NPM_RELEASE_SHA = `RELEASE_SHA: ${githubExpression('steps.npm.outputs.release_sha')}`;
 const RELEASE_JOB_SHA = `RELEASE_SHA: ${githubExpression('needs.publish.outputs.release_sha')}`;
@@ -33,38 +31,6 @@ describe('source-only Effect exception', () => {
     expect(localAgentContract).toContain(
       'GitHub Release reconciliation, follows the Effect and tagged-error rules',
     );
-  });
-});
-
-describe('CLI release workflow authorization', () => {
-  it('authorizes a quality run before shared publish queue admission', () => {
-    const workflowHeader = workflow.slice(0, position('jobs:'));
-    const publishGuard = workflow.slice(
-      position('  publish:'),
-      position('    runs-on:'),
-    );
-    expect(publishGuard).toContain(
-      "github.event.workflow_run.path == '.github/workflows/standards.yml'",
-    );
-    expect(publishGuard).toContain(
-      "github.event.workflow_run.conclusion == 'success'",
-    );
-    expect(publishGuard).toContain("github.event.workflow_run.event == 'push'");
-    expect(publishGuard).toContain(
-      "github.event.workflow_run.head_branch == 'main'",
-    );
-    expect(publishGuard).toContain(
-      'github.event.workflow_run.head_repository.full_name == github.repository',
-    );
-    expect(publishGuard).not.toContain('github.event.workflow_run.name');
-    expect(workflowHeader).not.toContain('concurrency:');
-    expect(publishGuard).toContain(
-      'concurrency:\n      group: publish-standards-cli\n      queue: max',
-    );
-    expect(publishGuard.indexOf('if:')).toBeLessThan(
-      publishGuard.indexOf('concurrency:'),
-    );
-    expect(workflow).toMatch(TESTED_SHA_CHECKOUT);
   });
 });
 

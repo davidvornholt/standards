@@ -98,15 +98,16 @@ export const assertNoReplaceRenameAvailable = (): void => {
   loadRenameAt2();
 };
 
-export const renameDirectoryNoReplace = (
-  directory: number,
+export const renameNoReplace = (
+  oldDirectory: number,
   oldName: string,
+  newDirectory: number,
   newName: string,
 ): void => {
   const result = loadRenameAt2()(
-    directory,
+    oldDirectory,
     cString(oldName),
-    directory,
+    newDirectory,
     cString(newName),
     RENAME_NOREPLACE,
   );
@@ -116,3 +117,9 @@ export const renameDirectoryNoReplace = (
     );
   }
 };
+
+export const renameDirectoryNoReplace = (
+  directory: number,
+  oldName: string,
+  newName: string,
+): void => renameNoReplace(directory, oldName, directory, newName);

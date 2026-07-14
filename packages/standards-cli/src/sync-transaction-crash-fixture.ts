@@ -73,14 +73,30 @@ const fault = (
     return crash();
   }
   if (
-    phase === 'rollback-restore-after-link' &&
+    ['rollback-restore-after-bind', 'rollback-restore-after-link'].includes(
+      phase,
+    ) &&
     event === 'install:before:managed/a.txt'
+  ) {
+    return Promise.reject(new Error('start rollback'));
+  }
+  if (
+    phase === 'rollback-remove-after-bind' &&
+    event === 'install:before:managed/b.txt'
   ) {
     return Promise.reject(new Error('start rollback'));
   }
   if (
     phase === 'rollback-restore-after-link' &&
     event === 'rollback-restore:after:managed/a.txt'
+  ) {
+    return crash();
+  }
+  if (
+    (phase === 'rollback-remove-after-bind' &&
+      event === 'rollback-remove-bind:after:managed/a.txt') ||
+    (phase === 'rollback-restore-after-bind' &&
+      event === 'rollback-restore-bind:after:managed/stale.txt')
   ) {
     return crash();
   }

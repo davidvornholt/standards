@@ -1,22 +1,23 @@
-import { link, unlink } from 'node:fs/promises';
+import { link } from 'node:fs/promises';
 import {
   directoryEntryPath,
   type PinnedDirectory,
   type PinnedTarget,
   syncPinnedDirectory,
 } from './sync-directory-handles';
-import { identitiesMatch } from './sync-filesystem';
+import { identitiesMatch, type NodeIdentity } from './sync-filesystem';
 import {
-  fileMatchesExpected,
-  inspectPinnedFile,
-} from './sync-transaction-files';
+  rollbackBindingName,
+  unlinkPinnedIdentity,
+} from './sync-transaction-bound-unlink';
+import { fileMatchesExpected } from './sync-transaction-files';
+import {
+  inspectPresentRollbackState,
+  resumePresentRollbackBinding,
+} from './sync-transaction-rollback-binding';
+import { rollbackMissing } from './sync-transaction-rollback-missing';
+import { cleanupRestoredBackup } from './sync-transaction-rollback-restored';
 import type { JournalOperation, MutationFault } from './sync-transaction-types';
-
-const artifact = (
-  transaction: PinnedDirectory,
-  name: string,
-  rel: string,
-): PinnedTarget => ({ name, parent: transaction, rel });
 
 const faulted = async (
   fault: MutationFault,
@@ -29,18 +30,19 @@ const faulted = async (
   await fault(operation, rel, 'after');
 };
 
-const sameFile = (
-  left: Awaited<ReturnType<typeof inspectPinnedFile>>,
-  right: Awaited<ReturnType<typeof inspectPinnedFile>>,
-): boolean =>
-  left.identity !== null && identitiesMatch(left.identity, right.identity);
-
-const restoreBackup = async (
-  target: PinnedTarget,
-  backup: PinnedTarget,
-  transaction: PinnedDirectory,
-  fault: MutationFault,
-): Promise<void> => {
+const restoreBackup = async ({
+  backup,
+  backupIdentity,
+  fault,
+  target,
+  transaction,
+}: {
+  readonly backup: PinnedTarget;
+  readonly backupIdentity: NodeIdentity;
+  readonly fault: MutationFault;
+  readonly target: PinnedTarget;
+  readonly transaction: PinnedDirectory;
+}): Promise<void> => {
   await faulted(fault, 'rollback-restore', target.rel, () =>
     link(
       directoryEntryPath(backup.parent, backup.name),
@@ -48,18 +50,40 @@ const restoreBackup = async (
     ),
   );
   await syncPinnedDirectory(target.parent);
-  await unlink(directoryEntryPath(backup.parent, backup.name));
+  await unlinkPinnedIdentity({
+    afterBind: () => fault('rollback-restore-bind', target.rel, 'after'),
+    bindingName: rollbackBindingName(backup.name),
+    expected: backupIdentity,
+    message: `Recovery backup changed before cleanup: ${target.rel}`,
+    target: backup,
+    transaction,
+  });
   await syncPinnedDirectory(transaction);
 };
 
-const removeInstalled = async (
-  target: PinnedTarget,
-  transaction: PinnedDirectory,
-  fault: MutationFault,
-): Promise<void> => {
-  await faulted(fault, 'rollback-remove', target.rel, () =>
-    unlink(directoryEntryPath(target.parent, target.name)),
-  );
+const removeInstalled = async ({
+  bindingName,
+  fault,
+  installedIdentity,
+  target,
+  transaction,
+}: {
+  readonly bindingName: string;
+  readonly fault: MutationFault;
+  readonly installedIdentity: NodeIdentity;
+  readonly target: PinnedTarget;
+  readonly transaction: PinnedDirectory;
+}): Promise<void> => {
+  await fault('rollback-remove', target.rel, 'before');
+  await unlinkPinnedIdentity({
+    afterBind: () => fault('rollback-remove-bind', target.rel, 'after'),
+    bindingName,
+    expected: installedIdentity,
+    message: `Recovery installed target changed before removal: ${target.rel}`,
+    target,
+    transaction,
+  });
+  await fault('rollback-remove', target.rel, 'after');
   await syncPinnedDirectory(target.parent);
   await syncPinnedDirectory(transaction);
 };
@@ -75,10 +99,31 @@ const rollbackPresent = async ({
   readonly target: PinnedTarget;
   readonly transaction: PinnedDirectory;
 }): Promise<void> => {
-  const backupTarget = artifact(transaction, operation.backup, operation.rel);
-  const backupState = await inspectPinnedFile(backupTarget);
+  const { backupState, backupTarget, bindingState, stageState, targetState } =
+    await inspectPresentRollbackState(transaction, operation, target);
+  if (
+    await resumePresentRollbackBinding({
+      backupState,
+      backupTarget,
+      bindingState,
+      operation,
+      restore: (backupIdentity) =>
+        restoreBackup({
+          backup: backupTarget,
+          backupIdentity,
+          fault,
+          target,
+          transaction,
+        }),
+      stageState,
+      target,
+      targetState,
+      transaction,
+    })
+  ) {
+    return;
+  }
   if (backupState.contents === null) {
-    const targetState = await inspectPinnedFile(target);
     if (!fileMatchesExpected(targetState, operation.before)) {
       throw new Error(`Recovery cannot find the prior file: ${operation.rel}`);
     }
@@ -89,63 +134,50 @@ const rollbackPresent = async ({
       `Recovery backup does not match preflight: ${operation.rel}`,
     );
   }
-  const [targetState, stageState] = await Promise.all([
-    inspectPinnedFile(target),
-    operation.stage === null
-      ? Promise.resolve(null)
-      : inspectPinnedFile(
-          artifact(transaction, operation.stage, operation.rel),
-        ),
-  ]);
   if (fileMatchesExpected(targetState, operation.before)) {
-    if (!sameFile(targetState, backupState)) {
-      throw new Error(
-        `Recovery found two prior-file candidates: ${operation.rel}`,
-      );
-    }
-    await syncPinnedDirectory(target.parent);
-    await unlink(directoryEntryPath(transaction, operation.backup));
-    await syncPinnedDirectory(transaction);
+    await cleanupRestoredBackup({
+      backupState,
+      backupTarget,
+      operation,
+      target,
+      targetState,
+      transaction,
+    });
     return;
   }
   if (targetState.contents !== null) {
-    if (stageState === null || !sameFile(targetState, stageState)) {
+    if (
+      stageState === null ||
+      targetState.identity === null ||
+      !identitiesMatch(targetState.identity, stageState.identity)
+    ) {
       throw new Error(
         `Recovery found an unexpected replacement: ${operation.rel}`,
       );
     }
-    await removeInstalled(target, transaction, fault);
+    if (targetState.identity === null) {
+      throw new Error(
+        `Recovery installed target has no identity: ${operation.rel}`,
+      );
+    }
+    await removeInstalled({
+      bindingName: rollbackBindingName(operation.backup),
+      fault,
+      installedIdentity: targetState.identity,
+      target,
+      transaction,
+    });
   }
-  await restoreBackup(target, backupTarget, transaction, fault);
-};
-
-const rollbackMissing = async (
-  operation: JournalOperation,
-  target: PinnedTarget,
-  transaction: PinnedDirectory,
-  fault: MutationFault,
-): Promise<void> => {
-  const [backupState, targetState, stageState] = await Promise.all([
-    inspectPinnedFile(artifact(transaction, operation.backup, operation.rel)),
-    inspectPinnedFile(target),
-    operation.stage === null
-      ? Promise.resolve(null)
-      : inspectPinnedFile(
-          artifact(transaction, operation.stage, operation.rel),
-        ),
-  ]);
-  if (backupState.contents !== null) {
-    throw new Error(`Recovery found an impossible backup: ${operation.rel}`);
+  if (backupState.identity === null) {
+    throw new Error(`Recovery backup has no identity: ${operation.rel}`);
   }
-  if (targetState.contents === null) {
-    return;
-  }
-  if (stageState === null || !sameFile(targetState, stageState)) {
-    throw new Error(
-      `Recovery preserves an unexpected new file: ${operation.rel}`,
-    );
-  }
-  await removeInstalled(target, transaction, fault);
+  await restoreBackup({
+    backup: backupTarget,
+    backupIdentity: backupState.identity,
+    fault,
+    target,
+    transaction,
+  });
 };
 
 export const rollbackOperation = ({

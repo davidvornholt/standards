@@ -18,7 +18,10 @@ import process from 'node:process';
 import { CANONICAL_SETTINGS_FILE, LOCAL_SETTINGS_FILE } from './github-api';
 import { runGithubApply, runGithubCheck } from './github-commands';
 import { loadGithubSettings } from './github-settings';
-import { REPOSITORY_OWNED_CONTROL_SEAMS } from './sync-control-seams';
+import {
+  classifyReservedSyncTarget,
+  SYNC_LOCK_FILE,
+} from './sync-control-seams';
 import {
   assertRepositoryRelativePath,
   type FileState,
@@ -135,17 +138,32 @@ const isStringArray = (value: unknown): value is ReadonlyArray<string> =>
 const isUnder = (path: string, parent: string): boolean =>
   path === parent || path.startsWith(`${parent}/`);
 
-const assertNoRepositoryOwnedControlSeams = (
+const assertNoReservedManagedTargets = (
   paths: ReadonlyArray<string>,
   label: string,
 ): void => {
   for (const path of paths) {
-    const seam = REPOSITORY_OWNED_CONTROL_SEAMS.find(
-      (candidate) => isUnder(path, candidate) || isUnder(candidate, path),
-    );
-    if (seam !== undefined) {
+    const reserved = classifyReservedSyncTarget(path);
+    if (reserved !== null) {
       throw new Error(
-        `${label} "${path}" overlaps repository-owned control seam "${seam}"`,
+        `${label} "${path}" overlaps ${reserved.kind} "${reserved.target}"`,
+      );
+    }
+  }
+};
+
+const assertNoCliOwnedSeedTargets = (
+  paths: ReadonlyArray<string>,
+  label: string,
+): void => {
+  for (const path of paths) {
+    const reserved = classifyReservedSyncTarget(path);
+    if (
+      reserved !== null &&
+      reserved.kind !== 'repository-owned control seam'
+    ) {
+      throw new Error(
+        `${label} "${path}" overlaps ${reserved.kind} "${reserved.target}"`,
       );
     }
   }
@@ -198,15 +216,20 @@ const loadManifest = async (root: RepositoryRoot): Promise<Manifest> => {
 const assertCompatibleSyncSource = (
   manifest: Manifest,
   managed: ReadonlyMap<string, SourceFile>,
+  seeds: ReadonlyMap<string, SourceFile>,
 ): void => {
   if (manifest.syncPolicyContractVersion !== SYNC_POLICY_CONTRACT_VERSION) {
     throw new Error(
       `Selected standards source must declare syncPolicyContractVersion: ${SYNC_POLICY_CONTRACT_VERSION}; choose a ref that includes the sync-policy controller contract`,
     );
   }
-  assertNoRepositoryOwnedControlSeams(
-    manifest.paths,
+  assertNoReservedManagedTargets(
+    [...manifest.paths, ...managed.keys()],
     'Selected standards source managed path',
+  );
+  assertNoCliOwnedSeedTargets(
+    [...seeds.keys()],
+    'Selected standards source seed target',
   );
   if (!manifest.paths.includes(SYNC_POLICY_CONTROLLER_PATH)) {
     throw new Error(
@@ -319,7 +342,7 @@ const lockFiles = (
   const files = new Map<string, string>();
   for (const [rel, hash] of Object.entries(parsed.files)) {
     assertSafeRelativePath(rel, 'sync-standards.lock file');
-    assertNoRepositoryOwnedControlSeams([rel], 'sync-standards.lock file');
+    assertNoReservedManagedTargets([rel], 'sync-standards.lock file');
     if (typeof hash !== 'string' || !SHA256.test(hash)) {
       throw new Error(
         `sync-standards.lock file "${rel}" must have a lowercase SHA-256 hash`,
@@ -341,6 +364,7 @@ const lockSeeds = (parsed: Record<string, unknown>): ReadonlySet<string> => {
   for (const seed of persisted) {
     assertSafeRelativePath(seed, 'sync-standards.lock seed');
   }
+  assertNoCliOwnedSeedTargets(persisted, 'sync-standards.lock seed');
   return new Set([...CONTRACT_V1_SEED_OWNERSHIP_BASELINE, ...persisted]);
 };
 
@@ -603,7 +627,7 @@ const prepareMirror = ({
   for (const rel of previous.keys()) {
     assertSafeRelativePath(rel, 'sync-standards.lock file');
   }
-  assertNoRepositoryOwnedControlSeams(
+  assertNoReservedManagedTargets(
     [...previous.keys()],
     'sync-standards.lock file',
   );
@@ -758,14 +782,11 @@ const runInit = async ({
     previousManaged: [],
   });
   const [managedStates, seedDestinations] = await Promise.all([
-    inspectRepositoryFiles(consumer, [
-      ...managed.keys(),
-      'sync-standards.lock',
-    ]),
+    inspectRepositoryFiles(consumer, [...managed.keys(), SYNC_LOCK_FILE]),
     inspectSeedDestinations(consumer, [...seeds.keys()]),
   ]);
   const states = new Map([...managedStates, ...seedDestinations.missing]);
-  const lockBefore = requiredState(states, 'sync-standards.lock');
+  const lockBefore = requiredState(states, SYNC_LOCK_FILE);
   if (lockBefore.contents !== null) {
     throw new Error('sync-standards.lock appeared during init preflight');
   }
@@ -800,7 +821,7 @@ const runInit = async ({
         before: lockBefore,
         contents: lock,
         mode: lockBefore.mode,
-        rel: 'sync-standards.lock',
+        rel: SYNC_LOCK_FILE,
       },
     ],
   });
@@ -855,11 +876,11 @@ const runSync = async ({
   const targetPaths = [
     ...managed.keys(),
     ...previous.keys(),
-    'sync-standards.lock',
+    SYNC_LOCK_FILE,
     ...(policyWrite === null ? [] : [SYNC_POLICY_FILE]),
   ];
   const states = await inspectRepositoryFiles(consumer, targetPaths);
-  const currentLock = requiredState(states, 'sync-standards.lock');
+  const currentLock = requiredState(states, SYNC_LOCK_FILE);
   if (
     !(
       currentLock.contents === lockInspection.state.contents ||
@@ -893,7 +914,7 @@ const runSync = async ({
       before: currentLock,
       contents: lock,
       mode: currentLock.mode,
-      rel: 'sync-standards.lock',
+      rel: SYNC_LOCK_FILE,
     },
   ];
   if (policyWrite !== null) {
@@ -936,7 +957,7 @@ const runCheck = async (
   for (const rel of lock.seeds) {
     assertSafeRelativePath(rel, 'sync-standards.lock seed');
   }
-  assertNoRepositoryOwnedControlSeams(
+  assertNoReservedManagedTargets(
     [...lock.files.keys()],
     'sync-standards.lock file',
   );
@@ -1502,7 +1523,7 @@ const runInitCommand = async (
         IGNORED_DIRS,
       ),
     ]);
-    assertCompatibleSyncSource(manifest, managed);
+    assertCompatibleSyncSource(manifest, managed, seeds);
     await runInit({
       consumer: consumerRoot,
       managed,
@@ -1556,7 +1577,7 @@ const runSyncCommand = async (
         IGNORED_DIRS,
       ),
     ]);
-    assertCompatibleSyncSource(manifest, managed);
+    assertCompatibleSyncSource(manifest, managed, seeds);
     await runSync({
       manifest,
       src: source,

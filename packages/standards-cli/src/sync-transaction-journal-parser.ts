@@ -1,4 +1,5 @@
 import { assertRepositoryRelativePath } from './sync-filesystem';
+import { parseStoredLinuxProcessIdentity } from './sync-process-identity';
 import {
   isReservedTransactionPath,
   isUuidV4,
@@ -7,6 +8,7 @@ import {
   assertJournalSemantics,
   JOURNAL_VERSION,
   type JournalOperation,
+  LEGACY_JOURNAL_VERSION,
   type TransactionJournal,
 } from './sync-transaction-types';
 
@@ -121,7 +123,10 @@ const operationValue = (value: unknown, index: number): JournalOperation => {
 
 export const parseJournal = (contents: string): TransactionJournal => {
   const value = record(JSON.parse(contents) as unknown, 'transaction journal');
-  if (value.version !== JOURNAL_VERSION) {
+  if (
+    value.version !== JOURNAL_VERSION &&
+    value.version !== LEGACY_JOURNAL_VERSION
+  ) {
     throw new Error('transaction journal has an unsupported version');
   }
   const root = record(value.root, 'transaction journal root');
@@ -163,12 +168,27 @@ export const parseJournal = (contents: string): TransactionJournal => {
   if (!isUuidV4(id)) {
     throw new Error('transaction journal id is invalid');
   }
+  const base = {
+    createdParents,
+    id,
+    lockRel: 'sync-standards.lock' as const,
+    operations,
+    ownerPid: Number(ownerPid),
+    root: { dev, ino },
+  };
+  if (value.version === LEGACY_JOURNAL_VERSION) {
+    if (value.ownerProcess !== undefined) {
+      throw new Error('legacy transaction journal has ownerProcess');
+    }
+    return { ...base, version: LEGACY_JOURNAL_VERSION };
+  }
   return {
     createdParents,
     id,
     lockRel: 'sync-standards.lock',
     operations,
     ownerPid: Number(ownerPid),
+    ownerProcess: parseStoredLinuxProcessIdentity(value.ownerProcess),
     root: { dev, ino },
     version: JOURNAL_VERSION,
   };

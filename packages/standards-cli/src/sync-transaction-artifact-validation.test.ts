@@ -95,3 +95,26 @@ it('preserves a same-content committed backup replacement and its WAL', async ()
     existsSync(join(rootPath, TRANSACTION_DIRECTORY, TRANSACTION_JOURNAL)),
   ).toBe(true);
 });
+
+it('preserves a rollback binding injected after commit and its WAL', async () => {
+  const rootPath = crashCommitted();
+  const binding = join(rootPath, TRANSACTION_DIRECTORY, 'rollback-0');
+  writeFixture(
+    join(rootPath, TRANSACTION_DIRECTORY),
+    'rollback-0',
+    'actor binding\n',
+  );
+  const actorInode = statSync(binding).ino;
+
+  await expect(recover(rootPath)).rejects.toThrow(
+    `Filesystem recovery retained ${TRANSACTION_DIRECTORY}`,
+  );
+
+  expect(readFixture(rootPath, `${TRANSACTION_DIRECTORY}/rollback-0`)).toBe(
+    'actor binding\n',
+  );
+  expect(statSync(binding).ino).toBe(actorInode);
+  expect(
+    existsSync(join(rootPath, TRANSACTION_DIRECTORY, TRANSACTION_JOURNAL)),
+  ).toBe(true);
+});

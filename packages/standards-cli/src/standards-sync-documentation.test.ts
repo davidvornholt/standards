@@ -2,7 +2,10 @@ import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { SUPPORTED_REPOSITORY_SETTING_KEYS } from './github-repository-settings';
-import { REPOSITORY_OWNED_CONTROL_SEAMS } from './sync-control-seams';
+import {
+  REPOSITORY_OWNED_CONTROL_SEAMS,
+  SYNC_LOCK_FILE,
+} from './sync-control-seams';
 
 const ROOT = join(import.meta.dir, '../../..');
 const SYNC_SKILL = join(ROOT, '.agents/skills/standards-sync/SKILL.md');
@@ -31,6 +34,7 @@ const formatList = (values: ReadonlyArray<string>): string => {
     : `${quoted.slice(0, -1).join(', ')}, or ${last}`;
 };
 const CONTROL_SEAM_SENTENCE = `${CONTROL_SEAM_PREFIX}${formatList(REPOSITORY_OWNED_CONTROL_SEAMS)}.`;
+const CLI_TARGET_SENTENCE = `Managed outputs and seed targets must not claim the CLI-owned \`${SYNC_LOCK_FILE}\` or exact reserved transaction artifacts in the \`.standards-transaction*\`, \`.standards-owner-publication-*\`, and created-parent \`.standards-parent-*\` namespaces.`;
 
 describe('standards sync documentation', () => {
   it('documents the current policy and configured-ref recovery accurately', () => {
@@ -46,6 +50,7 @@ describe('standards sync documentation', () => {
       expect(documentation).toContain('syncPolicyContractVersion');
       expect(documentation).toContain(CONTROL_SEAM_SENTENCE);
       expect(documentation.split(CONTROL_SEAM_PREFIX)).toHaveLength(2);
+      expect(documentation).toContain(CLI_TARGET_SENTENCE);
       expect(documentation).toContain(
         'The lock persists every observed repository-owned seed path, and sync rejects implicit seed-to-managed or managed-to-seed ownership changes before mutation',
       );

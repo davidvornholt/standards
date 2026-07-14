@@ -8,6 +8,11 @@ import {
 } from './sync-directory-handles';
 import { pinTarget } from './sync-directory-traversal';
 import { identitiesMatch, type RepositoryRoot } from './sync-filesystem';
+import {
+  inspectLegacyProcess,
+  inspectLinuxProcessIdentity,
+  type ProcessIdentityStatus,
+} from './sync-process-identity';
 import { cleanupTransaction } from './sync-transaction-cleanup';
 import {
   fileMatchesDesired,
@@ -18,6 +23,7 @@ import { recoverTransactionPublication } from './sync-transaction-publication-re
 import { prepareRecoveryState } from './sync-transaction-recovery-state';
 import { rollbackJournal } from './sync-transaction-rollback';
 import {
+  JOURNAL_VERSION,
   TRANSACTION_DIRECTORY,
   type TransactionJournal,
 } from './sync-transaction-types';
@@ -78,12 +84,23 @@ const verifyCommitted = async (
   );
 };
 
-const processIsAlive = (pid: number): boolean => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
+const ownerStatus = (journal: TransactionJournal): ProcessIdentityStatus =>
+  journal.version === JOURNAL_VERSION
+    ? inspectLinuxProcessIdentity(journal.ownerPid, journal.ownerProcess)
+    : inspectLegacyProcess(journal.ownerPid);
+
+const assertOwnerInactive = (journal: TransactionJournal): void => {
+  const status = ownerStatus(journal);
+  if (status === 'indeterminate') {
+    throw new Error(
+      `Cannot determine whether another standards sync owns ${TRANSACTION_DIRECTORY}`,
+    );
+  }
+  if (
+    status === 'active' &&
+    (journal.version !== JOURNAL_VERSION || journal.ownerPid !== process.pid)
+  ) {
+    throw new Error(`Another standards sync owns ${TRANSACTION_DIRECTORY}`);
   }
 };
 
@@ -128,9 +145,7 @@ export const recoverRepositoryTransactions = async (
         `Transaction journal belongs to a different repository root: ${TRANSACTION_DIRECTORY}`,
       );
     }
-    if (journal.ownerPid !== process.pid && processIsAlive(journal.ownerPid)) {
-      throw new Error(`Another standards sync owns ${TRANSACTION_DIRECTORY}`);
-    }
+    assertOwnerInactive(journal);
     const targets = await targetsForJournal(root, journal, opened);
     const committed = await hasCommittedMarker(state.transaction);
     const errors: Array<unknown> = committed

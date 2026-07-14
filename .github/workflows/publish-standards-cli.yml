@@ -2,7 +2,7 @@ name: Publish standards CLI
 
 # A reviewed version in the package manifest is the release declaration. Wait
 # for the canonical quality gate to finish so publishing is hard-gated on the
-# exact main-branch tooling commit. npm's immutable artifact is authoritative
+# exact default-branch tooling commit. npm's immutable artifact is authoritative
 # when a later successful run must finish an interrupted release.
 on:
   workflow_run:
@@ -20,7 +20,7 @@ jobs:
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.path == '.github/workflows/standards.yml' &&
-      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_branch == github.event.repository.default_branch &&
       github.event.workflow_run.head_repository.full_name == github.repository
     concurrency:
       group: publish-standards-cli
@@ -48,13 +48,19 @@ jobs:
           persist-credentials: false
           ref: ${{ github.event.workflow_run.head_sha }}
 
-      - name: Verify tested commit is on main
+      - name: Verify tested commit is on the default branch
         env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          git fetch --no-tags origin main
-          if ! git merge-base --is-ancestor "$RELEASE_SHA" origin/main; then
-            echo "::error::Tested commit $RELEASE_SHA is not on main"
+          if [[ -z "$DEFAULT_BRANCH" ]]; then
+            echo "::error::Repository default branch is unavailable"
+            exit 1
+          fi
+          remote_ref="refs/remotes/origin/$DEFAULT_BRANCH"
+          git fetch --no-tags origin "refs/heads/$DEFAULT_BRANCH:$remote_ref"
+          if ! git merge-base --is-ancestor "$RELEASE_SHA" "$remote_ref"; then
+            echo "::error::Tested commit $RELEASE_SHA is not on the default branch $DEFAULT_BRANCH"
             exit 1
           fi
 

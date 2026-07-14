@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { dirname } from 'node:path';
 import process from 'node:process';
 import type { FileState, NodeIdentity } from './sync-filesystem';
+import type { LinuxProcessIdentity } from './sync-process-identity';
 
 export const TRANSACTION_DIRECTORY = '.standards-transaction';
 export const TRANSACTION_CLEANUP = '.standards-transaction-cleanup';
@@ -17,7 +18,8 @@ export const TRANSACTION_PUBLICATION_PREFIX =
   '.standards-transaction-publication-';
 export const TRANSACTION_RESERVATION = '.standards-transaction-reservation';
 export const TRANSACTION_COMMITTED = 'COMMITTED';
-export const JOURNAL_VERSION = 1;
+export const LEGACY_JOURNAL_VERSION = 1;
+export const JOURNAL_VERSION = 2;
 
 export type ExpectedFile = {
   readonly dev: string | null;
@@ -40,15 +42,23 @@ export type JournalOperation = {
   readonly stage: string | null;
 };
 
-export type TransactionJournal = {
+type TransactionJournalBase = {
   readonly createdParents: ReadonlyArray<string>;
   readonly id: string;
   readonly lockRel: 'sync-standards.lock';
   readonly operations: ReadonlyArray<JournalOperation>;
   readonly ownerPid: number;
   readonly root: { readonly dev: string; readonly ino: string };
-  readonly version: typeof JOURNAL_VERSION;
 };
+
+export type TransactionJournal =
+  | (TransactionJournalBase & {
+      readonly version: typeof LEGACY_JOURNAL_VERSION;
+    })
+  | (TransactionJournalBase & {
+      readonly ownerProcess: LinuxProcessIdentity;
+      readonly version: typeof JOURNAL_VERSION;
+    });
 
 export type TransactionFileOperation =
   | 'backup-link'
@@ -57,7 +67,9 @@ export type TransactionFileOperation =
   | 'backup-unlink'
   | 'install'
   | 'rollback-remove'
-  | 'rollback-restore';
+  | 'rollback-remove-bind'
+  | 'rollback-restore'
+  | 'rollback-restore-bind';
 
 export type FileOperation =
   | 'close'

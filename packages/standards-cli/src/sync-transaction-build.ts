@@ -1,5 +1,6 @@
 import process from 'node:process';
 import { inspectRepositoryNode, type RepositoryRoot } from './sync-filesystem';
+import { captureLinuxProcessIdentity } from './sync-process-identity';
 import { isReservedTransactionPath } from './sync-transaction-artifact-names';
 import type { TransactionWrite } from './sync-transaction-files';
 import type { TransactionDelete } from './sync-transaction-plan';
@@ -87,6 +88,7 @@ export const buildJournal = ({
     lockRel: 'sync-standards.lock',
     operations,
     ownerPid: process.pid,
+    ownerProcess: captureLinuxProcessIdentity(),
     root: { dev: String(root.identity.dev), ino: String(root.identity.ino) },
     version: JOURNAL_VERSION,
   };
