@@ -16,6 +16,9 @@ const directories: Array<string> = [];
 const releasePackageSource = await file(
   `${import.meta.dir}/release-package.ts`,
 ).text();
+const releasePackageMarkerSource = await file(
+  `${import.meta.dir}/release-package-marker.ts`,
+).text();
 
 const temporaryDirectory = (label: string): string => {
   const directory = spawnSync(['mktemp', '-d', `/tmp/${label}-XXXXXX`])
@@ -46,17 +49,20 @@ afterEach(() => {
 
 describe('release package', () => {
   it('keeps packing application logic inside the Effect boundary', () => {
-    expect(releasePackageSource).toContain('acquireUseRelease(');
-    expect(releasePackageSource).toContain('tryPromise({');
+    const boundarySource = `${releasePackageSource}\n${releasePackageMarkerSource}`;
+    expect(boundarySource).toContain('acquireUseReleaseTyped(');
+    expect(boundarySource).toContain('tryPromise({');
+    expect(boundarySource).toContain("{ flag: 'wx' }");
     for (const forbidden of [
       ': Promise<',
       'Promise.all(',
       '.then(',
       '.finally(',
       'new Error(',
+      'orDie',
       'async ',
     ]) {
-      expect(releasePackageSource).not.toContain(forbidden);
+      expect(boundarySource).not.toContain(forbidden);
     }
   });
 
