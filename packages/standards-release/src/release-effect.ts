@@ -8,6 +8,8 @@ const schema = await import('effect/Schema');
 export type Effect<A, E = never, R = never> = EffectType<A, E, R>;
 
 export const {
+  acquireUseRelease,
+  all,
   either,
   fail,
   flatMap,
@@ -15,6 +17,7 @@ export const {
   gen,
   map,
   mapError,
+  orDie,
   runPromise,
   runPromiseExit,
   runSync,

@@ -9,8 +9,34 @@ const classifier = await file(
 ).text();
 const ABSOLUTE_PACKAGE_PATH =
   /PACKAGE_PATH: \$\{\{ github\.workspace \}\}\/packages\/standards-cli/u;
+const TESTED_SHA_CHECKOUT =
+  /ref: \$\{\{ github\.event\.workflow_run\.head_sha \}\}/u;
 
 const position = (text: string): number => workflow.indexOf(text);
+
+describe('CLI release workflow authorization', () => {
+  it('rejects a same-named quality workflow at a different path', () => {
+    const publishGuard = workflow.slice(
+      position('  publish:'),
+      position('    runs-on:'),
+    );
+    expect(publishGuard).toContain(
+      "github.event.workflow_run.path == '.github/workflows/standards.yml'",
+    );
+    expect(publishGuard).toContain(
+      "github.event.workflow_run.conclusion == 'success'",
+    );
+    expect(publishGuard).toContain("github.event.workflow_run.event == 'push'");
+    expect(publishGuard).toContain(
+      "github.event.workflow_run.head_branch == 'main'",
+    );
+    expect(publishGuard).toContain(
+      'github.event.workflow_run.head_repository.full_name == github.repository',
+    );
+    expect(publishGuard).not.toContain('github.event.workflow_run.name');
+    expect(workflow).toMatch(TESTED_SHA_CHECKOUT);
+  });
+});
 
 describe('CLI release workflow', () => {
   it('classifies before install and gates release work on the declaration', () => {

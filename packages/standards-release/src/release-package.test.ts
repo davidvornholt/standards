@@ -13,6 +13,9 @@ const SHA_LENGTH = 40;
 const EXPECTED_SHA = 'a'.repeat(SHA_LENGTH);
 const MISMATCHED_SHA = 'b'.repeat(SHA_LENGTH);
 const directories: Array<string> = [];
+const releasePackageSource = await file(
+  `${import.meta.dir}/release-package.ts`,
+).text();
 
 const temporaryDirectory = (label: string): string => {
   const directory = spawnSync(['mktemp', '-d', `/tmp/${label}-XXXXXX`])
@@ -42,6 +45,21 @@ afterEach(() => {
 });
 
 describe('release package', () => {
+  it('keeps packing application logic inside the Effect boundary', () => {
+    expect(releasePackageSource).toContain('acquireUseRelease(');
+    expect(releasePackageSource).toContain('tryPromise({');
+    for (const forbidden of [
+      ': Promise<',
+      'Promise.all(',
+      '.then(',
+      '.finally(',
+      'new Error(',
+      'async ',
+    ]) {
+      expect(releasePackageSource).not.toContain(forbidden);
+    }
+  });
+
   it('packs a deterministic source-bound artifact and cleans the marker', async () => {
     const packagePath = temporaryDirectory('release-package');
     const firstDestination = temporaryDirectory('release-artifact-first');

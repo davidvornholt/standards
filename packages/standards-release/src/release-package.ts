@@ -1,5 +1,15 @@
 import { ArtifactIdentityError } from './artifact-identity-error';
-import { fail, flatMap, gen, succeed, tryPromise } from './release-effect';
+import {
+  acquireUseRelease,
+  all,
+  effectTry,
+  fail,
+  flatMap,
+  gen,
+  orDie,
+  succeed,
+  tryPromise,
+} from './release-effect';
 import { ReleasePackageError } from './release-package-error';
 import { argv, file, spawn, write } from './release-runtime';
 
@@ -12,25 +22,75 @@ type CommandResult = {
   readonly stdout: string;
 };
 
-const run = (command: ReadonlyArray<string>): Promise<CommandResult> => {
-  const subprocess = spawn([...command], { stderr: 'pipe', stdout: 'pipe' });
-  return Promise.all([
-    subprocess.exited,
-    new Response(subprocess.stderr).text(),
-    new Response(subprocess.stdout).text(),
-  ]).then(([exitCode, stderr, stdout]) => ({ exitCode, stderr, stdout }));
-};
+type OperationError<E> = (operation: string, cause: unknown) => E;
 
-const requireMissingMarker = (marker: string): Promise<void> =>
-  file(marker)
-    .exists()
-    .then((exists) =>
-      exists
-        ? Promise.reject(
-            new Error(`${marker} already exists; refusing to overwrite it`),
-          )
-        : undefined,
+const run = <E>(
+  command: ReadonlyArray<string>,
+  operationError: OperationError<E>,
+) =>
+  gen(function* () {
+    const subprocess = yield* effectTry({
+      try: () => spawn([...command], { stderr: 'pipe', stdout: 'pipe' }),
+      catch: (cause) => operationError('starting subprocess', cause),
+    });
+    const [exitCode, stderr, stdout] = yield* all(
+      [
+        tryPromise({
+          try: () => subprocess.exited,
+          catch: (cause) => operationError('waiting for subprocess', cause),
+        }),
+        tryPromise({
+          try: () => new Response(subprocess.stderr).text(),
+          catch: (cause) => operationError('reading subprocess stderr', cause),
+        }),
+        tryPromise({
+          try: () => new Response(subprocess.stdout).text(),
+          catch: (cause) => operationError('reading subprocess stdout', cause),
+        }),
+      ] as const,
+      { concurrency: 'unbounded' },
     );
+    return { exitCode, stderr, stdout } satisfies CommandResult;
+  });
+
+const releasePackageOperationError: OperationError<ReleasePackageError> = (
+  operation,
+  cause,
+) =>
+  new ReleasePackageError({
+    message: `Packing release artifact failed while ${operation}: ${String(cause)}`,
+  });
+
+const requireMissingMarker = (marker: string) =>
+  tryPromise({
+    try: () => file(marker).exists(),
+    catch: (cause) =>
+      releasePackageOperationError('checking the source marker', cause),
+  }).pipe(
+    flatMap((exists) =>
+      exists
+        ? fail(
+            new ReleasePackageError({
+              message: `${marker} already exists; refusing to overwrite it`,
+            }),
+          )
+        : succeed(marker),
+    ),
+  );
+
+const writeMarker = (marker: string, expectedSha: string) =>
+  tryPromise({
+    try: () => write(marker, `${expectedSha}\n`),
+    catch: (cause) =>
+      releasePackageOperationError('writing the source marker', cause),
+  });
+
+const deleteMarker = (marker: string) =>
+  tryPromise({
+    try: () => file(marker).delete(),
+    catch: (cause) =>
+      releasePackageOperationError('cleaning the source marker', cause),
+  });
 
 const packGeneratedMarker = (
   marker: string,
@@ -39,34 +99,41 @@ const packGeneratedMarker = (
     readonly expectedSha: string;
     readonly packagePath: string;
   },
-): Promise<CommandResult> =>
-  write(marker, `${input.expectedSha}\n`)
-    .then(() =>
-      run([
-        argv[0] ?? 'bun',
-        'pm',
-        'pack',
-        '--cwd',
-        input.packagePath,
-        '--destination',
-        input.destination,
-        '--ignore-scripts',
-        '--quiet',
-      ]),
-    )
-    .finally(() => file(marker).delete());
+) =>
+  acquireUseRelease(
+    requireMissingMarker(marker),
+    () =>
+      gen(function* () {
+        yield* writeMarker(marker, input.expectedSha);
+        return yield* run(
+          [
+            argv[0] ?? 'bun',
+            'pm',
+            'pack',
+            '--cwd',
+            input.packagePath,
+            '--destination',
+            input.destination,
+            '--ignore-scripts',
+            '--quiet',
+          ],
+          releasePackageOperationError,
+        );
+      }),
+    (ownedMarker) => deleteMarker(ownedMarker).pipe(orDie),
+  );
 
 export const verifyArtifactSourceCommit = (input: {
   readonly artifact: string;
   readonly expectedSha: string;
 }) =>
-  tryPromise({
-    try: () => run(['tar', '-xOzf', input.artifact, ARCHIVE_SOURCE_COMMIT]),
-    catch: (cause) =>
+  run(
+    ['tar', '-xOzf', input.artifact, ARCHIVE_SOURCE_COMMIT],
+    (operation, cause) =>
       new ArtifactIdentityError({
-        message: `Reading package source commit failed: ${String(cause)}`,
+        message: `Reading package source commit failed while ${operation}: ${String(cause)}`,
       }),
-  }).pipe(
+  ).pipe(
     flatMap((result) => {
       if (result.exitCode !== 0) {
         return fail(
@@ -92,16 +159,7 @@ const packWithMarker = (input: {
   readonly packagePath: string;
 }) => {
   const marker = `${input.packagePath}/${SOURCE_COMMIT_FILE}`;
-  return tryPromise({
-    try: () =>
-      requireMissingMarker(marker).then(() =>
-        packGeneratedMarker(marker, input),
-      ),
-    catch: (cause) =>
-      new ReleasePackageError({
-        message: `Packing release artifact failed: ${String(cause)}`,
-      }),
-  }).pipe(
+  return packGeneratedMarker(marker, input).pipe(
     flatMap((result) => {
       if (result.exitCode !== 0) {
         return fail(
