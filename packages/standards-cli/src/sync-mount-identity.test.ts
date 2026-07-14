@@ -45,6 +45,14 @@ it('accepts a dash mount source after the framing separator', () => {
   expect(mountIdForPath('/repo/managed', entries)).toBe(10);
 });
 
+it('accepts a filesystem-defined non-path root', () => {
+  const entries = parseMountInfo(
+    '10 1 0:4 net:[4026531840] /run/docker/netns/default rw shared:2 - nsfs nsfs rw',
+  );
+
+  expect(mountIdForPath('/run/docker/netns/default', entries)).toBe(10);
+});
+
 it('fails closed on malformed or truncated mountinfo records', () => {
   expect(() => parseMountInfo('1e2 bad bad bad /')).toThrow(
     'Linux mountinfo contains an invalid mount entry',
@@ -60,9 +68,6 @@ it('fails closed on malformed or truncated mountinfo records', () => {
   );
   expect(() =>
     parseMountInfo('10 1 0:1 / /bad\\999 rw - rootfs rootfs rw'),
-  ).toThrow('Linux mountinfo contains an invalid path escape');
-  expect(() =>
-    parseMountInfo('10 1 0:1 /bad\\999 / rw - rootfs rootfs rw'),
   ).toThrow('Linux mountinfo contains an invalid path escape');
 });
 

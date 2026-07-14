@@ -30,7 +30,7 @@ const decodeMountPath = (value: string): string => {
 
 const parseMountEntry = (line: string, lineNumber: number): MountEntry => {
   const fields = line.split(' ');
-  const [idField, parentField, device, root, mountPoint, options] = fields;
+  const [idField, parentField, device, , mountPoint, options] = fields;
   const separator = fields.findIndex(
     (field, index) => index >= REQUIRED_PREFIX_FIELDS && field === '-',
   );
@@ -47,7 +47,6 @@ const parseMountEntry = (line: string, lineNumber: number): MountEntry => {
     ['parent-range', Number.isSafeInteger(parentId) && parentId >= 0],
     ['device-syntax', device !== undefined && DEVICE.test(device)],
     ['device-range', deviceParts.every(Number.isSafeInteger)],
-    ['root-path', root?.startsWith('/') === true],
     ['mount-point-path', mountPoint?.startsWith('/') === true],
     ['options', options !== undefined && options.length > 0],
     ['separator', separator >= REQUIRED_PREFIX_FIELDS],
@@ -64,7 +63,6 @@ const parseMountEntry = (line: string, lineNumber: number): MountEntry => {
       `Linux mountinfo contains an invalid mount entry at line ${lineNumber} (fields=${fields.length}, separator=${separator}, suffix=${suffix.length}; failed=${failed})`,
     );
   }
-  decodeMountPath(root);
   return { id, mountPoint: decodeMountPath(mountPoint) };
 };
 
