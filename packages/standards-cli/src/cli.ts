@@ -94,7 +94,11 @@ type Lock = {
   readonly upstream: string;
   readonly ref?: string;
   readonly sha: string;
-  readonly files: Record<string, string>;
+  readonly files: ReadonlyMap<string, string>;
+};
+
+type SerializedLock = Omit<Lock, 'files'> & {
+  readonly files: Readonly<Record<string, string>>;
 };
 
 type ConsumerSyncPolicyInspectionOptions = {
@@ -261,13 +265,16 @@ const inspectLock = async (root: RepositoryRoot): Promise<LockInspection> => {
   if (state.contents === null) {
     return { lock: null, state };
   }
-  const raw = JSON.parse(state.contents.toString('utf8')) as Lock;
-  return { lock: raw, state };
+  const raw = JSON.parse(state.contents.toString('utf8')) as SerializedLock;
+  return {
+    lock: { ...raw, files: new Map(Object.entries(raw.files)) },
+    state,
+  };
 };
 
 const lockContents = (lock: Lock): Buffer => {
   const files = Object.fromEntries(
-    Object.entries(lock.files).sort(([a], [b]) => a.localeCompare(b)),
+    [...lock.files].sort(([a], [b]) => a.localeCompare(b)),
   );
   const ordered = {
     upstream: lock.upstream,
@@ -408,7 +415,7 @@ const assertDisjoint = (
 };
 
 type MirrorResult = {
-  readonly files: Record<string, string>;
+  readonly files: ReadonlyMap<string, string>;
   readonly created: ReadonlyArray<string>;
   readonly updated: ReadonlyArray<string>;
   readonly deleted: ReadonlyArray<string>;
@@ -451,17 +458,17 @@ const prepareMirror = ({
   states,
 }: {
   readonly managed: ReadonlyMap<string, SourceFile>;
-  readonly previous: Record<string, string>;
+  readonly previous: ReadonlyMap<string, string>;
   readonly states: ReadonlyMap<string, FileState>;
 }): PreparedMirror => {
-  for (const rel of Object.keys(previous)) {
+  for (const rel of previous.keys()) {
     assertSafeRelativePath(rel, 'sync-standards.lock file');
   }
   assertNoRepositoryOwnedControlSeams(
-    Object.keys(previous),
+    [...previous.keys()],
     'sync-standards.lock file',
   );
-  const next: Record<string, string> = {};
+  const next = new Map<string, string>();
   const created: Array<string> = [];
   const updated: Array<string> = [];
   const tampered: Array<string> = [];
@@ -471,7 +478,7 @@ const prepareMirror = ({
     const currentHash =
       before.contents === null ? null : sha256(before.contents);
     const hash = sha256(source.contents);
-    const previousHash = previous[rel];
+    const previousHash = previous.get(rel);
     if (
       previousHash !== undefined &&
       currentHash !== null &&
@@ -490,10 +497,10 @@ const prepareMirror = ({
       mode: before.mode,
       rel,
     });
-    next[rel] = hash;
+    next.set(rel, hash);
   }
-  const deleted = Object.keys(previous).filter(
-    (rel) => !(rel in next) && requiredState(states, rel).contents !== null,
+  const deleted = [...previous.keys()].filter(
+    (rel) => !next.has(rel) && requiredState(states, rel).contents !== null,
   );
   return {
     deletes: deleted.map((rel) => ({
@@ -601,7 +608,7 @@ const runInit = async ({
   }
   const mirror = prepareMirror({
     managed,
-    previous: {},
+    previous: new Map(),
     states,
   });
   const seedWrites: Array<PreparedWrite> = [...seeds]
@@ -642,7 +649,7 @@ const runInit = async ({
   }
   reportMirror(mirror.result, false);
   console.log(
-    `init complete: ${Object.keys(mirror.result.files).length} managed file(s) at ${src.sha}`,
+    `init complete: ${mirror.result.files.size} managed file(s) at ${src.sha}`,
   );
 };
 
@@ -669,10 +676,10 @@ const runSync = async ({
 }: RunSyncOptions): Promise<void> => {
   assertDisjoint(manifest.paths, [...seeds.keys()]);
   const lockInspection = await inspectLock(consumer);
-  const previous = lockInspection.lock?.files ?? {};
+  const previous = lockInspection.lock?.files ?? new Map<string, string>();
   const targetPaths = [
     ...managed.keys(),
-    ...Object.keys(previous),
+    ...previous.keys(),
     'sync-standards.lock',
     ...(policyWrite === null ? [] : [SYNC_POLICY_FILE]),
   ];
@@ -727,7 +734,7 @@ const runSync = async ({
     writes: [...mirror.writes, ...controlWrites],
   });
   console.log(
-    `sync complete: ${Object.keys(mirror.result.files).length} managed file(s) at ${src.sha}`,
+    `sync complete: ${mirror.result.files.size} managed file(s) at ${src.sha}`,
   );
 };
 
@@ -739,17 +746,17 @@ const runCheck = async (
   policy: SyncPolicy | null,
 ): Promise<boolean> => {
   const { lock } = await inspectLock(consumer);
-  if (lock === null || Object.keys(lock.files).length === 0) {
+  if (lock === null || lock.files.size === 0) {
     console.error(
       'standards: no non-empty sync-standards.lock found; run `standards init` before checking',
     );
     return false;
   }
-  for (const rel of Object.keys(lock.files)) {
+  for (const rel of lock.files.keys()) {
     assertSafeRelativePath(rel, 'sync-standards.lock file');
   }
   assertNoRepositoryOwnedControlSeams(
-    Object.keys(lock.files),
+    [...lock.files.keys()],
     'sync-standards.lock file',
   );
   const lockedRef = lock.ref ?? DEFAULT_SYNC_POLICY.ref;
@@ -759,11 +766,8 @@ const runCheck = async (
       `standards: sync policy requests ${policy.ref}, but sync-standards.lock records ${lockedRef}; run \`bun standards sync\``,
     );
   }
-  const states = await inspectRepositoryFiles(
-    consumer,
-    Object.keys(lock.files),
-  );
-  const results = Object.entries(lock.files).map(([rel, hash]) => {
+  const states = await inspectRepositoryFiles(consumer, [...lock.files.keys()]);
+  const results = [...lock.files].map(([rel, hash]) => {
     const currentContents = requiredState(states, rel).contents;
     if (currentContents === null) {
       return `  missing:  ${rel}`;
@@ -788,9 +792,7 @@ const runCheck = async (
   if (!policyMatchesLock) {
     return false;
   }
-  console.log(
-    `standards: ${Object.keys(lock.files).length} canonical file(s) match upstream`,
-  );
+  console.log(`standards: ${lock.files.size} canonical file(s) match upstream`);
   return true;
 };
 
@@ -1248,6 +1250,27 @@ const openConsumerRoot = async (
   return consumerRoot;
 };
 
+const openSyncConsumerRoot = async (
+  consumer: string,
+  dryRun: boolean,
+): Promise<RepositoryRoot> => {
+  try {
+    return await openConsumerRoot(consumer, !dryRun);
+  } catch (error) {
+    if (
+      dryRun &&
+      error instanceof Error &&
+      error.message.startsWith('Pending ')
+    ) {
+      throw new Error(
+        `${error.message}. Rerun this \`bun standards sync\` command without \`--dry-run\` to recover the pending transaction before previewing`,
+        { cause: error },
+      );
+    }
+    throw error;
+  }
+};
+
 const runCheckCommand = async (consumer: string): Promise<boolean> => {
   const consumerRoot = await openConsumerRoot(consumer, false);
   const policyInspection = await inspectConsumerSyncPolicy(consumerRoot, {
@@ -1316,7 +1339,7 @@ const runSyncCommand = async (
   ref: string | undefined,
   dryRun: boolean,
 ): Promise<void> => {
-  const consumerRoot = await openConsumerRoot(consumer, true);
+  const consumerRoot = await openSyncConsumerRoot(consumer, dryRun);
   const policy = await inspectEffectiveSyncPolicy(consumerRoot, ref);
   const consumerManifest = await loadManifest(consumerRoot);
   const sourceName = from ?? consumerManifest.upstream;

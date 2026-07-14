@@ -18,6 +18,7 @@ import { createTransactionReservation } from './sync-transaction-reservation';
 
 const fixture = join(import.meta.dir, 'sync-transaction-crash-fixture.ts');
 const OWNER_PUBLICATION = /^\.standards-owner-publication-/u;
+const TRANSACTION_PUBLICATION = /^\.standards-transaction-publication-/u;
 
 afterEach(cleanupFixtures);
 
@@ -90,7 +91,11 @@ describe('atomic transaction ownership publication', () => {
   it('cleans an owner publication token after its active inode is gone', async () => {
     const root = setup();
     expect(crashAt(root, 'after-owner-reservation')).toBe('SIGKILL');
-    rmdirSync(join(root, '.standards-transaction'));
+    const publication = transactionArtifacts(root).find((entry) =>
+      TRANSACTION_PUBLICATION.test(entry),
+    );
+    expect(publication).toBeDefined();
+    rmdirSync(join(root, publication ?? 'missing'));
 
     await recover(root);
     await recover(root);
@@ -128,7 +133,7 @@ describe('atomic transaction ownership publication', () => {
 });
 
 describe('pre-binding transaction state', () => {
-  it('preserves an active directory created before inode binding', async () => {
+  it('cleans the legacy empty final-directory crash gap repeatedly', async () => {
     const rootPath = setup();
     const root = await openRepositoryRoot(rootPath, 'consumer');
     const rootDirectory = await openPinnedRoot(root);
@@ -143,13 +148,33 @@ describe('pre-binding transaction state', () => {
       await rootDirectory.handle.close();
     }
 
+    await recover(rootPath);
+    await recover(rootPath);
+
+    expect(transactionArtifacts(rootPath)).toEqual([]);
+  });
+
+  it('preserves unexpected contents in a legacy unbound final directory', async () => {
+    const rootPath = setup();
+    const root = await openRepositoryRoot(rootPath, 'consumer');
+    const rootDirectory = await openPinnedRoot(root);
+    try {
+      await createTransactionReservation(
+        rootDirectory,
+        '00000000-0000-4000-8000-000000000000',
+      );
+      writeFixture(rootPath, '.standards-transaction/actor.txt', 'actor\n');
+      await syncPinnedDirectory(rootDirectory);
+    } finally {
+      await rootDirectory.handle.close();
+    }
+
     await expect(recover(rootPath)).rejects.toThrow(
-      'Reserved transaction has no inode-bound owner',
+      'Transaction directory contains unexpected entries: actor.txt',
     );
 
-    expect(readdirSync(join(rootPath, '.standards-transaction'))).toEqual([]);
-    expect([...transactionArtifacts(rootPath)].sort()).toEqual(
-      ['.standards-transaction', '.standards-transaction-reservation'].sort(),
+    expect(readFixture(rootPath, '.standards-transaction/actor.txt')).toBe(
+      'actor\n',
     );
   });
 });

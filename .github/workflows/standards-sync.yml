@@ -59,11 +59,11 @@ jobs:
       # check is the signal, and branch protection keeps it unmergeable.
       #
       # Configure STANDARDS_SYNC_ENVIRONMENT_TOKEN in the protected
-      # `standards-sync` environment (fine-grained PAT: contents + pull requests
-      # write) so the opened PR triggers workflows. The environment admits
-      # protected branches generally. The schedule and repository_dispatch
-      # bind this workflow to the repository's default branch, which the
-      # canonical classic protection protects. PRs
+      # `standards-sync` environment (fine-grained PAT: Contents, Pull requests,
+      # and Workflows write) so the opened PR triggers workflows.
+      # The environment admits protected branches generally. The schedule and
+      # repository_dispatch bind this workflow to the repository's default branch,
+      # which the canonical classic protection protects. PRs
       # opened with the default GITHUB_TOKEN fallback do not trigger workflows
       # and need a manual nudge (push or close/reopen) to run the gate.
       #

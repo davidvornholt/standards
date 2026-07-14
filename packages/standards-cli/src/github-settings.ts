@@ -35,6 +35,18 @@ const REPOSITORY_IDENTITY_KEYS = new Set([
   'private',
   'visibility',
 ]);
+export const SUPPORTED_REPOSITORY_SETTING_KEYS = [
+  'allow_auto_merge',
+  'allow_merge_commit',
+  'allow_rebase_merge',
+  'allow_squash_merge',
+  'delete_branch_on_merge',
+  'squash_merge_commit_message',
+  'squash_merge_commit_title',
+] as const;
+const REPOSITORY_SETTING_KEYS = new Set<string>(
+  SUPPORTED_REPOSITORY_SETTING_KEYS,
+);
 
 type ParseResult = {
   readonly settings: GithubSettings | null;
@@ -48,13 +60,16 @@ const repositoryProblems = (
   if (!isRecord(repository)) {
     return [`${label} "repository" must be an object`];
   }
-  return Object.keys(repository).flatMap((key) =>
-    REPOSITORY_IDENTITY_KEYS.has(key)
-      ? [
-          `${label} repository."${key}" cannot manage repository identity or lifecycle`,
-        ]
-      : [],
-  );
+  return Object.keys(repository).flatMap((key) => {
+    if (REPOSITORY_IDENTITY_KEYS.has(key)) {
+      return [
+        `${label} repository."${key}" cannot manage repository identity or lifecycle`,
+      ];
+    }
+    return REPOSITORY_SETTING_KEYS.has(key)
+      ? []
+      : [`${label} repository has unknown key "${key}"`];
+  });
 };
 
 const parseSettings = (raw: unknown, label: string): ParseResult => {

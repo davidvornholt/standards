@@ -17,9 +17,19 @@ import {
   nodeLstat,
   spawn,
 } from './release-runtime';
+import { isReleaseSourceSha } from './release-source-sha';
 
 export const SOURCE_COMMIT_FILE = 'SOURCE_COMMIT';
 export const RELEASE_BUN_VERSION = '1.3.14';
+
+export const validateReleaseSourceSha = (sourceSha: string) =>
+  isReleaseSourceSha(sourceSha)
+    ? succeed(undefined)
+    : fail(
+        new ReleasePackageError({
+          message: `Packing release artifact requires a full lowercase commit SHA; received ${sourceSha}`,
+        }),
+      );
 
 export const validateReleaseBunVersion = (actualVersion: string) =>
   actualVersion === RELEASE_BUN_VERSION
@@ -135,6 +145,7 @@ const artifactFromResult = (result: CommandResult) => {
 
 export const packReleaseArtifact = (input: ReleasePackageInput) =>
   gen(function* () {
+    yield* validateReleaseSourceSha(input.expectedSha);
     yield* validateReleaseBunVersion(bunVersion);
     yield* ensureSourceMarkerAbsent(input.packagePath);
     const artifact = yield* run(

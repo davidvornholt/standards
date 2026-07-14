@@ -1,5 +1,6 @@
 import { constants } from 'node:fs';
 import { open, rename } from 'node:fs/promises';
+import { writeCompleteDescriptor } from './sync-descriptor-write';
 import {
   directoryEntryPath,
   type PinnedDirectory,
@@ -83,9 +84,12 @@ export const publishJournal = async (
   );
   try {
     const split = Math.max(1, Math.floor(contents.byteLength / 2));
-    await handle.write(contents.subarray(0, split));
-    await hooks.afterJournalPartialWrite?.();
-    await handle.write(contents.subarray(split));
+    await writeCompleteDescriptor({
+      afterPartialWrite: hooks.afterJournalPartialWrite,
+      contents,
+      handle,
+      partialOffset: split,
+    });
     await handle.sync();
   } finally {
     await handle.close();

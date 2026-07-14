@@ -89,6 +89,7 @@ export const applyRepositoryMutations = async (
     afterOwnerReservationFinalSync: hooks.afterOwnerReservationFinalSync,
     afterReservationFinalSync: hooks.afterReservationFinalSync,
     afterReservationPartialWrite: hooks.afterReservationPartialWrite,
+    afterPublicationMkdir: hooks.afterTransactionPublicationMkdir,
     beforeMkdir: hooks.beforeTransactionMkdir,
   });
   opened.push(transaction);

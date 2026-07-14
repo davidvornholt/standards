@@ -9,6 +9,7 @@ import {
   releaseTarFailure,
   scanReleaseTar,
 } from './release-package-tar-reader';
+import { isReleaseSourceSha } from './release-source-sha';
 import {
   createTarHeader,
   resizeTarHeader,
@@ -18,7 +19,6 @@ import {
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
-const fullCommitSha = /^[0-9a-f]{40}$/u;
 
 export type ReleaseTarIdentity = {
   readonly name: string;
@@ -100,7 +100,7 @@ const readScannedIdentity = (
     flatMap((manifest) => {
       if (
         typeof manifest.gitHead !== 'string' ||
-        !fullCommitSha.test(manifest.gitHead) ||
+        !isReleaseSourceSha(manifest.gitHead) ||
         typeof manifest.name !== 'string' ||
         manifest.name === '' ||
         typeof manifest.version !== 'string' ||

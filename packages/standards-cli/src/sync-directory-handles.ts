@@ -6,6 +6,7 @@ import {
   type NodeIdentity,
   type RepositoryRoot,
 } from './sync-filesystem';
+import { assertNoReplaceRenameAvailable } from './sync-linux-rename';
 
 export type PinnedDirectory = {
   readonly handle: FileHandle;
@@ -71,6 +72,7 @@ export const assertMutationPlatform = async (): Promise<void> => {
       `Safe standards filesystem mutations are unsupported on ${process.platform}`,
     );
   }
+  assertNoReplaceRenameAvailable();
   try {
     const probe = await openDirectory(descriptorRoot);
     await probe.handle.close();

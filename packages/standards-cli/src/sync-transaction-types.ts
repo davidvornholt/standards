@@ -13,6 +13,8 @@ export const TRANSACTION_OWNER_RESERVATION =
 export const TRANSACTION_OWNER_PUBLICATION_PREFIX =
   '.standards-owner-publication-';
 export const TRANSACTION_PARENT_BINDING_PREFIX = '.standards-parent-binding-';
+export const TRANSACTION_PUBLICATION_PREFIX =
+  '.standards-transaction-publication-';
 export const TRANSACTION_RESERVATION = '.standards-transaction-reservation';
 export const TRANSACTION_COMMITTED = 'COMMITTED';
 export const JOURNAL_VERSION = 1;

@@ -5,6 +5,7 @@ import {
   TRANSACTION_OWNER_PUBLICATION_PREFIX,
   TRANSACTION_OWNER_RESERVATION,
   TRANSACTION_PARENT_BINDING_PREFIX,
+  TRANSACTION_PUBLICATION_PREFIX,
   TRANSACTION_RESERVATION,
 } from './sync-transaction-types';
 
@@ -17,6 +18,21 @@ const PARENT_BINDING_TAIL = new RegExp(
 );
 
 export const isUuidV4 = (value: string): boolean => UUID_V4.test(value);
+
+export const transactionPublicationName = (id: string): string => {
+  if (!isUuidV4(id)) {
+    throw new Error('Transaction publication ID must be UUID-v4');
+  }
+  return `${TRANSACTION_PUBLICATION_PREFIX}${id}`;
+};
+
+export const transactionPublicationId = (name: string): string | null => {
+  if (!name.startsWith(TRANSACTION_PUBLICATION_PREFIX)) {
+    return null;
+  }
+  const id = name.slice(TRANSACTION_PUBLICATION_PREFIX.length);
+  return isUuidV4(id) ? id : null;
+};
 
 export const atomicRecordTemporaryName = (
   finalName: string,
@@ -61,5 +77,6 @@ export const isReservedTransactionPath = (rel: string): boolean =>
         isReservedAtomicRecordTemporaryName(part) ||
         part.startsWith(TRANSACTION_OWNER_PUBLICATION_PREFIX) ||
         part.startsWith(TRANSACTION_PARENT_BINDING_PREFIX) ||
+        part.startsWith(TRANSACTION_PUBLICATION_PREFIX) ||
         part.startsWith('.standards-parent-'),
     );

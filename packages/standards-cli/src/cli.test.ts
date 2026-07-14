@@ -9,6 +9,7 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -54,6 +55,10 @@ const STD_PATHS: ReadonlyArray<string> = [
   'managed',
   SYNC_POLICY_CONTROLLER_PATH,
 ];
+const PROTOTYPE_NAMED_FILES = ['__proto__', 'constructor', 'toString'] as const;
+const PROTOTYPE_NAMED_FILE_SET: ReadonlySet<string> = new Set(
+  PROTOTYPE_NAMED_FILES,
+);
 const SYNC_POLICY_CONTRACT_VERSION = 1;
 const BARE_SYNC_STEP = /^\s+run: bun standards sync$/mu;
 const FILE_TYPE_MODE_BASE = 0o1000;
@@ -258,6 +263,41 @@ const buildUpstream = (paths: ReadonlyArray<string> = STD_PATHS): string => {
   }
   return up;
 };
+const addPrototypeNamedFiles = (up: string): void => {
+  const manifest = JSON.parse(read(up, 'sync-standards.json')) as {
+    paths: Array<string>;
+  };
+  manifest.paths.push(...PROTOTYPE_NAMED_FILES);
+  write(up, 'sync-standards.json', JSON.stringify(manifest));
+  for (const file of PROTOTYPE_NAMED_FILES) {
+    write(up, file, `${file}\n`);
+  }
+};
+const removePrototypeNamedFiles = (up: string): void => {
+  const manifest = JSON.parse(read(up, 'sync-standards.json')) as {
+    paths: Array<string>;
+  };
+  manifest.paths = manifest.paths.filter(
+    (path) => !PROTOTYPE_NAMED_FILE_SET.has(path),
+  );
+  write(up, 'sync-standards.json', JSON.stringify(manifest));
+  for (const file of PROTOTYPE_NAMED_FILES) {
+    rmSync(join(up, file));
+  }
+};
+const prototypeNamedLockEntries = (consumer: string) => {
+  const { files } = readLock(consumer);
+  return PROTOTYPE_NAMED_FILES.map((file) => {
+    const own = Object.hasOwn(files, file);
+    return { file, hash: own ? files[file] : undefined, own };
+  });
+};
+const expectedPrototypeNamedLockEntries = (present: boolean) =>
+  PROTOTYPE_NAMED_FILES.map((file) => ({
+    file,
+    hash: present ? sha256(`${file}\n`) : undefined,
+    own: present,
+  }));
 const initConsumer = (up: string): { consumer: string; result: RunResult } => {
   const consumer = mkTmp('sync-cons-');
   const result = run(consumer, ['init', '--from', up, '--dir', consumer]);
@@ -903,6 +943,90 @@ describe('sync', () => {
     const dry = sync(up, consumer, ['--dry-run']);
     expect(dry.status).toBe(0);
     expect(dry.stdout).toContain('dry run: already in sync; no changes');
+  });
+});
+
+describe('prototype-named lock entries', () => {
+  it('records every valid filename during init', () => {
+    const up = buildUpstream();
+    addPrototypeNamedFiles(up);
+
+    const { consumer, result } = initConsumer(up);
+
+    expect(result.status).toBe(0);
+    expect(prototypeNamedLockEntries(consumer)).toEqual(
+      expectedPrototypeNamedLockEntries(true),
+    );
+    expect(run(consumer, ['check', '--dir', consumer]).status).toBe(0);
+  });
+
+  it('records every valid filename added by sync', () => {
+    const up = buildUpstream();
+    const { consumer } = initConsumer(up);
+    addPrototypeNamedFiles(up);
+
+    const result = sync(up, consumer);
+
+    expect(result.status).toBe(0);
+    expect(prototypeNamedLockEntries(consumer)).toEqual(
+      expectedPrototypeNamedLockEntries(true),
+    );
+    expect(run(consumer, ['check', '--dir', consumer]).status).toBe(0);
+  });
+
+  it('deletes removed files and their own lock entries', () => {
+    const up = buildUpstream();
+    addPrototypeNamedFiles(up);
+    const { consumer } = initConsumer(up);
+    removePrototypeNamedFiles(up);
+
+    const result = sync(up, consumer);
+
+    expect(result.status).toBe(0);
+    expect(prototypeNamedLockEntries(consumer)).toEqual(
+      expectedPrototypeNamedLockEntries(false),
+    );
+    for (const file of PROTOTYPE_NAMED_FILES) {
+      expect(existsSync(join(consumer, file))).toBe(false);
+    }
+  });
+});
+
+describe('sync dry-run recovery boundary', () => {
+  it('leaves a pending transaction and managed files unchanged', () => {
+    const up = buildUpstream();
+    const { consumer } = initConsumer(up);
+    writePendingTransaction(consumer);
+    const managedPaths = ['managed/a.txt', 'sync-standards.lock'] as const;
+    const artifactPaths = [
+      `${TRANSACTION_DIRECTORY}/${TRANSACTION_JOURNAL}`,
+      `${TRANSACTION_DIRECTORY}/${TRANSACTION_OWNER}`,
+    ] as const;
+    const before = new Map(
+      [...managedPaths, ...artifactPaths].map((path) => [
+        path,
+        readFileSync(join(consumer, path)),
+      ]),
+    );
+    const artifactNames = readdirSync(
+      join(consumer, TRANSACTION_DIRECTORY),
+    ).sort();
+
+    const dry = sync(up, consumer, ['--dry-run']);
+
+    expect(dry.status).toBe(1);
+    expect(dry.stderr).toContain(
+      `Pending filesystem recovery: ${TRANSACTION_DIRECTORY}`,
+    );
+    expect(dry.stderr).toContain(
+      'Rerun this `bun standards sync` command without `--dry-run` to recover the pending transaction before previewing',
+    );
+    expect(readdirSync(join(consumer, TRANSACTION_DIRECTORY)).sort()).toEqual(
+      artifactNames,
+    );
+    for (const [path, contents] of before) {
+      expect(readFileSync(join(consumer, path))).toEqual(contents);
+    }
   });
 });
 

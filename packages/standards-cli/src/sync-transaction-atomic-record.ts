@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { link, open, unlink } from 'node:fs/promises';
+import { writeCompleteDescriptor } from './sync-descriptor-write';
 import {
   directoryEntryPath,
   type PinnedDirectory,
@@ -12,33 +13,6 @@ import { atomicRecordTemporaryName } from './sync-transaction-artifact-names';
 const PRIVATE_MODE = 0o600;
 const missing = (error: unknown): boolean =>
   (error as { readonly code?: unknown }).code === 'ENOENT';
-
-const writeBounded = async (
-  handle: Awaited<ReturnType<typeof open>>,
-  contents: Buffer,
-  afterPartialWrite?: () => Promise<void>,
-): Promise<void> => {
-  const split = Math.max(1, Math.floor(contents.byteLength / 2));
-  let offset = 0;
-  while (offset < contents.byteLength) {
-    const end = offset === 0 ? split : contents.byteLength;
-    // biome-ignore lint/performance/noAwaitInLoops: short writes must be completed on one descriptor
-    const { bytesWritten } = await handle.write(
-      contents,
-      offset,
-      end - offset,
-      null,
-    );
-    if (bytesWritten === 0) {
-      throw new Error('Atomic transaction record write made no progress');
-    }
-    offset += bytesWritten;
-    if (offset === split) {
-      // The hook models a crash while the final path is still absent.
-      await afterPartialWrite?.();
-    }
-  }
-};
 
 export const publishAtomicTransactionRecord = async ({
   afterFinalSync,
@@ -74,7 +48,12 @@ export const publishAtomicTransactionRecord = async ({
   try {
     const info = await handle.stat();
     temporaryIdentity = { dev: info.dev, ino: info.ino };
-    await writeBounded(handle, encoded, afterPartialWrite);
+    await writeCompleteDescriptor({
+      afterPartialWrite,
+      contents: encoded,
+      handle,
+      partialOffset: Math.max(1, Math.floor(encoded.byteLength / 2)),
+    });
     await handle.sync();
   } catch (error) {
     await handle.close();

@@ -62,6 +62,20 @@ const removeUnpublished = async (
   }
 };
 
+const removeEmptyUnboundPublication = async (
+  root: PinnedDirectory,
+  transaction: PinnedDirectory,
+  reservationId: string,
+): Promise<void> => {
+  await removeOwnedTransaction({
+    allowed: new Set(),
+    reservedName: TRANSACTION_DIRECTORY,
+    root,
+    transaction,
+  });
+  await removeTransactionReservation(root, reservationId);
+};
+
 export type PublicationRecoveryInput = {
   readonly reservation: TransactionReservation | null;
   readonly root: RepositoryRoot;
@@ -119,7 +133,12 @@ const recoverWithReservation = async (
     throw new Error('Cleanup reservation reached publication recovery');
   }
   if (owner === null) {
-    throw new Error('Reserved transaction has no inode-bound owner');
+    await removeEmptyUnboundPublication(
+      rootDirectory,
+      transaction,
+      reservation.id,
+    );
+    return null;
   }
   assertTransactionOwner(owner, root.identity, transaction);
   if (owner.id !== reservation.id) {

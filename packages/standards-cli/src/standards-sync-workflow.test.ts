@@ -20,6 +20,15 @@ const GATED_STEPS = [
   'Sync canonical files from upstream',
   'Open a pull request if the mirror changed',
 ] as const;
+const REPOSITORY_SETTING_KEYS = [
+  'allow_auto_merge',
+  'allow_merge_commit',
+  'allow_rebase_merge',
+  'allow_squash_merge',
+  'delete_branch_on_merge',
+  'squash_merge_commit_message',
+  'squash_merge_commit_title',
+] as const;
 const RELATIVE_IMPORT = /\bfrom"[.]{1,2}\//u;
 const workflowStep = (workflow: string, name: string): string => {
   const marker = `      - name: ${name}`;
@@ -55,6 +64,9 @@ describe('canonical scheduled sync contract', () => {
     expect(workflow).toContain('protected branches generally');
     expect(workflow).toContain("repository's default branch");
     expect(workflow).toContain('canonical classic protection protects');
+    expect(workflow).toContain(
+      'fine-grained PAT: Contents, Pull requests,\n      # and Workflows write',
+    );
     expect(
       workflowStep(workflow, 'Open a pull request if the mirror changed'),
     ).toContain(
@@ -96,6 +108,9 @@ describe('canonical scheduled sync contract', () => {
     >;
 
     expect(checkoutStep).not.toContain('ref: main');
+    expect(
+      Object.keys(settings.repository as Record<string, unknown>).sort(),
+    ).toEqual([...REPOSITORY_SETTING_KEYS].sort());
     expect(settings.rulesets as unknown).toEqual([]);
     expect(settings.default_branch_protection).toBeObject();
     expect(environment?.deployment_branch_policy).toEqual(

@@ -6,19 +6,18 @@ import {
   syncPinnedDirectory,
 } from './sync-directory-handles';
 import { identitiesMatch } from './sync-filesystem';
+import { renameDirectoryNoReplace } from './sync-linux-rename';
 import { removeOwnedTransaction } from './sync-transaction-artifact-cleanup';
+import { transactionPublicationName } from './sync-transaction-artifact-names';
 import {
   assertOwnerPublicationNamespaceAvailable,
   createOwnerPublicationToken,
   findOwnerPublicationToken,
   removeOwnerPublicationToken,
 } from './sync-transaction-owner-reservation';
-import {
-  assertTransactionOwner,
-  readTransactionOwner,
-  writeTransactionOwner,
-} from './sync-transaction-ownership';
+import { writeTransactionOwner } from './sync-transaction-ownership';
 import { assertParentBindingNamespaceAvailable } from './sync-transaction-parent-binding';
+import { assertTransactionPublicationNamespaceAvailable } from './sync-transaction-publication-namespace';
 import {
   createTransactionReservation,
   removeTransactionReservation,
@@ -65,43 +64,46 @@ const assertTransactionCurrent = async (
 const cleanupFailedPublication = async ({
   created,
   id,
+  reservedName,
   root,
   transaction,
 }: {
   readonly created: boolean;
   readonly id: string;
+  readonly reservedName: string;
   readonly root: PinnedDirectory;
   readonly transaction: PinnedDirectory | undefined;
 }): Promise<ReadonlyArray<unknown>> => {
-  const errors: Array<unknown> = [];
-  let opened = transaction;
-  if (created) {
+  if (created && transaction === undefined) {
+    return [new Error('Unbound staged transaction publication was retained')];
+  }
+  if (transaction !== undefined) {
     try {
-      opened ??= await openPinnedChild(root, TRANSACTION_DIRECTORY);
-      const owner = await readTransactionOwner(opened);
-      assertTransactionOwner(owner, root.identity, opened);
-      if (owner.id !== id) {
-        throw new Error('Transaction owner does not match its reservation');
+      const token = await findOwnerPublicationToken(root, transaction);
+      if (token !== null && token.id !== id) {
+        throw new Error('Owner publication token has a different reservation');
       }
       await removeOwnedTransaction({
-        allowed: new Set([TRANSACTION_OWNER]),
-        reservedName: TRANSACTION_DIRECTORY,
+        allowed: token === null ? new Set() : new Set([TRANSACTION_OWNER]),
+        reservedName,
         root,
-        transaction: opened,
+        transaction,
       });
+      if (token !== null) {
+        await removeOwnerPublicationToken(root, token);
+      }
     } catch (error) {
-      errors.push(error);
+      return [error];
+    } finally {
+      await transaction.handle.close().catch(() => undefined);
     }
   }
-  await opened?.handle.close().catch(() => undefined);
-  if (errors.length === 0) {
-    try {
-      await removeTransactionReservation(root, id);
-    } catch (error) {
-      errors.push(error);
-    }
+  try {
+    await removeTransactionReservation(root, id);
+  } catch (error) {
+    return [error];
   }
-  return errors;
+  return [];
 };
 
 const publicationFailure = (
@@ -119,6 +121,7 @@ export const createTransactionDirectory = async (
   id: string,
   hooks: {
     readonly afterMkdir?: () => Promise<void>;
+    readonly afterPublicationMkdir?: () => Promise<void>;
     readonly afterOwnerFinalSync?: () => Promise<void>;
     readonly afterOwnerPartialWrite?: () => Promise<void>;
     readonly afterOwnerReservationFinalSync?: () => Promise<void>;
@@ -128,6 +131,7 @@ export const createTransactionDirectory = async (
   } = {},
 ): Promise<PinnedDirectory> => {
   await assertTransactionAbsent(root);
+  await assertTransactionPublicationNamespaceAvailable(root);
   await assertOwnerPublicationNamespaceAvailable(root);
   await assertParentBindingNamespaceAvailable(root);
   await createTransactionReservation(root, id, {
@@ -135,21 +139,31 @@ export const createTransactionDirectory = async (
     afterPartialWrite: hooks.afterReservationPartialWrite,
   });
   let created = false;
+  let reservedName = transactionPublicationName(id);
   let transaction: PinnedDirectory | undefined;
   try {
     await hooks.beforeMkdir?.();
-    await mkdir(directoryEntryPath(root, TRANSACTION_DIRECTORY), {
+    await mkdir(directoryEntryPath(root, reservedName), {
       mode: 0o700,
     });
     created = true;
-    transaction = await openPinnedChild(root, TRANSACTION_DIRECTORY);
-    await assertTransactionCurrent(root, transaction);
+    transaction = await openPinnedChild(root, reservedName);
+    await syncPinnedDirectory(root);
+    await hooks.afterPublicationMkdir?.();
     await createOwnerPublicationToken(
       root,
       transaction,
       id,
       hooks.afterOwnerReservationFinalSync,
     );
+    renameDirectoryNoReplace(
+      root.handle.fd,
+      reservedName,
+      TRANSACTION_DIRECTORY,
+    );
+    reservedName = TRANSACTION_DIRECTORY;
+    await syncPinnedDirectory(root);
+    await assertTransactionCurrent(root, transaction);
     await hooks.afterMkdir?.();
     await assertTransactionCurrent(root, transaction);
     await removeTransactionReservation(root, id);
@@ -168,6 +182,7 @@ export const createTransactionDirectory = async (
     const cleanupErrors = await cleanupFailedPublication({
       created,
       id,
+      reservedName,
       root,
       transaction,
     });

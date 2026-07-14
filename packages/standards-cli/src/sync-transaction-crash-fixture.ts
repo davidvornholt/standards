@@ -146,6 +146,8 @@ await applyRepositoryMutations(
       phase === 'after-reservation-final-sync' ? crash : undefined,
     afterReservationPartialWrite:
       phase === 'during-reservation-write' ? crash : undefined,
+    afterTransactionPublicationMkdir:
+      phase === 'after-transaction-publication-mkdir' ? crash : undefined,
     afterTransactionMkdir:
       phase === 'after-transaction-mkdir' ? crash : undefined,
     beforeCommitMarker: phase === 'before-lock' ? crash : undefined,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { SUPPORTED_REPOSITORY_SETTING_KEYS } from './github-settings';
 
 const ROOT = join(import.meta.dir, '../../..');
 const SYNC_SKILL = join(ROOT, '.agents/skills/standards-sync/SKILL.md');
@@ -31,11 +32,32 @@ describe('standards sync documentation', () => {
         'repository-owned control seams `sync-standards.local.json`, `AGENTS.local.md`, `biome.jsonc`, or `.github/settings.local.json`',
       );
       expect(documentation).toContain('STANDARDS_SYNC_ENVIRONMENT_TOKEN');
+      expect(documentation).toContain(
+        'Contents, Pull requests, and Workflows repository permissions set to write',
+      );
       expect(documentation).toContain('classic branch protection');
       expect(documentation).toContain('ruleset-only');
       expect(documentation).toContain("repository's default branch");
       expect(documentation).not.toContain('protected-branch-only');
       expect(documentation).not.toContain('permits only branches protected');
+      expect(documentation).toContain(
+        `The \`repository\` object accepts exactly ${SUPPORTED_REPOSITORY_SETTING_KEYS.length} keys`,
+      );
+      for (const key of SUPPORTED_REPOSITORY_SETTING_KEYS) {
+        expect(documentation).toContain(`\`${key}\``);
+      }
+      expect(documentation).toContain(
+        'Any other repository key fails before any API request',
+      );
+      expect(documentation).toContain(
+        `canonical declaration currently owns all ${SUPPORTED_REPOSITORY_SETTING_KEYS.length} repository keys`,
+      );
+      expect(documentation).toContain(
+        'currently extends only `rulesets` and `environments`',
+      );
+      expect(documentation).toContain(
+        'a collision that fails instead of overriding canonical state',
+      );
     }
     expect(readFileSync(SYNC_SKILL, 'utf8')).toContain(
       'real sync from configured remote ref',

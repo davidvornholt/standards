@@ -12,6 +12,7 @@ import { removeOrphanOwnerPublicationToken } from './sync-transaction-owner-rese
 import {
   optionalTransactionReservation,
   recoverMissingTransaction,
+  recoverStagedTransactionPublication,
 } from './sync-transaction-publication-recovery';
 import type { TransactionReservation } from './sync-transaction-reservation';
 import { TRANSACTION_DIRECTORY } from './sync-transaction-types';
@@ -50,6 +51,11 @@ export const prepareRecoveryState = async ({
   readonly rootDirectory: PinnedDirectory;
 }): Promise<PendingTransaction | { readonly done: true }> => {
   let reservation = await optionalTransactionReservation(rootDirectory, mutate);
+  reservation = await recoverStagedTransactionPublication({
+    mutate,
+    reservation,
+    root: rootDirectory,
+  });
   if (await hasCompletedCleanup(rootDirectory)) {
     if (!mutate) {
       throw new Error('Pending committed transaction cleanup');

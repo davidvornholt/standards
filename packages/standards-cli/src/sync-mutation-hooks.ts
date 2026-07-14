@@ -15,6 +15,7 @@ export type MutationTestHooks = {
   readonly afterOwnerReservationFinalSync?: () => Promise<void>;
   readonly afterReservationFinalSync?: () => Promise<void>;
   readonly afterReservationPartialWrite?: () => Promise<void>;
+  readonly afterTransactionPublicationMkdir?: () => Promise<void>;
   readonly afterTransactionMkdir?: () => Promise<void>;
   readonly beforeCleanup?: () => Promise<void>;
   readonly beforeCleanupRmdir?: () => Promise<void>;

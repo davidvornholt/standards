@@ -20,7 +20,7 @@ const emptySeam = JSON.stringify({
 describe('loadGithubSettings', () => {
   it('merges an additive seam', () => {
     const local = JSON.stringify({
-      repository: { has_wiki: false },
+      repository: {},
       rulesets: [declaredRuleset('Protect releases')],
       environments: [
         JSON.parse(
@@ -32,7 +32,6 @@ describe('loadGithubSettings', () => {
     expect(loaded.problems).toEqual([]);
     expect(loaded.merged?.repository).toEqual({
       allow_auto_merge: true,
-      has_wiki: false,
     });
     expect(loaded.merged?.rulesets.map((r) => r.name)).toEqual([
       'Protect main',

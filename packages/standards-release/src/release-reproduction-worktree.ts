@@ -15,8 +15,8 @@ import type { packReleaseArtifact } from './release-package';
 import { readPackedArtifact } from './release-package-identity';
 import { ReleaseReproductionError } from './release-reproduction-error';
 import { nodeMkdir, nodeMkdtemp, nodeRm, spawnSync } from './release-runtime';
+import { isReleaseSourceSha } from './release-source-sha';
 
-const fullCommitSha = /^[0-9a-f]{40}$/u;
 const trailingSlash = /\/$/u;
 const PACKAGE_PATH = 'packages/standards-cli';
 
@@ -64,7 +64,7 @@ const verifyCandidate = (input: {
   readonly repositoryPath: string;
 }) =>
   gen(function* () {
-    if (!fullCommitSha.test(input.candidateSha)) {
+    if (!isReleaseSourceSha(input.candidateSha)) {
       return yield* fail(
         reproductionFailure(
           'validating the candidate commit',

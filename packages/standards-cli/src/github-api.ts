@@ -14,9 +14,10 @@ import {
 } from './github-settings';
 
 const API_ROOT = 'https://api.github.com';
-
-const GITHUB_REMOTE_PATTERN =
-  /github\.com[/:](?<repo>[^/]+\/[^/]+?)(?:\.git)?$/u;
+const SCP_GITHUB_REMOTE = /^git@github\.com:(?<path>[^:]+)$/u;
+const GITHUB_OWNER = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/u;
+const GITHUB_REPOSITORY = /^[A-Za-z0-9_.-]+$/u;
+const GIT_SUFFIX = /\.git$/iu;
 
 export const HTTP_OK = 200;
 export const HTTP_CREATED = 201;
@@ -51,9 +52,60 @@ export const resolveToken = (): string | null => {
   return quietExec('gh', ['auth', 'token']);
 };
 
+const repositoryFromPath = (path: string): string | null => {
+  const parts = path.split('/');
+  if (parts.length !== 2) {
+    return null;
+  }
+  const owner = parts[0] as string;
+  const rawRepository = parts[1] as string;
+  const repository = rawRepository.replace(GIT_SUFFIX, '');
+  if (
+    !(GITHUB_OWNER.test(owner) && GITHUB_REPOSITORY.test(repository)) ||
+    repository === '.' ||
+    repository === '..'
+  ) {
+    return null;
+  }
+  return `${owner}/${repository}`;
+};
+
+export const githubRepositoryFromRemote = (remote: string): string | null => {
+  const scpPath = SCP_GITHUB_REMOTE.exec(remote)?.groups?.path;
+  if (scpPath !== undefined) {
+    return repositoryFromPath(scpPath);
+  }
+  let url: URL;
+  try {
+    url = new URL(remote);
+  } catch {
+    return null;
+  }
+  const supportedHttps =
+    url.protocol === 'https:' &&
+    url.username.length === 0 &&
+    url.password.length === 0 &&
+    url.port.length === 0;
+  const supportedSsh =
+    url.protocol === 'ssh:' &&
+    url.username === 'git' &&
+    url.password.length === 0 &&
+    (url.port.length === 0 || url.port === '22');
+  if (
+    url.hostname !== 'github.com' ||
+    !(supportedHttps || supportedSsh) ||
+    url.search.length > 0 ||
+    url.hash.length > 0 ||
+    !url.pathname.startsWith('/')
+  ) {
+    return null;
+  }
+  return repositoryFromPath(url.pathname.slice(1));
+};
+
 export const resolveGithubRepo = (consumer: string): string | null => {
   const url = quietExec('git', ['-C', consumer, 'remote', 'get-url', 'origin']);
-  return url?.match(GITHUB_REMOTE_PATTERN)?.groups?.repo ?? null;
+  return url === null ? null : githubRepositoryFromRemote(url);
 };
 
 export type ApiResponse = { readonly status: number; readonly body: unknown };
