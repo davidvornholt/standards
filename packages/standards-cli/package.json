@@ -25,6 +25,7 @@
     "src/github-api.ts",
     "src/github-apply.ts",
     "src/github-commands.ts",
+    "src/github-custom-protection-response.ts",
     "src/github-diff.ts",
     "src/github-environment-apply.ts",
     "src/github-environment-response.ts",

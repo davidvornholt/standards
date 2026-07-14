@@ -69,6 +69,7 @@ describe('published package contract', () => {
       'package/src/github-api.ts',
       'package/src/github-apply.ts',
       'package/src/github-commands.ts',
+      'package/src/github-custom-protection-response.ts',
       'package/src/github-diff.ts',
       'package/src/github-environment-apply.ts',
       'package/src/github-environment-response.ts',

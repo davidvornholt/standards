@@ -3,6 +3,7 @@
 // values are never listed, read, or written.
 
 import { apiError, HTTP_NOT_FOUND, HTTP_OK, request } from './github-api';
+import { decodeCustomProtectionRules } from './github-custom-protection-response';
 import {
   decodeEnvironmentResponse,
   decodePolicyPage,
@@ -12,6 +13,7 @@ const WAIT_TIMER = 'wait_timer';
 const PREVENT_SELF_REVIEW = 'prevent_self_review';
 const DEPLOYMENT_BRANCH_POLICY = 'deployment_branch_policy';
 const DEPLOYMENT_BRANCH_POLICIES = 'deployment_branch_policies';
+const CUSTOM_DEPLOYMENT_PROTECTION_RULES = 'custom_deployment_protection_rules';
 const CUSTOM_BRANCH_POLICIES = 'custom_branch_policies';
 const POLICIES_PER_PAGE = 100;
 
@@ -83,6 +85,31 @@ const fetchDeploymentPolicies = async (
   return { policies: collected, problem: null };
 };
 
+const fetchCustomProtectionRules = async (
+  token: string | null,
+  path: string,
+  name: string,
+): Promise<DeploymentPoliciesRead> => {
+  const response = await request(
+    token,
+    'GET',
+    `${path}/deployment_protection_rules`,
+  );
+  if (response.status !== HTTP_OK) {
+    return {
+      policies: null,
+      problem: apiError(
+        `listing custom deployment protection rules for environment "${name}"`,
+        response,
+      ),
+    };
+  }
+  const decoded = decodeCustomProtectionRules(response.body, name);
+  return decoded.value === null
+    ? { policies: null, problem: decoded.problem }
+    : { policies: decoded.value.rules, problem: null };
+};
+
 export const fetchLiveEnvironment = async (
   token: string | null,
   repo: string,
@@ -121,6 +148,18 @@ export const fetchLiveEnvironment = async (
     }
     deploymentBranchPolicies = policies.policies;
   }
+  const customProtectionRules = await fetchCustomProtectionRules(
+    token,
+    path,
+    name,
+  );
+  if (customProtectionRules.policies === null) {
+    return {
+      environment: null,
+      missing: false,
+      problem: customProtectionRules.problem,
+    };
+  }
   return {
     environment: {
       name,
@@ -129,6 +168,7 @@ export const fetchLiveEnvironment = async (
       reviewers: decoded.value.reviewers,
       [DEPLOYMENT_BRANCH_POLICY]: branchPolicy,
       [DEPLOYMENT_BRANCH_POLICIES]: deploymentBranchPolicies,
+      [CUSTOM_DEPLOYMENT_PROTECTION_RULES]: customProtectionRules.policies,
     },
     missing: false,
     problem: null,

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { decodeCustomProtectionRules } from './github-custom-protection-response';
 import {
   decodeEnvironmentResponse,
   decodePolicyPage,
@@ -68,6 +69,34 @@ describe('decodePolicyPage', () => {
           'production',
         ).problem,
       ).toContain('invalid deployment-policy page');
+    }
+  });
+});
+
+describe('decodeCustomProtectionRules', () => {
+  it('decodes enabled rules with positive-safe rule and app identities', () => {
+    const decoded = decodeCustomProtectionRules(
+      JSON.parse(
+        '{"total_count":1,"custom_deployment_protection_rules":[{"app":{"id":9,"slug":"deployment-gate"},"enabled":true,"id":7}]}',
+      ) as unknown,
+      'production',
+    );
+
+    expect(decoded).toEqual({
+      problem: null,
+      value: {
+        rules: [{ app: { id: 9, slug: 'deployment-gate' }, id: 7 }],
+      },
+    });
+  });
+
+  it('fails closed on malformed counts, ids, enabled state, or app identity', () => {
+    const invalidBodies = JSON.parse(
+      '[{"total_count":1,"custom_deployment_protection_rules":[]},{"total_count":1,"custom_deployment_protection_rules":[{"app":{"id":9,"slug":"gate"},"enabled":true,"id":0}]},{"total_count":1,"custom_deployment_protection_rules":[{"app":{"id":9,"slug":"gate"},"enabled":false,"id":7}]},{"total_count":1,"custom_deployment_protection_rules":[{"app":{"id":0,"slug":""},"enabled":true,"id":7}]}]',
+    ) as ReadonlyArray<unknown>;
+
+    for (const body of invalidBodies) {
+      expect(decodeCustomProtectionRules(body, 'production').value).toBeNull();
     }
   });
 });

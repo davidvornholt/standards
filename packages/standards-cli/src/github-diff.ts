@@ -177,6 +177,7 @@ const ENVIRONMENT_COMPARED_KEYS = [
   'reviewers',
   'deployment_branch_policy',
   'deployment_branch_policies',
+  'custom_deployment_protection_rules',
 ] as const;
 
 export const diffEnvironment = (
@@ -186,7 +187,9 @@ export const diffEnvironment = (
   const name = String(declared.name);
   const drifted: Array<string> = [];
   for (const key of ENVIRONMENT_COMPARED_KEYS) {
-    if (!subsetMatches(declared[key], live[key])) {
+    const declaredValue =
+      key === 'custom_deployment_protection_rules' ? [] : declared[key];
+    if (!subsetMatches(declaredValue, live[key])) {
       drifted.push(
         `environment "${name}": ${key} differs from the declared configuration`,
       );

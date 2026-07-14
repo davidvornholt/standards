@@ -13,6 +13,8 @@ import {
 import { diffRuleset } from './github-diff';
 import type { GithubSettings } from './github-settings';
 
+type ReportAction = (action: string) => void;
+
 const reconcileRuleset = async (
   token: string,
   repo: string,
@@ -69,6 +71,7 @@ export const applyRulesets = async (
   token: string,
   repo: string,
   declared: GithubSettings,
+  reportAction: ReportAction = () => undefined,
 ): Promise<ReadonlyArray<string>> => {
   const live = await fetchLiveRulesets(token, repo);
   if (live.rulesets === null) {
@@ -87,12 +90,15 @@ export const applyRulesets = async (
     );
     if (action !== null) {
       actions.push(action);
+      reportAction(action);
     }
   }
   for (const [name, liveRuleset] of liveByName) {
     if (!declaredNames.has(name)) {
       // biome-ignore lint/performance/noAwaitInLoops: GitHub advises against concurrent write requests (secondary rate limits); mutations run sequentially on purpose.
-      actions.push(await deleteRuleset(token, repo, name, liveRuleset));
+      const action = await deleteRuleset(token, repo, name, liveRuleset);
+      actions.push(action);
+      reportAction(action);
     }
   }
   return actions;

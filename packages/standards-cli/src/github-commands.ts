@@ -1,5 +1,4 @@
-// `standards github --check` verifies the live GitHub repository against the
-// declared settings and fails closed on any drift or API error. `standards
+// Verifies live GitHub settings against the declaration and fails closed on drift or API error. `standards
 // github --apply` converges the live repository; it needs an admin token, so
 // it runs locally rather than in CI.
 
@@ -57,13 +56,12 @@ const applyEnvironments = async (
   token: string,
   repo: string,
   environments: GithubSettings['environments'],
-): Promise<ReadonlyArray<string>> => {
-  const actions: Array<string> = [];
+  reportAction: (action: string) => void,
+): Promise<void> => {
   for (const environment of environments) {
     // biome-ignore lint/performance/noAwaitInLoops: GitHub write requests are intentionally serialized to avoid secondary rate limits.
-    actions.push(...(await applyEnvironment(token, repo, environment)));
+    await applyEnvironment(token, repo, environment, reportAction);
   }
-  return actions;
 };
 
 const collectLiveDrift = async (
@@ -155,7 +153,11 @@ export const runGithubApply = async (consumer: string): Promise<boolean> => {
     return false;
   }
   try {
-    const actions: Array<string> = [];
+    let actionCount = 0;
+    const reportAction = (action: string): void => {
+      actionCount += 1;
+      console.log(`  ${action}`);
+    };
     const repoResponse = await request(token, 'GET', `/repos/${repo}`);
     if (repoResponse.status !== HTTP_OK || !isRecord(repoResponse.body)) {
       throw new Error(apiError(`reading repository ${repo}`, repoResponse));
@@ -174,17 +176,17 @@ export const runGithubApply = async (consumer: string): Promise<boolean> => {
       if (patched.status !== HTTP_OK) {
         throw new Error(apiError('updating repository settings', patched));
       }
-      actions.push('updated repository merge settings');
+      reportAction('updated repository merge settings');
     }
-    actions.push(...(await applyRulesets(token, repo, declared.merged)));
-    actions.push(
-      ...(await applyEnvironments(token, repo, declared.merged.environments)),
+    await applyRulesets(token, repo, declared.merged, reportAction);
+    await applyEnvironments(
+      token,
+      repo,
+      declared.merged.environments,
+      reportAction,
     );
-    for (const action of actions) {
-      console.log(`  ${action}`);
-    }
     console.log(
-      actions.length === 0
+      actionCount === 0
         ? 'standards github: already converged; no changes'
         : `standards github: apply complete for ${repo}`,
     );
