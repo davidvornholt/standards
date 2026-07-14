@@ -59,6 +59,12 @@ const SYNC_POLICY_CONTRACT_FILE = `${SYNC_POLICY_CONTROLLER_PATH}/index.mjs`;
 const SYNC_POLICY_CONTROLLER_FILES = ['action.yml', 'index.mjs'] as const;
 const SYNC_POLICY_GENERATION_EXPORT =
   /\bSYNC_POLICY_CONTRACT_VERSION=(?<version>\d+)\b/u;
+const REPOSITORY_OWNED_CONTROL_SEAMS = [
+  LOCAL_SETTINGS_FILE,
+  'AGENTS.local.md',
+  'biome.jsonc',
+  SYNC_POLICY_FILE,
+] as const;
 
 // Characters of a sha256 hex digest shown in drift reports; enough to identify.
 const HASH_PREVIEW_LENGTH = 12;
@@ -117,6 +123,25 @@ const sha256 = (buf: Buffer): string =>
   createHash('sha256').update(buf).digest('hex');
 
 const toPosix = (p: string): string => p.split(sep).join('/');
+
+const isUnder = (path: string, parent: string): boolean =>
+  path === parent || path.startsWith(`${parent}/`);
+
+const assertNoRepositoryOwnedControlSeams = (
+  paths: ReadonlyArray<string>,
+  label: string,
+): void => {
+  for (const path of paths) {
+    const seam = REPOSITORY_OWNED_CONTROL_SEAMS.find(
+      (candidate) => isUnder(path, candidate) || isUnder(candidate, path),
+    );
+    if (seam !== undefined) {
+      throw new Error(
+        `${label} "${path}" overlaps repository-owned control seam "${seam}"`,
+      );
+    }
+  }
+};
 
 const assertSafeRelativePath = (path: string, label: string): void => {
   const normalized = normalize(path);
@@ -180,6 +205,10 @@ const assertCompatibleSyncSource = (
       `Selected standards source must declare syncPolicyContractVersion: ${SYNC_POLICY_CONTRACT_VERSION}; choose a ref that includes the sync-policy controller contract`,
     );
   }
+  assertNoRepositoryOwnedControlSeams(
+    manifest.paths,
+    'Selected standards source managed path',
+  );
   if (!manifest.paths.includes(SYNC_POLICY_CONTROLLER_PATH)) {
     throw new Error(
       `syncPolicyContractVersion ${SYNC_POLICY_CONTRACT_VERSION} requires managed path "${SYNC_POLICY_CONTROLLER_PATH}"`,
@@ -394,9 +423,6 @@ const listManaged = async (
   await Promise.all(paths.map((p) => walk(join(dir, p), dir, out)));
   return out;
 };
-
-const isUnder = (a: string, b: string): boolean =>
-  a === b || a.startsWith(`${b}/`);
 
 const pruneEmptyParents = async (
   deletedFile: string,
@@ -647,6 +673,10 @@ const runCheck = async (
   for (const rel of Object.keys(lock.files)) {
     assertSafeRelativePath(rel, 'sync-standards.lock file');
   }
+  assertNoRepositoryOwnedControlSeams(
+    Object.keys(lock.files),
+    'sync-standards.lock file',
+  );
   const lockedRef = lock.ref ?? DEFAULT_SYNC_POLICY.ref;
   const policyMatchesLock = policy === null || lockedRef === policy.ref;
   if (policy !== null && !policyMatchesLock) {

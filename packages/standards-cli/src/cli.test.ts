@@ -3,6 +3,7 @@
 
 import { afterEach, describe, expect, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
@@ -76,6 +77,8 @@ const read = (root: string, rel: string): string =>
   readFileSync(join(root, rel), 'utf8');
 const readLock = (root: string): Lock =>
   JSON.parse(read(root, 'sync-standards.lock')) as Lock;
+const sha256 = (value: string): string =>
+  createHash('sha256').update(value).digest('hex');
 const setStandardsVersion = (root: string, version: string): void => {
   const packageJson = JSON.parse(read(root, 'package.json')) as {
     devDependencies: Record<string, string>;
@@ -572,6 +575,65 @@ describe('sync policy integration', () => {
 });
 
 describe('sync source compatibility', () => {
+  it('rejects a source that claims repo-owned policy before mutation and check', () => {
+    const up = buildUpstream();
+    const { consumer } = initConsumer(up);
+    const lockBefore = read(consumer, 'sync-standards.lock');
+    const managedBefore = read(consumer, 'managed/a.txt');
+    const controllerBefore = read(consumer, SYNC_POLICY_CONTRACT_PATH);
+    const policyBefore = read(consumer, SYNC_POLICY_FILE);
+    const claimedPolicy = `${JSON.stringify({
+      ref: DEFAULT_SYNC_POLICY.ref,
+      scheduledSync: false,
+    })}\n`;
+    rmSync(join(up, 'template', SYNC_POLICY_FILE));
+    write(up, SYNC_POLICY_FILE, claimedPolicy);
+    write(up, 'managed/a.txt', 'should not apply\n');
+    write(
+      up,
+      'sync-standards.json',
+      JSON.stringify({
+        upstream: up,
+        seedDir: 'template',
+        syncPolicyContractVersion: SYNC_POLICY_CONTRACT_VERSION,
+        paths: [...STD_PATHS, SYNC_POLICY_FILE],
+      }),
+    );
+
+    const result = sync(up, consumer);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      `repository-owned control seam "${SYNC_POLICY_FILE}"`,
+    );
+    expect(read(consumer, 'managed/a.txt')).toBe(managedBefore);
+    expect(read(consumer, SYNC_POLICY_CONTRACT_PATH)).toBe(controllerBefore);
+    expect(read(consumer, SYNC_POLICY_FILE)).toBe(policyBefore);
+    expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
+
+    write(consumer, SYNC_POLICY_FILE, claimedPolicy);
+    const previousLock = JSON.parse(lockBefore) as Lock;
+    const claimedLock = {
+      ...previousLock,
+      files: {
+        ...previousLock.files,
+        [SYNC_POLICY_FILE]: sha256(claimedPolicy),
+      },
+    };
+    write(
+      consumer,
+      'sync-standards.lock',
+      `${JSON.stringify(claimedLock, null, 2)}\n`,
+    );
+    const check = run(consumer, ['check', '--dir', consumer]);
+    expect(check.status).toBe(1);
+    expect(check.stderr).toContain(
+      `repository-owned control seam "${SYNC_POLICY_FILE}"`,
+    );
+  });
+});
+
+describe('sync controller compatibility', () => {
   it('rejects a v1 source that omits a managed controller boundary', () => {
     const up = buildUpstream();
     const { consumer } = initConsumer(up);

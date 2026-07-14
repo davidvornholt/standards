@@ -147,6 +147,9 @@ describe('standards sync documentation', () => {
       expect(documentation).toContain('protected `standards-sync`');
       expect(documentation).toContain('repository dispatch');
       expect(documentation).toContain('syncPolicyContractVersion');
+      expect(documentation).toContain(
+        'repository-owned control seams `sync-standards.local.json`, `AGENTS.local.md`, `biome.jsonc`, or `.github/settings.local.json`',
+      );
       expect(documentation).toContain('STANDARDS_SYNC_ENVIRONMENT_TOKEN');
       expect(documentation).toContain('admits protected branches generally');
       expect(documentation).toContain(
