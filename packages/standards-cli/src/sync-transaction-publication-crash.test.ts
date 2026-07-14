@@ -19,6 +19,7 @@ import { createTransactionReservation } from './sync-transaction-reservation';
 const fixture = join(import.meta.dir, 'sync-transaction-crash-fixture.ts');
 const OWNER_PUBLICATION = /^\.standards-owner-publication-/u;
 const TRANSACTION_PUBLICATION = /^\.standards-transaction-publication-/u;
+const UNBOUND_OWNER_TAIL = 'OWNER.11111111-1111-4111-8111-111111111111.tmp';
 
 afterEach(cleanupFixtures);
 
@@ -86,6 +87,23 @@ describe('atomic transaction ownership publication', () => {
 
     expect(transactionArtifacts(root)).toEqual([]);
     expect(readFixture(root, 'sync-standards.lock')).toBe('old lock\n');
+  });
+
+  it('preserves an exact-shaped unbound owner tail after journal publication', async () => {
+    const root = setup();
+    expect(crashAt(root, 'after-journal')).toBe('SIGKILL');
+    const actorPath = `.standards-transaction/${UNBOUND_OWNER_TAIL}`;
+    writeFixture(root, actorPath, 'actor owner tail\n');
+
+    const recoverAndAssertPreserved = async (): Promise<void> => {
+      await expect(recover(root)).rejects.toThrow(
+        'Unbound atomic transaction record tail was preserved',
+      );
+      expect(readFixture(root, actorPath)).toBe('actor owner tail\n');
+      expect(readFixture(root, 'sync-standards.lock')).toBe('old lock\n');
+    };
+    await recoverAndAssertPreserved();
+    await recoverAndAssertPreserved();
   });
 
   it('cleans an owner publication token after its active inode is gone', async () => {

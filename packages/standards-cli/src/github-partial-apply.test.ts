@@ -95,7 +95,12 @@ describe('partial GitHub apply reporting', () => {
         const url = String(input);
         const method = init?.method ?? 'GET';
         if (method === 'PATCH') {
-          return Promise.resolve(response(HTTP_OK, {}));
+          return Promise.resolve(
+            response(
+              HTTP_OK,
+              JSON.parse('{"allow_auto_merge":true}') as unknown,
+            ),
+          );
         }
         if (method === 'PUT') {
           return Promise.resolve(

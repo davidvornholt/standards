@@ -6,7 +6,7 @@ import {
   unpublishedArtifactNames,
 } from './sync-transaction-artifact-cleanup';
 import {
-  recoverAtomicPublicationTails,
+  assertNoUnboundAtomicPublicationTails,
   removeBoundAtomicPartialTails,
 } from './sync-transaction-atomic-recovery';
 import {
@@ -159,7 +159,7 @@ const recoverWithoutReservation = async (
   input: PublicationRecoveryInput,
 ): Promise<TransactionOwner | null> => {
   const { root, rootDirectory, transaction } = input;
-  await recoverAtomicPublicationTails(transaction, TRANSACTION_OWNER);
+  await assertNoUnboundAtomicPublicationTails(transaction, TRANSACTION_OWNER);
   const owner = await readTransactionOwner(transaction);
   assertTransactionOwner(owner, root.identity, transaction);
   if (await isUnpublishedTransaction(transaction)) {

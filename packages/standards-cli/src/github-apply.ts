@@ -9,7 +9,7 @@ import {
   HTTP_OK,
   request,
 } from './github-api';
-import { diffRuleset } from './github-diff';
+import { diffRuleset, diffRulesets } from './github-diff';
 import { fetchLiveRulesets, type LiveRulesets } from './github-rulesets';
 import type { GithubSettings } from './github-settings';
 
@@ -75,6 +75,51 @@ type ApplyRulesetsInput = {
   readonly token: string;
 };
 
+const rulesetsOrThrow = (
+  live: LiveRulesets,
+  context: string,
+): ReadonlyArray<Record<string, unknown>> => {
+  if (live.rulesets === null) {
+    throw new Error(`${context}: ${live.problem ?? 'unable to read rulesets'}`);
+  }
+  return live.rulesets;
+};
+
+const assertDeclaredRulesetsConverged = (
+  declared: GithubSettings,
+  liveRulesets: ReadonlyArray<Readonly<Record<string, unknown>>>,
+): void => {
+  const liveByName = new Map(
+    liveRulesets.map((ruleset) => [String(ruleset.name), ruleset]),
+  );
+  const problems = declared.rulesets.flatMap((ruleset) => {
+    const liveRuleset = liveByName.get(String(ruleset.name));
+    if (liveRuleset === undefined) {
+      return [`ruleset "${ruleset.name}" is missing after apply`];
+    }
+    const diff = diffRuleset(ruleset, liveRuleset);
+    return [...diff.drifted, ...diff.unverifiable];
+  });
+  if (problems.length > 0) {
+    throw new Error(
+      `declared rulesets did not converge after apply: ${problems.join('; ')}`,
+    );
+  }
+};
+
+const assertExactRulesetState = (
+  declared: GithubSettings,
+  liveRulesets: ReadonlyArray<Readonly<Record<string, unknown>>>,
+): void => {
+  const diff = diffRulesets(declared.rulesets, liveRulesets);
+  const problems = [...diff.drifted, ...diff.unverifiable];
+  if (problems.length > 0) {
+    throw new Error(
+      `rulesets did not converge after apply: ${problems.join('; ')}`,
+    );
+  }
+};
+
 export const applyPrefetchedRulesets = async ({
   declared,
   live,
@@ -82,12 +127,13 @@ export const applyPrefetchedRulesets = async ({
   repo,
   token,
 }: ApplyRulesetsInput): Promise<ReadonlyArray<string>> => {
-  if (live.rulesets === null) {
-    throw new Error(live.problem ?? 'unable to read rulesets');
-  }
-  const liveByName = new Map(live.rulesets.map((r) => [String(r.name), r]));
+  const initialRulesets = rulesetsOrThrow(live, 'reading initial rulesets');
+  const liveByName = new Map(
+    initialRulesets.map((ruleset) => [String(ruleset.name), ruleset]),
+  );
   const declaredNames = new Set(declared.rulesets.map((r) => String(r.name)));
   const actions: Array<string> = [];
+  let declaredMutationOccurred = false;
   for (const ruleset of declared.rulesets) {
     // biome-ignore lint/performance/noAwaitInLoops: GitHub advises against concurrent write requests (secondary rate limits); mutations run sequentially on purpose.
     const action = await reconcileRuleset(
@@ -97,18 +143,44 @@ export const applyPrefetchedRulesets = async ({
       liveByName.get(String(ruleset.name)),
     );
     if (action !== null) {
+      declaredMutationOccurred = true;
       actions.push(action);
       reportAction(action);
     }
   }
-  for (const [name, liveRuleset] of liveByName) {
+  const hasUndeclaredCandidate = [...liveByName.keys()].some(
+    (name) => !declaredNames.has(name),
+  );
+  if (!(declaredMutationOccurred || hasUndeclaredCandidate)) {
+    return actions;
+  }
+  const beforeDeletion = rulesetsOrThrow(
+    await fetchLiveRulesets(token, repo, true),
+    'verifying declared rulesets before deletion',
+  );
+  assertDeclaredRulesetsConverged(declared, beforeDeletion);
+  const freshByName = new Map(
+    beforeDeletion.map((ruleset) => [String(ruleset.name), ruleset]),
+  );
+  let deletionOccurred = false;
+  for (const [name, liveRuleset] of freshByName) {
     if (!declaredNames.has(name)) {
       // biome-ignore lint/performance/noAwaitInLoops: GitHub advises against concurrent write requests (secondary rate limits); mutations run sequentially on purpose.
       const action = await deleteRuleset(token, repo, name, liveRuleset);
+      deletionOccurred = true;
       actions.push(action);
       reportAction(action);
     }
   }
+  if (!deletionOccurred) {
+    assertExactRulesetState(declared, beforeDeletion);
+    return actions;
+  }
+  const finalRulesets = rulesetsOrThrow(
+    await fetchLiveRulesets(token, repo, true),
+    'verifying final ruleset state',
+  );
+  assertExactRulesetState(declared, finalRulesets);
   return actions;
 };
 

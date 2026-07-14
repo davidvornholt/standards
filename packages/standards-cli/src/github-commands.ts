@@ -11,12 +11,43 @@ import { applyDefaultBranchProtection } from './github-default-branch-apply';
 import { diffRepositorySettings } from './github-diff';
 import { applyPrefetchedEnvironment } from './github-environment-apply';
 import { diffGithubLiveState, readGithubLiveState } from './github-live-state';
+import { decodeLiveRepositorySettings } from './github-repository-settings';
+import { type GithubSettings, isRecord } from './github-settings';
 
 const reportProblems = (problems: ReadonlyArray<string>): void => {
   console.error(
     `standards github: ${problems.length} problem(s) with declared GitHub settings:`,
   );
   console.error(problems.map((problem) => `  - ${problem}`).join('\n'));
+};
+
+const assertRepositoryUpdateConverged = (
+  declared: GithubSettings,
+  response: unknown,
+): void => {
+  if (!isRecord(response)) {
+    throw new Error(
+      'updating repository settings: GitHub returned an invalid repository response',
+    );
+  }
+  const decoded = decodeLiveRepositorySettings(
+    response,
+    declared.repository,
+    true,
+  );
+  const diff = diffRepositorySettings(declared.repository, decoded.settings);
+  const problems = [
+    ...decoded.problems,
+    ...diff.drifted,
+    ...diff.unverifiable.map(
+      (key) => `repository setting "${key}" remained unverifiable`,
+    ),
+  ];
+  if (problems.length > 0) {
+    throw new Error(
+      `updating repository settings did not prove convergence: ${problems.join('; ')}`,
+    );
+  }
 };
 
 export const runGithubCheck = async (consumer: string): Promise<boolean> => {
@@ -110,6 +141,7 @@ export const runGithubApply = async (consumer: string): Promise<boolean> => {
       if (patched.status !== HTTP_OK) {
         throw new Error(apiError('updating repository settings', patched));
       }
+      assertRepositoryUpdateConverged(declared.merged, patched.body);
       reportAction('updated repository merge settings');
     }
     if (

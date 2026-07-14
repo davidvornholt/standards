@@ -58,6 +58,18 @@ export const recoverAtomicPublicationTails = async (
   await removeNames(directory, tails);
 };
 
+export const assertNoUnboundAtomicPublicationTails = async (
+  directory: PinnedDirectory,
+  finalName: string,
+): Promise<void> => {
+  const tails = await snapshotTails(directory, finalName);
+  if (tails.size > 0) {
+    throw new Error(
+      `Unbound atomic transaction record tail was preserved: ${[...tails.keys()].join(', ')}`,
+    );
+  }
+};
+
 export const removeBoundAtomicPartialTails = async (
   directory: PinnedDirectory,
   finalName: string,
