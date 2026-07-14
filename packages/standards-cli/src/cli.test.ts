@@ -6,10 +6,12 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -301,6 +303,19 @@ describe('init', () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('kept seed.txt (already present)');
     expect(read(consumer, 'seed.txt')).toBe('mine\n');
+  });
+
+  it('keeps a pre-existing real directory at a seed destination', () => {
+    const up = buildUpstream();
+    const consumer = mkTmp('sync-cons-');
+    mkdirSync(join(consumer, 'seed.txt'));
+
+    const result = run(consumer, ['init', '--from', up, '--dir', consumer]);
+
+    expect(result.status).toBe(0);
+    expect(lstatSync(join(consumer, 'seed.txt')).isDirectory()).toBe(true);
+    expect(read(consumer, 'managed/a.txt')).toBe('alpha\n');
+    expect(readLock(consumer).files['managed/a.txt']).toBeDefined();
   });
 
   it('refuses to re-initialize when a lock already exists', () => {
@@ -1385,6 +1400,218 @@ describe('unknown command', () => {
     const result = run(consumer, ['bogus', '--dir', consumer]);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('Unknown command');
+  });
+});
+
+describe('source filesystem boundary', () => {
+  it('rejects a source file symlink before a mixed sync writes anything', () => {
+    const up = buildUpstream();
+    const { consumer } = initConsumer(up);
+    const victimRoot = mkTmp('sync-victim-');
+    write(victimRoot, 'victim.txt', 'external\n');
+    const lockBefore = read(consumer, 'sync-standards.lock');
+    write(up, 'managed/a.txt', 'changed\n');
+    rmSync(join(up, 'managed/b.txt'));
+    symlinkSync(join(victimRoot, 'victim.txt'), join(up, 'managed/b.txt'));
+
+    const result = sync(up, consumer);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('must not be a symbolic link');
+    expect(read(consumer, 'managed/a.txt')).toBe('alpha\n');
+    expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
+    expect(read(victimRoot, 'victim.txt')).toBe('external\n');
+  });
+
+  it('rejects source managed-directory and seed-directory symlinks', () => {
+    for (const target of ['managed', 'template']) {
+      const up = buildUpstream();
+      const consumer = mkTmp('sync-cons-');
+      const victimRoot = mkTmp('sync-victim-');
+      write(victimRoot, 'victim.txt', 'external\n');
+      rmSync(join(up, target), { recursive: true });
+      symlinkSync(victimRoot, join(up, target));
+
+      const result = run(consumer, ['init', '--from', up, '--dir', consumer]);
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('must not be a symbolic link');
+      expect(existsSync(join(consumer, 'sync-standards.lock'))).toBe(false);
+      expect(existsSync(join(consumer, 'managed/a.txt'))).toBe(false);
+      expect(read(victimRoot, 'victim.txt')).toBe('external\n');
+    }
+  });
+
+  it('rejects a source seed-file symlink before init writes any seed', () => {
+    const up = buildUpstream();
+    const consumer = mkTmp('sync-cons-');
+    const victimRoot = mkTmp('sync-victim-');
+    write(victimRoot, 'victim.txt', 'external\n');
+    rmSync(join(up, 'template/seed.txt'));
+    symlinkSync(join(victimRoot, 'victim.txt'), join(up, 'template/seed.txt'));
+
+    const result = run(consumer, ['init', '--from', up, '--dir', consumer]);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('must not be a symbolic link');
+    expect(existsSync(join(consumer, 'package.json'))).toBe(false);
+    expect(existsSync(join(consumer, 'sync-standards.lock'))).toBe(false);
+    expect(read(victimRoot, 'victim.txt')).toBe('external\n');
+  });
+});
+
+describe('consumer sync filesystem boundary', () => {
+  it('rejects a consumer file symlink before a mixed update', () => {
+    const up = buildUpstream();
+    const { consumer } = initConsumer(up);
+    const victimRoot = mkTmp('sync-victim-');
+    write(victimRoot, 'victim.txt', 'external\n');
+    const lockBefore = read(consumer, 'sync-standards.lock');
+    rmSync(join(consumer, 'managed/a.txt'));
+    symlinkSync(
+      join(victimRoot, 'victim.txt'),
+      join(consumer, 'managed/a.txt'),
+    );
+    write(up, 'managed/a.txt', 'changed a\n');
+    write(up, 'managed/b.txt', 'changed b\n');
+
+    const result = sync(up, consumer);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('must not be a symbolic link');
+    expect(read(consumer, 'managed/b.txt')).toBe('beta\n');
+    expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
+    expect(read(victimRoot, 'victim.txt')).toBe('external\n');
+  });
+
+  it('rejects dangling file and parent symlinks for creates', () => {
+    for (const parentLink of [false, true]) {
+      const up = buildUpstream(
+        parentLink ? [...STD_PATHS, 'new-managed'] : STD_PATHS,
+      );
+      const { consumer } = initConsumer(up);
+      const victimRoot = mkTmp('sync-victim-');
+      const lockBefore = read(consumer, 'sync-standards.lock');
+      write(up, 'managed/new.txt', 'new\n');
+      write(up, 'managed/b.txt', 'changed\n');
+      if (parentLink) {
+        symlinkSync(victimRoot, join(consumer, 'new-managed'));
+        write(up, 'new-managed/new.txt', 'new\n');
+      } else {
+        symlinkSync(
+          join(victimRoot, 'missing.txt'),
+          join(consumer, 'managed/new.txt'),
+        );
+      }
+
+      const result = sync(up, consumer);
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('must not be a symbolic link');
+      expect(read(consumer, 'managed/b.txt')).toBe('beta\n');
+      expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
+      expect(existsSync(join(victimRoot, 'missing.txt'))).toBe(false);
+      expect(existsSync(join(victimRoot, 'new.txt'))).toBe(false);
+    }
+  });
+
+  it('rejects a consumer parent symlink before delete or prune', () => {
+    const up = buildUpstream([...STD_PATHS, 'legacy']);
+    write(up, 'legacy/nested/old.txt', 'old\n');
+    const { consumer } = initConsumer(up);
+    const victimRoot = mkTmp('sync-victim-');
+    write(victimRoot, 'nested/old.txt', 'external\n');
+    const lockBefore = read(consumer, 'sync-standards.lock');
+    rmSync(join(up, 'legacy'), { recursive: true });
+    write(
+      up,
+      'sync-standards.json',
+      JSON.stringify({
+        upstream: up,
+        seedDir: 'template',
+        syncPolicyContractVersion: SYNC_POLICY_CONTRACT_VERSION,
+        paths: STD_PATHS,
+      }),
+    );
+    rmSync(join(consumer, 'legacy'), { recursive: true });
+    symlinkSync(victimRoot, join(consumer, 'legacy'));
+    write(up, 'managed/a.txt', 'changed\n');
+
+    const result = sync(up, consumer);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('must not be a symbolic link');
+    expect(read(consumer, 'managed/a.txt')).toBe('alpha\n');
+    expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
+    expect(read(victimRoot, 'nested/old.txt')).toBe('external\n');
+  });
+});
+
+describe('consumer init and check filesystem boundary', () => {
+  it('rejects a lock destination symlink before a managed update', () => {
+    const up = buildUpstream();
+    const { consumer } = initConsumer(up);
+    const victimRoot = mkTmp('sync-victim-');
+    write(victimRoot, 'victim.txt', 'external\n');
+    rmSync(join(consumer, 'sync-standards.lock'));
+    symlinkSync(
+      join(victimRoot, 'victim.txt'),
+      join(consumer, 'sync-standards.lock'),
+    );
+    write(up, 'managed/a.txt', 'changed\n');
+
+    const result = sync(up, consumer);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('must not be a symbolic link');
+    expect(read(consumer, 'managed/a.txt')).toBe('alpha\n');
+    expect(read(victimRoot, 'victim.txt')).toBe('external\n');
+  });
+
+  it('rejects seed destination links before init writes managed files', () => {
+    for (const parentLink of [false, true]) {
+      const up = buildUpstream();
+      const consumer = mkTmp('sync-cons-');
+      const victimRoot = mkTmp('sync-victim-');
+      write(victimRoot, 'victim.txt', 'external\n');
+      if (parentLink) {
+        rmSync(join(up, 'template/seed.txt'));
+        write(up, 'template/config/seed.txt', 'seed\n');
+        symlinkSync(victimRoot, join(consumer, 'config'));
+      } else {
+        symlinkSync(join(victimRoot, 'victim.txt'), join(consumer, 'seed.txt'));
+      }
+
+      const result = run(consumer, ['init', '--from', up, '--dir', consumer]);
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('must not be a symbolic link');
+      expect(existsSync(join(consumer, 'managed/a.txt'))).toBe(false);
+      expect(existsSync(join(consumer, 'sync-standards.lock'))).toBe(false);
+      expect(read(victimRoot, 'victim.txt')).toBe('external\n');
+    }
+  });
+
+  it('rejects managed file and parent symlinks during check', () => {
+    for (const parentLink of [false, true]) {
+      const up = buildUpstream();
+      const { consumer } = initConsumer(up);
+      const victimRoot = mkTmp('sync-victim-');
+      write(victimRoot, 'a.txt', 'external\n');
+      if (parentLink) {
+        rmSync(join(consumer, 'managed'), { recursive: true });
+        symlinkSync(victimRoot, join(consumer, 'managed'));
+      } else {
+        rmSync(join(consumer, 'managed/a.txt'));
+        symlinkSync(join(victimRoot, 'a.txt'), join(consumer, 'managed/a.txt'));
+      }
+
+      const result = run(consumer, ['check', '--dir', consumer]);
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('must not be a symbolic link');
+      expect(read(victimRoot, 'a.txt')).toBe('external\n');
+    }
   });
 });
 

@@ -39,7 +39,10 @@
     "src/github-rulesets.ts",
     "src/github-settings-merge.ts",
     "src/github-settings.ts",
-    "src/sync-policy.ts"
+    "src/sync-filesystem.ts",
+    "src/sync-mutations.ts",
+    "src/sync-policy.ts",
+    "src/sync-source.ts"
   ],
   "scripts": {
     "standards": "cd ../.. && bun packages/standards-cli/src/cli.ts",

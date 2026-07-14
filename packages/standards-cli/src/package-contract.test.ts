@@ -90,7 +90,10 @@ describe('published package contract', () => {
       'package/src/github-rulesets.ts',
       'package/src/github-settings-merge.ts',
       'package/src/github-settings.ts',
+      'package/src/sync-filesystem.ts',
+      'package/src/sync-mutations.ts',
       'package/src/sync-policy.ts',
+      'package/src/sync-source.ts',
     ]);
     const manifestArchive = run([
       'tar',

@@ -21,6 +21,8 @@ Quality gates are deliberately strict so that **agents can verify their work mec
 
 Every file is either **synced** (upstream-owned, read-only in consumers — the list in `sync-standards.json`) or **seeded once** (written by `init` from `template/`, then owned by the repo: the `biome.jsonc` wrapper, `AGENTS.local.md`, `.github/dependabot.yml`, `.sops.yaml`, `secrets/*.example.yaml`, root scaffolding, `README.md`). Secret-shape examples are seeded, not synced, so each repo can extend them to mirror its own real secrets without the next sync clobbering them.
 
+Sync treats the source and consumer as filesystem boundaries: managed and seed trees may contain only real directories and regular files, and symlinks or special nodes anywhere in a source or destination path fail the complete preflight before any planned write or deletion begins.
+
 Because canonical files are read-only, every point of legitimate per-repo variation goes through a wrapper seam: `biome.jsonc` extends `biome.base.jsonc`, `AGENTS.local.md` extends `AGENTS.md`, and `.github/settings.local.json` extends `.github/settings.json` (additively — it can add repository settings, rulesets, and environments but never override canonical ones, including classic default-branch protection).
 
 ## Adopt it

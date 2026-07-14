@@ -2,6 +2,8 @@
 
 CLI for bootstrapping, synchronizing, and validating repositories that consume [davidvornholt/standards](https://github.com/davidvornholt/standards).
 
+The sync engine accepts only real directories and regular files in managed and seed trees. It rejects symlinks and special nodes in source or consumer paths and preflights the complete filesystem plan before writing or deleting anything.
+
 ```sh
 bunx @davidvornholt/standards init
 standards sync

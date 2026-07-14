@@ -11,37 +11,28 @@
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import {
-  existsSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  statSync,
-} from 'node:fs';
-import {
-  cp,
-  mkdir,
-  readdir,
-  readFile,
-  rm,
-  rmdir,
-  stat,
-  writeFile,
-} from 'node:fs/promises';
+import { existsSync, lstatSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import {
-  dirname,
-  isAbsolute,
-  join,
-  normalize,
-  relative,
-  resolve,
-  sep,
-} from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import process from 'node:process';
 import { CANONICAL_SETTINGS_FILE, LOCAL_SETTINGS_FILE } from './github-api';
 import { runGithubApply, runGithubCheck } from './github-commands';
 import { loadGithubSettings } from './github-settings';
+import {
+  assertRepositoryRelativePath,
+  type FileState,
+  inspectRepositoryDirectories,
+  inspectRepositoryFile,
+  inspectRepositoryFiles,
+  inspectRepositoryNode,
+  openRepositoryRoot,
+  type RepositoryRoot,
+} from './sync-filesystem';
+import {
+  applyRepositoryMutations,
+  type PreparedDelete,
+  type PreparedWrite,
+} from './sync-mutations';
 import {
   DEFAULT_SYNC_POLICY,
   inspectSyncPolicy,
@@ -50,6 +41,7 @@ import {
   type SyncPolicy,
   type SyncPolicyInspection,
 } from './sync-policy';
+import { type SourceFile, snapshotRepositoryTrees } from './sync-source';
 
 const { YAML: BunYaml } = await import('bun');
 
@@ -68,6 +60,7 @@ const REPOSITORY_OWNED_CONTROL_SEAMS = [
 
 // Characters of a sha256 hex digest shown in drift reports; enough to identify.
 const HASH_PREVIEW_LENGTH = 12;
+const DEFAULT_FILE_MODE = 0o666;
 
 const GITHUB_PREFIX = 'github:';
 const FULL_COMMIT_SHA = /^[0-9a-fA-F]{40}$/u;
@@ -122,8 +115,6 @@ type CliOptions = {
 const sha256 = (buf: Buffer): string =>
   createHash('sha256').update(buf).digest('hex');
 
-const toPosix = (p: string): string => p.split(sep).join('/');
-
 const isUnder = (path: string, parent: string): boolean =>
   path === parent || path.startsWith(`${parent}/`);
 
@@ -143,21 +134,7 @@ const assertNoRepositoryOwnedControlSeams = (
   }
 };
 
-const assertSafeRelativePath = (path: string, label: string): void => {
-  const normalized = normalize(path);
-  if (
-    path.length === 0 ||
-    path === '.' ||
-    isAbsolute(path) ||
-    path.includes('\\') ||
-    normalized !== path ||
-    path.split('/').includes('..')
-  ) {
-    throw new Error(
-      `${label} must be a normalized repository-relative path: ${path}`,
-    );
-  }
-};
+const assertSafeRelativePath = assertRepositoryRelativePath;
 
 const parseManifest = (raw: unknown): Manifest => {
   if (typeof raw !== 'object' || raw === null) {
@@ -189,16 +166,17 @@ const parseManifest = (raw: unknown): Manifest => {
   };
 };
 
-const loadManifest = async (path: string): Promise<Manifest> => {
-  if (!existsSync(path)) {
-    throw new Error(`Manifest not found: ${path}`);
+const loadManifest = async (root: RepositoryRoot): Promise<Manifest> => {
+  const state = await inspectRepositoryFile(root, 'sync-standards.json');
+  if (state.contents === null) {
+    throw new Error(`Manifest not found in ${root.label}`);
   }
-  return parseManifest(JSON.parse(await readFile(path, 'utf8')) as unknown);
+  return parseManifest(JSON.parse(state.contents.toString('utf8')) as unknown);
 };
 
 const assertCompatibleSyncSource = (
   manifest: Manifest,
-  sourceDir: string,
+  managed: ReadonlyMap<string, SourceFile>,
 ): void => {
   if (manifest.syncPolicyContractVersion !== SYNC_POLICY_CONTRACT_VERSION) {
     throw new Error(
@@ -215,18 +193,17 @@ const assertCompatibleSyncSource = (
     );
   }
   for (const file of SYNC_POLICY_CONTROLLER_FILES) {
-    const path = join(sourceDir, SYNC_POLICY_CONTROLLER_PATH, file);
-    if (!(existsSync(path) && statSync(path).isFile())) {
+    const path = `${SYNC_POLICY_CONTROLLER_PATH}/${file}`;
+    if (!managed.has(path)) {
       throw new Error(
-        `syncPolicyContractVersion ${SYNC_POLICY_CONTRACT_VERSION} requires controller file "${SYNC_POLICY_CONTROLLER_PATH}/${file}"`,
+        `syncPolicyContractVersion ${SYNC_POLICY_CONTRACT_VERSION} requires controller file "${path}"`,
       );
     }
   }
-  const contract = readFileSync(
-    join(sourceDir, SYNC_POLICY_CONTRACT_FILE),
-    'utf8',
-  );
-  const generation = contract.match(SYNC_POLICY_GENERATION_EXPORT)?.groups
+  const contract = managed
+    .get(SYNC_POLICY_CONTRACT_FILE)
+    ?.contents.toString('utf8');
+  const generation = contract?.match(SYNC_POLICY_GENERATION_EXPORT)?.groups
     ?.version;
   if (generation !== String(SYNC_POLICY_CONTRACT_VERSION)) {
     throw new Error(
@@ -255,26 +232,24 @@ const assertSupportedRef = (ref: string): void => {
   }
 };
 
-const writeSyncPolicy = async (
-  consumer: string,
-  policy: SyncPolicy,
-): Promise<void> => {
-  await writeFile(
-    join(consumer, SYNC_POLICY_FILE),
-    `${JSON.stringify(policy, null, 2)}\n`,
-  );
+const syncPolicyContents = (policy: SyncPolicy): Buffer =>
+  Buffer.from(`${JSON.stringify(policy, null, 2)}\n`);
+
+type LockInspection = {
+  readonly lock: Lock | null;
+  readonly state: FileState;
 };
 
-const readLock = async (dir: string): Promise<Lock | null> => {
-  const path = join(dir, 'sync-standards.lock');
-  if (!existsSync(path)) {
-    return null;
+const inspectLock = async (root: RepositoryRoot): Promise<LockInspection> => {
+  const state = await inspectRepositoryFile(root, 'sync-standards.lock');
+  if (state.contents === null) {
+    return { lock: null, state };
   }
-  const raw = JSON.parse(await readFile(path, 'utf8')) as Lock;
-  return raw;
+  const raw = JSON.parse(state.contents.toString('utf8')) as Lock;
+  return { lock: raw, state };
 };
 
-const writeLock = async (dir: string, lock: Lock): Promise<void> => {
+const lockContents = (lock: Lock): Buffer => {
   const files = Object.fromEntries(
     Object.entries(lock.files).sort(([a], [b]) => a.localeCompare(b)),
   );
@@ -284,10 +259,7 @@ const writeLock = async (dir: string, lock: Lock): Promise<void> => {
     sha: lock.sha,
     files,
   };
-  await writeFile(
-    join(dir, 'sync-standards.lock'),
-    `${JSON.stringify(ordered, null, 2)}\n`,
-  );
+  return Buffer.from(`${JSON.stringify(ordered, null, 2)}\n`);
 };
 
 const assertFetchedCommitObject = (
@@ -332,6 +304,12 @@ const assertFetchedCommitObject = (
 // tags, or full commit shas, so a same-named branch and tag cannot collide.
 const resolveSource = (src: string, ref: string | undefined): Source => {
   if (existsSync(src)) {
+    const sourceInfo = lstatSync(src);
+    if (sourceInfo.isSymbolicLink() || !sourceInfo.isDirectory()) {
+      throw new Error(
+        `Local standards source must be a real directory: ${src}`,
+      );
+    }
     if (ref !== undefined) {
       throw new Error(
         `--ref requires a git URL source; a local path is used as-is: ${src}`,
@@ -392,58 +370,6 @@ const resolveSource = (src: string, ref: string | undefined): Source => {
   return { dir, sha, cleanup };
 };
 
-// Recursively collect files under `abs`, keyed by their POSIX path relative to
-// `base`. Missing paths are skipped so a manifest entry with no files is inert.
-const walk = async (
-  abs: string,
-  base: string,
-  out: Map<string, string>,
-): Promise<void> => {
-  const info = await stat(abs).catch(() => null);
-  if (info === null) {
-    return;
-  }
-  if (info.isDirectory()) {
-    const entries = await readdir(abs);
-    await Promise.all(
-      entries
-        .filter((entry) => !IGNORED_DIRS.has(entry))
-        .map((entry) => walk(join(abs, entry), base, out)),
-    );
-    return;
-  }
-  out.set(toPosix(relative(base, abs)), abs);
-};
-
-const listManaged = async (
-  dir: string,
-  paths: ReadonlyArray<string>,
-): Promise<Map<string, string>> => {
-  const out = new Map<string, string>();
-  await Promise.all(paths.map((p) => walk(join(dir, p), dir, out)));
-  return out;
-};
-
-const pruneEmptyParents = async (
-  deletedFile: string,
-  consumer: string,
-): Promise<void> => {
-  const directory = dirname(deletedFile);
-  if (directory === consumer) {
-    return;
-  }
-  try {
-    await rmdir(directory);
-  } catch (error) {
-    const { code } = error as { readonly code?: unknown };
-    if (code === 'ENOENT' || code === 'ENOTEMPTY') {
-      return;
-    }
-    throw error;
-  }
-  await pruneEmptyParents(directory, consumer);
-};
-
 // Managed (bucket 1) paths and seed (bucket 2) targets must never overlap, or a
 // file would have two owners and `sync` could clobber a repo-owned seed.
 const assertDisjoint = (
@@ -469,66 +395,95 @@ type MirrorResult = {
   readonly tampered: ReadonlyArray<string>;
 };
 
-type MirrorOptions = {
-  readonly manifest: Manifest;
-  readonly srcDir: string;
-  readonly consumer: string;
-  readonly previous: Record<string, string>;
-  readonly dryRun: boolean;
+type PreparedMirror = {
+  readonly deletes: ReadonlyArray<PreparedDelete>;
+  readonly prunePaths: ReadonlyArray<string>;
+  readonly result: MirrorResult;
+  readonly writes: ReadonlyArray<PreparedWrite>;
 };
 
-// Mirror managed files into the consumer, deleting any previously-locked file
-// that no longer exists upstream (three-way reconcile against the lock). When
-// `dryRun` is set nothing is written or deleted; the returned plan is reported.
-const mirror = async ({
-  manifest,
-  srcDir,
-  consumer,
+const requiredState = (
+  states: ReadonlyMap<string, FileState>,
+  rel: string,
+): FileState => {
+  const state = states.get(rel);
+  if (state === undefined) {
+    throw new Error(`Missing filesystem preflight: ${rel}`);
+  }
+  return state;
+};
+
+const prunePathsFor = (files: ReadonlyArray<string>): ReadonlyArray<string> => {
+  const paths = new Set<string>();
+  for (const file of files) {
+    let parent = dirname(file);
+    while (parent !== '.') {
+      paths.add(parent);
+      parent = dirname(parent);
+    }
+  }
+  return [...paths];
+};
+
+const prepareMirror = ({
+  managed,
   previous,
-  dryRun,
-}: MirrorOptions): Promise<MirrorResult> => {
+  states,
+}: {
+  readonly managed: ReadonlyMap<string, SourceFile>;
+  readonly previous: Record<string, string>;
+  readonly states: ReadonlyMap<string, FileState>;
+}): PreparedMirror => {
   for (const rel of Object.keys(previous)) {
     assertSafeRelativePath(rel, 'sync-standards.lock file');
   }
-  const upstream = await listManaged(srcDir, manifest.paths);
+  assertNoRepositoryOwnedControlSeams(
+    Object.keys(previous),
+    'sync-standards.lock file',
+  );
   const next: Record<string, string> = {};
   const created: Array<string> = [];
   const updated: Array<string> = [];
   const tampered: Array<string> = [];
-  await Promise.all(
-    [...upstream].map(async ([rel, abs]) => {
-      const dest = join(consumer, rel);
-      const buf = await readFile(abs);
-      const hash = sha256(buf);
-      const currentHash = existsSync(dest)
-        ? sha256(await readFile(dest))
-        : null;
-      const prev = previous[rel];
-      if (prev !== undefined && currentHash !== null && currentHash !== prev) {
-        tampered.push(rel);
-      }
-      if (currentHash === null) {
-        created.push(rel);
-      } else if (currentHash !== hash) {
-        updated.push(rel);
-      }
-      if (!dryRun) {
-        await mkdir(dirname(dest), { recursive: true });
-        await writeFile(dest, buf);
-      }
-      next[rel] = hash;
-    }),
-  );
-  const deleted = Object.keys(previous).filter(
-    (rel) => !(rel in next) && existsSync(join(consumer, rel)),
-  );
-  if (!dryRun) {
-    await Promise.all(deleted.map((rel) => rm(join(consumer, rel))));
-    await Promise.all(
-      deleted.map((rel) => pruneEmptyParents(join(consumer, rel), consumer)),
-    );
+  const writes: Array<PreparedWrite> = [];
+  for (const [rel, source] of managed) {
+    const before = requiredState(states, rel);
+    const currentHash =
+      before.contents === null ? null : sha256(before.contents);
+    const hash = sha256(source.contents);
+    const previousHash = previous[rel];
+    if (
+      previousHash !== undefined &&
+      currentHash !== null &&
+      currentHash !== previousHash
+    ) {
+      tampered.push(rel);
+    }
+    if (currentHash === null) {
+      created.push(rel);
+    } else if (currentHash !== hash) {
+      updated.push(rel);
+    }
+    writes.push({
+      before,
+      contents: source.contents,
+      mode: before.mode ?? DEFAULT_FILE_MODE,
+      rel,
+    });
+    next[rel] = hash;
   }
-  return { files: next, created, updated, deleted, tampered };
+  const deleted = Object.keys(previous).filter(
+    (rel) => !(rel in next) && requiredState(states, rel).contents !== null,
+  );
+  return {
+    deletes: deleted.map((rel) => ({
+      before: requiredState(states, rel),
+      rel,
+    })),
+    prunePaths: prunePathsFor(deleted),
+    result: { files: next, created, updated, deleted, tampered },
+    writes,
+  };
 };
 
 // Print what a mirror did (or, for a dry run, would do). Real syncs stay quiet
@@ -568,60 +523,118 @@ const reportMirror = (result: MirrorResult, dryRun: boolean): void => {
   }
 };
 
-const seedTargets = async (
-  srcDir: string,
-  seedDir: string,
-): Promise<Map<string, string>> => {
-  const root = join(srcDir, seedDir);
-  const out = new Map<string, string>();
-  await walk(root, root, out);
-  return out;
+type RunInitOptions = {
+  readonly consumer: RepositoryRoot;
+  readonly managed: ReadonlyMap<string, SourceFile>;
+  readonly manifest: Manifest;
+  readonly seeds: ReadonlyMap<string, SourceFile>;
+  readonly src: Source;
 };
 
-const runInit = async (
-  manifest: Manifest,
-  src: Source,
-  consumer: string,
-): Promise<void> => {
-  const seeds = await seedTargets(src.dir, manifest.seedDir);
-  assertDisjoint(manifest.paths, [...seeds.keys()]);
-  await Promise.all(
-    [...seeds].map(async ([rel, abs]) => {
-      const dest = join(consumer, rel);
-      if (existsSync(dest)) {
-        console.log(`  kept ${rel} (already present)`);
-        return;
-      }
-      await mkdir(dirname(dest), { recursive: true });
-      await cp(abs, dest);
-      console.log(`  seeded ${rel}`);
-    }),
+const inspectSeedDestinations = async (
+  consumer: RepositoryRoot,
+  rels: ReadonlyArray<string>,
+): Promise<{
+  readonly existing: ReadonlySet<string>;
+  readonly missing: ReadonlyMap<string, FileState>;
+}> => {
+  const inspections = await Promise.all(
+    rels.map(
+      async (rel) => [rel, await inspectRepositoryNode(consumer, rel)] as const,
+    ),
   );
-  const result = await mirror({
-    manifest,
-    srcDir: src.dir,
-    consumer,
+  const existing = new Set<string>();
+  const missing = new Map<string, FileState>();
+  for (const [rel, node] of inspections) {
+    if (node.info === null) {
+      missing.set(rel, { contents: null, identity: null, mode: null });
+    } else if (node.info.isFile() || node.info.isDirectory()) {
+      existing.add(rel);
+    } else {
+      throw new Error(
+        `${consumer.label} seed destination must be a regular file or directory: ${rel}`,
+      );
+    }
+  }
+  return { existing, missing };
+};
+
+const runInit = async ({
+  consumer,
+  managed,
+  manifest,
+  seeds,
+  src,
+}: RunInitOptions): Promise<void> => {
+  assertDisjoint(manifest.paths, [...seeds.keys()]);
+  const [managedStates, seedDestinations] = await Promise.all([
+    inspectRepositoryFiles(consumer, [
+      ...managed.keys(),
+      'sync-standards.lock',
+    ]),
+    inspectSeedDestinations(consumer, [...seeds.keys()]),
+  ]);
+  const states = new Map([...managedStates, ...seedDestinations.missing]);
+  const lockBefore = requiredState(states, 'sync-standards.lock');
+  if (lockBefore.contents !== null) {
+    throw new Error('sync-standards.lock appeared during init preflight');
+  }
+  const mirror = prepareMirror({
+    managed,
     previous: {},
-    dryRun: false,
+    states,
   });
-  reportMirror(result, false);
-  await writeLock(consumer, {
+  const seedWrites: Array<PreparedWrite> = [...seeds]
+    .filter(([rel]) => !seedDestinations.existing.has(rel))
+    .map(([rel, source]) => ({
+      before: requiredState(states, rel),
+      contents: source.contents,
+      mode: source.mode,
+      rel,
+    }));
+  const lock = lockContents({
     upstream: manifest.upstream,
     ref: DEFAULT_SYNC_POLICY.ref,
     sha: src.sha,
-    files: result.files,
+    files: mirror.result.files,
   });
+  await applyRepositoryMutations({
+    deletes: mirror.deletes,
+    prunes: [],
+    root: consumer,
+    writes: [
+      ...seedWrites,
+      ...mirror.writes,
+      {
+        before: lockBefore,
+        contents: lock,
+        mode: DEFAULT_FILE_MODE,
+        rel: 'sync-standards.lock',
+      },
+    ],
+  });
+  for (const rel of seeds.keys()) {
+    console.log(
+      seedWrites.some((write) => write.rel === rel)
+        ? `  seeded ${rel}`
+        : `  kept ${rel} (already present)`,
+    );
+  }
+  reportMirror(mirror.result, false);
   console.log(
-    `init complete: ${Object.keys(result.files).length} managed file(s) at ${src.sha}`,
+    `init complete: ${Object.keys(mirror.result.files).length} managed file(s) at ${src.sha}`,
   );
 };
 
 type RunSyncOptions = {
   readonly manifest: Manifest;
   readonly src: Source;
-  readonly consumer: string;
+  readonly consumer: RepositoryRoot;
   readonly dryRun: boolean;
+  readonly managed: ReadonlyMap<string, SourceFile>;
+  readonly policyWrite: SyncPolicy | null;
   readonly requestedRef: string;
+  readonly seeds: ReadonlyMap<string, SourceFile>;
 };
 
 const runSync = async ({
@@ -629,30 +642,72 @@ const runSync = async ({
   src,
   consumer,
   dryRun,
+  managed,
+  policyWrite,
   requestedRef,
+  seeds,
 }: RunSyncOptions): Promise<void> => {
-  const seeds = await seedTargets(src.dir, manifest.seedDir);
   assertDisjoint(manifest.paths, [...seeds.keys()]);
-  const lock = await readLock(consumer);
-  const result = await mirror({
-    manifest,
-    srcDir: src.dir,
+  const lockInspection = await inspectLock(consumer);
+  const previous = lockInspection.lock?.files ?? {};
+  const targetPaths = [
+    ...managed.keys(),
+    ...Object.keys(previous),
+    'sync-standards.lock',
+    ...(policyWrite === null ? [] : [SYNC_POLICY_FILE]),
+  ];
+  const states = await inspectRepositoryFiles(consumer, targetPaths);
+  const currentLock = requiredState(states, 'sync-standards.lock');
+  if (
+    !(
+      currentLock.contents === lockInspection.state.contents ||
+      (currentLock.contents !== null &&
+        lockInspection.state.contents !== null &&
+        currentLock.contents.equals(lockInspection.state.contents))
+    )
+  ) {
+    throw new Error('sync-standards.lock changed during sync preflight');
+  }
+  const mirror = prepareMirror({ managed, previous, states });
+  const prunes = await inspectRepositoryDirectories(
     consumer,
-    previous: lock?.files ?? {},
-    dryRun,
-  });
-  reportMirror(result, dryRun);
+    mirror.prunePaths,
+  );
+  reportMirror(mirror.result, dryRun);
   if (dryRun) {
     return;
   }
-  await writeLock(consumer, {
+  const lock = lockContents({
     upstream: manifest.upstream,
     ref: requestedRef,
     sha: src.sha,
-    files: result.files,
+    files: mirror.result.files,
+  });
+  const controlWrites: Array<PreparedWrite> = [
+    {
+      before: currentLock,
+      contents: lock,
+      mode: currentLock.mode ?? DEFAULT_FILE_MODE,
+      rel: 'sync-standards.lock',
+    },
+  ];
+  if (policyWrite !== null) {
+    const before = requiredState(states, SYNC_POLICY_FILE);
+    controlWrites.push({
+      before,
+      contents: syncPolicyContents(policyWrite),
+      mode: before.mode ?? DEFAULT_FILE_MODE,
+      rel: SYNC_POLICY_FILE,
+    });
+  }
+  await applyRepositoryMutations({
+    deletes: mirror.deletes,
+    prunes,
+    root: consumer,
+    writes: [...mirror.writes, ...controlWrites],
   });
   console.log(
-    `sync complete: ${Object.keys(result.files).length} managed file(s) at ${src.sha}`,
+    `sync complete: ${Object.keys(mirror.result.files).length} managed file(s) at ${src.sha}`,
   );
 };
 
@@ -660,10 +715,10 @@ const runSync = async ({
 // local edits or deletions of canonical files. Does NOT detect upstream moving
 // on — see the "known limitation" in the standards repository README.
 const runCheck = async (
-  consumer: string,
+  consumer: RepositoryRoot,
   policy: SyncPolicy | null,
 ): Promise<boolean> => {
-  const lock = await readLock(consumer);
+  const { lock } = await inspectLock(consumer);
   if (lock === null || Object.keys(lock.files).length === 0) {
     console.error(
       'standards: no non-empty sync-standards.lock found; run `standards init` before checking',
@@ -684,19 +739,21 @@ const runCheck = async (
       `standards: sync policy requests ${policy.ref}, but sync-standards.lock records ${lockedRef}; run \`bun standards sync\``,
     );
   }
-  const results = await Promise.all(
-    Object.entries(lock.files).map(async ([rel, hash]) => {
-      const dest = join(consumer, rel);
-      if (!existsSync(dest)) {
-        return `  missing:  ${rel}`;
-      }
-      const current = sha256(await readFile(dest));
-      if (current !== hash) {
-        return `  modified: ${rel} (expected ${hash.slice(0, HASH_PREVIEW_LENGTH)}, found ${current.slice(0, HASH_PREVIEW_LENGTH)})`;
-      }
-      return null;
-    }),
+  const states = await inspectRepositoryFiles(
+    consumer,
+    Object.keys(lock.files),
   );
+  const results = Object.entries(lock.files).map(([rel, hash]) => {
+    const currentContents = requiredState(states, rel).contents;
+    if (currentContents === null) {
+      return `  missing:  ${rel}`;
+    }
+    const current = sha256(currentContents);
+    if (current !== hash) {
+      return `  modified: ${rel} (expected ${hash.slice(0, HASH_PREVIEW_LENGTH)}, found ${current.slice(0, HASH_PREVIEW_LENGTH)})`;
+    }
+    return null;
+  });
   const problems = results.filter((p): p is string => p !== null);
   if (problems.length > 0) {
     console.error(
@@ -717,8 +774,13 @@ const runCheck = async (
   return true;
 };
 
-const readTextIfPresent = async (path: string): Promise<string | null> =>
-  existsSync(path) ? readFile(path, 'utf8') : null;
+const readTextIfPresent = async (
+  root: RepositoryRoot,
+  rel: string,
+): Promise<string | null> => {
+  const state = await inspectRepositoryFile(root, rel);
+  return state.contents?.toString('utf8') ?? null;
+};
 
 const DEPENDABOT_BASELINE_ECOSYSTEMS = ['bun', 'github-actions'] as const;
 const DEPENDABOT_SCHEDULE_INTERVALS = new Set([
@@ -739,21 +801,22 @@ const isDefaultSyncPolicy = (policy: SyncPolicy): boolean =>
   policy.scheduledSync === DEFAULT_SYNC_POLICY.scheduledSync;
 
 const inspectConsumerSyncPolicy = async (
-  consumer: string,
+  consumer: RepositoryRoot,
   options: ConsumerSyncPolicyInspectionOptions,
 ): Promise<SyncPolicyInspection> => {
-  const contractPath = join(consumer, SYNC_POLICY_CONTRACT_FILE);
-  const storedPolicyText = await readTextIfPresent(
-    join(consumer, SYNC_POLICY_FILE),
+  const contractText = await readTextIfPresent(
+    consumer,
+    SYNC_POLICY_CONTRACT_FILE,
   );
+  const storedPolicyText = await readTextIfPresent(consumer, SYNC_POLICY_FILE);
   const effectivePolicyText =
     options.policyText ?? storedPolicyText ?? undefined;
   const result = inspectSyncPolicy({
     packageText:
-      (await readTextIfPresent(join(consumer, 'package.json'))) ?? undefined,
+      (await readTextIfPresent(consumer, 'package.json')) ?? undefined,
     policyText: effectivePolicyText,
   });
-  if (!existsSync(contractPath)) {
+  if (contractText === null) {
     if (options.allowMissingDefaultContract) {
       return {
         ...result,
@@ -789,7 +852,7 @@ const requireValidSyncPolicy = (
 };
 
 const inspectEffectiveSyncPolicy = async (
-  consumer: string,
+  consumer: RepositoryRoot,
   requestedRef: string | undefined,
 ): Promise<SyncPolicy> => {
   const currentInspection = await inspectConsumerSyncPolicy(consumer, {
@@ -982,21 +1045,22 @@ const inspectPackageJson = (
 };
 
 const runDoctor = async (
-  consumer: string,
+  consumer: RepositoryRoot,
   policyInspection: SyncPolicyInspection,
 ): Promise<boolean> => {
   const problems: Array<string> = [...policyInspection.problems];
-  const biome = await readTextIfPresent(join(consumer, 'biome.jsonc'));
+  const biome = await readTextIfPresent(consumer, 'biome.jsonc');
   if (biome === null || !biome.includes('"./biome.base.jsonc"')) {
     problems.push('biome.jsonc must extend "./biome.base.jsonc"');
   }
 
-  if (!existsSync(join(consumer, 'AGENTS.local.md'))) {
+  if ((await readTextIfPresent(consumer, 'AGENTS.local.md')) === null) {
     problems.push('AGENTS.local.md must exist for project-specific guidance');
   }
 
   const dependabot = await readTextIfPresent(
-    join(consumer, '.github/dependabot.yml'),
+    consumer,
+    '.github/dependabot.yml',
   );
   if (dependabot === null) {
     problems.push('.github/dependabot.yml must exist');
@@ -1011,11 +1075,13 @@ const runDoctor = async (
   // The GitHub settings seam only exists once the canonical declaration has
   // been synced in; before that there is nothing to extend.
   const canonicalSettings = await readTextIfPresent(
-    join(consumer, CANONICAL_SETTINGS_FILE),
+    consumer,
+    CANONICAL_SETTINGS_FILE,
   );
   if (canonicalSettings !== null) {
     const localSettings = await readTextIfPresent(
-      join(consumer, LOCAL_SETTINGS_FILE),
+      consumer,
+      LOCAL_SETTINGS_FILE,
     );
     problems.push(
       ...loadGithubSettings(canonicalSettings, localSettings).problems,
@@ -1151,18 +1217,23 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
 };
 
 const runCheckCommand = async (consumer: string): Promise<boolean> => {
-  const policyInspection = await inspectConsumerSyncPolicy(consumer, {
+  const consumerRoot = await openRepositoryRoot(
+    consumer,
+    'consumer repository',
+  );
+  const policyInspection = await inspectConsumerSyncPolicy(consumerRoot, {
     allowMissingDefaultContract: false,
     policyText: undefined,
   });
-  const driftIsClean = await runCheck(consumer, policyInspection.policy);
-  const integrationIsValid = await runDoctor(consumer, policyInspection);
+  const driftIsClean = await runCheck(consumerRoot, policyInspection.policy);
+  const integrationIsValid = await runDoctor(consumerRoot, policyInspection);
   // The GitHub gate activates with the synced declaration and then fails
   // closed: once .github/settings.json exists, an unreachable API or an
   // unreadable origin is a failure, not a skip.
-  const githubIsConverged = existsSync(join(consumer, CANONICAL_SETTINGS_FILE))
-    ? await runGithubCheck(consumer)
-    : true;
+  const githubIsConverged =
+    (await readTextIfPresent(consumerRoot, CANONICAL_SETTINGS_FILE)) === null
+      ? true
+      : await runGithubCheck(consumer);
   return driftIsClean && integrationIsValid && githubIsConverged;
 };
 
@@ -1170,10 +1241,14 @@ const runInitCommand = async (
   consumer: string,
   from: string | undefined,
 ): Promise<void> => {
+  const consumerRoot = await openRepositoryRoot(
+    consumer,
+    'consumer repository',
+  );
   // Refuse before cloning upstream: re-initializing skips the lock, so it
   // would silently overwrite local canonical edits and orphan files that
   // upstream deleted (they leave the lock and no future sync removes them).
-  if (existsSync(join(consumer, 'sync-standards.lock'))) {
+  if ((await inspectLock(consumerRoot)).state.contents !== null) {
     console.error(
       'standards: already initialized (sync-standards.lock exists). Use `bun standards sync` to update.',
     );
@@ -1182,11 +1257,28 @@ const runInitCommand = async (
   }
   const source = resolveSource(from ?? DEFAULT_UPSTREAM, undefined);
   try {
-    const manifest = await loadManifest(
-      join(source.dir, 'sync-standards.json'),
+    const sourceRoot = await openRepositoryRoot(
+      source.dir,
+      'selected standards source',
     );
-    assertCompatibleSyncSource(manifest, source.dir);
-    await runInit(manifest, source, consumer);
+    const manifest = await loadManifest(sourceRoot);
+    const [managed, seeds] = await Promise.all([
+      snapshotRepositoryTrees(sourceRoot, manifest.paths, null, IGNORED_DIRS),
+      snapshotRepositoryTrees(
+        sourceRoot,
+        [manifest.seedDir],
+        manifest.seedDir,
+        IGNORED_DIRS,
+      ),
+    ]);
+    assertCompatibleSyncSource(manifest, managed);
+    await runInit({
+      consumer: consumerRoot,
+      managed,
+      manifest,
+      seeds,
+      src: source,
+    });
   } finally {
     source.cleanup();
   }
@@ -1198,10 +1290,12 @@ const runSyncCommand = async (
   ref: string | undefined,
   dryRun: boolean,
 ): Promise<void> => {
-  const policy = await inspectEffectiveSyncPolicy(consumer, ref);
-  const consumerManifest = await loadManifest(
-    join(consumer, 'sync-standards.json'),
+  const consumerRoot = await openRepositoryRoot(
+    consumer,
+    'consumer repository',
   );
+  const policy = await inspectEffectiveSyncPolicy(consumerRoot, ref);
+  const consumerManifest = await loadManifest(consumerRoot);
   const sourceName = from ?? consumerManifest.upstream;
   const sourceIsLocal = existsSync(sourceName);
   const requestedRef = ref ?? policy.ref;
@@ -1210,20 +1304,31 @@ const runSyncCommand = async (
     sourceIsLocal && ref === undefined ? undefined : requestedRef,
   );
   try {
-    const manifest = await loadManifest(
-      join(source.dir, 'sync-standards.json'),
+    const sourceRoot = await openRepositoryRoot(
+      source.dir,
+      'selected standards source',
     );
-    assertCompatibleSyncSource(manifest, source.dir);
+    const manifest = await loadManifest(sourceRoot);
+    const [managed, seeds] = await Promise.all([
+      snapshotRepositoryTrees(sourceRoot, manifest.paths, null, IGNORED_DIRS),
+      snapshotRepositoryTrees(
+        sourceRoot,
+        [manifest.seedDir],
+        manifest.seedDir,
+        IGNORED_DIRS,
+      ),
+    ]);
+    assertCompatibleSyncSource(manifest, managed);
     await runSync({
       manifest,
       src: source,
-      consumer,
+      consumer: consumerRoot,
       dryRun,
+      managed,
+      policyWrite: ref === undefined ? null : policy,
       requestedRef,
+      seeds,
     });
-    if (!dryRun && ref !== undefined) {
-      await writeSyncPolicy(consumer, policy);
-    }
   } finally {
     source.cleanup();
   }
@@ -1264,11 +1369,15 @@ const main = async (): Promise<void> => {
   }
 
   if (command === 'doctor') {
-    const policyInspection = await inspectConsumerSyncPolicy(consumer, {
+    const consumerRoot = await openRepositoryRoot(
+      consumer,
+      'consumer repository',
+    );
+    const policyInspection = await inspectConsumerSyncPolicy(consumerRoot, {
       allowMissingDefaultContract: false,
       policyText: undefined,
     });
-    if (!(await runDoctor(consumer, policyInspection))) {
+    if (!(await runDoctor(consumerRoot, policyInspection))) {
       process.exitCode = 1;
     }
     return;
