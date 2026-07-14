@@ -132,8 +132,9 @@ describe('default branch protection apply', () => {
   it('creates protection, reports immediately, and verifies normalized readback', async () => {
     const calls: Array<{ body: string | null; method: string }> = [];
     globalThis.fetch = Object.assign(
-      (_input: URL | RequestInfo, init?: RequestInit) => {
+      (input: URL | RequestInfo, init?: RequestInit) => {
         const method = init?.method ?? 'GET';
+        const path = new URL(String(input)).pathname;
         calls.push({
           body: typeof init?.body === 'string' ? init.body : null,
           method,
@@ -141,8 +142,13 @@ describe('default branch protection apply', () => {
         if (method === 'PUT') {
           return Promise.resolve(response(HTTP_OK, {}));
         }
+        if (path === '/repos/owner/repo') {
+          return Promise.resolve(
+            response(HTTP_OK, JSON.parse('{"default_branch":"trunk"}')),
+          );
+        }
         return Promise.resolve(
-          calls.filter((call) => call.method === 'GET').length === 1
+          path === '/repos/owner/repo/branches/trunk'
             ? response(HTTP_OK, {
                 name: 'trunk',
                 protected: true,

@@ -1,5 +1,5 @@
 import { constants } from 'node:fs';
-import { open, unlink } from 'node:fs/promises';
+import { open } from 'node:fs/promises';
 import {
   directoryEntryPath,
   type PinnedDirectory,
@@ -7,6 +7,10 @@ import {
 } from './sync-directory-handles';
 import { identitiesMatch, type NodeIdentity } from './sync-filesystem';
 import { publishAtomicTransactionRecord } from './sync-transaction-atomic-record';
+import {
+  bindAndRemoveEntry,
+  resolveRemovalEntryName,
+} from './sync-transaction-bound-remove';
 import {
   type CleanupReservation,
   type PublicationReservation,
@@ -32,12 +36,15 @@ export const readTransactionReservationEntry = async (
   root: PinnedDirectory,
 ) => {
   const handle = await open(
-    directoryEntryPath(root, TRANSACTION_RESERVATION),
+    directoryEntryPath(
+      root,
+      await resolveRemovalEntryName(root, TRANSACTION_RESERVATION),
+    ),
     constants.O_RDONLY + constants.O_NOFOLLOW + constants.O_NONBLOCK,
   );
   try {
-    const info = await handle.stat();
-    if (!(info.isFile() && info.size <= MAX_BYTES)) {
+    const info = await handle.stat({ bigint: true });
+    if (!(info.isFile() && info.size <= BigInt(MAX_BYTES))) {
       throw new Error('Transaction reservation must be a small regular file');
     }
     return {
@@ -160,6 +167,7 @@ export const removeTransactionReservation = async (
   expectedId: string,
   hooks: {
     readonly afterSync?: () => Promise<void>;
+    readonly afterBind?: () => Promise<void>;
     readonly afterUnlink?: () => Promise<void>;
   } = {},
 ): Promise<void> => {
@@ -169,7 +177,13 @@ export const removeTransactionReservation = async (
   if (!identitiesMatch(before.identity, after.identity)) {
     throw new Error('Transaction reservation changed during cleanup');
   }
-  await unlink(directoryEntryPath(root, TRANSACTION_RESERVATION));
+  await bindAndRemoveEntry({
+    afterBind: hooks.afterBind,
+    directory: root,
+    expected: after.identity,
+    kind: 'file',
+    name: TRANSACTION_RESERVATION,
+  });
   await hooks.afterUnlink?.();
   await syncPinnedDirectory(root);
   await hooks.afterSync?.();

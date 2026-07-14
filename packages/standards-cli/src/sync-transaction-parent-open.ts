@@ -5,6 +5,7 @@ import {
 } from './sync-directory-handles';
 import { pinTarget } from './sync-directory-traversal';
 import type { RepositoryRoot } from './sync-filesystem';
+import { openRemovalBindingDirectory } from './sync-transaction-bound-remove';
 
 const missing = (error: unknown): boolean =>
   (error as { readonly code?: unknown }).code === 'ENOENT';
@@ -38,7 +39,15 @@ export const openCreatedParent = async (
     return { directory, target };
   } catch (error) {
     if (missing(error)) {
-      return { directory: null, target };
+      const directory = await openRemovalBindingDirectory(
+        target.parent,
+        target.name,
+      );
+      if (directory === null) {
+        return { directory: null, target };
+      }
+      opened.push(directory);
+      return { directory, target };
     }
     throw error;
   }

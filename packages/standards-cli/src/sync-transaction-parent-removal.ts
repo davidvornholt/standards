@@ -1,40 +1,21 @@
-import { rmdir, unlink } from 'node:fs/promises';
 import {
-  directoryEntryPath,
-  openPinnedChild,
   type PinnedDirectory,
   type PinnedTarget,
   syncPinnedDirectory,
 } from './sync-directory-handles';
-import { identitiesMatch } from './sync-filesystem';
-import {
-  type CreatedParentBinding,
-  removeParentBinding,
-} from './sync-transaction-parent-binding';
+import { bindAndRemoveEntry } from './sync-transaction-bound-remove';
+import type { CreatedParentBinding } from './sync-transaction-parent-binding';
+import { removeParentBinding } from './sync-transaction-parent-binding-cleanup';
 import {
   assertOnlyCreatedParentMarker,
+  createdParentMarkerIdentity,
   createdParentMarkerName,
-  verifyCreatedParentMarker,
 } from './sync-transaction-parent-state';
 import { removeTransactionReservation } from './sync-transaction-reservation';
 import type {
   MutationFault,
   TransactionJournal,
 } from './sync-transaction-types';
-
-const assertCurrentDirectory = async (
-  target: PinnedTarget,
-  directory: PinnedDirectory,
-): Promise<void> => {
-  const current = await openPinnedChild(target.parent, target.name);
-  try {
-    if (!identitiesMatch(current.identity, directory.identity)) {
-      throw new Error('Created parent changed during cleanup');
-    }
-  } finally {
-    await current.handle.close();
-  }
-};
 
 export const removeCreatedParent = async ({
   binding,
@@ -58,18 +39,27 @@ export const removeCreatedParent = async ({
   readonly target: PinnedTarget;
 }): Promise<void> => {
   const marker = createdParentMarkerName(journal.id);
-  if (await verifyCreatedParentMarker(directory, journal)) {
-    await unlink(directoryEntryPath(directory, marker));
-    await fault('parent-cleanup-marker-unlink', rel, 'after');
+  const markerIdentity = await createdParentMarkerIdentity(directory, journal);
+  if (markerIdentity !== null) {
+    await bindAndRemoveEntry({
+      afterRemove: () => fault('parent-cleanup-marker-unlink', rel, 'after'),
+      directory,
+      expected: markerIdentity,
+      kind: 'file',
+      name: marker,
+    });
   }
   await syncPinnedDirectory(directory);
   await fault('parent-cleanup-directory-fsync', rel, 'after');
   if (!committed) {
     await assertOnlyCreatedParentMarker(directory, marker);
-    await assertCurrentDirectory(target, directory);
-    await rmdir(directoryEntryPath(target.parent, target.name));
-    await fault('parent-cleanup-rmdir', rel, 'after');
-    await syncPinnedDirectory(target.parent);
+    await bindAndRemoveEntry({
+      afterRemove: () => fault('parent-cleanup-rmdir', rel, 'after'),
+      directory: target.parent,
+      expected: directory.identity,
+      kind: 'directory',
+      name: target.name,
+    });
     await fault('parent-cleanup-parent-fsync', rel, 'after');
   }
   if (binding !== null) {

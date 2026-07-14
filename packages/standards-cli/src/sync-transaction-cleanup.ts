@@ -4,8 +4,9 @@ import {
   type PinnedDirectory,
 } from './sync-directory-handles';
 import type { RepositoryRoot } from './sync-filesystem';
-import { journalArtifactNames } from './sync-transaction-artifact-cleanup';
+import { journalArtifactNames } from './sync-transaction-artifact-policy';
 import { assertTransactionArtifacts } from './sync-transaction-artifact-validation';
+import { findRemovalBinding } from './sync-transaction-bound-remove';
 import { removeOwnedTransactionDurably } from './sync-transaction-durable-cleanup';
 import { readJournal } from './sync-transaction-journal';
 import {
@@ -77,7 +78,10 @@ export const scavengeDurableCleanup = async ({
   assertCleanupReservation(ownership);
   const cleanupReservation = ownership.reservation;
   const entries = await readdir(directoryEntryPath(transaction, '.'));
-  if (entries.includes(TRANSACTION_JOURNAL)) {
+  if (
+    entries.includes(TRANSACTION_JOURNAL) ||
+    (await findRemovalBinding(transaction, TRANSACTION_JOURNAL)) !== null
+  ) {
     const journal = await readJournal(transaction);
     if (journal.id !== cleanupReservation.id) {
       throw new Error('Cleanup reservation does not match its journal');
@@ -109,7 +113,10 @@ export const scavengeDurableCleanup = async ({
     });
     return;
   }
-  const unexpected = entries.filter((entry) => entry !== TRANSACTION_OWNER);
+  const ownerBinding = await findRemovalBinding(transaction, TRANSACTION_OWNER);
+  const unexpected = entries.filter(
+    (entry) => entry !== TRANSACTION_OWNER && entry !== ownerBinding?.name,
+  );
   if (unexpected.length > 0) {
     throw new Error('Cleanup tail contains unexpected transaction artifacts');
   }

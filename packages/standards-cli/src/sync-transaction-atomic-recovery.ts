@@ -1,48 +1,70 @@
-import { readdir, unlink } from 'node:fs/promises';
+import { readdir } from 'node:fs/promises';
 import {
   directoryEntryPath,
   type PinnedDirectory,
-  syncPinnedDirectory,
 } from './sync-directory-handles';
 import { identitiesMatch, type NodeIdentity } from './sync-filesystem';
 import { isAtomicRecordTemporaryName } from './sync-transaction-artifact-names';
 import { regularAtomicRecordIdentity } from './sync-transaction-atomic-record';
+import {
+  bindAndRemoveEntry,
+  parseRemovalBinding,
+} from './sync-transaction-bound-remove';
 
 const temporaryNames = async (
   directory: PinnedDirectory,
   finalName: string,
 ): Promise<ReadonlyArray<string>> =>
   (await readdir(directoryEntryPath(directory, '.')))
+    .map((name) => {
+      const binding = parseRemovalBinding(name);
+      return binding === null ? name : binding.original;
+    })
     .filter((name) => isAtomicRecordTemporaryName(name, finalName))
     .sort();
 
 const snapshotTails = async (
   directory: PinnedDirectory,
   finalName: string,
-): Promise<ReadonlyMap<string, NodeIdentity>> =>
-  new Map(
+): Promise<ReadonlyMap<string, NodeIdentity>> => {
+  const names = await temporaryNames(directory, finalName);
+  if (new Set(names).size !== names.length) {
+    throw new Error('Atomic transaction record tail and binding both exist');
+  }
+  const entries = await readdir(directoryEntryPath(directory, '.'));
+  return new Map(
     await Promise.all(
-      (await temporaryNames(directory, finalName)).map(
-        async (name) =>
-          [name, await regularAtomicRecordIdentity(directory, name)] as const,
-      ),
+      names.map(async (name) => {
+        const binding = entries.find(
+          (entry) => parseRemovalBinding(entry)?.original === name,
+        );
+        const actual = binding ?? name;
+        const identity = await regularAtomicRecordIdentity(directory, actual);
+        const encoded =
+          binding === undefined ? null : parseRemovalBinding(binding);
+        if (encoded !== null && !identitiesMatch(encoded.identity, identity)) {
+          throw new Error(
+            `Atomic transaction record removal binding changed: ${name}`,
+          );
+        }
+        return [name, identity] as const;
+      }),
     ),
   );
+};
 
 const removeNames = async (
   directory: PinnedDirectory,
   entries: ReadonlyMap<string, NodeIdentity>,
 ): Promise<void> => {
   for (const [name, expected] of entries) {
-    // biome-ignore lint/performance/noAwaitInLoops: every removal is preceded by an identity recheck
-    const current = await regularAtomicRecordIdentity(directory, name);
-    if (!identitiesMatch(expected, current)) {
-      throw new Error(`Atomic transaction record tail changed: ${name}`);
-    }
-    await unlink(directoryEntryPath(directory, name));
-  }
-  if (entries.size > 0) {
-    await syncPinnedDirectory(directory);
+    // biome-ignore lint/performance/noAwaitInLoops: atomic tails are bound and removed sequentially
+    await bindAndRemoveEntry({
+      directory,
+      expected,
+      kind: 'file',
+      name,
+    });
   }
 };
 

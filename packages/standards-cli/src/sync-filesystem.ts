@@ -1,10 +1,9 @@
-import { constants, type Stats } from 'node:fs';
+import { type BigIntStats, constants } from 'node:fs';
 import { lstat, open, realpath } from 'node:fs/promises';
 import { isAbsolute, join, normalize, relative, resolve, sep } from 'node:path';
-
 export type NodeIdentity = {
-  readonly dev: number;
-  readonly ino: number;
+  readonly dev: bigint;
+  readonly ino: bigint;
 };
 
 export type RepositoryRoot = {
@@ -29,10 +28,10 @@ const FILE_TYPE_MODE_BASE = 0o1000;
 const missing = (error: unknown): boolean =>
   (error as { readonly code?: unknown }).code === 'ENOENT';
 
-const identityOf = (info: Stats): NodeIdentity => ({
-  dev: info.dev,
-  ino: info.ino,
-});
+export const identityOf = (info: {
+  readonly dev: bigint;
+  readonly ino: bigint;
+}): NodeIdentity => ({ dev: info.dev, ino: info.ino });
 
 export const identitiesMatch = (
   left: NodeIdentity | null,
@@ -75,12 +74,12 @@ export const openRepositoryRoot = async (
   label: string,
 ): Promise<RepositoryRoot> => {
   const lexical = resolve(path);
-  const lexicalInfo = await lstat(lexical);
+  const lexicalInfo = await lstat(lexical, { bigint: true });
   if (lexicalInfo.isSymbolicLink() || !lexicalInfo.isDirectory()) {
     throw new Error(`${label} root must be a real directory: ${lexical}`);
   }
   const canonical = await realpath(lexical);
-  const canonicalInfo = await lstat(canonical);
+  const canonicalInfo = await lstat(canonical, { bigint: true });
   if (!canonicalInfo.isDirectory()) {
     throw new Error(`${label} root must be a real directory: ${canonical}`);
   }
@@ -90,18 +89,18 @@ export const openRepositoryRoot = async (
 export const inspectRepositoryNode = (
   root: RepositoryRoot,
   rel: string,
-): Promise<{ readonly path: string; readonly info: Stats | null }> => {
+): Promise<{ readonly path: string; readonly info: BigIntStats | null }> => {
   assertRepositoryRelativePath(rel, `${root.label} path`);
   const parts = rel.split('/');
   const inspectPart = async (
     index: number,
     parent: string,
-  ): Promise<{ readonly path: string; readonly info: Stats | null }> => {
+  ): Promise<{ readonly path: string; readonly info: BigIntStats | null }> => {
     const current = join(parent, parts[index] ?? '');
     assertInside(root, current);
-    let info: Stats;
+    let info: BigIntStats;
     try {
-      info = await lstat(current);
+      info = await lstat(current, { bigint: true });
     } catch (error) {
       if (missing(error)) {
         return { path: join(root.path, ...parts), info: null };
@@ -142,7 +141,7 @@ export const inspectRepositoryFile = async (
     constants.O_RDONLY + constants.O_NOFOLLOW + constants.O_NONBLOCK,
   );
   try {
-    const opened = await handle.stat();
+    const opened = await handle.stat({ bigint: true });
     if (
       !(
         opened.isFile() &&
@@ -154,7 +153,7 @@ export const inspectRepositoryFile = async (
     return {
       contents: await handle.readFile(),
       identity: identityOf(opened),
-      mode: opened.mode % FILE_TYPE_MODE_BASE,
+      mode: Number(opened.mode) % FILE_TYPE_MODE_BASE,
     };
   } finally {
     await handle.close();

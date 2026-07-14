@@ -4,6 +4,11 @@ import {
   directoryEntryPath,
   type PinnedDirectory,
 } from './sync-directory-handles';
+import { identityOf, type NodeIdentity } from './sync-filesystem';
+import {
+  removalBindingIdentity,
+  resolveRemovalEntryName,
+} from './sync-transaction-bound-remove';
 import {
   assertTransactionReservation,
   type ParentCleanupReservation,
@@ -19,35 +24,45 @@ const missing = (error: unknown): boolean =>
 export const createdParentMarkerName = (id: string): string =>
   `.standards-parent-${id}`;
 
-export const verifyCreatedParentMarker = async (
+export const createdParentMarkerIdentity = async (
   directory: PinnedDirectory,
   journal: TransactionJournal,
-): Promise<boolean> => {
+): Promise<NodeIdentity | null> => {
+  const name = createdParentMarkerName(journal.id);
   let marker: FileHandle;
   try {
     marker = await open(
-      directoryEntryPath(directory, createdParentMarkerName(journal.id)),
+      directoryEntryPath(
+        directory,
+        await resolveRemovalEntryName(directory, name),
+      ),
       constants.O_RDONLY + constants.O_NOFOLLOW + constants.O_NONBLOCK,
     );
   } catch (error) {
     if (missing(error)) {
-      return false;
+      return null;
     }
     throw error;
   }
   try {
-    const info = await marker.stat();
+    const info = await marker.stat({ bigint: true });
     if (
-      !(info.isFile() && info.size === journal.id.length) ||
+      !(info.isFile() && info.size === BigInt(journal.id.length)) ||
       (await marker.readFile('utf8')) !== journal.id
     ) {
       throw new Error('Created-parent ownership marker is invalid');
     }
-    return true;
+    return identityOf(info);
   } finally {
     await marker.close();
   }
 };
+
+export const verifyCreatedParentMarker = async (
+  directory: PinnedDirectory,
+  journal: TransactionJournal,
+): Promise<boolean> =>
+  (await createdParentMarkerIdentity(directory, journal)) !== null;
 
 export const readParentCleanupReservation = async (
   root: PinnedDirectory,
@@ -75,7 +90,8 @@ export const assertOnlyCreatedParentMarker = async (
   marker: string,
 ): Promise<void> => {
   const unexpected = (await readdir(directoryEntryPath(directory, '.'))).filter(
-    (entry) => entry !== marker,
+    (entry) =>
+      entry !== marker && removalBindingIdentity(marker, entry) === null,
   );
   if (unexpected.length > 0) {
     throw new Error('Created parent contains unexpected descendants');

@@ -13,8 +13,8 @@ import {
   assertOwnerPublicationNamespaceAvailable,
   createOwnerPublicationToken,
   findOwnerPublicationToken,
-  removeOwnerPublicationToken,
 } from './sync-transaction-owner-reservation';
+import { removeOwnerPublicationToken } from './sync-transaction-owner-token-cleanup';
 import { writeTransactionOwner } from './sync-transaction-ownership';
 import { assertParentBindingNamespaceAvailable } from './sync-transaction-parent-binding';
 import { assertTransactionPublicationNamespaceAvailable } from './sync-transaction-publication-namespace';

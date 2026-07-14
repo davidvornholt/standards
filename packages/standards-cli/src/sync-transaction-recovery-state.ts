@@ -3,12 +3,13 @@ import {
   type PinnedDirectory,
 } from './sync-directory-handles';
 import type { RepositoryRoot } from './sync-filesystem';
+import { openRemovalBindingDirectory } from './sync-transaction-bound-remove';
 import { scavengeDurableCleanup } from './sync-transaction-cleanup';
 import {
   hasCompletedCleanup,
   scavengeCompletedCleanup,
 } from './sync-transaction-cleanup-state';
-import { removeOrphanOwnerPublicationToken } from './sync-transaction-owner-reservation';
+import { removeOrphanOwnerPublicationToken } from './sync-transaction-owner-token-cleanup';
 import {
   optionalTransactionReservation,
   recoverMissingTransaction,
@@ -27,7 +28,7 @@ const openTransaction = async (
     return await openPinnedChild(root, TRANSACTION_DIRECTORY);
   } catch (error) {
     if (missing(error)) {
-      return null;
+      return openRemovalBindingDirectory(root, TRANSACTION_DIRECTORY);
     }
     throw error;
   }

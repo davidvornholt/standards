@@ -1,13 +1,16 @@
 import { constants } from 'node:fs';
-import { open, readdir, unlink } from 'node:fs/promises';
+import { open, readdir } from 'node:fs/promises';
 import {
   directoryEntryPath,
   type PinnedDirectory,
-  syncPinnedDirectory,
 } from './sync-directory-handles';
 import { identitiesMatch, type NodeIdentity } from './sync-filesystem';
 import { publishAtomicTransactionRecord } from './sync-transaction-atomic-record';
 import { removeBoundAtomicPartialTails } from './sync-transaction-atomic-recovery';
+import {
+  parseRemovalBinding,
+  resolveRemovalEntryName,
+} from './sync-transaction-bound-remove';
 import {
   reservationIdentity,
   storedIdentity,
@@ -38,7 +41,12 @@ export const assertParentBindingNamespaceAvailable = async (
   root: PinnedDirectory,
 ): Promise<void> => {
   const entries = (await readdir(directoryEntryPath(root, '.'))).filter(
-    (entry) => entry.startsWith(TRANSACTION_PARENT_BINDING_PREFIX),
+    (entry) => {
+      const binding = parseRemovalBinding(entry);
+      return (binding === null ? entry : binding.original).startsWith(
+        TRANSACTION_PARENT_BINDING_PREFIX,
+      );
+    },
   );
   if (entries.length > 0) {
     throw new Error('Created-parent binding namespace is occupied');
@@ -88,7 +96,7 @@ const readBinding = async (
   let handle: Awaited<ReturnType<typeof open>>;
   try {
     handle = await open(
-      directoryEntryPath(root, name),
+      directoryEntryPath(root, await resolveRemovalEntryName(root, name)),
       constants.O_RDONLY + constants.O_NOFOLLOW + constants.O_NONBLOCK,
     );
   } catch (error) {
@@ -98,8 +106,8 @@ const readBinding = async (
     throw error;
   }
   try {
-    const info = await handle.stat();
-    if (!(info.isFile() && info.size <= MAX_BYTES)) {
+    const info = await handle.stat({ bigint: true });
+    if (!(info.isFile() && info.size <= BigInt(MAX_BYTES))) {
       throw new Error('Created-parent binding must be a small regular file');
     }
     return parseBinding(await handle.readFile('utf8'), {
@@ -167,31 +175,4 @@ export const readParentBinding = async (
     throw new Error('Created-parent binding does not match its journal');
   }
   return binding;
-};
-
-export const removeParentBinding = async ({
-  binding,
-  hooks = {},
-  index,
-  journal,
-  root,
-}: {
-  readonly binding: CreatedParentBinding;
-  readonly hooks?: {
-    readonly afterSync?: () => Promise<void>;
-    readonly afterUnlink?: () => Promise<void>;
-  };
-  readonly index: number;
-  readonly journal: TransactionJournal;
-  readonly root: PinnedDirectory;
-}): Promise<void> => {
-  const name = createdParentBindingName(journal.id, index);
-  const current = await readBinding(root, name);
-  if (current === null || !identitiesMatch(current.file, binding.file)) {
-    throw new Error('Created-parent binding changed during cleanup');
-  }
-  await unlink(directoryEntryPath(root, name));
-  await hooks.afterUnlink?.();
-  await syncPinnedDirectory(root);
-  await hooks.afterSync?.();
 };

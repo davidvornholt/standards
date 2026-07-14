@@ -1,5 +1,10 @@
 import { identitiesMatch, type NodeIdentity } from './sync-filesystem';
 import {
+  parseStoredNodeIdentity,
+  type StoredNodeIdentity,
+  storedNodeIdentity,
+} from './sync-node-identity';
+import {
   TRANSACTION_CLEANUP,
   TRANSACTION_DIRECTORY,
 } from './sync-transaction-types';
@@ -7,12 +12,9 @@ import {
 export const RESERVATION_VERSION = 1;
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
-const DECIMAL = /^\d+$/u;
-
-type StoredIdentity = { readonly dev: string; readonly ino: string };
 type ReservationBase = {
   readonly id: string;
-  readonly root: StoredIdentity;
+  readonly root: StoredNodeIdentity;
   readonly version: typeof RESERVATION_VERSION;
 };
 
@@ -22,7 +24,7 @@ export type PublicationReservation = ReservationBase & {
 
 export type ParentCleanupReservation = ReservationBase & {
   readonly decision: 'committed' | 'rolled-back';
-  readonly parent: StoredIdentity;
+  readonly parent: StoredNodeIdentity;
   readonly phase: 'parent-cleanup';
   readonly rel: string;
 };
@@ -33,7 +35,7 @@ export type CleanupReservation = ReservationBase & {
   readonly reservedName:
     | typeof TRANSACTION_CLEANUP
     | typeof TRANSACTION_DIRECTORY;
-  readonly transaction: StoredIdentity;
+  readonly transaction: StoredNodeIdentity;
 };
 
 export type TransactionReservation =
@@ -41,32 +43,22 @@ export type TransactionReservation =
   | ParentCleanupReservation
   | PublicationReservation;
 
-export const storedIdentity = (value: NodeIdentity): StoredIdentity => ({
-  dev: String(value.dev),
-  ino: String(value.ino),
-});
+export const storedIdentity = storedNodeIdentity;
 
 export const reservationIdentity = (
   value: unknown,
   label: string,
 ): NodeIdentity => {
-  if (
-    typeof value !== 'object' ||
-    value === null ||
-    !('dev' in value) ||
-    !('ino' in value) ||
-    typeof value.dev !== 'string' ||
-    typeof value.ino !== 'string' ||
-    !DECIMAL.test(value.dev) ||
-    !DECIMAL.test(value.ino)
-  ) {
-    throw new Error(`Transaction reservation ${label} identity is invalid`);
+  try {
+    return parseStoredNodeIdentity(
+      value,
+      `Transaction reservation ${label} identity`,
+    );
+  } catch (error) {
+    throw new Error(`Transaction reservation ${label} identity is invalid`, {
+      cause: error,
+    });
   }
-  const parsed = { dev: Number(value.dev), ino: Number(value.ino) };
-  if (!(Number.isSafeInteger(parsed.dev) && Number.isSafeInteger(parsed.ino))) {
-    throw new Error(`Transaction reservation ${label} identity is invalid`);
-  }
-  return parsed;
 };
 
 export const parseReservation = (contents: string): TransactionReservation => {

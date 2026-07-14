@@ -1,39 +1,27 @@
 import { constants } from 'node:fs';
-import { open, readdir, rmdir, unlink } from 'node:fs/promises';
+import { open, readdir } from 'node:fs/promises';
 import {
   directoryEntryPath,
   openPinnedChild,
   type PinnedDirectory,
   syncPinnedDirectory,
 } from './sync-directory-handles';
-import { identitiesMatch, type NodeIdentity } from './sync-filesystem';
 import {
-  TRANSACTION_COMMITTED,
+  identitiesMatch,
+  identityOf,
+  type NodeIdentity,
+} from './sync-filesystem';
+import {
+  bindAndRemoveEntry,
+  findRemovalBinding,
+  removalBindingIdentity,
+} from './sync-transaction-bound-remove';
+import {
   TRANSACTION_JOURNAL,
-  TRANSACTION_JOURNAL_TEMP,
   TRANSACTION_OWNER,
-  type TransactionJournal,
 } from './sync-transaction-types';
 
 type ArtifactSnapshot = ReadonlyMap<string, NodeIdentity>;
-
-const artifactNames = (
-  journal: TransactionJournal,
-  committed: boolean,
-): ReadonlySet<string> =>
-  new Set([
-    TRANSACTION_OWNER,
-    TRANSACTION_JOURNAL,
-    ...(committed ? [TRANSACTION_COMMITTED] : []),
-    ...journal.operations.flatMap(({ backup, stage }) =>
-      stage === null ? [backup] : [backup, stage],
-    ),
-  ]);
-
-const identityOf = (info: { readonly dev: number; readonly ino: number }) => ({
-  dev: info.dev,
-  ino: info.ino,
-});
 
 const inspectArtifact = async (
   transaction: PinnedDirectory,
@@ -44,7 +32,7 @@ const inspectArtifact = async (
     constants.O_RDONLY + constants.O_NOFOLLOW + constants.O_NONBLOCK,
   );
   try {
-    const info = await handle.stat();
+    const info = await handle.stat({ bigint: true });
     if (!info.isFile()) {
       throw new Error(`Transaction artifact must be a regular file: ${name}`);
     }
@@ -59,20 +47,42 @@ const inspectArtifacts = async (
   allowed: ReadonlySet<string>,
 ): Promise<ArtifactSnapshot> => {
   const entries = await readdir(directoryEntryPath(transaction, '.'));
-  const unexpected = entries.filter((entry) => !allowed.has(entry));
+  const snapshot = new Map<string, NodeIdentity>();
+  const unexpected: Array<string> = [];
+  const inspected = await Promise.all(
+    entries.map(async (entry) => {
+      const logicalName = allowed.has(entry)
+        ? entry
+        : [...allowed].find(
+            (allowedName) =>
+              removalBindingIdentity(allowedName, entry) !== null,
+          );
+      if (logicalName === undefined) {
+        return { entry, logicalName: null };
+      }
+      const identity = await inspectArtifact(transaction, entry);
+      const boundIdentity = removalBindingIdentity(logicalName, entry);
+      if (boundIdentity !== null && !identitiesMatch(boundIdentity, identity)) {
+        throw new Error(
+          `Transaction artifact removal binding changed: ${entry}`,
+        );
+      }
+      return { entry, identity, logicalName };
+    }),
+  );
+  for (const item of inspected) {
+    if (item.logicalName === null || snapshot.has(item.logicalName)) {
+      unexpected.push(item.entry);
+    } else {
+      snapshot.set(item.logicalName, item.identity as NodeIdentity);
+    }
+  }
   if (unexpected.length > 0) {
     throw new Error(
       `Transaction directory contains unexpected entries: ${unexpected.join(', ')}`,
     );
   }
-  return new Map(
-    await Promise.all(
-      entries.map(
-        async (entry) =>
-          [entry, await inspectArtifact(transaction, entry)] as const,
-      ),
-    ),
-  );
+  return snapshot;
 };
 
 const assertSnapshot = (
@@ -94,13 +104,23 @@ const assertReservedIdentity = async (
   reservedName: string,
   transaction: PinnedDirectory,
 ): Promise<void> => {
-  const current = await openPinnedChild(root, reservedName);
+  let current: PinnedDirectory | null = null;
   try {
-    if (!identitiesMatch(current.identity, transaction.identity)) {
+    current = await openPinnedChild(root, reservedName);
+  } catch (error) {
+    if ((error as { readonly code?: unknown }).code !== 'ENOENT') {
+      throw error;
+    }
+  }
+  try {
+    const identity =
+      current?.identity ??
+      (await findRemovalBinding(root, reservedName))?.identity;
+    if (!identitiesMatch(identity ?? null, transaction.identity)) {
       throw new Error(`Reserved transaction entry changed: ${reservedName}`);
     }
   } finally {
-    await current.handle.close();
+    await current?.handle.close();
   }
 };
 
@@ -117,6 +137,7 @@ const deletionOrder = (names: ReadonlyArray<string>): ReadonlyArray<string> =>
 
 export const removeOwnedTransaction = async ({
   afterUnlink,
+  afterRmdirBind,
   allowed,
   beforeUnlink,
   beforeRmdir,
@@ -126,6 +147,7 @@ export const removeOwnedTransaction = async ({
   validate,
 }: {
   readonly afterUnlink?: (name: string) => Promise<void>;
+  readonly afterRmdirBind?: () => Promise<void>;
   readonly allowed: ReadonlySet<string>;
   readonly beforeUnlink?: () => Promise<void>;
   readonly beforeRmdir?: () => Promise<void>;
@@ -144,12 +166,12 @@ export const removeOwnedTransaction = async ({
   for (const name of deletionOrder([...snapshot.keys()])) {
     // biome-ignore lint/performance/noAwaitInLoops: every removal revalidates the remaining journal artifacts
     await validate?.();
-    // Every unlink is preceded by an identity check through the pinned directory.
-    const current = await inspectArtifact(transaction, name);
-    if (!identitiesMatch(snapshot.get(name) ?? null, current)) {
-      throw new Error(`Transaction artifact changed during cleanup: ${name}`);
-    }
-    await unlink(directoryEntryPath(transaction, name));
+    await bindAndRemoveEntry({
+      directory: transaction,
+      expected: snapshot.get(name) as NodeIdentity,
+      kind: 'file',
+      name,
+    });
     await afterUnlink?.(name);
   }
   await syncPinnedDirectory(transaction);
@@ -159,26 +181,11 @@ export const removeOwnedTransaction = async ({
   }
   await beforeRmdir?.();
   await assertReservedIdentity(root, reservedName, transaction);
-  await rmdir(directoryEntryPath(root, reservedName));
-  await syncPinnedDirectory(root);
-};
-
-export const journalArtifactNames = artifactNames;
-
-export const unpublishedArtifactNames = new Set([
-  TRANSACTION_OWNER,
-  TRANSACTION_JOURNAL,
-  TRANSACTION_JOURNAL_TEMP,
-]);
-
-export const isUnpublishedTransaction = async (
-  transaction: PinnedDirectory,
-): Promise<boolean> => {
-  const entries = await readdir(directoryEntryPath(transaction, '.'));
-  return (
-    !entries.includes(TRANSACTION_JOURNAL) &&
-    entries.every((entry) =>
-      [TRANSACTION_OWNER, TRANSACTION_JOURNAL_TEMP].includes(entry),
-    )
-  );
+  await bindAndRemoveEntry({
+    afterBind: afterRmdirBind,
+    directory: root,
+    expected: transaction.identity,
+    kind: 'directory',
+    name: reservedName,
+  });
 };

@@ -1,24 +1,25 @@
 import type { PinnedDirectory } from './sync-directory-handles';
-import type { RepositoryRoot } from './sync-filesystem';
+import { removeOwnedTransaction } from './sync-transaction-artifact-cleanup';
 import {
   isUnpublishedTransaction,
-  removeOwnedTransaction,
   unpublishedArtifactNames,
-} from './sync-transaction-artifact-cleanup';
+} from './sync-transaction-artifact-policy';
 import {
   assertNoUnboundAtomicPublicationTails,
   removeBoundAtomicPartialTails,
 } from './sync-transaction-atomic-recovery';
+import { removeOwnedTransactionDurably } from './sync-transaction-durable-cleanup';
 import {
   findOwnerPublicationToken,
   type OwnerPublicationToken,
-  removeOwnerPublicationToken,
 } from './sync-transaction-owner-reservation';
+import { removeOwnerPublicationToken } from './sync-transaction-owner-token-cleanup';
 import {
   assertTransactionOwner,
   readTransactionOwner,
   type TransactionOwner,
 } from './sync-transaction-ownership';
+import type { PublicationRecoveryInput } from './sync-transaction-publication-types';
 import {
   assertTransactionReservation,
   removeTransactionReservation,
@@ -49,16 +50,26 @@ const removeUnpublished = async (
   root: PinnedDirectory,
   transaction: PinnedDirectory,
   reservationId: string | null,
+  cleanupId: string,
 ): Promise<void> => {
+  if (reservationId === null) {
+    await removeOwnedTransactionDurably({
+      allowed: unpublishedArtifactNames,
+      decision: 'rolled-back',
+      id: cleanupId,
+      reservedName: TRANSACTION_DIRECTORY,
+      root,
+      transaction,
+    });
+    return;
+  }
   await removeOwnedTransaction({
     allowed: unpublishedArtifactNames,
     reservedName: TRANSACTION_DIRECTORY,
     root,
     transaction,
   });
-  if (reservationId !== null) {
-    await removeTransactionReservation(root, reservationId);
-  }
+  await removeTransactionReservation(root, reservationId);
 };
 
 const removeEmptyUnboundPublication = async (
@@ -73,13 +84,6 @@ const removeEmptyUnboundPublication = async (
     transaction,
   });
   await removeTransactionReservation(root, reservationId);
-};
-
-export type PublicationRecoveryInput = {
-  readonly reservation: TransactionReservation | null;
-  readonly root: RepositoryRoot;
-  readonly rootDirectory: PinnedDirectory;
-  readonly transaction: PinnedDirectory;
 };
 
 const recoverWithOwnerToken = async (
@@ -107,6 +111,7 @@ const recoverWithOwnerToken = async (
       rootDirectory,
       transaction,
       reservation?.phase === 'publication' ? reservation.id : null,
+      ownerToken.id,
     );
     await removeOwnerPublicationToken(rootDirectory, ownerToken);
     return null;
@@ -148,7 +153,12 @@ const recoverWithReservation = async (
     throw new Error('Transaction owner does not match its reservation');
   }
   if (await isUnpublishedTransaction(transaction)) {
-    await removeUnpublished(rootDirectory, transaction, reservation.id);
+    await removeUnpublished(
+      rootDirectory,
+      transaction,
+      reservation.id,
+      reservation.id,
+    );
     return null;
   }
   await removeTransactionReservation(rootDirectory, reservation.id);
@@ -163,7 +173,7 @@ const recoverWithoutReservation = async (
   const owner = await readTransactionOwner(transaction);
   assertTransactionOwner(owner, root.identity, transaction);
   if (await isUnpublishedTransaction(transaction)) {
-    await removeUnpublished(rootDirectory, transaction, null);
+    await removeUnpublished(rootDirectory, transaction, null, owner.id);
     return null;
   }
   return owner;

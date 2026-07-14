@@ -2,10 +2,8 @@ import {
   type PinnedDirectory,
   syncPinnedDirectory,
 } from './sync-directory-handles';
-import {
-  type CreatedParentBinding,
-  removeParentBinding,
-} from './sync-transaction-parent-binding';
+import type { CreatedParentBinding } from './sync-transaction-parent-binding';
+import { removeParentBinding } from './sync-transaction-parent-binding-cleanup';
 import { removeTransactionReservation } from './sync-transaction-reservation';
 import type { ParentCleanupReservation } from './sync-transaction-reservation-record';
 import type { TransactionJournal } from './sync-transaction-types';

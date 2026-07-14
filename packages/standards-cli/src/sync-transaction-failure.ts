@@ -1,9 +1,7 @@
 import type { PinnedDirectory, PinnedTarget } from './sync-directory-handles';
 import type { RepositoryRoot } from './sync-filesystem';
-import {
-  removeOwnedTransaction,
-  unpublishedArtifactNames,
-} from './sync-transaction-artifact-cleanup';
+import { removeOwnedTransaction } from './sync-transaction-artifact-cleanup';
+import { unpublishedArtifactNames } from './sync-transaction-artifact-policy';
 import { cleanupTransaction } from './sync-transaction-cleanup';
 import {
   assertTransactionOwner,

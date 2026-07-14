@@ -4,10 +4,10 @@ import {
   fetchDefaultBranchProtection,
   type LiveDefaultBranch,
 } from './github-default-branch';
+import { decodeDefaultBranch } from './github-default-branch-response';
 import { subsetMatches } from './github-diff';
 import { isRecord } from './github-settings';
 
-const DEFAULT_BRANCH = 'default_branch';
 const REQUIRED_REVIEWS = 'required_pull_request_reviews';
 const BYPASS_ALLOWANCES = 'bypass_pull_request_allowances';
 const REQUIRED_CHECKS = 'required_status_checks';
@@ -42,14 +42,36 @@ const verifyUpdate = async (
   input: ApplyDefaultBranchInput,
   branch: string,
 ): Promise<void> => {
+  const repository = await request(input.token, 'GET', `/repos/${input.repo}`);
+  if (repository.status !== HTTP_OK) {
+    throw new Error(
+      apiError(
+        'verifying repository default branch after protection update',
+        repository,
+      ),
+    );
+  }
+  const currentDefault = decodeDefaultBranch(repository.body);
+  if (currentDefault.value === null) {
+    throw new Error(
+      currentDefault.problem ??
+        'GitHub returned an invalid repository default branch after protection update',
+    );
+  }
+  if (currentDefault.value !== branch) {
+    throw new Error(
+      `Repository default branch changed from "${branch}" to "${currentDefault.value}" during protection update`,
+    );
+  }
   const verified = await fetchDefaultBranchProtection(
     input.token,
     input.repo,
-    { [DEFAULT_BRANCH]: branch },
+    repository.body,
     true,
   );
   if (
     verified.problem !== null ||
+    !verified.classicProtection ||
     verified.protection === null ||
     !subsetMatches(input.declared, verified.protection)
   ) {

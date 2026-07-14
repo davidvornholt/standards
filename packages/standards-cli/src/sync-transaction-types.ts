@@ -115,7 +115,7 @@ export const expectedFile = (state: FileState): ExpectedFile => ({
 export const expectedIdentity = (state: ExpectedFile): NodeIdentity | null =>
   state.dev === null || state.ino === null
     ? null
-    : { dev: Number(state.dev), ino: Number(state.ino) };
+    : { dev: BigInt(state.dev), ino: BigInt(state.ino) };
 
 export const effectiveMode = (mode: number | null): number =>
   // biome-ignore lint/suspicious/noBitwiseOperators: applying a Unix umask is intentionally bitwise

@@ -10,6 +10,10 @@ import {
   type RepositoryRoot,
 } from './sync-filesystem';
 import {
+  removalBindingIdentity,
+  resolveRemovalEntryName,
+} from './sync-transaction-bound-remove';
+import {
   fileMatchesDesired,
   fileMatchesExpected,
   inspectPinnedFile,
@@ -37,7 +41,9 @@ const assertExactArtifact = async (
   name: string,
   contents: Buffer,
 ): Promise<void> => {
-  const state = await inspectPinnedFile(artifact(transaction, name));
+  const state = await inspectPinnedFile(
+    artifact(transaction, await resolveRemovalEntryName(transaction, name)),
+  );
   if (
     state.contents === null ||
     state.mode !== PRIVATE_MODE ||
@@ -66,7 +72,9 @@ const validateOperationArtifact = async ({
   if (operation === undefined) {
     return;
   }
-  const state = await inspectPinnedFile(artifact(transaction, name));
+  const state = await inspectPinnedFile(
+    artifact(transaction, await resolveRemovalEntryName(transaction, name)),
+  );
   if (name === operation.backup) {
     if (!(committed && fileMatchesExpected(state, operation.before))) {
       throw new Error(`Transaction backup is invalid: ${operation.rel}`);
@@ -130,7 +138,9 @@ const validateArtifact = async ({
   if (owner.id !== journal.id) {
     throw new Error('Transaction owner does not match its journal');
   }
-  const state = await inspectPinnedFile(artifact(transaction, name));
+  const state = await inspectPinnedFile(
+    artifact(transaction, await resolveRemovalEntryName(transaction, name)),
+  );
   if (state.mode !== PRIVATE_MODE) {
     throw new Error('Transaction owner mode is invalid');
   }
@@ -148,8 +158,31 @@ export const assertTransactionArtifacts = async ({
   readonly transaction: PinnedDirectory;
 }): Promise<void> => {
   const entries = await readdir(directoryEntryPath(transaction, '.'));
+  const allowed = new Set([
+    TRANSACTION_OWNER,
+    TRANSACTION_JOURNAL,
+    ...(committed ? [TRANSACTION_COMMITTED] : []),
+    ...journal.operations.flatMap(({ backup, stage }) =>
+      stage === null ? [backup] : [backup, stage],
+    ),
+  ]);
+  const logicalNames = entries.map((entry) => {
+    if (allowed.has(entry)) {
+      return entry;
+    }
+    const logical = [...allowed].find(
+      (name) => removalBindingIdentity(name, entry) !== null,
+    );
+    if (logical === undefined) {
+      throw new Error(`Transaction artifact is unexpected: ${entry}`);
+    }
+    return logical;
+  });
+  if (new Set(logicalNames).size !== logicalNames.length) {
+    throw new Error('Transaction artifact and removal binding both exist');
+  }
   await Promise.all(
-    entries.map((name) =>
+    logicalNames.map((name) =>
       validateArtifact({ committed, journal, name, root, transaction }),
     ),
   );

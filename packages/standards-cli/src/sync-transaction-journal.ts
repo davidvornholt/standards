@@ -6,6 +6,7 @@ import {
   type PinnedDirectory,
   syncPinnedDirectory,
 } from './sync-directory-handles';
+import { resolveRemovalEntryName } from './sync-transaction-bound-remove';
 import { parseJournal } from './sync-transaction-journal-parser';
 import {
   TRANSACTION_COMMITTED,
@@ -29,11 +30,11 @@ const readRegularEntry = async (
     constants.O_RDONLY + constants.O_NOFOLLOW + constants.O_NONBLOCK,
   );
   try {
-    const info = await handle.stat();
+    const info = await handle.stat({ bigint: true });
     if (!info.isFile()) {
       throw new Error(`Transaction entry must be a regular file: ${name}`);
     }
-    if (info.size > maximumBytes) {
+    if (info.size > BigInt(maximumBytes)) {
       throw new Error(`Transaction entry exceeds its size limit: ${name}`);
     }
     const buffer = Buffer.alloc(maximumBytes + 1);
@@ -110,7 +111,7 @@ export const readJournal = async (
     (
       await readRegularEntry(
         transaction,
-        TRANSACTION_JOURNAL,
+        await resolveRemovalEntryName(transaction, TRANSACTION_JOURNAL),
         MAX_JOURNAL_BYTES,
       )
     ).toString('utf8'),

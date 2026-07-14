@@ -99,14 +99,19 @@ describe('disabled optional protection repair', () => {
   it('updates disabled sections and verifies the repaired response', async () => {
     const methods: Array<string> = [];
     globalThis.fetch = Object.assign(
-      (_input: URL | RequestInfo, init?: RequestInit) => {
+      (input: URL | RequestInfo, init?: RequestInit) => {
         const method = init?.method ?? 'GET';
         methods.push(method);
         if (method === 'PUT') {
           return Promise.resolve(response(HTTP_OK, {}));
         }
+        if (String(input).endsWith('/repos/owner/repo')) {
+          return Promise.resolve(
+            response(HTTP_OK, JSON.parse('{"default_branch":"trunk"}')),
+          );
+        }
         return Promise.resolve(
-          method === 'GET' && String(_input).endsWith('/branches/trunk')
+          method === 'GET' && String(input).endsWith('/branches/trunk')
             ? response(HTTP_OK, {
                 name: 'trunk',
                 protected: true,
@@ -141,7 +146,7 @@ describe('disabled optional protection repair', () => {
       repo: 'owner/repo',
       token: 'token',
     });
-    expect(methods).toEqual(['PUT', 'GET', 'GET']);
+    expect(methods).toEqual(['PUT', 'GET', 'GET', 'GET']);
     expect(actions).toEqual([
       'updated classic protection for default branch "trunk"',
     ]);

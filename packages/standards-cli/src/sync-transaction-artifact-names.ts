@@ -1,3 +1,4 @@
+import { REMOVAL_BINDING_PREFIX } from './sync-transaction-bound-remove';
 import {
   TRANSACTION_CLEANUP,
   TRANSACTION_DIRECTORY,
@@ -78,5 +79,6 @@ export const isReservedTransactionPath = (rel: string): boolean =>
         part.startsWith(TRANSACTION_OWNER_PUBLICATION_PREFIX) ||
         part.startsWith(TRANSACTION_PARENT_BINDING_PREFIX) ||
         part.startsWith(TRANSACTION_PUBLICATION_PREFIX) ||
+        part.startsWith(REMOVAL_BINDING_PREFIX) ||
         part.startsWith('.standards-parent-'),
     );

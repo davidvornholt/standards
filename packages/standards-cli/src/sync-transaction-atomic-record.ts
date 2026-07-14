@@ -1,14 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { link, open, unlink } from 'node:fs/promises';
+import { link, open } from 'node:fs/promises';
 import { writeCompleteDescriptor } from './sync-descriptor-write';
 import {
   directoryEntryPath,
   type PinnedDirectory,
   syncPinnedDirectory,
 } from './sync-directory-handles';
-import { identitiesMatch, type NodeIdentity } from './sync-filesystem';
+import type { NodeIdentity } from './sync-filesystem';
 import { atomicRecordTemporaryName } from './sync-transaction-artifact-names';
+import { bindAndRemoveEntry } from './sync-transaction-bound-remove';
 
 const PRIVATE_MODE = 0o600;
 const missing = (error: unknown): boolean =>
@@ -17,6 +18,7 @@ const missing = (error: unknown): boolean =>
 export const publishAtomicTransactionRecord = async ({
   afterFinalSync,
   afterPartialWrite,
+  afterTemporaryBind,
   afterTemporaryOpen,
   contents,
   directory,
@@ -25,6 +27,7 @@ export const publishAtomicTransactionRecord = async ({
 }: {
   readonly afterFinalSync?: () => Promise<void>;
   readonly afterPartialWrite?: () => Promise<void>;
+  readonly afterTemporaryBind?: (name: string) => Promise<void>;
   readonly afterTemporaryOpen?: (identity: NodeIdentity) => Promise<void>;
   readonly contents: string;
   readonly directory: PinnedDirectory;
@@ -48,7 +51,7 @@ export const publishAtomicTransactionRecord = async ({
   );
   let temporaryIdentity: NodeIdentity | null = null;
   try {
-    const info = await handle.stat();
+    const info = await handle.stat({ bigint: true });
     temporaryIdentity = { dev: info.dev, ino: info.ino };
     await afterTemporaryOpen?.(temporaryIdentity);
     await writeCompleteDescriptor({
@@ -61,40 +64,29 @@ export const publishAtomicTransactionRecord = async ({
   } catch (error) {
     await handle.close();
     if (temporaryIdentity !== null) {
-      await cleanupTemporary(
-        directory,
-        temporaryName,
-        temporaryPath,
-        temporaryIdentity,
-      );
+      await cleanupTemporary(directory, temporaryName, temporaryIdentity);
     }
     throw error;
   }
   await handle.close();
+  if (temporaryIdentity === null) {
+    throw new Error(
+      `Atomic transaction record identity is missing: ${finalName}`,
+    );
+  }
   try {
     await link(temporaryPath, finalPath);
     await syncPinnedDirectory(directory);
     await afterFinalSync?.();
-    const currentTemporary = await regularAtomicRecordIdentity(
+    await bindAndRemoveEntry({
+      afterBind: () => afterTemporaryBind?.(temporaryName) ?? Promise.resolve(),
       directory,
-      temporaryName,
-    );
-    if (!identitiesMatch(temporaryIdentity, currentTemporary)) {
-      throw new Error(
-        `Atomic transaction record tail changed: ${temporaryName}`,
-      );
-    }
-    await unlink(temporaryPath);
-    await syncPinnedDirectory(directory);
+      expected: temporaryIdentity,
+      kind: 'file',
+      name: temporaryName,
+    });
   } catch (error) {
-    if (temporaryIdentity !== null) {
-      await cleanupTemporary(
-        directory,
-        temporaryName,
-        temporaryPath,
-        temporaryIdentity,
-      );
-    }
+    await cleanupTemporary(directory, temporaryName, temporaryIdentity);
     throw error;
   }
 };
@@ -108,7 +100,7 @@ export const regularAtomicRecordIdentity = async (
     constants.O_RDONLY + constants.O_NOFOLLOW + constants.O_NONBLOCK,
   );
   try {
-    const info = await handle.stat();
+    const info = await handle.stat({ bigint: true });
     if (!info.isFile()) {
       throw new Error(`Atomic transaction record must be regular: ${name}`);
     }
@@ -121,21 +113,14 @@ export const regularAtomicRecordIdentity = async (
 const cleanupTemporary = async (
   directory: PinnedDirectory,
   name: string,
-  path: string,
-  expected: { readonly dev: number; readonly ino: number },
+  expected: NodeIdentity,
 ): Promise<void> => {
-  let current: { readonly dev: number; readonly ino: number };
   try {
-    current = await regularAtomicRecordIdentity(directory, name);
+    await bindAndRemoveEntry({ directory, expected, kind: 'file', name });
   } catch (error) {
     if (missing(error)) {
       return;
     }
     throw error;
   }
-  if (!identitiesMatch(expected, current)) {
-    throw new Error(`Atomic transaction record tail changed: ${name}`);
-  }
-  await unlink(path);
-  await syncPinnedDirectory(directory);
 };

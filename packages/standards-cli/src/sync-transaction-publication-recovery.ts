@@ -3,16 +3,16 @@ import {
   type PinnedDirectory,
 } from './sync-directory-handles';
 import type { RepositoryRoot } from './sync-filesystem';
+import { removeOwnedTransaction } from './sync-transaction-artifact-cleanup';
 import {
-  removeOwnedTransaction,
-  unpublishedArtifactNames,
-} from './sync-transaction-artifact-cleanup';
-import { transactionPublicationId } from './sync-transaction-artifact-names';
+  transactionPublicationId,
+  transactionPublicationName,
+} from './sync-transaction-artifact-names';
+import { unpublishedArtifactNames } from './sync-transaction-artifact-policy';
 import { recoverAtomicPublicationTails } from './sync-transaction-atomic-recovery';
-import {
-  findOwnerPublicationToken,
-  removeOwnerPublicationToken,
-} from './sync-transaction-owner-reservation';
+import { openRemovalBindingDirectory } from './sync-transaction-bound-remove';
+import { findOwnerPublicationToken } from './sync-transaction-owner-reservation';
+import { removeOwnerPublicationToken } from './sync-transaction-owner-token-cleanup';
 import type { TransactionOwner } from './sync-transaction-ownership';
 import { recoverPublicationCase } from './sync-transaction-publication-cases';
 import { stagedTransactionPublicationNames } from './sync-transaction-publication-namespace';
@@ -25,6 +25,36 @@ import {
 } from './sync-transaction-reservation';
 import { TRANSACTION_RESERVATION } from './sync-transaction-types';
 
+const recoverBoundStagedRemoval = async (
+  root: PinnedDirectory,
+  reservation: TransactionReservation | null,
+): Promise<boolean> => {
+  if (reservation?.phase !== 'publication') {
+    return false;
+  }
+  const name = transactionPublicationName(reservation.id);
+  const transaction = await openRemovalBindingDirectory(root, name);
+  if (transaction === null) {
+    return false;
+  }
+  try {
+    const token = await findOwnerPublicationToken(root, transaction);
+    await removeOwnedTransaction({
+      allowed: unpublishedArtifactNames,
+      reservedName: name,
+      root,
+      transaction,
+    });
+    if (token !== null) {
+      await removeOwnerPublicationToken(root, token);
+    }
+    await removeTransactionReservation(root, reservation.id);
+    return true;
+  } finally {
+    await transaction.handle.close();
+  }
+};
+
 export const recoverStagedTransactionPublication = async ({
   mutate,
   reservation,
@@ -36,6 +66,9 @@ export const recoverStagedTransactionPublication = async ({
 }): Promise<TransactionReservation | null> => {
   const entries = await stagedTransactionPublicationNames(root);
   if (entries.length === 0) {
+    if (await recoverBoundStagedRemoval(root, reservation)) {
+      return null;
+    }
     return reservation;
   }
   if (entries.length !== 1) {

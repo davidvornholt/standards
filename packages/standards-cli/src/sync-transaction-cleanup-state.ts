@@ -3,6 +3,7 @@ import {
   type PinnedDirectory,
 } from './sync-directory-handles';
 import type { RepositoryRoot } from './sync-filesystem';
+import { openRemovalBindingDirectory } from './sync-transaction-bound-remove';
 import { scavengeDurableCleanup } from './sync-transaction-cleanup';
 import type { TransactionReservation } from './sync-transaction-reservation';
 import { TRANSACTION_CLEANUP } from './sync-transaction-types';
@@ -19,7 +20,12 @@ export const hasCompletedCleanup = async (
     return true;
   } catch (error) {
     if (missing(error)) {
-      return false;
+      const bound = await openRemovalBindingDirectory(
+        root,
+        TRANSACTION_CLEANUP,
+      );
+      await bound?.handle.close();
+      return bound !== null;
     }
     throw error;
   }
@@ -30,7 +36,22 @@ export const scavengeCompletedCleanup = async (
   rootDirectory: PinnedDirectory,
   reservation: TransactionReservation,
 ): Promise<void> => {
-  const cleanup = await openPinnedChild(rootDirectory, TRANSACTION_CLEANUP);
+  let cleanup: PinnedDirectory;
+  try {
+    cleanup = await openPinnedChild(rootDirectory, TRANSACTION_CLEANUP);
+  } catch (error) {
+    if (!missing(error)) {
+      throw error;
+    }
+    const bound = await openRemovalBindingDirectory(
+      rootDirectory,
+      TRANSACTION_CLEANUP,
+    );
+    if (bound === null) {
+      throw error;
+    }
+    cleanup = bound;
+  }
   try {
     await scavengeDurableCleanup({
       reservation,

@@ -9,6 +9,7 @@ import {
 import {
   type FileState,
   identitiesMatch,
+  identityOf,
   type NodeIdentity,
 } from './sync-filesystem';
 import {
@@ -34,11 +35,6 @@ export type StagedWrite = {
 };
 
 const FILE_TYPE_MODE_BASE = 0o1000;
-
-const identityOf = (info: { readonly dev: number; readonly ino: number }) => ({
-  dev: info.dev,
-  ino: info.ino,
-});
 
 const isMissing = (error: unknown): boolean =>
   (error as { readonly code?: unknown }).code === 'ENOENT';
@@ -67,14 +63,14 @@ export const inspectPinnedFile = async (
     throw error;
   }
   try {
-    const info = await handle.stat();
+    const info = await handle.stat({ bigint: true });
     if (!info.isFile()) {
       throw new Error(`Mutation target must be a regular file: ${target.rel}`);
     }
     return {
       contents: await handle.readFile(),
       identity: identityOf(info),
-      mode: info.mode % FILE_TYPE_MODE_BASE,
+      mode: Number(info.mode) % FILE_TYPE_MODE_BASE,
     };
   } finally {
     await handle.close();
@@ -124,7 +120,7 @@ export const assertPinnedDirectoryUnchanged = async (
   before: NodeIdentity,
   rel: string,
 ): Promise<void> => {
-  const info = await directory.handle.stat();
+  const info = await directory.handle.stat({ bigint: true });
   if (!(info.isDirectory() && identitiesMatch(before, identityOf(info)))) {
     throw new Error(`Consumer directory changed after preflight: ${rel}`);
   }

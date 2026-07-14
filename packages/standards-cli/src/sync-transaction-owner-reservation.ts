@@ -1,5 +1,5 @@
 import { constants } from 'node:fs';
-import { open, readdir, unlink } from 'node:fs/promises';
+import { open, readdir } from 'node:fs/promises';
 import {
   directoryEntryPath,
   type PinnedDirectory,
@@ -7,6 +7,10 @@ import {
 } from './sync-directory-handles';
 import { identitiesMatch, type NodeIdentity } from './sync-filesystem';
 import { renameDirectoryNoReplace } from './sync-linux-rename';
+import {
+  parseRemovalBinding,
+  resolveRemovalEntryName,
+} from './sync-transaction-bound-remove';
 import { TRANSACTION_OWNER_PUBLICATION_PREFIX } from './sync-transaction-types';
 
 const PRIVATE_MODE = 0o600;
@@ -34,7 +38,12 @@ export const assertOwnerPublicationNamespaceAvailable = async (
   root: PinnedDirectory,
 ): Promise<void> => {
   const entries = (await readdir(directoryEntryPath(root, '.'))).filter(
-    (entry) => entry.startsWith(TRANSACTION_OWNER_PUBLICATION_PREFIX),
+    (entry) => {
+      const binding = parseRemovalBinding(entry);
+      return (binding === null ? entry : binding.original).startsWith(
+        TRANSACTION_OWNER_PUBLICATION_PREFIX,
+      );
+    },
   );
   if (entries.length > 0) {
     throw new Error('Owner publication token namespace is occupied');
@@ -46,12 +55,12 @@ const inspectToken = async (
   name: string,
 ): Promise<NodeIdentity> => {
   const handle = await open(
-    directoryEntryPath(root, name),
+    directoryEntryPath(root, await resolveRemovalEntryName(root, name)),
     constants.O_RDONLY + constants.O_NOFOLLOW + constants.O_NONBLOCK,
   );
   try {
-    const info = await handle.stat();
-    if (!(info.isFile() && info.size === 0)) {
+    const info = await handle.stat({ bigint: true });
+    if (!(info.isFile() && info.size === 0n)) {
       throw new Error('Owner publication token must be an empty regular file');
     }
     return { dev: info.dev, ino: info.ino };
@@ -91,12 +100,15 @@ export const createOwnerPublicationToken = async (
   await afterSync?.();
 };
 
-const findToken = async (
+export const findOwnerPublicationTokenEntry = async (
   root: PinnedDirectory,
 ): Promise<OwnerPublicationToken | null> => {
-  const candidates = (await readdir(directoryEntryPath(root, '.'))).filter(
-    (entry) => entry.startsWith(TRANSACTION_OWNER_PUBLICATION_PREFIX),
-  );
+  const candidates = (await readdir(directoryEntryPath(root, '.')))
+    .map((entry) => {
+      const binding = parseRemovalBinding(entry);
+      return binding === null ? entry : binding.original;
+    })
+    .filter((entry) => entry.startsWith(TRANSACTION_OWNER_PUBLICATION_PREFIX));
   if (candidates.length === 0) {
     return null;
   }
@@ -109,19 +121,20 @@ const findToken = async (
   if (groups === undefined) {
     throw new Error('Owner publication token is invalid');
   }
-  const transaction = { dev: Number(groups.dev), ino: Number(groups.ino) };
   const ownerRecord =
     groups.ownerDev === undefined || groups.ownerIno === undefined
       ? null
-      : { dev: Number(groups.ownerDev), ino: Number(groups.ownerIno) };
+      : { dev: BigInt(groups.ownerDev), ino: BigInt(groups.ownerIno) };
+  const exactTransaction = {
+    dev: BigInt(groups.dev as string),
+    ino: BigInt(groups.ino as string),
+  };
   if (
-    !(
-      Number.isSafeInteger(transaction.dev) &&
-      Number.isSafeInteger(transaction.ino) &&
-      (ownerRecord === null ||
-        (Number.isSafeInteger(ownerRecord.dev) &&
-          Number.isSafeInteger(ownerRecord.ino)))
-    )
+    exactTransaction.dev.toString() !== groups.dev ||
+    exactTransaction.ino.toString() !== groups.ino ||
+    (ownerRecord !== null &&
+      (ownerRecord.dev.toString() !== groups.ownerDev ||
+        ownerRecord.ino.toString() !== groups.ownerIno))
   ) {
     throw new Error('Owner publication token inode is invalid');
   }
@@ -130,7 +143,7 @@ const findToken = async (
     identity: await inspectToken(root, name),
     name,
     ownerRecord,
-    transaction,
+    transaction: exactTransaction,
   };
 };
 
@@ -157,7 +170,7 @@ export const findOwnerPublicationToken = async (
   root: PinnedDirectory,
   transaction: PinnedDirectory,
 ): Promise<OwnerPublicationToken | null> => {
-  const token = await findToken(root);
+  const token = await findOwnerPublicationTokenEntry(root);
   if (
     token !== null &&
     !identitiesMatch(token.transaction, transaction.identity)
@@ -165,34 +178,4 @@ export const findOwnerPublicationToken = async (
     throw new Error('Owner publication token does not match active inode');
   }
   return token;
-};
-
-export const removeOrphanOwnerPublicationToken = async (
-  root: PinnedDirectory,
-  reservationId?: string,
-  mutate = true,
-): Promise<void> => {
-  const token = await findToken(root);
-  if (token === null) {
-    return;
-  }
-  if (reservationId !== undefined && token.id !== reservationId) {
-    throw new Error('Owner publication token has a different reservation');
-  }
-  if (!mutate) {
-    throw new Error('Pending owner publication token cleanup');
-  }
-  await removeOwnerPublicationToken(root, token);
-};
-
-export const removeOwnerPublicationToken = async (
-  root: PinnedDirectory,
-  token: OwnerPublicationToken,
-): Promise<void> => {
-  const current = await inspectToken(root, token.name);
-  if (!identitiesMatch(token.identity, current)) {
-    throw new Error('Owner publication token changed during cleanup');
-  }
-  await unlink(directoryEntryPath(root, token.name));
-  await syncPinnedDirectory(root);
 };

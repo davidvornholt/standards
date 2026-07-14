@@ -137,8 +137,8 @@ export const recoverRepositoryTransactions = async (
     }
     if (
       !identitiesMatch(root.identity, {
-        dev: Number(journal.root.dev),
-        ino: Number(journal.root.ino),
+        dev: BigInt(journal.root.dev),
+        ino: BigInt(journal.root.ino),
       })
     ) {
       throw new Error(

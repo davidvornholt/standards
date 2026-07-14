@@ -3,6 +3,7 @@ import { type FileHandle, open } from 'node:fs/promises';
 import process from 'node:process';
 import {
   identitiesMatch,
+  identityOf,
   type NodeIdentity,
   type RepositoryRoot,
 } from './sync-filesystem';
@@ -36,11 +37,6 @@ export const descriptorRootForPlatform = (
 
 const descriptorRoot = descriptorRootForPlatform(process.platform);
 
-const identityOf = (info: { readonly dev: number; readonly ino: number }) => ({
-  dev: info.dev,
-  ino: info.ino,
-});
-
 export const directoryEntryPath = (
   directory: PinnedDirectory,
   name: string,
@@ -58,7 +54,7 @@ const openDirectory = async (path: string): Promise<PinnedDirectory> => {
     path,
     constants.O_RDONLY + constants.O_DIRECTORY + constants.O_NOFOLLOW,
   );
-  const info = await handle.stat();
+  const info = await handle.stat({ bigint: true });
   if (!info.isDirectory()) {
     await handle.close();
     throw new Error(`Filesystem path must be a real directory: ${path}`);
