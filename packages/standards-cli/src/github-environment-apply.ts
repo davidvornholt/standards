@@ -1,7 +1,5 @@
 import { apiError, HTTP_NO_CONTENT, HTTP_OK, request } from './github-api';
 import { subsetMatches } from './github-diff';
-import type { ReportAction } from './github-environment-branch-apply';
-import { reconcileBranchPolicies } from './github-environment-transition-apply';
 import {
   environmentPath,
   fetchLiveEnvironment,
@@ -12,7 +10,6 @@ import { isRecord } from './github-settings';
 const WAIT_TIMER = 'wait_timer';
 const PREVENT_SELF_REVIEW = 'prevent_self_review';
 const DEPLOYMENT_BRANCH_POLICY = 'deployment_branch_policy';
-const DEPLOYMENT_BRANCH_POLICIES = 'deployment_branch_policies';
 const CUSTOM_DEPLOYMENT_PROTECTION_RULES = 'custom_deployment_protection_rules';
 const PROTECTION_KEYS = [
   WAIT_TIMER,
@@ -26,9 +23,7 @@ type ApplyContext = {
   readonly path: string;
   readonly name: string;
 };
-
-const usesCustomPolicies = (policy: unknown): boolean =>
-  isRecord(policy) && policy.custom_branch_policies === true;
+type ReportAction = (action: string) => void;
 
 const updateProtection = async (
   context: ApplyContext,
@@ -99,34 +94,17 @@ export const applyEnvironment = async (
   if (live.problem !== null) {
     throw new Error(live.problem);
   }
-  const livePolicies = Array.isArray(
-    live.environment?.[DEPLOYMENT_BRANCH_POLICIES],
-  )
-    ? live.environment[DEPLOYMENT_BRANCH_POLICIES].filter(isRecord)
-    : [];
-  const declaredPolicies = Array.isArray(declared[DEPLOYMENT_BRANCH_POLICIES])
-    ? declared[DEPLOYMENT_BRANCH_POLICIES].filter(isRecord)
-    : [];
   const customProtectionRules = Array.isArray(
     live.environment?.[CUSTOM_DEPLOYMENT_PROTECTION_RULES],
   )
     ? live.environment[CUSTOM_DEPLOYMENT_PROTECTION_RULES].filter(isRecord)
     : [];
-  const actions = [
-    ...(await reconcileBranchPolicies({
-      context,
-      declaredPolicies,
-      declaredUsesCustom: usesCustomPolicies(
-        declared[DEPLOYMENT_BRANCH_POLICY],
-      ),
-      livePolicies,
-      liveUsesCustom: usesCustomPolicies(
-        live.environment?.[DEPLOYMENT_BRANCH_POLICY],
-      ),
-      reportAction,
-      updateProtection: () => updateProtection(context, declared, live),
-    })),
-  ];
+  const actions: Array<string> = [];
+  const protection = await updateProtection(context, declared, live);
+  if (protection !== null) {
+    actions.push(protection);
+    reportAction(protection);
+  }
   const deletedCustom = await deleteCustomProtectionRules(
     context,
     customProtectionRules,

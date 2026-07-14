@@ -27,7 +27,7 @@ describe('custom deployment protection check', () => {
     directories.push(consumer);
     mkdirSync(join(consumer, '.github'));
     const environment = JSON.parse(
-      '{"name":"production","wait_timer":0,"prevent_self_review":false,"reviewers":[],"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false},"deployment_branch_policies":[]}',
+      '{"name":"production","wait_timer":0,"prevent_self_review":false,"reviewers":[],"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false}}',
     ) as Record<string, unknown>;
     writeFileSync(
       join(consumer, '.github/settings.json'),

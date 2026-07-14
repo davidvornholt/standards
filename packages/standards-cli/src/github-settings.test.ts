@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { loadGithubSettings } from './github-settings';
 
 const canonicalEnvironment = JSON.parse(
-  '{"name":"standards-sync","wait_timer":0,"prevent_self_review":false,"reviewers":[],"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false},"deployment_branch_policies":[]}',
+  '{"name":"standards-sync","wait_timer":0,"prevent_self_review":false,"reviewers":[],"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false}}',
 ) as Record<string, unknown>;
 
 const canonical = JSON.stringify({
@@ -24,7 +24,7 @@ describe('loadGithubSettings', () => {
       rulesets: [{ name: 'Protect releases', target: 'branch' }],
       environments: [
         JSON.parse(
-          '{"name":"production","wait_timer":0,"prevent_self_review":false,"reviewers":[],"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false},"deployment_branch_policies":[]}',
+          '{"name":"production","wait_timer":0,"prevent_self_review":false,"reviewers":[],"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false}}',
         ),
       ],
     });
@@ -127,10 +127,11 @@ describe('environment settings validation', () => {
 
     expect(loaded.merged).toBeNull();
     expect(loaded.problems).toEqual([
+      '.github/settings.json environments[0] has unknown key "deployment_branch_policies"',
       '.github/settings.json environments[0] has unknown key "waitTimer"',
       '.github/settings.json environments[0].reviewers[0] has unknown key "login"',
       '.github/settings.json environments[0].deployment_branch_policy has unknown key "protected_branch"',
-      '.github/settings.json environments[0].deployment_branch_policies[0] has unknown key "pattern"',
+      '.github/settings.json environments[0].deployment_branch_policy must enable protected branches only',
     ]);
   });
 
@@ -144,11 +145,11 @@ describe('environment settings validation', () => {
     );
     expect(loaded.merged).toBeNull();
     expect(loaded.problems).toEqual([
+      '.github/settings.json environments[0] has unknown key "deployment_branch_policies"',
       '.github/settings.json environments[0].wait_timer must be an integer from 0 to 43200',
       '.github/settings.json environments[0].prevent_self_review must be a boolean',
       '.github/settings.json environments[0].reviewers must be an array',
-      '.github/settings.json environments[0].deployment_branch_policy must enable exactly one branch-policy mode',
-      '.github/settings.json environments[0].deployment_branch_policies[0] must have a non-empty branch name pattern',
+      '.github/settings.json environments[0].deployment_branch_policy must enable protected branches only',
     ]);
   });
 });

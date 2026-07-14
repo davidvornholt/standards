@@ -40,7 +40,7 @@ describe('runGithubApply', () => {
     directories.push(consumer);
     mkdirSync(join(consumer, '.github'));
     const invalidEnvironment = JSON.parse(
-      `{"name":"${'e'.repeat(MAX_ENVIRONMENT_NAME_LENGTH + 1)}","wait_timer":${MAX_WAIT_TIMER + 1},"prevent_self_review":false,"reviewers":[],"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false},"deployment_branch_policies":[]}`,
+      `{"name":"${'e'.repeat(MAX_ENVIRONMENT_NAME_LENGTH + 1)}","wait_timer":${MAX_WAIT_TIMER + 1},"prevent_self_review":false,"reviewers":[],"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false}}`,
     ) as Record<string, unknown>;
     invalidEnvironment.reviewers = Array.from(
       { length: MAX_REVIEWERS + 1 },

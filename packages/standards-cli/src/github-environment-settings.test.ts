@@ -4,7 +4,7 @@ import { environmentListProblems } from './github-environment-settings';
 const MAX_ENVIRONMENT_NAME_LENGTH = 255;
 const MAX_WAIT_TIMER = 43_200;
 const MAX_REVIEWERS = 6;
-const EXPECTED_PROBLEM_COUNT = 14;
+const EXPECTED_PROBLEM_COUNT = 9;
 const WAIT_TIMER = 'wait_timer';
 const PREVENT_SELF_REVIEW = 'prevent_self_review';
 const DEPLOYMENT_BRANCH_POLICY = 'deployment_branch_policy';
@@ -14,7 +14,7 @@ const CUSTOM_BRANCH_POLICIES = 'custom_branch_policies';
 
 const validEnvironment = (name: string): Record<string, unknown> => ({
   ...JSON.parse(
-    '{"wait_timer":0,"prevent_self_review":false,"reviewers":[],"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false},"deployment_branch_policies":[]}',
+    '{"wait_timer":0,"prevent_self_review":false,"reviewers":[],"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false}}',
   ),
   name,
 });
@@ -79,12 +79,7 @@ describe('environmentListProblems', () => {
       [DEPLOYMENT_BRANCH_POLICY]: JSON.parse(
         '{"protected_branches":true,"custom_branch_policies":true,"typo":false}',
       ),
-      [DEPLOYMENT_BRANCH_POLICIES]: [
-        { name: 'main', extra: true },
-        { name: 'main', duplicate: true },
-        { name: '', pattern: '*' },
-        null,
-      ],
+      [DEPLOYMENT_BRANCH_POLICIES]: [{ name: 'main' }],
     };
 
     const problems = environmentListProblems([environment], 'settings');
@@ -103,30 +98,23 @@ describe('environmentListProblems', () => {
       'settings environments[0].deployment_branch_policy has unknown key "typo"',
     );
     expect(problems).toContain(
-      'settings environments[0] declares deployment policy "main" more than once',
-    );
-    expect(problems).toContain(
-      'settings environments[0].deployment_branch_policies[2] has unknown key "pattern"',
-    );
-    expect(problems).toContain(
-      'settings environments[0].deployment_branch_policies[3] must have a non-empty branch name pattern',
+      'settings environments[0] has unknown key "deployment_branch_policies"',
     );
   });
 
-  it('rejects policy types that cannot be reconciled from GitHub reads', () => {
-    for (const type of ['branch', 'tag']) {
-      const environment = {
-        ...validEnvironment('standards-sync'),
-        [DEPLOYMENT_BRANCH_POLICY]: {
-          [PROTECTED_BRANCHES]: false,
-          [CUSTOM_BRANCH_POLICIES]: true,
-        },
-        [DEPLOYMENT_BRANCH_POLICIES]: [{ name: 'main', type }],
-      };
+  it('rejects custom branch mode and deployment policy declarations', () => {
+    const environment = {
+      ...validEnvironment('standards-sync'),
+      [DEPLOYMENT_BRANCH_POLICY]: {
+        [PROTECTED_BRANCHES]: false,
+        [CUSTOM_BRANCH_POLICIES]: true,
+      },
+      [DEPLOYMENT_BRANCH_POLICIES]: [{ name: 'main', type: 'branch' }],
+    };
 
-      expect(environmentListProblems([environment], 'settings')).toEqual([
-        'settings environments[0].deployment_branch_policies[0] has unknown key "type"',
-      ]);
-    }
+    expect(environmentListProblems([environment], 'settings')).toEqual([
+      'settings environments[0] has unknown key "deployment_branch_policies"',
+      'settings environments[0].deployment_branch_policy must enable protected branches only',
+    ]);
   });
 });

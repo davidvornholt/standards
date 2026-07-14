@@ -9,14 +9,12 @@ const ENVIRONMENT_KEYS = new Set([
   'prevent_self_review',
   'reviewers',
   'deployment_branch_policy',
-  'deployment_branch_policies',
 ]);
 const REVIEWER_KEYS = new Set(['type', 'id']);
 const BRANCH_POLICY_MODE_KEYS = new Set([
   'protected_branches',
   'custom_branch_policies',
 ]);
-const DEPLOYMENT_POLICY_KEYS = new Set(['name']);
 const MAX_ENVIRONMENT_NAME_LENGTH = 255;
 export const MAX_WAIT_TIMER = 43_200;
 export const MAX_REVIEWERS = 6;
@@ -71,69 +69,15 @@ const branchPolicyModeProblems = (
 ): ReadonlyArray<string> => {
   const policyPrefix = `${prefix}.deployment_branch_policy`;
   if (!isRecord(policy)) {
-    return [`${policyPrefix} must enable exactly one branch-policy mode`];
+    return [`${policyPrefix} must enable protected branches only`];
   }
   return [
     ...unknownKeyProblems(policy, BRANCH_POLICY_MODE_KEYS, policyPrefix),
-    ...(typeof policy.protected_branches === 'boolean' &&
-    typeof policy.custom_branch_policies === 'boolean' &&
-    policy.protected_branches !== policy.custom_branch_policies
+    ...(policy.protected_branches === true &&
+    policy.custom_branch_policies === false
       ? []
-      : [`${policyPrefix} must enable exactly one branch-policy mode`]),
+      : [`${policyPrefix} must enable protected branches only`]),
   ];
-};
-
-const deploymentPolicyProblems = (
-  policies: unknown,
-  prefix: string,
-): ReadonlyArray<string> => {
-  if (!Array.isArray(policies)) {
-    return [`${prefix}.deployment_branch_policies must be an array`];
-  }
-  const names = new Set<string>();
-  return policies.flatMap((policy, index) => {
-    const policyPrefix = `${prefix}.deployment_branch_policies[${index}]`;
-    if (!isRecord(policy)) {
-      return [`${policyPrefix} must have a non-empty branch name pattern`];
-    }
-    const name =
-      typeof policy.name === 'string' && policy.name.length > 0
-        ? policy.name
-        : null;
-    const problems = [
-      ...unknownKeyProblems(policy, DEPLOYMENT_POLICY_KEYS, policyPrefix),
-      ...(name === null
-        ? [`${policyPrefix} must have a non-empty branch name pattern`]
-        : []),
-    ];
-    if (name === null) {
-      return problems;
-    }
-    if (names.has(name)) {
-      problems.push(
-        `${prefix} declares deployment policy "${policy.name}" more than once`,
-      );
-    } else {
-      names.add(name);
-    }
-    return problems;
-  });
-};
-
-const policyModeConsistencyProblems = (
-  environment: Readonly<Record<string, unknown>>,
-  prefix: string,
-): ReadonlyArray<string> => {
-  const mode = environment.deployment_branch_policy;
-  const policies = environment.deployment_branch_policies;
-  return isRecord(mode) &&
-    mode.custom_branch_policies === false &&
-    Array.isArray(policies) &&
-    policies.length > 0
-    ? [
-        `${prefix}.deployment_branch_policies must be empty when custom branch policies are disabled`,
-      ]
-    : [];
 };
 
 const environmentProblems = (
@@ -151,8 +95,6 @@ const environmentProblems = (
     : [`${prefix}.prevent_self_review must be a boolean`]),
   ...reviewerProblems(environment.reviewers, prefix),
   ...branchPolicyModeProblems(environment.deployment_branch_policy, prefix),
-  ...deploymentPolicyProblems(environment.deployment_branch_policies, prefix),
-  ...policyModeConsistencyProblems(environment, prefix),
 ];
 
 export const environmentListProblems = (

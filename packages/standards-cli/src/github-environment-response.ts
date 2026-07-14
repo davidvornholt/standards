@@ -20,11 +20,6 @@ export type DecodedEnvironment = {
   readonly waitTimer: number;
 };
 
-export type DecodedPolicyPage = {
-  readonly policies: ReadonlyArray<Readonly<Record<string, unknown>>>;
-  readonly totalCount: number;
-};
-
 const invalid = <T>(context: string, detail: string): DecodeResult<T> => ({
   problem: `${context}: GitHub returned ${detail}`,
   value: null,
@@ -158,39 +153,5 @@ export const decodeEnvironmentResponse = (
       branchPolicy: policy,
       ...protection.value,
     },
-  };
-};
-
-export const decodePolicyPage = (
-  body: unknown,
-  name: string,
-): DecodeResult<DecodedPolicyPage> => {
-  const context = `listing deployment policies for environment "${name}"`;
-  if (
-    !(isRecord(body) && Number.isSafeInteger(body.total_count)) ||
-    Number(body.total_count) < 0 ||
-    !Array.isArray(body.branch_policies)
-  ) {
-    return invalid(context, 'an invalid deployment-policy page');
-  }
-  const policies: Array<Readonly<Record<string, unknown>>> = [];
-  const names = new Set<string>();
-  for (const policy of body.branch_policies) {
-    if (
-      !(isRecord(policy) && isPositiveSafeInteger(policy.id)) ||
-      typeof policy.name !== 'string' ||
-      policy.name.length === 0
-    ) {
-      return invalid(context, 'an invalid deployment policy');
-    }
-    if (names.has(policy.name)) {
-      return invalid(context, 'a duplicate deployment policy name');
-    }
-    names.add(policy.name);
-    policies.push({ id: policy.id, name: policy.name });
-  }
-  return {
-    problem: null,
-    value: { policies, totalCount: Number(body.total_count) },
   };
 };

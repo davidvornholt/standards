@@ -3,7 +3,6 @@ import { HTTP_NO_CONTENT, HTTP_OK } from './github-api';
 import { applyEnvironment } from './github-environment-apply';
 
 const originalFetch = globalThis.fetch;
-const branchPath = 'deployment-branch-policies';
 const customPath = 'deployment_protection_rules';
 const PROTECTION_RULES = 'protection_rules';
 const WAIT_TIMER = 'wait_timer';
@@ -11,16 +10,9 @@ const PREVENT_SELF_REVIEW = 'prevent_self_review';
 const DEPLOYMENT_BRANCH_POLICY = 'deployment_branch_policy';
 const PROTECTED_BRANCHES = 'protected_branches';
 const CUSTOM_BRANCH_POLICIES = 'custom_branch_policies';
-const DEPLOYMENT_BRANCH_POLICIES = 'deployment_branch_policies';
 const TOTAL_COUNT = 'total_count';
-const BRANCH_POLICIES = 'branch_policies';
 const CUSTOM_PROTECTION_RULES = 'custom_deployment_protection_rules';
 const HTTP_ERROR = 500;
-
-const deleteResult = (url: string): Response =>
-  url.includes(customPath)
-    ? response(HTTP_ERROR, { message: 'custom delete failed' })
-    : response(HTTP_NO_CONTENT);
 
 const response = (status: number, body: unknown = null): Response =>
   new Response(body === null ? null : JSON.stringify(body), {
@@ -50,19 +42,16 @@ const customRules = (present: boolean) => ({
     : [],
 });
 
-const declared = (usesCustomBranches: boolean) => ({
+const declared = {
   name: 'production',
   [WAIT_TIMER]: 0,
   [PREVENT_SELF_REVIEW]: false,
   reviewers: [],
   [DEPLOYMENT_BRANCH_POLICY]: {
-    [PROTECTED_BRANCHES]: !usesCustomBranches,
-    [CUSTOM_BRANCH_POLICIES]: usesCustomBranches,
+    [PROTECTED_BRANCHES]: true,
+    [CUSTOM_BRANCH_POLICIES]: false,
   },
-  [DEPLOYMENT_BRANCH_POLICIES]: usesCustomBranches
-    ? [{ name: 'release/*' }]
-    : [],
-});
+};
 
 const installFetch = (
   handler: (url: string, method: string) => Response,
@@ -84,11 +73,11 @@ afterEach(() => {
 });
 
 describe('environment reconciliation ordering', () => {
-  it('creates non-destructive state before branch and custom-rule deletes', async () => {
+  it('updates protection before deleting custom rules without branch-policy requests', async () => {
     const calls: Array<string> = [];
     const reported: Array<string> = [];
     installFetch((url, method) => {
-      if (method === 'PUT' || method === 'POST') {
+      if (method === 'PUT') {
         return response(HTTP_OK, {});
       }
       if (method === 'DELETE') {
@@ -97,61 +86,30 @@ describe('environment reconciliation ordering', () => {
       if (url.includes(customPath)) {
         return response(HTTP_OK, customRules(true));
       }
-      if (url.includes(branchPath)) {
-        return response(HTTP_OK, {
-          [TOTAL_COUNT]: 1,
-          [BRANCH_POLICIES]: [{ id: 7, name: 'old/*' }],
-        });
-      }
       return response(HTTP_OK, environment(true));
     }, calls);
 
     const actions = await applyEnvironment(
       'token',
       'owner/repo',
-      declared(true),
+      declared,
       (action) => reported.push(action),
     );
 
     expect(calls.map((call) => call.split(' ')[0])).toEqual([
       'GET',
       'GET',
-      'GET',
       'PUT',
-      'POST',
-      'DELETE',
       'DELETE',
     ]);
     expect(calls.at(-1)).toContain(customPath);
+    expect(
+      calls.every((call) => !call.includes('deployment-branch-policies')),
+    ).toBe(true);
     expect(reported).toEqual([...actions]);
   });
 
-  it('reports protection before a later branch-policy create failure', async () => {
-    const calls: Array<string> = [];
-    const reported: Array<string> = [];
-    installFetch((url, method) => {
-      if (method === 'PUT') {
-        return response(HTTP_OK, {});
-      }
-      if (method === 'POST') {
-        return response(HTTP_ERROR, { message: 'create failed' });
-      }
-      if (url.includes(customPath)) {
-        return response(HTTP_OK, customRules(false));
-      }
-      return response(HTTP_OK, environment(false));
-    }, calls);
-
-    await expect(
-      applyEnvironment('token', 'owner/repo', declared(true), (action) =>
-        reported.push(action),
-      ),
-    ).rejects.toThrow('creating deployment policy');
-    expect(reported).toEqual(['updated environment "production" protection']);
-    expect(calls.some((call) => call.startsWith('DELETE'))).toBe(false);
-  });
-
-  it('reports branch deletion before a later custom-rule delete failure', async () => {
+  it('reports protection immediately before a later custom-rule delete failure', async () => {
     const calls: Array<string> = [];
     const reported: Array<string> = [];
     installFetch((url, method) => {
@@ -159,28 +117,19 @@ describe('environment reconciliation ordering', () => {
         return response(HTTP_OK, {});
       }
       if (method === 'DELETE') {
-        return deleteResult(url);
+        return response(HTTP_ERROR, { message: 'custom delete failed' });
       }
       if (url.includes(customPath)) {
         return response(HTTP_OK, customRules(true));
-      }
-      if (url.includes(branchPath)) {
-        return response(HTTP_OK, {
-          [TOTAL_COUNT]: 1,
-          [BRANCH_POLICIES]: [{ id: 7, name: 'old/*' }],
-        });
       }
       return response(HTTP_OK, environment(true));
     }, calls);
 
     await expect(
-      applyEnvironment('token', 'owner/repo', declared(false), (action) =>
+      applyEnvironment('token', 'owner/repo', declared, (action) =>
         reported.push(action),
       ),
     ).rejects.toThrow('deleting custom deployment protection rule');
-    expect(reported).toEqual([
-      'deleted undeclared deployment policy "old/*" from environment "production"',
-      'updated environment "production" protection',
-    ]);
+    expect(reported).toEqual(['updated environment "production" protection']);
   });
 });

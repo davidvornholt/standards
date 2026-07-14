@@ -108,7 +108,7 @@ describe('canonical scheduled sync contract', () => {
     expect(environment?.deployment_branch_policy).toEqual(
       JSON.parse('{"protected_branches":true,"custom_branch_policies":false}'),
     );
-    expect(environment?.deployment_branch_policies).toEqual([]);
+    expect(environment).not.toHaveProperty('deployment_branch_policies');
   });
 
   it('keeps workflow and action metadata valid YAML', () => {

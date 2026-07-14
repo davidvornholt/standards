@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { HTTP_NO_CONTENT, HTTP_NOT_FOUND, HTTP_OK } from './github-api';
+import { HTTP_NOT_FOUND, HTTP_OK } from './github-api';
 import { applyEnvironment } from './github-environment-apply';
 
 const originalFetch = globalThis.fetch;
@@ -7,12 +7,10 @@ const DEPLOYMENT_BRANCH_POLICY = 'deployment_branch_policy';
 const PROTECTION_RULES = 'protection_rules';
 const PROTECTED_BRANCHES = 'protected_branches';
 const CUSTOM_BRANCH_POLICIES = 'custom_branch_policies';
-const TOTAL_COUNT = 'total_count';
-const BRANCH_POLICIES = 'branch_policies';
 const CUSTOM_PROTECTION_PATH = 'deployment_protection_rules';
 
 const declared = JSON.parse(
-  '{"name":"standards-sync","wait_timer":0,"prevent_self_review":false,"reviewers":[],"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false},"deployment_branch_policies":[]}',
+  '{"name":"standards-sync","wait_timer":0,"prevent_self_review":false,"reviewers":[],"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false}}',
 ) as Record<string, unknown>;
 
 const mockFetch = (
@@ -95,23 +93,15 @@ describe('applyEnvironment', () => {
     expect(methods).toEqual(['GET', 'GET']);
   });
 
-  it('deletes undeclared branch policies before disabling custom mode', async () => {
-    const methods: Array<string> = [];
+  it('switches live custom mode with one PUT and no branch-policy requests', async () => {
+    const calls: Array<{ method: string; url: string }> = [];
     globalThis.fetch = mockFetch((input, init) => {
-      methods.push(init?.method ?? 'GET');
-      if (init?.method === 'DELETE') {
-        return response(HTTP_NO_CONTENT);
-      }
-      if (String(input).includes('deployment-branch-policies')) {
-        return response(
-          HTTP_OK,
-          JSON.parse(
-            '{"total_count":1,"branch_policies":[{"id":7,"node_id":"node-7","name":"main"}]}',
-          ),
-        );
-      }
+      calls.push({ method: init?.method ?? 'GET', url: String(input) });
       if (String(input).includes(CUSTOM_PROTECTION_PATH)) {
         return response(HTTP_OK, customProtectionRules());
+      }
+      if (init?.method === 'PUT') {
+        return response(HTTP_OK, {});
       }
       return response(
         HTTP_OK,
@@ -126,9 +116,11 @@ describe('applyEnvironment', () => {
 
     const actions = await applyEnvironment('token', 'owner/repo', declared);
 
-    expect(methods).toEqual(['GET', 'GET', 'GET', 'DELETE', 'PUT']);
+    expect(calls.map(({ method }) => method)).toEqual(['GET', 'GET', 'PUT']);
+    expect(
+      calls.every(({ url }) => !url.includes('deployment-branch-policies')),
+    ).toBe(true);
     expect(actions).toEqual([
-      'deleted undeclared deployment policy "main" from environment "standards-sync"',
       'updated environment "standards-sync" protection',
     ]);
   });
@@ -149,36 +141,5 @@ describe('applyEnvironment validation', () => {
       applyEnvironment('token', 'owner/repo', declared),
     ).rejects.toThrow('invalid environment response');
     expect(methods).toEqual(['GET']);
-  });
-
-  it('fails without writes when a deployment policy is malformed', async () => {
-    const calls: Array<string> = [];
-    globalThis.fetch = mockFetch((input, init) => {
-      calls.push(`${init?.method ?? 'GET'} ${String(input)}`);
-      if (String(input).includes('deployment-branch-policies')) {
-        return response(HTTP_OK, {
-          [TOTAL_COUNT]: 1,
-          [BRANCH_POLICIES]: [{}],
-        });
-      }
-      if (String(input).includes(CUSTOM_PROTECTION_PATH)) {
-        return response(HTTP_OK, customProtectionRules());
-      }
-      return response(
-        HTTP_OK,
-        liveEnvironment({
-          [DEPLOYMENT_BRANCH_POLICY]: {
-            [PROTECTED_BRANCHES]: false,
-            [CUSTOM_BRANCH_POLICIES]: true,
-          },
-        }),
-      );
-    });
-
-    await expect(
-      applyEnvironment('token', 'owner/repo', declared),
-    ).rejects.toThrow('invalid deployment policy');
-    expect(calls).toHaveLength(2);
-    expect(calls.every((call) => call.startsWith('GET '))).toBe(true);
   });
 });

@@ -176,7 +176,6 @@ const ENVIRONMENT_COMPARED_KEYS = [
   'prevent_self_review',
   'reviewers',
   'deployment_branch_policy',
-  'deployment_branch_policies',
   'custom_deployment_protection_rules',
 ] as const;
 
