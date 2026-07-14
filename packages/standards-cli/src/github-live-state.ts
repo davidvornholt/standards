@@ -29,6 +29,42 @@ export type GithubLiveState = {
   readonly rulesets: LiveRulesets;
 };
 
+type GithubStateDiff = {
+  readonly drifted: ReadonlyArray<string>;
+  readonly unverifiable: ReadonlyArray<string>;
+};
+
+const diffDefaultBranch = (
+  declared: GithubSettings['defaultBranchProtection'],
+  live: LiveDefaultBranch | null,
+): GithubStateDiff => {
+  if (declared === null || live === null || live.problem !== null) {
+    return { drifted: [], unverifiable: [] };
+  }
+  if (!live.classicProtection) {
+    return {
+      drifted: [
+        `default branch "${live.branch}" has no classic branch protection`,
+      ],
+      unverifiable: [],
+    };
+  }
+  if (live.unverifiable) {
+    return {
+      drifted: [],
+      unverifiable: [`default branch "${live.branch}" protection details`],
+    };
+  }
+  return live.protection === null || !subsetMatches(declared, live.protection)
+    ? {
+        drifted: [
+          `default branch "${live.branch}" protection differs from the declaration`,
+        ],
+        unverifiable: [],
+      }
+    : { drifted: [], unverifiable: [] };
+};
+
 export const readGithubLiveState = async (
   token: string | null,
   repo: string,
@@ -101,36 +137,21 @@ export const diffGithubLiveState = (
     live.rulesets.rulesets === null
       ? { drifted: [], unverifiable: [] }
       : diffRulesets(declared.rulesets, live.rulesets.rulesets);
+  const defaultBranch = diffDefaultBranch(
+    declared.defaultBranchProtection,
+    live.defaultBranch,
+  );
   const drifted = [
     ...live.problems,
     ...repository.drifted,
     ...rulesets.drifted,
+    ...defaultBranch.drifted,
   ];
-  const unverifiable = [...repository.unverifiable, ...rulesets.unverifiable];
-  if (
-    declared.defaultBranchProtection !== null &&
-    live.defaultBranch !== null
-  ) {
-    if (!live.defaultBranch.classicProtection) {
-      drifted.push(
-        `default branch "${live.defaultBranch.branch}" has no classic branch protection`,
-      );
-    } else if (live.defaultBranch.unverifiable) {
-      unverifiable.push(
-        `default branch "${live.defaultBranch.branch}" protection details`,
-      );
-    } else if (
-      live.defaultBranch.protection === null ||
-      !subsetMatches(
-        declared.defaultBranchProtection,
-        live.defaultBranch.protection,
-      )
-    ) {
-      drifted.push(
-        `default branch "${live.defaultBranch.branch}" protection differs from the declaration`,
-      );
-    }
-  }
+  const unverifiable = [
+    ...repository.unverifiable,
+    ...rulesets.unverifiable,
+    ...defaultBranch.unverifiable,
+  ];
   drifted.push(
     ...live.environments.flatMap(
       ({ declared: environment, live: liveEnvironment }) => {

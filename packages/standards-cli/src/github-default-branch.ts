@@ -6,6 +6,7 @@ import {
 } from './github-default-branch-response';
 
 const HTTP_FORBIDDEN = 403;
+const HTTP_UNAUTHORIZED = 401;
 
 export type LiveDefaultBranch = {
   readonly branch: string | null;
@@ -79,11 +80,9 @@ export const fetchDefaultBranchProtection = async (
       unverifiable: false,
     };
   }
-  if (
-    detail.status === HTTP_FORBIDDEN &&
-    !detailRequired &&
-    classicProtection
-  ) {
+  const detailVisibilityDenied =
+    detail.status === HTTP_UNAUTHORIZED || detail.status === HTTP_FORBIDDEN;
+  if (detailVisibilityDenied && !detailRequired && classicProtection) {
     return {
       branch,
       classicProtection,

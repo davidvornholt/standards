@@ -6,6 +6,7 @@ import {
   decodeBranchSummary,
   decodeDefaultBranchProtection,
 } from './github-default-branch-response';
+import { diffGithubLiveState } from './github-live-state';
 
 const originalFetch = globalThis.fetch;
 const declared = JSON.parse(
@@ -16,6 +17,7 @@ const declared = JSON.parse(
 ).default_branch_protection as Record<string, unknown>;
 const HTTP_FORBIDDEN = 403;
 const HTTP_OK = 200;
+const HTTP_UNAUTHORIZED = 401;
 const repository = JSON.parse('{"default_branch":"trunk"}') as Record<
   string,
   unknown
@@ -49,12 +51,13 @@ describe('default branch protection responses', () => {
     );
   });
 
-  it('marks forbidden details unverifiable only after classic existence is proven', async () => {
+  it('marks visibility-denied details unverifiable only after classic existence is proven', async () => {
+    let deniedStatus = HTTP_UNAUTHORIZED;
     globalThis.fetch = Object.assign(
       (input: URL | RequestInfo) =>
         Promise.resolve(
           String(input).endsWith('/protection')
-            ? response(HTTP_FORBIDDEN, { message: 'forbidden' })
+            ? response(deniedStatus, { message: 'visibility denied' })
             : response(HTTP_OK, {
                 name: 'trunk',
                 protected: true,
@@ -73,6 +76,16 @@ describe('default branch protection responses', () => {
       classicProtection: true,
       unverifiable: true,
     });
+    deniedStatus = HTTP_FORBIDDEN;
+    expect(
+      await fetchDefaultBranchProtection(
+        'token',
+        'owner/repo',
+        repository,
+        false,
+      ),
+    ).toMatchObject({ classicProtection: true, unverifiable: true });
+    deniedStatus = HTTP_UNAUTHORIZED;
     expect(
       (
         await fetchDefaultBranchProtection(
@@ -82,7 +95,35 @@ describe('default branch protection responses', () => {
           true,
         )
       ).problem,
-    ).toContain('HTTP 403');
+    ).toContain('HTTP 401');
+  });
+
+  it('does not add semantic drift when the detail read has a problem', () => {
+    const problem =
+      'reading protection for default branch "trunk": HTTP 404 Not Found';
+    expect(
+      diffGithubLiveState(
+        {
+          defaultBranchProtection: declared,
+          environments: [],
+          repository: {},
+          rulesets: [],
+        },
+        {
+          defaultBranch: {
+            branch: 'trunk',
+            classicProtection: true,
+            problem,
+            protection: null,
+            unverifiable: false,
+          },
+          environments: [],
+          problems: [problem],
+          repository: {},
+          rulesets: { problem: null, rulesets: [] },
+        },
+      ).drifted,
+    ).toEqual([problem]);
   });
 });
 
