@@ -20,6 +20,8 @@ const DEPLOYMENT_POLICY_KEYS = new Set(['name', 'type']);
 const MAX_ENVIRONMENT_NAME_LENGTH = 255;
 export const MAX_WAIT_TIMER = 43_200;
 export const MAX_REVIEWERS = 6;
+export const isPositiveSafeInteger = (value: unknown): value is number =>
+  Number.isSafeInteger(value) && Number(value) > 0;
 
 export const environmentIdentity = (name: string): string => name.toLowerCase();
 
@@ -47,16 +49,16 @@ const reviewerProblems = (
       const reviewerPrefix = `${prefix}.reviewers[${index}]`;
       if (!isRecord(reviewer)) {
         return [
-          `${reviewerPrefix} must have type "User" or "Team" and an integer id`,
+          `${reviewerPrefix} must have type "User" or "Team" and a positive safe integer id`,
         ];
       }
       return [
         ...unknownKeyProblems(reviewer, REVIEWER_KEYS, reviewerPrefix),
         ...((reviewer.type === 'User' || reviewer.type === 'Team') &&
-        Number.isInteger(reviewer.id)
+        isPositiveSafeInteger(reviewer.id)
           ? []
           : [
-              `${reviewerPrefix} must have type "User" or "Team" and an integer id`,
+              `${reviewerPrefix} must have type "User" or "Team" and a positive safe integer id`,
             ]),
       ];
     }),

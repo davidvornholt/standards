@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
@@ -43,6 +49,51 @@ describe('runGithubApply', () => {
     writeFileSync(
       join(consumer, '.github/settings.json'),
       JSON.stringify({ environments: [invalidEnvironment] }),
+    );
+    writeFileSync(
+      join(consumer, '.github/settings.local.json'),
+      '{"repository":{},"rulesets":[],"environments":[]}',
+    );
+    execFileSync('git', ['init', '--quiet', consumer]);
+    execFileSync('git', [
+      '-C',
+      consumer,
+      'remote',
+      'add',
+      'origin',
+      'git@github.com:owner/repo.git',
+    ]);
+    let requests = 0;
+    globalThis.fetch = Object.assign(
+      () => {
+        requests += 1;
+        return Promise.resolve(new Response(null, { status: 500 }));
+      },
+      { preconnect: originalFetch.preconnect },
+    );
+    process.env.GH_TOKEN = 'test-token';
+
+    expect(await runGithubApply(consumer)).toBe(false);
+    expect(requests).toBe(0);
+  });
+
+  it('makes no API request when a declared reviewer identity is invalid', async () => {
+    const consumer = mkdtempSync(join(tmpdir(), 'github-apply-'));
+    directories.push(consumer);
+    mkdirSync(join(consumer, '.github'));
+    const canonical = JSON.parse(
+      readFileSync(
+        join(import.meta.dir, '../../../.github/settings.json'),
+        'utf8',
+      ),
+    ) as { environments: Array<Record<string, unknown>> };
+    const [environment] = canonical.environments;
+    if (environment !== undefined) {
+      environment.reviewers = [{ type: 'User', id: 0 }];
+    }
+    writeFileSync(
+      join(consumer, '.github/settings.json'),
+      JSON.stringify(canonical),
     );
     writeFileSync(
       join(consumer, '.github/settings.local.json'),

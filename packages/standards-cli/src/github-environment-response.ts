@@ -1,4 +1,8 @@
-import { MAX_REVIEWERS, MAX_WAIT_TIMER } from './github-environment-settings';
+import {
+  isPositiveSafeInteger,
+  MAX_REVIEWERS,
+  MAX_WAIT_TIMER,
+} from './github-environment-settings';
 import { isRecord } from './github-settings';
 
 const WAIT_TIMER = 'wait_timer';
@@ -26,9 +30,6 @@ const invalid = <T>(context: string, detail: string): DecodeResult<T> => ({
   value: null,
 });
 
-const positiveSafeInteger = (value: unknown): value is number =>
-  Number.isSafeInteger(value) && Number(value) > 0;
-
 const decodeReviewers = (
   value: unknown,
   context: string,
@@ -43,7 +44,7 @@ const decodeReviewers = (
       !isRecord(entry) ||
       (entry.type !== 'User' && entry.type !== 'Team') ||
       !isRecord(reviewer) ||
-      !positiveSafeInteger(reviewer.id)
+      !isPositiveSafeInteger(reviewer.id)
     ) {
       return invalid(context, 'an invalid required-reviewer identity');
     }
@@ -175,7 +176,7 @@ export const decodePolicyPage = (
   const policies: Array<Readonly<Record<string, unknown>>> = [];
   for (const policy of body.branch_policies) {
     if (
-      !(isRecord(policy) && positiveSafeInteger(policy.id)) ||
+      !(isRecord(policy) && isPositiveSafeInteger(policy.id)) ||
       typeof policy.name !== 'string' ||
       policy.name.length === 0 ||
       (policy.type !== 'branch' && policy.type !== 'tag')

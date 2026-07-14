@@ -24,11 +24,24 @@ describe('environmentListProblems', () => {
       [WAIT_TIMER]: MAX_WAIT_TIMER,
       reviewers: Array.from({ length: MAX_REVIEWERS }, (_, index) => ({
         type: 'User',
-        id: index + 1,
+        id: index === MAX_REVIEWERS - 1 ? Number.MAX_SAFE_INTEGER : index + 1,
       })),
     };
 
     expect(environmentListProblems([environment], 'settings')).toEqual([]);
+  });
+
+  it('rejects nonpositive and unsafe reviewer identities', () => {
+    for (const id of [0, -1, Number.MAX_SAFE_INTEGER + 1]) {
+      const environment = {
+        ...validEnvironment('standards-sync'),
+        reviewers: [{ type: 'User', id }],
+      };
+
+      expect(environmentListProblems([environment], 'settings')).toEqual([
+        'settings environments[0].reviewers[0] must have type "User" or "Team" and a positive safe integer id',
+      ]);
+    }
   });
 
   it('rejects values above every GitHub environment limit', () => {

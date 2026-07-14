@@ -10,7 +10,6 @@ const PREFLIGHT = join(
   ROOT,
   '.github/actions/standards-sync-preflight/index.mjs',
 );
-const CLI = join(ROOT, 'packages/standards-cli/src/cli.ts');
 const LOCK = join(ROOT, 'sync-standards.lock');
 const EVENT_NAME_VARIABLE = 'GITHUB_EVENT_NAME';
 const OUTPUT_VARIABLE = 'GITHUB_OUTPUT';
@@ -44,10 +43,14 @@ describe('standards source workspace', () => {
 
   it('keeps a real-root local dry run as a no-op', () => {
     const lockBefore = readLock();
-    const result = spawnSync('bun', [CLI, 'sync', '--from', '.', '--dry-run'], {
-      cwd: ROOT,
-      encoding: 'utf8',
-    });
+    const result = spawnSync(
+      'bun',
+      ['standards', 'sync', '--from', '.', '--dry-run'],
+      {
+        cwd: ROOT,
+        encoding: 'utf8',
+      },
+    );
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('dry run: already in sync; no changes');

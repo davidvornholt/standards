@@ -2,19 +2,16 @@ export type SyncPolicy = {
   readonly ref: string;
   readonly scheduledSync: boolean;
 };
-
 export type SyncPolicyInspection = {
   readonly packageJson: Record<string, unknown> | undefined;
   readonly policy: SyncPolicy | null;
   readonly problems: ReadonlyArray<string>;
 };
-
 type SyncPolicyInspectionInput = {
   readonly packageText: string | undefined;
   readonly policyText: string | undefined;
   readonly sourceWorkspacePackageText: string | undefined;
 };
-
 export const DEFAULT_SYNC_POLICY: SyncPolicy = {
   ref: 'refs/heads/main',
   scheduledSync: true,
@@ -126,11 +123,7 @@ const inspectPolicy = (
 };
 
 const versionIsCompatible = (version: string): boolean => {
-  const match = EXACT_STABLE_SEMVER.exec(version);
-  if (match === null) {
-    return false;
-  }
-  const { major, minor } = match.groups ?? {};
+  const { major, minor } = EXACT_STABLE_SEMVER.exec(version)?.groups ?? {};
   return (
     major !== undefined &&
     minor !== undefined &&
@@ -157,13 +150,21 @@ const isStandardsSourceWorkspace = (
     packageJson.private === true &&
     Array.isArray(workspaces) &&
     workspaces.includes('packages/*') &&
-    scripts?.standards === 'bun packages/standards-cli/src/cli.ts' &&
+    scripts?.standards ===
+      'turbo run standards --filter @davidvornholt/standards --' &&
+    scripts.check ===
+      'turbo run standards --filter @davidvornholt/standards -- github --check && turbo run lint check-types test' &&
+    scripts['check:fix'] ===
+      'turbo run standards --filter @davidvornholt/standards -- github --check && turbo run lint:fix check-types test' &&
     isRecord(sourcePackage) &&
     sourcePackage.name === STANDARDS_PACKAGE &&
     typeof sourcePackage.version === 'string' &&
     versionIsCompatible(sourcePackage.version) &&
     isRecord(sourcePackage.bin) &&
-    sourcePackage.bin.standards === 'src/cli.ts'
+    sourcePackage.bin.standards === 'src/cli.ts' &&
+    isRecord(sourcePackage.scripts) &&
+    sourcePackage.scripts.standards ===
+      'cd ../.. && bun packages/standards-cli/src/cli.ts'
   );
 };
 
