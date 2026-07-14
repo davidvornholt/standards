@@ -9,7 +9,7 @@ import { isRecord } from './github-settings';
 
 const DEFAULT_BRANCH = 'default_branch';
 const REQUIRED_REVIEWS = 'required_pull_request_reviews';
-const DISMISSAL_RESTRICTIONS = 'dismissal_restrictions';
+const BYPASS_ALLOWANCES = 'bypass_pull_request_allowances';
 const REQUIRED_CHECKS = 'required_status_checks';
 
 type ApplyDefaultBranchInput = {
@@ -31,10 +31,9 @@ const updateBody = (declared: Readonly<Record<string, unknown>>) => {
     ...Object.fromEntries(
       Object.entries(declared).filter(([key]) => key !== 'required_signatures'),
     ),
-    [REQUIRED_REVIEWS]: {
-      ...reviews,
-      [DISMISSAL_RESTRICTIONS]: {},
-    },
+    [REQUIRED_REVIEWS]: Object.fromEntries(
+      Object.entries(reviews).filter(([key]) => key !== BYPASS_ALLOWANCES),
+    ),
     [REQUIRED_CHECKS]: status,
   };
 };

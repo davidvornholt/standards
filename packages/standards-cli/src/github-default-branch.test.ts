@@ -135,5 +135,11 @@ describe('default branch protection apply', () => {
       declared.required_status_checks,
     );
     expect(putBody.required_status_checks).not.toHaveProperty('contexts');
+    expect(putBody.required_pull_request_reviews).not.toHaveProperty(
+      'bypass_pull_request_allowances',
+    );
+    expect(putBody.required_pull_request_reviews).not.toHaveProperty(
+      'dismissal_restrictions',
+    );
   });
 });
