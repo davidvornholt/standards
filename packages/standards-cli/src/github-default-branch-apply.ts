@@ -35,7 +35,7 @@ const updateBody = (declared: Readonly<Record<string, unknown>>) => {
       ...reviews,
       [DISMISSAL_RESTRICTIONS]: {},
     },
-    [REQUIRED_CHECKS]: { ...status, contexts: [] },
+    [REQUIRED_CHECKS]: status,
   };
 };
 

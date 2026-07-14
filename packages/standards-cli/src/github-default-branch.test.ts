@@ -131,6 +131,9 @@ describe('default branch protection apply', () => {
     const putBody = JSON.parse(
       calls.find((call) => call.method === 'PUT')?.body ?? '{}',
     ) as Record<string, unknown>;
-    expect(putBody.required_status_checks).toHaveProperty('contexts', []);
+    expect(putBody.required_status_checks).toEqual(
+      declared.required_status_checks,
+    );
+    expect(putBody.required_status_checks).not.toHaveProperty('contexts');
   });
 });
