@@ -31,6 +31,9 @@ describe('standards sync documentation', () => {
       expect(documentation).toContain(
         'repository-owned control seams `sync-standards.local.json`, `AGENTS.local.md`, `biome.jsonc`, or `.github/settings.local.json`',
       );
+      expect(documentation).toContain(
+        'The lock persists every observed repository-owned seed path, and sync rejects implicit seed-to-managed or managed-to-seed ownership changes before mutation',
+      );
       expect(documentation).toContain('STANDARDS_SYNC_ENVIRONMENT_TOKEN');
       expect(documentation).toContain(
         'Contents, Pull requests, and Workflows repository permissions set to write',

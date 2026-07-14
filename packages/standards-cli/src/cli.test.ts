@@ -41,6 +41,7 @@ const POLICY_SEED = join(
   '../../../template',
   SYNC_POLICY_FILE,
 );
+const TEMPLATE_ROOT = join(import.meta.dir, '../../../template');
 const SYNC_POLICY_CONTROLLER_PATH = '.github/actions/standards-sync-preflight';
 const SYNC_POLICY_CONTROLLER_FILES = ['action.yml', 'index.mjs'] as const;
 const SYNC_POLICY_CONTRACT_PATH = `${SYNC_POLICY_CONTROLLER_PATH}/index.mjs`;
@@ -69,6 +70,7 @@ type Lock = {
   ref?: string;
   sha: string;
   files: Record<string, string>;
+  seeds: Array<string>;
 };
 type RunOptions = {
   readonly engine?: string;
@@ -97,6 +99,16 @@ const read = (root: string, rel: string): string =>
   readFileSync(join(root, rel), 'utf8');
 const readLock = (root: string): Lock =>
   JSON.parse(read(root, 'sync-standards.lock')) as Lock;
+const listRelativeFiles = (
+  root: string,
+  directory = '',
+): ReadonlyArray<string> =>
+  readdirSync(join(root, directory), { withFileTypes: true }).flatMap(
+    (entry) => {
+      const path = directory === '' ? entry.name : `${directory}/${entry.name}`;
+      return entry.isDirectory() ? listRelativeFiles(root, path) : [path];
+    },
+  );
 const sha256 = (value: string): string =>
   createHash('sha256').update(value).digest('hex');
 const writePendingTransaction = (consumer: string): void => {
@@ -418,6 +430,11 @@ describe('init', () => {
     );
     expect(readLock(consumer).ref).toBe(DEFAULT_SYNC_POLICY.ref);
     expect(readLock(consumer).files['managed/a.txt']).toBeDefined();
+    expect(readLock(consumer).seeds).toEqual(
+      [...listRelativeFiles(TEMPLATE_ROOT), 'seed.txt'].sort((a, b) =>
+        a.localeCompare(b),
+      ),
+    );
     expect(existsSync(join(consumer, 'packages/standards-cli'))).toBe(false);
   });
 
@@ -534,6 +551,53 @@ describe('check', () => {
     expect(check.stderr).toContain(
       `policy requests refs/heads/stable, but sync-standards.lock records ${DEFAULT_SYNC_POLICY.ref}`,
     );
+  });
+});
+
+describe('lock seed ownership schema', () => {
+  it('rejects a non-array seed ownership field', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    const malformedLock = { ...readLock(consumer), seeds: 'README.md' };
+    write(
+      consumer,
+      'sync-standards.lock',
+      `${JSON.stringify(malformedLock, null, 2)}\n`,
+    );
+
+    const check = run(consumer, ['check', '--dir', consumer]);
+
+    expect(check.status).toBe(1);
+    expect(check.stderr).toContain(
+      'sync-standards.lock "seeds" must be a string array',
+    );
+  });
+
+  it.each([
+    'check',
+    'sync',
+  ] as const)('rejects an explicit null seed field during %s without mutation', (command) => {
+    const up = buildUpstream();
+    const { consumer } = initConsumer(up);
+    const malformedLock = { ...readLock(consumer), seeds: null };
+    write(
+      consumer,
+      'sync-standards.lock',
+      `${JSON.stringify(malformedLock, null, 2)}\n`,
+    );
+    const lockBefore = read(consumer, 'sync-standards.lock');
+    const managedBefore = read(consumer, 'managed/a.txt');
+
+    const result =
+      command === 'check'
+        ? run(consumer, ['check', '--dir', consumer])
+        : sync(up, consumer);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      'sync-standards.lock "seeds" must be a string array',
+    );
+    expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
+    expect(read(consumer, 'managed/a.txt')).toBe(managedBefore);
   });
 });
 
@@ -901,7 +965,169 @@ describe('sync', () => {
       'dry run: already in sync; no changes',
     );
   });
+});
 
+describe('sync historical ownership', () => {
+  it.each([
+    { args: [] as ReadonlyArray<string>, label: 'sync' },
+    { args: ['--dry-run'], label: 'dry-run' },
+  ])('rejects historical managed/seed overlap before target inspection during $label', ({
+    args,
+  }) => {
+    const up = buildUpstream();
+    const { consumer } = initConsumer(up);
+    const lock = readLock(consumer);
+    lock.files['README.md'] = sha256('old canonical README\n');
+    write(
+      consumer,
+      'sync-standards.lock',
+      `${JSON.stringify(lock, null, 2)}\n`,
+    );
+    write(consumer, 'actor.txt', 'actor-owned\n');
+    symlinkSync('actor.txt', join(consumer, 'README.md'));
+    const lockBefore = read(consumer, 'sync-standards.lock');
+
+    const result = sync(up, consumer, args);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      'Previously managed path "README.md" overlaps repository-owned seed path "README.md"',
+    );
+    expect(result.stderr).not.toContain(
+      'consumer repository path must not be a symbolic link',
+    );
+    expect(lstatSync(join(consumer, 'README.md')).isSymbolicLink()).toBe(true);
+    expect(read(consumer, 'actor.txt')).toBe('actor-owned\n');
+    expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
+  });
+});
+
+describe('sync ownership transitions', () => {
+  it('protects contract-v1 seed ownership when a legacy lock source promotes a seed', () => {
+    const up = buildUpstream();
+    write(up, 'template/README.md', 'upstream seed\n');
+    const { consumer } = initConsumer(up);
+    write(consumer, 'README.md', 'consumer-owned\n');
+    const { seeds: _seeds, ...legacyLock } = readLock(consumer);
+    write(
+      consumer,
+      'sync-standards.lock',
+      `${JSON.stringify(legacyLock, null, 2)}\n`,
+    );
+    const lockBefore = read(consumer, 'sync-standards.lock');
+    rmSync(join(up, 'template/README.md'));
+    write(up, 'README.md', 'new canonical content\n');
+    const manifest = JSON.parse(read(up, 'sync-standards.json')) as {
+      paths: Array<string>;
+    };
+    manifest.paths.push('README.md');
+    write(up, 'sync-standards.json', JSON.stringify(manifest));
+
+    const result = sync(up, consumer);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      'would take ownership of repository-owned seed path "README.md"',
+    );
+    expect(read(consumer, 'README.md')).toBe('consumer-owned\n');
+    expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
+  });
+
+  it('rejects demoting a previously managed file to a seed before mutation', () => {
+    const up = buildUpstream();
+    const { consumer } = initConsumer(up);
+    const managedBefore = read(consumer, 'managed/a.txt');
+    const lockBefore = read(consumer, 'sync-standards.lock');
+    const manifest = JSON.parse(read(up, 'sync-standards.json')) as {
+      paths: Array<string>;
+    };
+    manifest.paths = manifest.paths.filter((path) => path !== 'managed');
+    write(up, 'sync-standards.json', JSON.stringify(manifest));
+    write(up, 'template/managed/a.txt', 'new seed default\n');
+
+    const result = sync(up, consumer);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      'would take ownership of previously managed path "managed/a.txt"',
+    );
+    expect(read(consumer, 'managed/a.txt')).toBe(managedBefore);
+    expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
+  });
+});
+
+describe('sync lock metadata preview', () => {
+  it('records a newly observed seed and protects its ownership on later syncs', () => {
+    const up = buildUpstream();
+    const { consumer } = initConsumer(up);
+    write(up, 'template/future-seed.txt', 'future default\n');
+    const lockBeforeObservation = read(consumer, 'sync-standards.lock');
+
+    const preview = sync(up, consumer, ['--dry-run']);
+
+    expect(preview.status).toBe(0);
+    expect(preview.stdout).toContain(
+      'would update sync-standards.lock (metadata)',
+    );
+    expect(preview.stdout).toContain(
+      'dry run: 0 to create, 0 to update, 0 to delete, 1 lock metadata update(s)',
+    );
+    expect(existsSync(join(consumer, 'future-seed.txt'))).toBe(false);
+    expect(read(consumer, 'sync-standards.lock')).toBe(lockBeforeObservation);
+
+    const observed = sync(up, consumer);
+
+    expect(observed.status).toBe(0);
+    expect(existsSync(join(consumer, 'future-seed.txt'))).toBe(false);
+    expect(readLock(consumer).seeds).toContain('future-seed.txt');
+    rmSync(join(up, 'template/future-seed.txt'));
+    write(up, 'future-seed.txt', 'future canonical\n');
+    const manifest = JSON.parse(read(up, 'sync-standards.json')) as {
+      paths: Array<string>;
+    };
+    manifest.paths.push('future-seed.txt');
+    write(up, 'sync-standards.json', JSON.stringify(manifest));
+    const lockBeforePromotion = read(consumer, 'sync-standards.lock');
+
+    const promoted = sync(up, consumer);
+
+    expect(promoted.status).toBe(1);
+    expect(promoted.stderr).toContain(
+      'would take ownership of repository-owned seed path "future-seed.txt"',
+    );
+    expect(existsSync(join(consumer, 'future-seed.txt'))).toBe(false);
+    expect(read(consumer, 'sync-standards.lock')).toBe(lockBeforePromotion);
+  });
+
+  it('previews legacy seed-baseline lock migration without writing it', () => {
+    const up = buildUpstream();
+    const { consumer } = initConsumer(up);
+    const { seeds: _seeds, ...legacyLock } = readLock(consumer);
+    write(
+      consumer,
+      'sync-standards.lock',
+      `${JSON.stringify(legacyLock, null, 2)}\n`,
+    );
+    const lockBefore = read(consumer, 'sync-standards.lock');
+
+    const preview = sync(up, consumer, ['--dry-run']);
+
+    expect(preview.status).toBe(0);
+    expect(preview.stdout).toContain(
+      'would update sync-standards.lock (metadata)',
+    );
+    expect(preview.stdout).toContain(
+      'dry run: 0 to create, 0 to update, 0 to delete, 1 lock metadata update(s)',
+    );
+    expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
+
+    expect(sync(up, consumer).status).toBe(0);
+    expect(readLock(consumer).seeds).toContain('README.md');
+    expect(readLock(consumer).seeds).toContain('seed.txt');
+  });
+});
+
+describe('sync mirror', () => {
   it('deletes a consumer file removed from upstream and prunes the lock', () => {
     const up = buildUpstream();
     const { consumer } = initConsumer(up);

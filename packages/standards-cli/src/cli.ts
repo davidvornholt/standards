@@ -66,6 +66,23 @@ const REPOSITORY_OWNED_CONTROL_SEAMS = [
   'biome.jsonc',
   SYNC_POLICY_FILE,
 ] as const;
+// Locks written before seed ownership was persisted need the complete seed set
+// shipped by the contract-v1 template. Keep this migration baseline forever:
+// a selected source may omit a seed, but that must not make it managed again.
+const CONTRACT_V1_SEED_OWNERSHIP_BASELINE = [
+  '.agents/review/decisions.md',
+  '.github/dependabot.yml',
+  '.github/settings.local.json',
+  '.sops.yaml',
+  'AGENTS.local.md',
+  'README.md',
+  'biome.jsonc',
+  'package.json',
+  'secrets/ci.example.yaml',
+  'secrets/dev.example.yaml',
+  'sync-standards.local.json',
+  'turbo.json',
+] as const;
 
 // Characters of a sha256 hex digest shown in drift reports; enough to identify.
 const HASH_PREVIEW_LENGTH = 12;
@@ -95,10 +112,12 @@ type Lock = {
   readonly ref?: string;
   readonly sha: string;
   readonly files: ReadonlyMap<string, string>;
+  readonly seeds: ReadonlySet<string>;
 };
 
-type SerializedLock = Omit<Lock, 'files'> & {
+type SerializedLock = Omit<Lock, 'files' | 'seeds'> & {
   readonly files: Readonly<Record<string, string>>;
+  readonly seeds?: unknown;
 };
 
 type ConsumerSyncPolicyInspectionOptions = {
@@ -125,6 +144,8 @@ type CliOptions = {
 
 const sha256 = (buf: Buffer): string =>
   createHash('sha256').update(buf).digest('hex');
+const isStringArray = (value: unknown): value is ReadonlyArray<string> =>
+  Array.isArray(value) && value.every((item) => typeof item === 'string');
 
 const isUnder = (path: string, parent: string): boolean =>
   path === parent || path.startsWith(`${parent}/`);
@@ -266,8 +287,17 @@ const inspectLock = async (root: RepositoryRoot): Promise<LockInspection> => {
     return { lock: null, state };
   }
   const raw = JSON.parse(state.contents.toString('utf8')) as SerializedLock;
+  const persistedSeeds = Object.hasOwn(raw, 'seeds') ? raw.seeds : [];
+  if (!isStringArray(persistedSeeds)) {
+    throw new Error('sync-standards.lock "seeds" must be a string array');
+  }
+  const seeds = new Set<string>(CONTRACT_V1_SEED_OWNERSHIP_BASELINE);
+  for (const seed of persistedSeeds) {
+    assertSafeRelativePath(seed, 'sync-standards.lock seed');
+    seeds.add(seed);
+  }
   return {
-    lock: { ...raw, files: new Map(Object.entries(raw.files)) },
+    lock: { ...raw, files: new Map(Object.entries(raw.files)), seeds },
     state,
   };
 };
@@ -281,6 +311,7 @@ const lockContents = (lock: Lock): Buffer => {
     ref: lock.ref ?? DEFAULT_SYNC_POLICY.ref,
     sha: lock.sha,
     files,
+    seeds: [...lock.seeds].sort((a, b) => a.localeCompare(b)),
   };
   return Buffer.from(`${JSON.stringify(ordered, null, 2)}\n`);
 };
@@ -414,6 +445,49 @@ const assertDisjoint = (
   }
 };
 
+const assertNoOwnershipTransitions = ({
+  establishedSeeds,
+  managed,
+  observedSeeds,
+  previousManaged,
+}: {
+  readonly establishedSeeds: ReadonlySet<string>;
+  readonly managed: ReadonlyArray<string>;
+  readonly observedSeeds: ReadonlyArray<string>;
+  readonly previousManaged: ReadonlyArray<string>;
+}): void => {
+  for (const managedPath of previousManaged) {
+    const seedPath = [...establishedSeeds].find(
+      (seed) => isUnder(managedPath, seed) || isUnder(seed, managedPath),
+    );
+    if (seedPath !== undefined) {
+      throw new Error(
+        `Previously managed path "${managedPath}" overlaps repository-owned seed path "${seedPath}"; explicit ownership migration is required`,
+      );
+    }
+  }
+  for (const managedPath of managed) {
+    const seedPath = [...establishedSeeds].find(
+      (seed) => isUnder(managedPath, seed) || isUnder(seed, managedPath),
+    );
+    if (seedPath !== undefined) {
+      throw new Error(
+        `Managed path "${managedPath}" would take ownership of repository-owned seed path "${seedPath}"; explicit seed-to-managed migration is required`,
+      );
+    }
+  }
+  for (const seedPath of observedSeeds) {
+    const managedPath = previousManaged.find(
+      (previous) => isUnder(seedPath, previous) || isUnder(previous, seedPath),
+    );
+    if (managedPath !== undefined) {
+      throw new Error(
+        `Seed path "${seedPath}" would take ownership of previously managed path "${managedPath}"; explicit managed-to-seed migration is required`,
+      );
+    }
+  }
+};
+
 type MirrorResult = {
   readonly files: ReadonlyMap<string, string>;
   readonly created: ReadonlyArray<string>;
@@ -515,29 +589,43 @@ const prepareMirror = ({
 
 // Print what a mirror did (or, for a dry run, would do). Real syncs stay quiet
 // about unchanged files and only announce deletions and clobbered local edits.
-const reportMirror = (result: MirrorResult, dryRun: boolean): void => {
-  if (dryRun) {
-    for (const rel of result.created) {
-      console.log(`  would create ${rel}`);
-    }
-    for (const rel of result.updated) {
-      console.log(`  would update ${rel}`);
-    }
-    for (const rel of result.deleted) {
-      console.log(`  would delete ${rel} (removed upstream)`);
-    }
-    if (result.tampered.length > 0) {
-      console.log(
-        `  would overwrite ${result.tampered.length} locally-modified canonical file(s): ${result.tampered.join(', ')}`,
-      );
-    }
-    const changes =
-      result.created.length + result.updated.length + result.deleted.length;
+const reportDryRun = (
+  result: MirrorResult,
+  lockMetadataChanged: boolean,
+): void => {
+  for (const rel of result.created) {
+    console.log(`  would create ${rel}`);
+  }
+  for (const rel of result.updated) {
+    console.log(`  would update ${rel}`);
+  }
+  for (const rel of result.deleted) {
+    console.log(`  would delete ${rel} (removed upstream)`);
+  }
+  if (result.tampered.length > 0) {
     console.log(
-      changes === 0
-        ? 'dry run: already in sync; no changes'
-        : `dry run: ${result.created.length} to create, ${result.updated.length} to update, ${result.deleted.length} to delete`,
+      `  would overwrite ${result.tampered.length} locally-modified canonical file(s): ${result.tampered.join(', ')}`,
     );
+  }
+  if (lockMetadataChanged) {
+    console.log('  would update sync-standards.lock (metadata)');
+  }
+  const changes =
+    result.created.length + result.updated.length + result.deleted.length;
+  console.log(
+    changes === 0 && !lockMetadataChanged
+      ? 'dry run: already in sync; no changes'
+      : `dry run: ${result.created.length} to create, ${result.updated.length} to update, ${result.deleted.length} to delete, ${lockMetadataChanged ? 1 : 0} lock metadata update(s)`,
+  );
+};
+
+const reportMirror = (
+  result: MirrorResult,
+  dryRun: boolean,
+  lockMetadataChanged = false,
+): void => {
+  if (dryRun) {
+    reportDryRun(result, lockMetadataChanged);
     return;
   }
   for (const rel of result.deleted) {
@@ -594,6 +682,16 @@ const runInit = async ({
   src,
 }: RunInitOptions): Promise<void> => {
   assertDisjoint(manifest.paths, [...seeds.keys()]);
+  const seedOwnership = new Set<string>([
+    ...CONTRACT_V1_SEED_OWNERSHIP_BASELINE,
+    ...seeds.keys(),
+  ]);
+  assertNoOwnershipTransitions({
+    establishedSeeds: seedOwnership,
+    managed: manifest.paths,
+    observedSeeds: [...seeds.keys()],
+    previousManaged: [],
+  });
   const [managedStates, seedDestinations] = await Promise.all([
     inspectRepositoryFiles(consumer, [
       ...managed.keys(),
@@ -624,6 +722,7 @@ const runInit = async ({
     ref: DEFAULT_SYNC_POLICY.ref,
     sha: src.sha,
     files: mirror.result.files,
+    seeds: seedOwnership,
   });
   await applyRepositoryMutations({
     deletes: mirror.deletes,
@@ -677,6 +776,16 @@ const runSync = async ({
   assertDisjoint(manifest.paths, [...seeds.keys()]);
   const lockInspection = await inspectLock(consumer);
   const previous = lockInspection.lock?.files ?? new Map<string, string>();
+  const establishedSeeds =
+    lockInspection.lock?.seeds ??
+    new Set<string>(CONTRACT_V1_SEED_OWNERSHIP_BASELINE);
+  assertNoOwnershipTransitions({
+    establishedSeeds,
+    managed: manifest.paths,
+    observedSeeds: [...seeds.keys()],
+    previousManaged: [...previous.keys()],
+  });
+  const seedOwnership = new Set([...establishedSeeds, ...seeds.keys()]);
   const targetPaths = [
     ...managed.keys(),
     ...previous.keys(),
@@ -700,16 +809,19 @@ const runSync = async ({
     consumer,
     mirror.prunePaths,
   );
-  reportMirror(mirror.result, dryRun);
-  if (dryRun) {
-    return;
-  }
   const lock = lockContents({
     upstream: manifest.upstream,
     ref: requestedRef,
     sha: src.sha,
     files: mirror.result.files,
+    seeds: seedOwnership,
   });
+  const lockMetadataChanged =
+    currentLock.contents === null || !currentLock.contents.equals(lock);
+  reportMirror(mirror.result, dryRun, lockMetadataChanged);
+  if (dryRun) {
+    return;
+  }
   const controlWrites: Array<PreparedWrite> = [
     {
       before: currentLock,
@@ -755,10 +867,14 @@ const runCheck = async (
   for (const rel of lock.files.keys()) {
     assertSafeRelativePath(rel, 'sync-standards.lock file');
   }
+  for (const rel of lock.seeds) {
+    assertSafeRelativePath(rel, 'sync-standards.lock seed');
+  }
   assertNoRepositoryOwnedControlSeams(
     [...lock.files.keys()],
     'sync-standards.lock file',
   );
+  assertDisjoint([...lock.files.keys()], [...lock.seeds]);
   const lockedRef = lock.ref ?? DEFAULT_SYNC_POLICY.ref;
   const policyMatchesLock = policy === null || lockedRef === policy.ref;
   if (policy !== null && !policyMatchesLock) {

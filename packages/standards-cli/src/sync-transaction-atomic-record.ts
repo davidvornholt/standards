@@ -17,6 +17,7 @@ const missing = (error: unknown): boolean =>
 export const publishAtomicTransactionRecord = async ({
   afterFinalSync,
   afterPartialWrite,
+  afterTemporaryOpen,
   contents,
   directory,
   finalName,
@@ -24,6 +25,7 @@ export const publishAtomicTransactionRecord = async ({
 }: {
   readonly afterFinalSync?: () => Promise<void>;
   readonly afterPartialWrite?: () => Promise<void>;
+  readonly afterTemporaryOpen?: (identity: NodeIdentity) => Promise<void>;
   readonly contents: string;
   readonly directory: PinnedDirectory;
   readonly finalName: string;
@@ -48,6 +50,7 @@ export const publishAtomicTransactionRecord = async ({
   try {
     const info = await handle.stat();
     temporaryIdentity = { dev: info.dev, ino: info.ino };
+    await afterTemporaryOpen?.(temporaryIdentity);
     await writeCompleteDescriptor({
       afterPartialWrite,
       contents: encoded,

@@ -35,7 +35,6 @@ const missing = (error: unknown): boolean =>
 const optionalOwner = async (
   transaction: PinnedDirectory,
 ): Promise<TransactionOwner | null> => {
-  await recoverAtomicPublicationTails(transaction, TRANSACTION_OWNER);
   try {
     return await readTransactionOwner(transaction);
   } catch (error) {
@@ -91,7 +90,11 @@ const recoverWithOwnerToken = async (
   if (reservation !== null && ownerToken.id !== reservation.id) {
     throw new Error('Filesystem publication ownership records disagree');
   }
-  await removeBoundAtomicPartialTails(transaction, TRANSACTION_OWNER);
+  await removeBoundAtomicPartialTails(
+    transaction,
+    TRANSACTION_OWNER,
+    ownerToken.ownerRecord,
+  );
   const owner = await optionalOwner(transaction);
   if (owner !== null) {
     assertTransactionOwner(owner, root.identity, transaction);

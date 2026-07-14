@@ -104,7 +104,7 @@ describe('standards repository', () => {
     }
   });
 
-  it('keeps a real-root local dry run as a no-op', () => {
+  it('keeps a real-root local dry run write-free while reporting lock migration', () => {
     const lockBefore = readLock();
     const result = spawnSync(
       'bun',
@@ -116,7 +116,10 @@ describe('standards repository', () => {
     );
 
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain('dry run: already in sync; no changes');
+    expect(result.stdout).toContain(
+      'would update sync-standards.lock (metadata)',
+    );
+    expect(result.stdout).toContain('1 lock metadata update(s)');
     expect(readLock()).toBe(lockBefore);
   });
 });

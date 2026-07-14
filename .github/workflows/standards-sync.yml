@@ -31,6 +31,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.STANDARDS_SYNC_ENVIRONMENT_TOKEN || github.token }}
 
       - name: Check scheduled sync policy
         id: preflight
@@ -60,7 +62,8 @@ jobs:
       #
       # Configure STANDARDS_SYNC_ENVIRONMENT_TOKEN in the protected
       # `standards-sync` environment (fine-grained PAT: Contents, Pull requests,
-      # and Workflows write) so the opened PR triggers workflows.
+      # and Workflows write) so both the persisted Git credentials and `gh`
+      # use it, and the opened PR triggers workflows.
       # The environment admits protected branches generally. The schedule and
       # repository_dispatch bind this workflow to the repository's default branch,
       # which the canonical classic protection protects. PRs
@@ -73,7 +76,7 @@ jobs:
       - name: Open a pull request if the mirror changed
         if: steps.preflight.outputs.run_sync == 'true'
         env:
-          GH_TOKEN: ${{ secrets.STANDARDS_SYNC_ENVIRONMENT_TOKEN || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.STANDARDS_SYNC_ENVIRONMENT_TOKEN || github.token }}
         run: |
           if [ -z "$(git status --porcelain)" ]; then
             echo "Already in sync with upstream standards; nothing to open."

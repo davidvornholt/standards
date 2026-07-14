@@ -56,6 +56,12 @@ describe('canonical scheduled sync contract', () => {
     const checkoutStep = workflowStep(workflow, 'Checkout');
     expect(checkoutStep).toContain('uses: actions/checkout@v6');
     expect(checkoutStep).not.toContain('ref:');
+    expect(checkoutStep).toContain(
+      [
+        'token: $',
+        '{{ secrets.STANDARDS_SYNC_ENVIRONMENT_TOKEN || github.token }}',
+      ].join(''),
+    );
     expect(workflow).toContain('repository_dispatch:');
     expect(workflow).toContain('types: [standards-sync]');
     expect(workflow).not.toContain('workflow_dispatch:');
@@ -72,7 +78,7 @@ describe('canonical scheduled sync contract', () => {
     ).toContain(
       [
         'GH_TOKEN: $',
-        '{{ secrets.STANDARDS_SYNC_ENVIRONMENT_TOKEN || secrets.GITHUB_TOKEN }}',
+        '{{ secrets.STANDARDS_SYNC_ENVIRONMENT_TOKEN || github.token }}',
       ].join(''),
     );
     expect(workflow).not.toContain('secrets.STANDARDS_SYNC_TOKEN');
@@ -95,7 +101,9 @@ describe('canonical scheduled sync contract', () => {
       );
     }
   });
+});
 
+describe('canonical scheduled sync portability', () => {
   it('supports a non-main default branch through event and protected-branch semantics', () => {
     const workflow = readFileSync(WORKFLOW, 'utf8');
     const settings = JSON.parse(readFileSync(SETTINGS, 'utf8')) as Record<

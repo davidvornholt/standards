@@ -6,21 +6,29 @@ import {
   syncPinnedDirectory,
 } from './sync-directory-handles';
 import { identitiesMatch, type NodeIdentity } from './sync-filesystem';
+import { renameDirectoryNoReplace } from './sync-linux-rename';
 import { TRANSACTION_OWNER_PUBLICATION_PREFIX } from './sync-transaction-types';
 
 const PRIVATE_MODE = 0o600;
 const TOKEN =
-  /^\.standards-owner-publication-(?<id>[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})-(?<dev>\d+)-(?<ino>\d+)$/u;
+  /^\.standards-owner-publication-(?<id>[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})-(?<dev>\d+)-(?<ino>\d+)(?:-(?<ownerDev>\d+)-(?<ownerIno>\d+))?$/u;
 
 export type OwnerPublicationToken = {
   readonly id: string;
   readonly identity: NodeIdentity;
   readonly name: string;
+  readonly ownerRecord: NodeIdentity | null;
   readonly transaction: NodeIdentity;
 };
 
-const tokenName = (transaction: PinnedDirectory, id: string): string =>
-  `${TRANSACTION_OWNER_PUBLICATION_PREFIX}${id}-${transaction.identity.dev}-${transaction.identity.ino}`;
+const tokenName = (
+  transaction: PinnedDirectory,
+  id: string,
+  ownerRecord?: NodeIdentity,
+): string =>
+  `${TRANSACTION_OWNER_PUBLICATION_PREFIX}${id}-${transaction.identity.dev}-${transaction.identity.ino}${
+    ownerRecord === undefined ? '' : `-${ownerRecord.dev}-${ownerRecord.ino}`
+  }`;
 
 export const assertOwnerPublicationNamespaceAvailable = async (
   root: PinnedDirectory,
@@ -102,10 +110,17 @@ const findToken = async (
     throw new Error('Owner publication token is invalid');
   }
   const transaction = { dev: Number(groups.dev), ino: Number(groups.ino) };
+  const ownerRecord =
+    groups.ownerDev === undefined || groups.ownerIno === undefined
+      ? null
+      : { dev: Number(groups.ownerDev), ino: Number(groups.ownerIno) };
   if (
     !(
       Number.isSafeInteger(transaction.dev) &&
-      Number.isSafeInteger(transaction.ino)
+      Number.isSafeInteger(transaction.ino) &&
+      (ownerRecord === null ||
+        (Number.isSafeInteger(ownerRecord.dev) &&
+          Number.isSafeInteger(ownerRecord.ino)))
     )
   ) {
     throw new Error('Owner publication token inode is invalid');
@@ -114,8 +129,28 @@ const findToken = async (
     id: groups.id as string,
     identity: await inspectToken(root, name),
     name,
+    ownerRecord,
     transaction,
   };
+};
+
+export const bindOwnerPublicationToken = async (
+  root: PinnedDirectory,
+  transaction: PinnedDirectory,
+  id: string,
+  ownerRecord: NodeIdentity,
+): Promise<void> => {
+  const token = await findOwnerPublicationToken(root, transaction);
+  if (token === null || token.id !== id || token.ownerRecord !== null) {
+    throw new Error('Owner publication token cannot bind the owner record');
+  }
+  const boundName = tokenName(transaction, id, ownerRecord);
+  renameDirectoryNoReplace(root.handle.fd, token.name, boundName);
+  await syncPinnedDirectory(root);
+  const boundIdentity = await inspectToken(root, boundName);
+  if (!identitiesMatch(token.identity, boundIdentity)) {
+    throw new Error('Owner publication token changed during record binding');
+  }
 };
 
 export const findOwnerPublicationToken = async (

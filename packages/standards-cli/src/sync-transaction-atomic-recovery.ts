@@ -61,5 +61,22 @@ export const recoverAtomicPublicationTails = async (
 export const removeBoundAtomicPartialTails = async (
   directory: PinnedDirectory,
   finalName: string,
-): Promise<void> =>
-  removeNames(directory, await snapshotTails(directory, finalName));
+  expected?: NodeIdentity | null,
+): Promise<void> => {
+  const tails = await snapshotTails(directory, finalName);
+  if (tails.size === 0) {
+    return;
+  }
+  if (expected === undefined) {
+    await removeNames(directory, tails);
+    return;
+  }
+  if (tails.size !== 1 || expected === null) {
+    throw new Error('Atomic transaction record tail lacks an inode binding');
+  }
+  const identity = tails.values().next().value;
+  if (identity === undefined || !identitiesMatch(identity, expected)) {
+    throw new Error('Atomic transaction record tail changed after binding');
+  }
+  await removeNames(directory, tails);
+};

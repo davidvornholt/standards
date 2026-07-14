@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
 import { runGithubApply } from './github-commands';
+import { invalidRepositoryValues } from './github-repository-value-test-fixture';
 import { declaredRuleset } from './github-ruleset-test-fixture';
 import { loadGithubSettings } from './github-settings';
 
@@ -30,7 +31,6 @@ const identityKeys: Array<string> = [
   'visibility',
 ];
 const validRuleset = declaredRuleset('Protect main');
-
 afterEach(() => {
   globalThis.fetch = originalFetch;
   if (originalToken === undefined) {
@@ -118,6 +118,24 @@ describe('repository declaration boundary', () => {
       repository: { [DEFAULT_BRANCH]: 'trunk' },
     });
     expect(applied).toEqual({ requests: 0, result: false });
+  });
+
+  it.each(
+    invalidRepositoryValues,
+  )('rejects invalid canonical and local repository values for %s before requests', async (key, value) => {
+    const declarations = [
+      [{ ...empty, repository: { [key]: value } }, empty],
+      [empty, { ...empty, repository: { [key]: value } }],
+    ] as const;
+    const results = await Promise.all(
+      declarations.map(([canonical, local]) =>
+        applyRequestCount(canonical, local),
+      ),
+    );
+    expect(results).toEqual([
+      { requests: 0, result: false },
+      { requests: 0, result: false },
+    ]);
   });
 });
 

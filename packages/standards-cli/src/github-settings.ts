@@ -47,6 +47,15 @@ export const SUPPORTED_REPOSITORY_SETTING_KEYS = [
 const REPOSITORY_SETTING_KEYS = new Set<string>(
   SUPPORTED_REPOSITORY_SETTING_KEYS,
 );
+const BOOLEAN_REPOSITORY_SETTINGS = new Set([
+  'allow_auto_merge',
+  'allow_merge_commit',
+  'allow_rebase_merge',
+  'allow_squash_merge',
+  'delete_branch_on_merge',
+]);
+const SQUASH_COMMIT_MESSAGES = new Set(['BLANK', 'COMMIT_MESSAGES', 'PR_BODY']);
+const SQUASH_COMMIT_TITLES = new Set(['COMMIT_OR_PR_TITLE', 'PR_TITLE']);
 
 type ParseResult = {
   readonly settings: GithubSettings | null;
@@ -60,15 +69,35 @@ const repositoryProblems = (
   if (!isRecord(repository)) {
     return [`${label} "repository" must be an object`];
   }
-  return Object.keys(repository).flatMap((key) => {
+  return Object.entries(repository).flatMap(([key, value]) => {
     if (REPOSITORY_IDENTITY_KEYS.has(key)) {
       return [
         `${label} repository."${key}" cannot manage repository identity or lifecycle`,
       ];
     }
-    return REPOSITORY_SETTING_KEYS.has(key)
-      ? []
-      : [`${label} repository has unknown key "${key}"`];
+    if (!REPOSITORY_SETTING_KEYS.has(key)) {
+      return [`${label} repository has unknown key "${key}"`];
+    }
+    if (BOOLEAN_REPOSITORY_SETTINGS.has(key) && typeof value !== 'boolean') {
+      return [`${label} repository."${key}" must be a boolean`];
+    }
+    if (
+      key === 'squash_merge_commit_message' &&
+      !(typeof value === 'string' && SQUASH_COMMIT_MESSAGES.has(value))
+    ) {
+      return [
+        `${label} repository."${key}" must be BLANK, COMMIT_MESSAGES, or PR_BODY`,
+      ];
+    }
+    if (
+      key === 'squash_merge_commit_title' &&
+      !(typeof value === 'string' && SQUASH_COMMIT_TITLES.has(value))
+    ) {
+      return [
+        `${label} repository."${key}" must be COMMIT_OR_PR_TITLE or PR_TITLE`,
+      ];
+    }
+    return [];
   });
 };
 

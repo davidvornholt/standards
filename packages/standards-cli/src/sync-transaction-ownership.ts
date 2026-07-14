@@ -6,6 +6,7 @@ import {
 } from './sync-directory-handles';
 import { identitiesMatch, type NodeIdentity } from './sync-filesystem';
 import { publishAtomicTransactionRecord } from './sync-transaction-atomic-record';
+import { bindOwnerPublicationToken } from './sync-transaction-owner-reservation';
 import { TRANSACTION_OWNER } from './sync-transaction-types';
 
 const OWNER_VERSION = 1;
@@ -127,6 +128,8 @@ export const writeTransactionOwner = async (
   await publishAtomicTransactionRecord({
     afterFinalSync: hooks.afterFinalSync,
     afterPartialWrite: hooks.afterPartialWrite,
+    afterTemporaryOpen: (identity) =>
+      bindOwnerPublicationToken(root, transaction, id, identity),
     contents: `${JSON.stringify(owner)}\n`,
     directory: transaction,
     finalName: TRANSACTION_OWNER,
