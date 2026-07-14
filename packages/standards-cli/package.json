@@ -41,6 +41,7 @@
     "src/github-rulesets.ts",
     "src/github-settings-merge.ts",
     "src/github-settings.ts",
+    "src/sync-control-seams.ts",
     "src/sync-directory-handles.ts",
     "src/sync-directory-traversal.ts",
     "src/sync-descriptor-write.ts",

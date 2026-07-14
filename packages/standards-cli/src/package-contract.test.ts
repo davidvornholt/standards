@@ -125,6 +125,7 @@ describe('packed package contract', () => {
       'package/src/github-rulesets.ts',
       'package/src/github-settings-merge.ts',
       'package/src/github-settings.ts',
+      'package/src/sync-control-seams.ts',
       'package/src/sync-descriptor-write.ts',
       ...DIRECTORY_RUNTIME_FILES,
       'package/src/sync-filesystem.ts',

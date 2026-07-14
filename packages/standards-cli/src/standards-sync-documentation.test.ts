@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { SUPPORTED_REPOSITORY_SETTING_KEYS } from './github-settings';
+import { REPOSITORY_OWNED_CONTROL_SEAMS } from './sync-control-seams';
 
 const ROOT = join(import.meta.dir, '../../..');
 const SYNC_SKILL = join(ROOT, '.agents/skills/standards-sync/SKILL.md');
@@ -15,6 +16,16 @@ const CURRENT_POLICY_DOCS = [
   SYNC_SKILL,
 ] as const;
 const MIGRATION_DOCS = [ROOT_README, PACKAGE_README] as const;
+const CONTROL_SEAM_PREFIX =
+  'Contract-v1 sources must not manage the repository-owned control seams ';
+const formatList = (values: ReadonlyArray<string>): string => {
+  const quoted = values.map((value) => `\`${value}\``);
+  const last = quoted.at(-1);
+  return last === undefined
+    ? ''
+    : `${quoted.slice(0, -1).join(', ')}, or ${last}`;
+};
+const CONTROL_SEAM_SENTENCE = `${CONTROL_SEAM_PREFIX}${formatList(REPOSITORY_OWNED_CONTROL_SEAMS)}.`;
 
 describe('standards sync documentation', () => {
   it('documents the current policy and configured-ref recovery accurately', () => {
@@ -28,9 +39,8 @@ describe('standards sync documentation', () => {
       expect(documentation).toContain('protected `standards-sync`');
       expect(documentation).toContain('repository dispatch');
       expect(documentation).toContain('syncPolicyContractVersion');
-      expect(documentation).toContain(
-        'repository-owned control seams `sync-standards.local.json`, `AGENTS.local.md`, `biome.jsonc`, or `.github/settings.local.json`',
-      );
+      expect(documentation).toContain(CONTROL_SEAM_SENTENCE);
+      expect(documentation.split(CONTROL_SEAM_PREFIX)).toHaveLength(2);
       expect(documentation).toContain(
         'The lock persists every observed repository-owned seed path, and sync rejects implicit seed-to-managed or managed-to-seed ownership changes before mutation',
       );

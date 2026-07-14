@@ -63,6 +63,8 @@ const PROTOTYPE_NAMED_FILE_SET: ReadonlySet<string> = new Set(
 const SYNC_POLICY_CONTRACT_VERSION = 1;
 const BARE_SYNC_STEP = /^\s+run: bun standards sync$/mu;
 const FILE_TYPE_MODE_BASE = 0o1000;
+const COMMIT_SHA_LENGTH = 40;
+const SHA256_LENGTH = 64;
 
 type RunResult = { stdout: string; stderr: string; status: number };
 type Lock = {
@@ -601,6 +603,177 @@ describe('lock seed ownership schema', () => {
   });
 });
 
+type InvalidLock = {
+  readonly expected: string;
+  readonly label: string;
+  readonly value: (lock: Lock) => unknown;
+};
+
+const INVALID_LOCKS: Array<InvalidLock> = [
+  {
+    expected: 'must be a JSON object',
+    label: 'null root',
+    value: () => null,
+  },
+  {
+    expected: 'must be a JSON object',
+    label: 'array root',
+    value: () => [],
+  },
+  {
+    expected: 'must be a JSON object',
+    label: 'primitive root',
+    value: () => 'lock',
+  },
+  {
+    expected: 'has unknown key "extra"',
+    label: 'unknown root field',
+    value: (lock) => ({ ...lock, extra: true }),
+  },
+  {
+    expected: '"upstream" must be a non-empty string',
+    label: 'missing upstream',
+    value: ({ upstream: _upstream, ...lock }) => lock,
+  },
+  {
+    expected: '"upstream" must be a non-empty string',
+    label: 'null upstream',
+    value: (lock) => ({ ...lock, upstream: null }),
+  },
+  {
+    expected: '"upstream" must be a non-empty string',
+    label: 'empty upstream',
+    value: (lock) => ({ ...lock, upstream: '' }),
+  },
+  {
+    expected: '"ref" must be a string',
+    label: 'null ref',
+    value: (lock) => ({ ...lock, ref: null }),
+  },
+  {
+    expected: 'Unsupported ref "main"',
+    label: 'unqualified ref',
+    value: (lock) => ({ ...lock, ref: 'main' }),
+  },
+  {
+    expected: '"sha" must be "local" or a lowercase full Git commit ID',
+    label: 'null source sha',
+    value: (lock) => ({ ...lock, sha: null }),
+  },
+  {
+    expected: '"sha" must be "local" or a lowercase full Git commit ID',
+    label: 'uppercase source sha',
+    value: (lock) => ({ ...lock, sha: 'A'.repeat(COMMIT_SHA_LENGTH) }),
+  },
+  {
+    expected: '"sha" must be "local" or a lowercase full Git commit ID',
+    label: 'short source sha',
+    value: (lock) => ({
+      ...lock,
+      sha: 'a'.repeat(COMMIT_SHA_LENGTH - 1),
+    }),
+  },
+  {
+    expected: '"files" must be a JSON object',
+    label: 'missing files',
+    value: ({ files: _files, ...lock }) => lock,
+  },
+  {
+    expected: '"files" must be a JSON object',
+    label: 'null files',
+    value: (lock) => ({ ...lock, files: null }),
+  },
+  {
+    expected: '"files" must be a JSON object',
+    label: 'array files',
+    value: (lock) => ({ ...lock, files: [] }),
+  },
+  {
+    expected: 'must have a lowercase SHA-256 hash',
+    label: 'null file hash',
+    value: (lock) => ({ ...lock, files: { 'managed/a.txt': null } }),
+  },
+  {
+    expected: 'must have a lowercase SHA-256 hash',
+    label: 'uppercase file hash',
+    value: (lock) => ({
+      ...lock,
+      files: { 'managed/a.txt': 'A'.repeat(SHA256_LENGTH) },
+    }),
+  },
+  {
+    expected: 'must have a lowercase SHA-256 hash',
+    label: 'short file hash',
+    value: (lock) => ({
+      ...lock,
+      files: { 'managed/a.txt': 'a'.repeat(SHA256_LENGTH - 1) },
+    }),
+  },
+  {
+    expected: 'must be a normalized repository-relative path',
+    label: 'unsafe file path',
+    value: (lock) => ({
+      ...lock,
+      files: { '../outside.txt': 'a'.repeat(SHA256_LENGTH) },
+    }),
+  },
+  {
+    expected: 'repository-owned control seam',
+    label: 'reserved control file path',
+    value: (lock) => ({
+      ...lock,
+      files: { [SYNC_POLICY_FILE]: 'a'.repeat(SHA256_LENGTH) },
+    }),
+  },
+  {
+    expected: 'must be unique',
+    label: 'duplicate seeds',
+    value: (lock) => ({ ...lock, seeds: ['docs/a.txt', 'docs/a.txt'] }),
+  },
+  {
+    expected: 'must be a normalized repository-relative path',
+    label: 'unsafe seed path',
+    value: (lock) => ({ ...lock, seeds: ['../outside.txt'] }),
+  },
+  {
+    expected: 'overlaps repository-owned seed path "docs"',
+    label: 'file and seed ownership overlap',
+    value: (lock) => ({
+      ...lock,
+      files: { 'docs/a.txt': 'a'.repeat(SHA256_LENGTH) },
+      seeds: ['docs'],
+    }),
+  },
+];
+
+describe('lock ownership schema', () => {
+  it.each(INVALID_LOCKS)('rejects $label before sync mutation', ({
+    expected,
+    value,
+  }) => {
+    const up = buildUpstream();
+    const { consumer } = initConsumer(up);
+    write(
+      consumer,
+      'sync-standards.lock',
+      `${JSON.stringify(value(readLock(consumer)), null, 2)}\n`,
+    );
+    const filesBefore = listRelativeFiles(consumer);
+    const contentsBefore = new Map(
+      filesBefore.map((rel) => [rel, read(consumer, rel)]),
+    );
+
+    const result = sync(up, consumer);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(expected);
+    expect(listRelativeFiles(consumer)).toEqual(filesBefore);
+    for (const [rel, contents] of contentsBefore) {
+      expect(read(consumer, rel)).toBe(contents);
+    }
+  });
+});
+
 describe('doctor', () => {
   it('reports every missing integration seam together', () => {
     const consumer = mkTmp('sync-cons-');
@@ -780,6 +953,44 @@ describe('sync policy integration', () => {
 });
 
 describe('sync source compatibility', () => {
+  it.each([
+    'init',
+    'sync',
+  ] as const)('rejects an empty upstream during %s without consumer mutation', (command) => {
+    const up = buildUpstream();
+    const consumer =
+      command === 'init' ? mkTmp('sync-cons-') : initConsumer(up).consumer;
+    write(consumer, 'actor-owned.txt', 'keep me\n');
+    write(up, 'managed/a.txt', 'must not apply\n');
+    const manifest = JSON.parse(read(up, 'sync-standards.json')) as Record<
+      string,
+      unknown
+    >;
+    write(
+      up,
+      'sync-standards.json',
+      JSON.stringify({ ...manifest, upstream: '' }),
+    );
+    const filesBefore = listRelativeFiles(consumer);
+    const contentsBefore = new Map(
+      filesBefore.map((rel) => [rel, read(consumer, rel)]),
+    );
+
+    const result =
+      command === 'init'
+        ? run(consumer, ['init', '--from', up, '--dir', consumer])
+        : sync(up, consumer);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      'requires non-empty string "upstream" and string "seedDir"',
+    );
+    expect(listRelativeFiles(consumer)).toEqual(filesBefore);
+    for (const [rel, contents] of contentsBefore) {
+      expect(read(consumer, rel)).toBe(contents);
+    }
+  });
+
   it('rejects a source that claims repo-owned policy before mutation and check', () => {
     const up = buildUpstream();
     const { consumer } = initConsumer(up);
@@ -1476,6 +1687,32 @@ describe('source URL safety', () => {
     expect(result.stderr).not.toContain('sync-user');
     expect(result.stderr).not.toContain('sync-password');
     expect(result.stderr).not.toContain('query-secret');
+  });
+});
+
+describe('local Git object formats', () => {
+  it('accepts locks produced from a local SHA-256 Git repository', () => {
+    const up = buildUpstream();
+    git(up, ['init', '--quiet', '--object-format=sha256', '-b', 'main']);
+    git(up, ['add', '-A']);
+    git(up, ['commit', '--quiet', '-m', 'initial']);
+    const initialSha = git(up, ['rev-parse', 'HEAD']);
+
+    const { consumer, result: initialized } = initConsumer(up);
+
+    expect(initialized.status).toBe(0);
+    expect(initialSha).toHaveLength(SHA256_LENGTH);
+    expect(readLock(consumer).sha).toBe(initialSha);
+    expect(run(consumer, ['check', '--dir', consumer]).status).toBe(0);
+
+    write(up, 'managed/a.txt', 'sha256 update\n');
+    git(up, ['add', '-A']);
+    git(up, ['commit', '--quiet', '-m', 'update']);
+    const updatedSha = git(up, ['rev-parse', 'HEAD']);
+
+    expect(sync(up, consumer).status).toBe(0);
+    expect(readLock(consumer).sha).toBe(updatedSha);
+    expect(run(consumer, ['check', '--dir', consumer]).status).toBe(0);
   });
 });
 

@@ -18,6 +18,7 @@ import process from 'node:process';
 import { CANONICAL_SETTINGS_FILE, LOCAL_SETTINGS_FILE } from './github-api';
 import { runGithubApply, runGithubCheck } from './github-commands';
 import { loadGithubSettings } from './github-settings';
+import { REPOSITORY_OWNED_CONTROL_SEAMS } from './sync-control-seams';
 import {
   assertRepositoryRelativePath,
   type FileState,
@@ -43,11 +44,6 @@ import {
 } from './sync-policy';
 import { type SourceFile, snapshotRepositoryTrees } from './sync-source';
 import { recoverRepositoryTransactions } from './sync-transaction-recovery';
-import {
-  TRANSACTION_CLEANUP,
-  TRANSACTION_DIRECTORY,
-  TRANSACTION_RESERVATION,
-} from './sync-transaction-types';
 
 const { YAML: BunYaml } = await import('bun');
 
@@ -57,15 +53,6 @@ const SYNC_POLICY_CONTRACT_FILE = `${SYNC_POLICY_CONTROLLER_PATH}/index.mjs`;
 const SYNC_POLICY_CONTROLLER_FILES = ['action.yml', 'index.mjs'] as const;
 const SYNC_POLICY_GENERATION_EXPORT =
   /\bSYNC_POLICY_CONTRACT_VERSION=(?<version>\d+)\b/u;
-const REPOSITORY_OWNED_CONTROL_SEAMS = [
-  TRANSACTION_CLEANUP,
-  TRANSACTION_DIRECTORY,
-  TRANSACTION_RESERVATION,
-  LOCAL_SETTINGS_FILE,
-  'AGENTS.local.md',
-  'biome.jsonc',
-  SYNC_POLICY_FILE,
-] as const;
 // Locks written before seed ownership was persisted need the complete seed set
 // shipped by the contract-v1 template. Keep this migration baseline forever:
 // a selected source may omit a seed, but that must not make it managed again.
@@ -88,6 +75,9 @@ const CONTRACT_V1_SEED_OWNERSHIP_BASELINE = [
 const HASH_PREVIEW_LENGTH = 12;
 const GITHUB_PREFIX = 'github:';
 const FULL_COMMIT_SHA = /^[0-9a-fA-F]{40}$/u;
+const STORED_COMMIT_SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u;
+const SHA256 = /^[0-9a-f]{64}$/u;
+const LOCK_KEYS = new Set(['files', 'ref', 'seeds', 'sha', 'upstream']);
 
 // Never mirrored, even under a managed directory path: build output, VCS
 // metadata, and installed dependencies would otherwise pollute the lock when
@@ -113,11 +103,6 @@ type Lock = {
   readonly sha: string;
   readonly files: ReadonlyMap<string, string>;
   readonly seeds: ReadonlySet<string>;
-};
-
-type SerializedLock = Omit<Lock, 'files' | 'seeds'> & {
-  readonly files: Readonly<Record<string, string>>;
-  readonly seeds?: unknown;
 };
 
 type ConsumerSyncPolicyInspectionOptions = {
@@ -173,9 +158,13 @@ const parseManifest = (raw: unknown): Manifest => {
     throw new Error('sync-standards.json must be a JSON object');
   }
   const o = raw as Record<string, unknown>;
-  if (typeof o.upstream !== 'string' || typeof o.seedDir !== 'string') {
+  if (
+    typeof o.upstream !== 'string' ||
+    o.upstream.length === 0 ||
+    typeof o.seedDir !== 'string'
+  ) {
     throw new Error(
-      'sync-standards.json requires string "upstream" and "seedDir"',
+      'sync-standards.json requires non-empty string "upstream" and string "seedDir"',
     );
   }
   if (
@@ -281,23 +270,99 @@ type LockInspection = {
   readonly state: FileState;
 };
 
+const lockRecord = (parsed: unknown): Record<string, unknown> => {
+  if (!isRecord(parsed)) {
+    throw new Error('sync-standards.lock must be a JSON object');
+  }
+  for (const key of Object.keys(parsed)) {
+    if (!LOCK_KEYS.has(key)) {
+      throw new Error(`sync-standards.lock has unknown key "${key}"`);
+    }
+  }
+  return parsed;
+};
+
+const lockMetadata = (
+  parsed: Record<string, unknown>,
+): Pick<Lock, 'ref' | 'sha' | 'upstream'> => {
+  if (typeof parsed.upstream !== 'string' || parsed.upstream.length === 0) {
+    throw new Error(
+      'sync-standards.lock "upstream" must be a non-empty string',
+    );
+  }
+  if (
+    !(
+      typeof parsed.sha === 'string' &&
+      (parsed.sha === 'local' || STORED_COMMIT_SHA.test(parsed.sha))
+    )
+  ) {
+    throw new Error(
+      'sync-standards.lock "sha" must be "local" or a lowercase full Git commit ID',
+    );
+  }
+  if (Object.hasOwn(parsed, 'ref') && typeof parsed.ref !== 'string') {
+    throw new Error('sync-standards.lock "ref" must be a string');
+  }
+  const ref = parsed.ref as string | undefined;
+  if (ref !== undefined) {
+    assertSupportedRef(ref);
+  }
+  return { ref, sha: parsed.sha, upstream: parsed.upstream };
+};
+
+const lockFiles = (
+  parsed: Record<string, unknown>,
+): ReadonlyMap<string, string> => {
+  if (!isRecord(parsed.files)) {
+    throw new Error('sync-standards.lock "files" must be a JSON object');
+  }
+  const files = new Map<string, string>();
+  for (const [rel, hash] of Object.entries(parsed.files)) {
+    assertSafeRelativePath(rel, 'sync-standards.lock file');
+    assertNoRepositoryOwnedControlSeams([rel], 'sync-standards.lock file');
+    if (typeof hash !== 'string' || !SHA256.test(hash)) {
+      throw new Error(
+        `sync-standards.lock file "${rel}" must have a lowercase SHA-256 hash`,
+      );
+    }
+    files.set(rel, hash);
+  }
+  return files;
+};
+
+const lockSeeds = (parsed: Record<string, unknown>): ReadonlySet<string> => {
+  const persisted = Object.hasOwn(parsed, 'seeds') ? parsed.seeds : [];
+  if (!isStringArray(persisted)) {
+    throw new Error('sync-standards.lock "seeds" must be a string array');
+  }
+  if (new Set(persisted).size !== persisted.length) {
+    throw new Error('sync-standards.lock "seeds" must be unique');
+  }
+  for (const seed of persisted) {
+    assertSafeRelativePath(seed, 'sync-standards.lock seed');
+  }
+  return new Set([...CONTRACT_V1_SEED_OWNERSHIP_BASELINE, ...persisted]);
+};
+
 const inspectLock = async (root: RepositoryRoot): Promise<LockInspection> => {
   const state = await inspectRepositoryFile(root, 'sync-standards.lock');
   if (state.contents === null) {
     return { lock: null, state };
   }
-  const raw = JSON.parse(state.contents.toString('utf8')) as SerializedLock;
-  const persistedSeeds = Object.hasOwn(raw, 'seeds') ? raw.seeds : [];
-  if (!isStringArray(persistedSeeds)) {
-    throw new Error('sync-standards.lock "seeds" must be a string array');
-  }
-  const seeds = new Set<string>(CONTRACT_V1_SEED_OWNERSHIP_BASELINE);
-  for (const seed of persistedSeeds) {
-    assertSafeRelativePath(seed, 'sync-standards.lock seed');
-    seeds.add(seed);
-  }
+  const parsed = lockRecord(
+    JSON.parse(state.contents.toString('utf8')) as unknown,
+  );
+  const metadata = lockMetadata(parsed);
+  const files = lockFiles(parsed);
+  const seeds = lockSeeds(parsed);
+  assertNoOwnershipTransitions({
+    establishedSeeds: seeds,
+    managed: [],
+    observedSeeds: [],
+    previousManaged: [...files.keys()],
+  });
   return {
-    lock: { ...raw, files: new Map(Object.entries(raw.files)), seeds },
+    lock: { ...metadata, files, seeds },
     state,
   };
 };
