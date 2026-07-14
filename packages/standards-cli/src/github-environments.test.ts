@@ -53,22 +53,37 @@ describe('applyEnvironment', () => {
   it('creates protected-branch deployment mode without secret APIs', async () => {
     const calls: Array<{ method: string; url: string; body: string | null }> =
       [];
+    let created = false;
     globalThis.fetch = mockFetch((input, init) => {
       calls.push({
         method: init?.method ?? 'GET',
         url: String(input),
         body: typeof init?.body === 'string' ? init.body : null,
       });
-      if (init?.method === 'GET') {
+      if (init?.method === 'PUT') {
+        created = true;
+        return response(HTTP_OK, {});
+      }
+      if (!created) {
         return response(HTTP_NOT_FOUND, { message: 'Not Found' });
       }
-      return response(HTTP_OK, {});
+      return response(
+        HTTP_OK,
+        String(input).includes(CUSTOM_PROTECTION_PATH)
+          ? customProtectionRules()
+          : liveEnvironment(),
+      );
     });
 
     const actions = await applyEnvironment('token', 'owner/repo', declared);
 
     expect(actions).toHaveLength(1);
-    expect(calls.map((call) => call.method)).toEqual(['GET', 'PUT']);
+    expect(calls.map((call) => call.method)).toEqual([
+      'GET',
+      'PUT',
+      'GET',
+      'GET',
+    ]);
     expect(calls.every((call) => !call.url.includes('secrets'))).toBe(true);
     expect(JSON.parse(calls[1]?.body ?? '{}')).toEqual(
       JSON.parse(
@@ -95,28 +110,38 @@ describe('applyEnvironment', () => {
 
   it('switches live custom mode with one PUT and no branch-policy requests', async () => {
     const calls: Array<{ method: string; url: string }> = [];
+    let updated = false;
     globalThis.fetch = mockFetch((input, init) => {
       calls.push({ method: init?.method ?? 'GET', url: String(input) });
       if (String(input).includes(CUSTOM_PROTECTION_PATH)) {
         return response(HTTP_OK, customProtectionRules());
       }
       if (init?.method === 'PUT') {
+        updated = true;
         return response(HTTP_OK, {});
       }
       return response(
         HTTP_OK,
-        liveEnvironment({
-          [DEPLOYMENT_BRANCH_POLICY]: {
-            [PROTECTED_BRANCHES]: false,
-            [CUSTOM_BRANCH_POLICIES]: true,
-          },
-        }),
+        updated
+          ? liveEnvironment()
+          : liveEnvironment({
+              [DEPLOYMENT_BRANCH_POLICY]: {
+                [PROTECTED_BRANCHES]: false,
+                [CUSTOM_BRANCH_POLICIES]: true,
+              },
+            }),
       );
     });
 
     const actions = await applyEnvironment('token', 'owner/repo', declared);
 
-    expect(calls.map(({ method }) => method)).toEqual(['GET', 'GET', 'PUT']);
+    expect(calls.map(({ method }) => method)).toEqual([
+      'GET',
+      'GET',
+      'PUT',
+      'GET',
+      'GET',
+    ]);
     expect(
       calls.every(({ url }) => !url.includes('deployment-branch-policies')),
     ).toBe(true);

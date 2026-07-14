@@ -49,6 +49,12 @@ describe('standards sync documentation', () => {
       expect(documentation).toContain(
         'The lock persists every observed repository-owned seed path, and sync rejects implicit seed-to-managed or managed-to-seed ownership changes before mutation',
       );
+      expect(documentation).toContain(
+        'bare sync validates `sync-standards.lock` before source selection and uses its `upstream`',
+      );
+      expect(documentation).toContain(
+        'Only an explicit `--from` overrides locked source authority',
+      );
       expect(documentation).toContain('STANDARDS_SYNC_ENVIRONMENT_TOKEN');
       expect(documentation).toContain(
         'Contents, Pull requests, and Workflows repository permissions set to write',

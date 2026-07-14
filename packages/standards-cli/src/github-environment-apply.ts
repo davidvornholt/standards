@@ -1,5 +1,5 @@
 import { apiError, HTTP_NO_CONTENT, HTTP_OK, request } from './github-api';
-import { subsetMatches } from './github-diff';
+import { diffEnvironment, subsetMatches } from './github-diff';
 import {
   environmentPath,
   fetchLiveEnvironment,
@@ -24,6 +24,56 @@ type ApplyContext = {
   readonly name: string;
 };
 type ReportAction = (action: string) => void;
+const requireEnvironment = (
+  name: string,
+  live: LiveEnvironment,
+): Readonly<Record<string, unknown>> => {
+  if (live.problem !== null) {
+    throw new Error(live.problem);
+  }
+  if (live.missing || live.environment === null) {
+    throw new Error(`Environment "${name}" is missing on readback`);
+  }
+  return live.environment;
+};
+
+const protectionMatches = (
+  declared: Readonly<Record<string, unknown>>,
+  live: Readonly<Record<string, unknown>>,
+): boolean =>
+  PROTECTION_KEYS.every((key) => subsetMatches(declared[key], live[key]));
+
+const assertProtectionConverged = (
+  declared: Readonly<Record<string, unknown>>,
+  live: LiveEnvironment,
+): void => {
+  const name = String(declared.name);
+  if (!protectionMatches(declared, requireEnvironment(name, live))) {
+    throw new Error(
+      `Environment "${name}" protection did not match the declaration on verification readback`,
+    );
+  }
+};
+
+const assertEnvironmentConverged = (
+  declared: Readonly<Record<string, unknown>>,
+  live: LiveEnvironment,
+): void => {
+  const name = String(declared.name);
+  const drift = diffEnvironment(declared, requireEnvironment(name, live));
+  if (drift.length > 0) {
+    throw new Error(
+      `Environment "${name}" did not match the declaration after apply: ${drift.join('; ')}`,
+    );
+  }
+};
+
+const customProtectionRulesFrom = (
+  live: LiveEnvironment,
+): ReadonlyArray<Readonly<Record<string, unknown>>> =>
+  Array.isArray(live.environment?.[CUSTOM_DEPLOYMENT_PROTECTION_RULES])
+    ? live.environment[CUSTOM_DEPLOYMENT_PROTECTION_RULES].filter(isRecord)
+    : [];
 
 const updateProtection = async (
   context: ApplyContext,
@@ -102,23 +152,36 @@ export const applyPrefetchedEnvironment = async ({
   if (live.problem !== null) {
     throw new Error(live.problem);
   }
-  const customProtectionRules = Array.isArray(
-    live.environment?.[CUSTOM_DEPLOYMENT_PROTECTION_RULES],
-  )
-    ? live.environment[CUSTOM_DEPLOYMENT_PROTECTION_RULES].filter(isRecord)
-    : [];
   const actions: Array<string> = [];
   const protection = await updateProtection(context, declared, live);
   if (protection !== null) {
     actions.push(protection);
     reportAction(protection);
   }
+  const initialCustomProtectionRules = customProtectionRulesFrom(live);
+  const needsVerification =
+    protection !== null || initialCustomProtectionRules.length > 0;
+  const verifiedLive = needsVerification
+    ? await fetchLiveEnvironment(token, repo, name)
+    : live;
+  if (needsVerification) {
+    assertProtectionConverged(declared, verifiedLive);
+  }
+  const customProtectionRules = customProtectionRulesFrom(verifiedLive);
   const deletedCustom = await deleteCustomProtectionRules(
     context,
     customProtectionRules,
     reportAction,
   );
   actions.push(...deletedCustom);
+  if (deletedCustom.length > 0) {
+    assertEnvironmentConverged(
+      declared,
+      await fetchLiveEnvironment(token, repo, name),
+    );
+  } else if (protection !== null) {
+    assertEnvironmentConverged(declared, verifiedLive);
+  }
   return actions;
 };
 

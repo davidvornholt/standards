@@ -483,6 +483,144 @@ describe('init', () => {
   });
 });
 
+describe('sync source authority', () => {
+  it('restores a missing managed manifest from the locked upstream', () => {
+    const up = buildUpstream();
+    const { consumer } = initConsumer(up);
+    rmSync(join(consumer, 'sync-standards.json'));
+    write(up, 'managed/a.txt', 'locked upstream\n');
+
+    const result = run(consumer, ['sync', '--dir', consumer]);
+
+    expect(result.status).toBe(0);
+    expect(read(consumer, 'sync-standards.json')).toBe(
+      read(up, 'sync-standards.json'),
+    );
+    expect(read(consumer, 'managed/a.txt')).toBe('locked upstream\n');
+  });
+
+  it('restores a malformed managed manifest from the locked upstream', () => {
+    const up = buildUpstream();
+    const { consumer } = initConsumer(up);
+    write(consumer, 'sync-standards.json', '{ malformed');
+    write(up, 'managed/a.txt', 'locked upstream\n');
+
+    const result = run(consumer, ['sync', '--dir', consumer]);
+
+    expect(result.status).toBe(0);
+    expect(read(consumer, 'sync-standards.json')).toBe(
+      read(up, 'sync-standards.json'),
+    );
+    expect(read(consumer, 'managed/a.txt')).toBe('locked upstream\n');
+  });
+
+  it('does not let a modified managed manifest redirect bare sync', () => {
+    const lockedUpstream = buildUpstream();
+    const redirect = buildUpstream();
+    const { consumer } = initConsumer(lockedUpstream);
+    const consumerManifest = JSON.parse(
+      read(consumer, 'sync-standards.json'),
+    ) as Record<string, unknown>;
+    write(
+      consumer,
+      'sync-standards.json',
+      JSON.stringify({ ...consumerManifest, upstream: redirect }),
+    );
+    write(lockedUpstream, 'managed/a.txt', 'locked upstream\n');
+    write(redirect, 'managed/a.txt', 'redirected upstream\n');
+
+    const result = run(consumer, ['sync', '--dir', consumer]);
+
+    expect(result.status).toBe(0);
+    expect(read(consumer, 'managed/a.txt')).toBe('locked upstream\n');
+    expect(readLock(consumer).upstream).toBe(lockedUpstream);
+  });
+});
+
+describe('sync source selection', () => {
+  it('keeps policy ref selection when the lock supplies source authority', () => {
+    const { up, taggedSha } = buildGitUpstream();
+    const redirect = buildUpstream();
+    const { consumer } = initConsumer(up);
+    const consumerManifest = JSON.parse(
+      read(consumer, 'sync-standards.json'),
+    ) as Record<string, unknown>;
+    write(
+      consumer,
+      'sync-standards.json',
+      JSON.stringify({ ...consumerManifest, upstream: redirect }),
+    );
+    write(
+      consumer,
+      SYNC_POLICY_FILE,
+      JSON.stringify({ ref: 'refs/tags/v1', scheduledSync: true }),
+    );
+    write(redirect, 'managed/a.txt', 'redirected upstream\n');
+
+    const result = run(consumer, ['sync', '--dir', consumer]);
+
+    expect(result.status).toBe(0);
+    expect(read(consumer, 'managed/a.txt')).toBe('alpha\n');
+    expect(readLock(consumer).ref).toBe('refs/tags/v1');
+    expect(readLock(consumer).sha).toBe(taggedSha);
+  });
+
+  it('uses an explicit --from as the source override', () => {
+    const lockedUpstream = buildUpstream();
+    const override = buildUpstream();
+    const { consumer } = initConsumer(lockedUpstream);
+    write(lockedUpstream, 'managed/a.txt', 'locked upstream\n');
+    write(override, 'managed/a.txt', 'explicit override\n');
+
+    const result = sync(override, consumer);
+
+    expect(result.status).toBe(0);
+    expect(read(consumer, 'managed/a.txt')).toBe('explicit override\n');
+    expect(readLock(consumer).upstream).toBe(override);
+  });
+
+  it('rejects an invalid lock before consulting the managed manifest', () => {
+    const up = buildUpstream();
+    const { consumer } = initConsumer(up);
+    const invalidLock = { ...readLock(consumer), upstream: '' };
+    write(
+      consumer,
+      'sync-standards.lock',
+      `${JSON.stringify(invalidLock, null, 2)}\n`,
+    );
+    write(consumer, 'sync-standards.json', '{ malformed');
+    const filesBefore = listRelativeFiles(consumer);
+    const contentsBefore = new Map(
+      filesBefore.map((rel) => [rel, read(consumer, rel)]),
+    );
+
+    const result = run(consumer, ['sync', '--dir', consumer]);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      'sync-standards.lock "upstream" must be a non-empty string',
+    );
+    expect(result.stderr).not.toContain('Unexpected identifier');
+    expect(listRelativeFiles(consumer)).toEqual(filesBefore);
+    for (const [rel, contents] of contentsBefore) {
+      expect(read(consumer, rel)).toBe(contents);
+    }
+  });
+
+  it('keeps the managed-manifest fallback for a lockless legacy consumer', () => {
+    const up = buildUpstream();
+    const { consumer } = initConsumer(up);
+    rmSync(join(consumer, 'sync-standards.lock'));
+    write(up, 'managed/a.txt', 'legacy update\n');
+
+    const result = run(consumer, ['sync', '--dir', consumer]);
+
+    expect(result.status).toBe(0);
+    expect(read(consumer, 'managed/a.txt')).toBe('legacy update\n');
+    expect(readLock(consumer).upstream).toBe(up);
+  });
+});
+
 describe('check', () => {
   it('passes right after init', () => {
     const { consumer } = initConsumer(buildUpstream());

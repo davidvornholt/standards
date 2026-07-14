@@ -822,6 +822,7 @@ type RunSyncOptions = {
   readonly src: Source;
   readonly consumer: RepositoryRoot;
   readonly dryRun: boolean;
+  readonly lockInspection: LockInspection;
   readonly managed: ReadonlyMap<string, SourceFile>;
   readonly policyWrite: SyncPolicy | null;
   readonly requestedRef: string;
@@ -833,13 +834,13 @@ const runSync = async ({
   src,
   consumer,
   dryRun,
+  lockInspection,
   managed,
   policyWrite,
   requestedRef,
   seeds,
 }: RunSyncOptions): Promise<void> => {
   assertDisjoint(manifest.paths, [...seeds.keys()]);
-  const lockInspection = await inspectLock(consumer);
   const previous = lockInspection.lock?.files ?? new Map<string, string>();
   const establishedSeeds =
     lockInspection.lock?.seeds ??
@@ -1521,9 +1522,19 @@ const runSyncCommand = async (
   dryRun: boolean,
 ): Promise<void> => {
   const consumerRoot = await openSyncConsumerRoot(consumer, dryRun);
+  const lockInspection = await inspectLock(consumerRoot);
   const policy = await inspectEffectiveSyncPolicy(consumerRoot, ref);
-  const consumerManifest = await loadManifest(consumerRoot);
-  const sourceName = from ?? consumerManifest.upstream;
+  const legacyManifest =
+    from === undefined && lockInspection.lock === null
+      ? await loadManifest(consumerRoot)
+      : null;
+  const sourceName =
+    from ?? lockInspection.lock?.upstream ?? legacyManifest?.upstream;
+  if (sourceName === undefined) {
+    throw new Error(
+      'Cannot select a standards source without --from, a valid sync-standards.lock, or a legacy sync-standards.json',
+    );
+  }
   const sourceIsLocal = existsSync(sourceName);
   const requestedRef = ref ?? policy.ref;
   const source = resolveSource(
@@ -1551,6 +1562,7 @@ const runSyncCommand = async (
       src: source,
       consumer: consumerRoot,
       dryRun,
+      lockInspection,
       managed,
       policyWrite: ref === undefined ? null : policy,
       requestedRef,
