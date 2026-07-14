@@ -44,7 +44,9 @@ import { loadGithubSettings } from './github-settings';
 import {
   DEFAULT_SYNC_POLICY,
   inspectSyncPolicy,
+  STANDARDS_SOURCE_PACKAGE_FILE,
   SYNC_POLICY_CONTRACT_VERSION,
+  SYNC_POLICY_FILE,
   type SyncPolicy,
   type SyncPolicyInspection,
 } from './sync-policy';
@@ -52,7 +54,6 @@ import {
 const { YAML: BunYaml } = await import('bun');
 
 const DEFAULT_UPSTREAM = 'github:davidvornholt/standards';
-const LOCAL_POLICY_FILE = 'sync-standards.local.json';
 const SYNC_POLICY_CONTRACT_FILE = 'packages/standards-cli/src/sync-policy.ts';
 const SYNC_POLICY_CONTROLLER_PATH = '.github/actions/standards-sync-preflight';
 const SYNC_POLICY_CONTROLLER_FILES = ['action.yml', 'index.mjs'] as const;
@@ -235,7 +236,7 @@ const writeSyncPolicy = async (
   policy: SyncPolicy,
 ): Promise<void> => {
   await writeFile(
-    join(consumer, LOCAL_POLICY_FILE),
+    join(consumer, SYNC_POLICY_FILE),
     `${JSON.stringify(policy, null, 2)}\n`,
   );
 };
@@ -695,7 +696,7 @@ const inspectConsumerSyncPolicy = async (
 ): Promise<SyncPolicyInspection> => {
   const contractPath = join(consumer, SYNC_POLICY_CONTRACT_FILE);
   const storedPolicyText = await readTextIfPresent(
-    join(consumer, LOCAL_POLICY_FILE),
+    join(consumer, SYNC_POLICY_FILE),
   );
   const effectivePolicyText =
     options.policyText ?? storedPolicyText ?? undefined;
@@ -703,6 +704,10 @@ const inspectConsumerSyncPolicy = async (
     packageText:
       (await readTextIfPresent(join(consumer, 'package.json'))) ?? undefined,
     policyText: effectivePolicyText,
+    sourceWorkspacePackageText:
+      (await readTextIfPresent(
+        join(consumer, STANDARDS_SOURCE_PACKAGE_FILE),
+      )) ?? undefined,
   });
   if (!existsSync(contractPath)) {
     if (options.allowMissingDefaultContract) {
@@ -712,7 +717,7 @@ const inspectConsumerSyncPolicy = async (
           ...result.problems,
           ...(result.policy !== null && !isDefaultSyncPolicy(result.policy)
             ? [
-                `${LOCAL_POLICY_FILE} may be absent or contain only the exact default policy while ${SYNC_POLICY_CONTRACT_FILE} is missing; upgrade @davidvornholt/standards, run a bare sync from the repository's default branch, then pin a non-default ref`,
+                `${SYNC_POLICY_FILE} may be absent or contain only the exact default policy while ${SYNC_POLICY_CONTRACT_FILE} is missing; upgrade @davidvornholt/standards, run a bare sync from the repository's default branch, then pin a non-default ref`,
               ]
             : []),
         ],

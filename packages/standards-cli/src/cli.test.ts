@@ -14,7 +14,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import process from 'node:process';
-import { DEFAULT_SYNC_POLICY } from './sync-policy';
+import { DEFAULT_SYNC_POLICY, SYNC_POLICY_FILE } from './sync-policy';
 
 const ENGINE = join(import.meta.dir, 'cli.ts');
 const LEGACY_ENGINE = join(
@@ -28,7 +28,8 @@ const WORKFLOW = join(
 const ROOT_MANIFEST = join(import.meta.dir, '../../../sync-standards.json');
 const POLICY_SEED = join(
   import.meta.dir,
-  '../../../template/sync-standards.local.json',
+  '../../../template',
+  SYNC_POLICY_FILE,
 );
 const SYNC_POLICY_CONTROLLER_PATH = '.github/actions/standards-sync-preflight';
 const SYNC_POLICY_CONTROLLER_FILES = ['action.yml', 'index.mjs'] as const;
@@ -126,7 +127,7 @@ const buildUpstream = (paths: ReadonlyArray<string> = STD_PATHS): string => {
   write(up, 'template/seed.txt', 'seed original\n');
   write(
     up,
-    'template/sync-standards.local.json',
+    `template/${SYNC_POLICY_FILE}`,
     `${JSON.stringify(DEFAULT_SYNC_POLICY, null, 2)}\n`,
   );
   write(up, 'template/AGENTS.local.md', '# Local\n');
@@ -235,7 +236,7 @@ const buildGitUpstream = (): {
       paths: ['sync-standards.json', 'managed'],
     }),
   );
-  rmSync(join(up, 'template/sync-standards.local.json'));
+  rmSync(join(up, 'template', SYNC_POLICY_FILE));
   rmSync(join(up, '.github'), { recursive: true });
   rmSync(join(up, SYNC_POLICY_CONTRACT_PATH));
   git(up, ['add', '-A']);
@@ -264,7 +265,7 @@ const buildGitUpstream = (): {
   git(up, ['tag', '--annotate', 'annotated', '--message', 'annotated']);
   write(
     up,
-    'template/sync-standards.local.json',
+    `template/${SYNC_POLICY_FILE}`,
     `${JSON.stringify(DEFAULT_SYNC_POLICY, null, 2)}\n`,
   );
   write(up, 'managed/a.txt', 'alpha v2\n');
@@ -295,7 +296,7 @@ describe('init', () => {
       'package-ecosystem: bun',
     );
     expect(read(consumer, 'managed/a.txt')).toBe('alpha\n');
-    expect(read(consumer, 'sync-standards.local.json')).toContain(
+    expect(read(consumer, SYNC_POLICY_FILE)).toContain(
       JSON.stringify(DEFAULT_SYNC_POLICY.ref),
     );
     expect(readLock(consumer).ref).toBe(DEFAULT_SYNC_POLICY.ref);
@@ -372,13 +373,13 @@ describe('check', () => {
       'sync-standards.lock',
       `${JSON.stringify(oldLock, null, 2)}\n`,
     );
-    rmSync(join(consumer, 'sync-standards.local.json'));
+    rmSync(join(consumer, SYNC_POLICY_FILE));
 
     expect(run(consumer, ['check', '--dir', consumer]).status).toBe(0);
 
     write(
       consumer,
-      'sync-standards.local.json',
+      SYNC_POLICY_FILE,
       JSON.stringify({ ref: 'refs/tags/v1', scheduledSync: true }),
     );
     const pinnedCheck = run(consumer, ['check', '--dir', consumer]);
@@ -392,7 +393,7 @@ describe('check', () => {
     const { consumer } = initConsumer(buildUpstream());
     write(
       consumer,
-      'sync-standards.local.json',
+      SYNC_POLICY_FILE,
       JSON.stringify({ ref: 'refs/heads/stable', scheduledSync: true }),
     );
 
@@ -550,7 +551,7 @@ describe('sync policy integration', () => {
     const { consumer } = initConsumer(buildUpstream());
     write(
       consumer,
-      'sync-standards.local.json',
+      SYNC_POLICY_FILE,
       JSON.stringify({ ref: 'refs/tags/v0.5.0' }),
     );
     setStandardsVersion(consumer, '0.4.0');
@@ -569,7 +570,7 @@ describe('sync policy integration', () => {
     const { consumer } = initConsumer(buildUpstream());
     write(
       consumer,
-      'sync-standards.local.json',
+      SYNC_POLICY_FILE,
       JSON.stringify({ ref: 'refs/tags/v0.5.0', scheduledSync: true }),
     );
 
@@ -594,7 +595,7 @@ describe('sync source compatibility', () => {
       const lockBefore = read(consumer, 'sync-standards.lock');
       const managedBefore = read(consumer, 'managed/a.txt');
       const controllerBefore = read(consumer, SYNC_POLICY_CONTRACT_PATH);
-      const policyBefore = read(consumer, 'sync-standards.local.json');
+      const policyBefore = read(consumer, SYNC_POLICY_FILE);
       write(up, 'managed/a.txt', 'should not apply\n');
       write(
         up,
@@ -615,7 +616,7 @@ describe('sync source compatibility', () => {
       );
       expect(read(consumer, 'managed/a.txt')).toBe(managedBefore);
       expect(read(consumer, SYNC_POLICY_CONTRACT_PATH)).toBe(controllerBefore);
-      expect(read(consumer, 'sync-standards.local.json')).toBe(policyBefore);
+      expect(read(consumer, SYNC_POLICY_FILE)).toBe(policyBefore);
       expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
     }
   });
@@ -627,7 +628,7 @@ describe('sync source compatibility', () => {
       const lockBefore = read(consumer, 'sync-standards.lock');
       const managedBefore = read(consumer, 'managed/a.txt');
       const controllerBefore = read(consumer, SYNC_POLICY_CONTRACT_PATH);
-      const policyBefore = read(consumer, 'sync-standards.local.json');
+      const policyBefore = read(consumer, SYNC_POLICY_FILE);
       write(up, 'managed/a.txt', 'should not apply\n');
       rmSync(join(up, SYNC_POLICY_CONTROLLER_PATH, missingFile));
 
@@ -639,7 +640,7 @@ describe('sync source compatibility', () => {
       );
       expect(read(consumer, 'managed/a.txt')).toBe(managedBefore);
       expect(read(consumer, SYNC_POLICY_CONTRACT_PATH)).toBe(controllerBefore);
-      expect(read(consumer, 'sync-standards.local.json')).toBe(policyBefore);
+      expect(read(consumer, SYNC_POLICY_FILE)).toBe(policyBefore);
       expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
     }
   });
@@ -750,7 +751,7 @@ describe('ref pinning', () => {
     expect(read(consumer, 'managed/a.txt')).toBe('alpha\n');
     expect(readLock(consumer).ref).toBe('refs/tags/v1');
     expect(readLock(consumer).sha).toBe(taggedSha);
-    expect(JSON.parse(read(consumer, 'sync-standards.local.json'))).toEqual({
+    expect(JSON.parse(read(consumer, SYNC_POLICY_FILE))).toEqual({
       ref: 'refs/tags/v1',
       scheduledSync: true,
     });
@@ -764,7 +765,7 @@ describe('ref pinning', () => {
   it('missing policy defaults bare local and workflow sync to main', () => {
     const { up } = buildGitUpstream();
     const { consumer } = initConsumer(up);
-    rmSync(join(consumer, 'sync-standards.local.json'));
+    rmSync(join(consumer, SYNC_POLICY_FILE));
     write(up, 'managed/a.txt', 'alpha v3\n');
     git(up, ['add', '-A']);
     git(up, ['commit', '--quiet', '-m', 'v3']);
@@ -785,7 +786,7 @@ describe('ref pinning', () => {
     });
     expect(workflow.status).toBe(0);
     expect(read(consumer, 'managed/a.txt')).toBe('alpha v4\n');
-    expect(existsSync(join(consumer, 'sync-standards.local.json'))).toBe(false);
+    expect(existsSync(join(consumer, SYNC_POLICY_FILE))).toBe(false);
   });
 
   it('bare local and workflow sync use the same configured ref', () => {
@@ -793,7 +794,7 @@ describe('ref pinning', () => {
     const { consumer } = initConsumer(up);
     write(
       consumer,
-      'sync-standards.local.json',
+      SYNC_POLICY_FILE,
       JSON.stringify({ ref: 'refs/tags/v1', scheduledSync: true }),
     );
 
@@ -815,7 +816,7 @@ describe('ref pinning', () => {
   it('dry-run with an override changes neither policy, lock, nor content', () => {
     const { up, url } = buildGitUpstream();
     const { consumer } = initConsumer(up);
-    const policyBefore = read(consumer, 'sync-standards.local.json');
+    const policyBefore = read(consumer, SYNC_POLICY_FILE);
     const lockBefore = read(consumer, 'sync-standards.lock');
 
     const dry = sync(url, consumer, ['--ref', 'refs/tags/v1', '--dry-run']);
@@ -823,7 +824,7 @@ describe('ref pinning', () => {
     expect(dry.status).toBe(0);
     expect(dry.stdout).toContain('would update managed/a.txt');
     expect(read(consumer, 'managed/a.txt')).toBe('alpha v2\n');
-    expect(read(consumer, 'sync-standards.local.json')).toBe(policyBefore);
+    expect(read(consumer, SYNC_POLICY_FILE)).toBe(policyBefore);
     expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
   });
 });
@@ -838,11 +839,7 @@ describe('policy validation', () => {
       { ref: DEFAULT_SYNC_POLICY.ref },
       { ref: 'main', scheduledSync: true },
     ]) {
-      write(
-        consumer,
-        'sync-standards.local.json',
-        JSON.stringify(invalidPolicy),
-      );
+      write(consumer, SYNC_POLICY_FILE, JSON.stringify(invalidPolicy));
       const result = run(consumer, ['sync', '--dir', consumer]);
       expect(result.status).toBe(1);
       expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
@@ -854,7 +851,7 @@ describe('policy validation', () => {
     const lockBefore = read(consumer, 'sync-standards.lock');
     write(
       consumer,
-      'sync-standards.local.json',
+      SYNC_POLICY_FILE,
       JSON.stringify({ ...DEFAULT_SYNC_POLICY, typo: false }),
     );
 
@@ -869,7 +866,7 @@ describe('policy validation', () => {
     const { consumer } = initConsumer(buildUpstream());
     const lockBefore = read(consumer, 'sync-standards.lock');
     const managedBefore = read(consumer, 'managed/a.txt');
-    const policyBefore = read(consumer, 'sync-standards.local.json');
+    const policyBefore = read(consumer, SYNC_POLICY_FILE);
 
     setStandardsVersion(consumer, '0.4.0');
     const explicit = sync('file:///missing-standards', consumer, [
@@ -879,12 +876,12 @@ describe('policy validation', () => {
     expect(explicit.status).toBe(1);
     expect(explicit.stderr).toContain('exact stable version >=0.5.0');
     expect(explicit.stderr).not.toContain('Cannot fetch');
-    expect(read(consumer, 'sync-standards.local.json')).toBe(policyBefore);
+    expect(read(consumer, SYNC_POLICY_FILE)).toBe(policyBefore);
 
     setStandardsVersion(consumer, '^0.5.0');
     write(
       consumer,
-      'sync-standards.local.json',
+      SYNC_POLICY_FILE,
       JSON.stringify({ ref: 'refs/tags/v1', scheduledSync: true }),
     );
     const bare = run(consumer, [
@@ -910,7 +907,7 @@ describe('policy validation', () => {
       }
       const lockBefore = read(consumer, 'sync-standards.lock');
       const managedBefore = read(consumer, 'managed/a.txt');
-      const policyBefore = read(consumer, 'sync-standards.local.json');
+      const policyBefore = read(consumer, SYNC_POLICY_FILE);
 
       const result = sync('file:///missing-standards', consumer);
 
@@ -918,7 +915,7 @@ describe('policy validation', () => {
       expect(result.stderr).toContain('exact stable version >=0.5.0');
       expect(result.stderr).not.toContain('Cannot fetch');
       expect(read(consumer, 'managed/a.txt')).toBe(managedBefore);
-      expect(read(consumer, 'sync-standards.local.json')).toBe(policyBefore);
+      expect(read(consumer, SYNC_POLICY_FILE)).toBe(policyBefore);
       expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
       expect(existsSync(join(consumer, SYNC_POLICY_CONTRACT_PATH))).toBe(
         controllerPresent,
@@ -934,7 +931,7 @@ describe('legacy policy bootstrap exactness', () => {
     setStandardsVersion(consumer, '0.4.0');
     write(
       consumer,
-      'sync-standards.local.json',
+      SYNC_POLICY_FILE,
       JSON.stringify({ ...DEFAULT_SYNC_POLICY, typo: false }),
     );
     const lockBefore = read(consumer, 'sync-standards.lock');
@@ -968,7 +965,7 @@ describe('ref resolution', () => {
     const { up, url, taggedSha } = buildGitUpstream();
     const { consumer } = initConsumer(up);
     const lockBefore = read(consumer, 'sync-standards.lock');
-    const policyBefore = read(consumer, 'sync-standards.local.json');
+    const policyBefore = read(consumer, SYNC_POLICY_FILE);
     const objectIds = [
       git(up, ['rev-parse', 'refs/tags/annotated']),
       git(up, ['rev-parse', 'refs/tags/v1^{tree}']),
@@ -980,7 +977,7 @@ describe('ref resolution', () => {
       expect(result.status).toBe(1);
       expect(result.stderr).toContain('full object IDs must identify a commit');
       expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
-      expect(read(consumer, 'sync-standards.local.json')).toBe(policyBefore);
+      expect(read(consumer, SYNC_POLICY_FILE)).toBe(policyBefore);
     }
 
     const qualified = sync(url, consumer, ['--ref', 'refs/tags/annotated']);
@@ -1009,14 +1006,14 @@ describe('ref resolution', () => {
     const { consumer } = initConsumer(up);
     const managedBefore = read(consumer, 'managed/a.txt');
     const lockBefore = read(consumer, 'sync-standards.lock');
-    const policyBefore = read(consumer, 'sync-standards.local.json');
+    const policyBefore = read(consumer, SYNC_POLICY_FILE);
 
     for (const invalidRef of ['v1', 'stable', '-u', 'refs/tags/missing']) {
       const result = sync(url, consumer, ['--ref', invalidRef]);
       expect(result.status).toBe(1);
       expect(read(consumer, 'managed/a.txt')).toBe(managedBefore);
       expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
-      expect(read(consumer, 'sync-standards.local.json')).toBe(policyBefore);
+      expect(read(consumer, SYNC_POLICY_FILE)).toBe(policyBefore);
     }
   });
 
@@ -1025,7 +1022,7 @@ describe('ref resolution', () => {
     const { consumer } = initConsumer(up);
     write(
       consumer,
-      'sync-standards.local.json',
+      SYNC_POLICY_FILE,
       JSON.stringify({ ref: 'refs/tags/v1', scheduledSync: true }),
     );
     write(up, 'managed/a.txt', 'local uncommitted change\n');
@@ -1034,7 +1031,7 @@ describe('ref resolution', () => {
     expect(local.status).toBe(0);
     expect(read(consumer, 'managed/a.txt')).toBe('local uncommitted change\n');
     expect(readLock(consumer).ref).toBe('refs/tags/v1');
-    expect(JSON.parse(read(consumer, 'sync-standards.local.json'))).toEqual({
+    expect(JSON.parse(read(consumer, SYNC_POLICY_FILE))).toEqual({
       ref: 'refs/tags/v1',
       scheduledSync: true,
     });
@@ -1067,11 +1064,7 @@ describe('scheduled and legacy sync', () => {
     const { up, url } = buildGitUpstream();
     const { consumer } = initConsumer(up);
     removeSyncPolicyController(consumer);
-    write(
-      consumer,
-      'sync-standards.local.json',
-      JSON.stringify(DEFAULT_SYNC_POLICY),
-    );
+    write(consumer, SYNC_POLICY_FILE, JSON.stringify(DEFAULT_SYNC_POLICY));
     setStandardsVersion(consumer, '0.5.0');
 
     const bootstrap = run(consumer, ['sync', '--dir', consumer]);
@@ -1084,7 +1077,7 @@ describe('scheduled and legacy sync', () => {
     }
     expect(existsSync(join(consumer, SYNC_POLICY_CONTRACT_PATH))).toBe(true);
     expect(sync(url, consumer, ['--ref', 'refs/tags/v1']).status).toBe(0);
-    expect(JSON.parse(read(consumer, 'sync-standards.local.json'))).toEqual({
+    expect(JSON.parse(read(consumer, SYNC_POLICY_FILE))).toEqual({
       ref: 'refs/tags/v1',
       scheduledSync: true,
     });
@@ -1095,7 +1088,7 @@ describe('scheduled and legacy sync', () => {
     removeSyncPolicyController(consumer);
     write(
       consumer,
-      'sync-standards.local.json',
+      SYNC_POLICY_FILE,
       JSON.stringify({ ref: 'refs/tags/v1', scheduledSync: true }),
     );
     const lockBefore = read(consumer, 'sync-standards.lock');
@@ -1117,7 +1110,7 @@ describe('scheduled and legacy sync', () => {
     const { consumer } = initConsumer(up);
     write(
       consumer,
-      'sync-standards.local.json',
+      SYNC_POLICY_FILE,
       JSON.stringify({ ...DEFAULT_SYNC_POLICY, scheduledSync: false }),
     );
     write(up, 'managed/a.txt', 'alpha v3\n');
@@ -1154,7 +1147,7 @@ describe('scheduled and legacy sync', () => {
     expect(historicalPaths).not.toContain(SYNC_POLICY_CONTRACT_PATH);
     expect(historicalManifest).not.toContain('syncPolicyContractVersion');
     const lockBefore = read(consumer, 'sync-standards.lock');
-    const policyBefore = read(consumer, 'sync-standards.local.json');
+    const policyBefore = read(consumer, SYNC_POLICY_FILE);
     const controllerBefore = read(consumer, SYNC_POLICY_CONTRACT_PATH);
     const managedBefore = read(consumer, 'managed/a.txt');
 
@@ -1166,7 +1159,7 @@ describe('scheduled and legacy sync', () => {
     );
     expect(read(consumer, SYNC_POLICY_CONTRACT_PATH)).toBe(controllerBefore);
     expect(read(consumer, 'managed/a.txt')).toBe(managedBefore);
-    expect(read(consumer, 'sync-standards.local.json')).toBe(policyBefore);
+    expect(read(consumer, SYNC_POLICY_FILE)).toBe(policyBefore);
     expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
   });
 });
@@ -1186,7 +1179,7 @@ describe('canonical workflow', () => {
       paths: ReadonlyArray<string>;
     };
     expect(policy).toEqual(DEFAULT_SYNC_POLICY);
-    expect(manifest.paths).not.toContain('sync-standards.local.json');
+    expect(manifest.paths).not.toContain(SYNC_POLICY_FILE);
   });
 });
 

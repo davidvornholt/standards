@@ -10,14 +10,13 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
-import { DEFAULT_SYNC_POLICY } from './sync-policy';
+import { DEFAULT_SYNC_POLICY, SYNC_POLICY_FILE } from './sync-policy';
 
 const ROOT = join(import.meta.dir, '../../..');
 const PREFLIGHT = join(
   ROOT,
   '.github/actions/standards-sync-preflight/index.mjs',
 );
-const POLICY_FILE = 'sync-standards.local.json';
 const STANDARDS_PACKAGE = '@davidvornholt/standards';
 const FULL_SHA_LENGTH = 40;
 
@@ -39,7 +38,7 @@ const runPreflight = (
   temporaryDirectories.push(directory);
   const outputPath = join(directory, 'github-output');
   if (policyJson !== undefined) {
-    writeFileSync(join(directory, POLICY_FILE), policyJson);
+    writeFileSync(join(directory, SYNC_POLICY_FILE), policyJson);
   }
   if (packageJson !== undefined) {
     writeFileSync(join(directory, 'package.json'), packageJson);

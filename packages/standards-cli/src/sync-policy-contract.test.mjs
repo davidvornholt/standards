@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { DEFAULT_SYNC_POLICY, inspectSyncPolicy } from './sync-policy.ts';
+import {
+  DEFAULT_SYNC_POLICY,
+  inspectSyncPolicy,
+  SYNC_POLICY_FILE,
+} from './sync-policy.ts';
 
 const packageText = (version) =>
   JSON.stringify({
@@ -19,7 +23,7 @@ describe('sync policy controller contract', () => {
 
     assert.ok(
       inspection.problems.includes(
-        'sync-standards.local.json has unknown key "typo"',
+        `${SYNC_POLICY_FILE} has unknown key "typo"`,
       ),
     );
   });
@@ -32,6 +36,16 @@ describe('sync policy controller contract', () => {
 
     assert.equal(inspection.problems.length, 1);
     assert.deepEqual(inspection.policy, DEFAULT_SYNC_POLICY);
+    assert.ok(inspection.problems[0].includes('exact stable version >=0.5.0'));
+  });
+
+  it('does not waive consumer dependency checks for a package-name lookalike', () => {
+    const inspection = inspectSyncPolicy({
+      packageText: JSON.stringify({ name: 'standards', private: true }),
+      policyText: undefined,
+      sourceWorkspacePackageText: packageText('0.5.0'),
+    });
+
     assert.ok(inspection.problems[0].includes('exact stable version >=0.5.0'));
   });
 });

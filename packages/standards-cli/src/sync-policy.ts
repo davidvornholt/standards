@@ -12,6 +12,7 @@ export type SyncPolicyInspection = {
 type SyncPolicyInspectionInput = {
   readonly packageText: string | undefined;
   readonly policyText: string | undefined;
+  readonly sourceWorkspacePackageText: string | undefined;
 };
 
 export const DEFAULT_SYNC_POLICY: SyncPolicy = {
@@ -20,15 +21,16 @@ export const DEFAULT_SYNC_POLICY: SyncPolicy = {
 };
 
 export const SYNC_POLICY_CONTRACT_VERSION = 1;
+export const SYNC_POLICY_FILE = 'sync-standards.local.json';
+export const STANDARDS_SOURCE_PACKAGE_FILE =
+  'packages/standards-cli/package.json';
 
-const POLICY_FILE = 'sync-standards.local.json';
 const PACKAGE_FILE = 'package.json';
 const STANDARDS_PACKAGE = '@davidvornholt/standards';
 const FULL_COMMIT_SHA = /^[0-9a-fA-F]{40}$/u;
 const EXACT_STABLE_SEMVER =
   /^(?<major>0|[1-9]\d*)\.(?<minor>0|[1-9]\d*)\.(?<patch>0|[1-9]\d*)$/u;
 const REQUIRED_MINOR_VERSION = 5n;
-const REQUIRED_VERSION = [0n, REQUIRED_MINOR_VERSION, 0n] as const;
 const INVALID_REF_CHARACTERS = new Set(['~', '^', ':', '?', '*', '[', '\\']);
 const SPACE_CODE_POINT = 32;
 const DELETE_CODE_POINT = 127;
@@ -95,28 +97,28 @@ const inspectPolicy = (
   if (policyText === undefined) {
     return DEFAULT_SYNC_POLICY;
   }
-  const raw = parseJson(policyText, POLICY_FILE, problems);
+  const raw = parseJson(policyText, SYNC_POLICY_FILE, problems);
   if (raw === undefined) {
     return null;
   }
   if (!isRecord(raw)) {
-    problems.push(`${POLICY_FILE} must be a JSON object`);
+    problems.push(`${SYNC_POLICY_FILE} must be a JSON object`);
     return null;
   }
   for (const key of Object.keys(raw)) {
     if (!POLICY_KEYS.has(key)) {
-      problems.push(`${POLICY_FILE} has unknown key "${key}"`);
+      problems.push(`${SYNC_POLICY_FILE} has unknown key "${key}"`);
     }
   }
   const refIsValid = typeof raw.ref === 'string' && isSupportedRef(raw.ref);
   const scheduledSyncIsValid = typeof raw.scheduledSync === 'boolean';
   if (!refIsValid) {
     problems.push(
-      `${POLICY_FILE} requires "ref" to be refs/heads/<branch>, refs/tags/<tag>, or a full commit SHA`,
+      `${SYNC_POLICY_FILE} requires "ref" to be refs/heads/<branch>, refs/tags/<tag>, or a full commit SHA`,
     );
   }
   if (!scheduledSyncIsValid) {
-    problems.push(`${POLICY_FILE} requires boolean "scheduledSync"`);
+    problems.push(`${SYNC_POLICY_FILE} requires boolean "scheduledSync"`);
   }
   return refIsValid && scheduledSyncIsValid
     ? { ref: raw.ref as string, scheduledSync: raw.scheduledSync as boolean }
@@ -128,26 +130,47 @@ const versionIsCompatible = (version: string): boolean => {
   if (match === null) {
     return false;
   }
-  const { major, minor, patch } = match.groups ?? {};
-  if (major === undefined || minor === undefined || patch === undefined) {
-    return false;
-  }
-  const actual = [major, minor, patch].map((part) => BigInt(part));
-  for (const [index, required] of REQUIRED_VERSION.entries()) {
-    const component = actual[index];
-    if (component === undefined) {
-      return false;
-    }
-    if (component !== required) {
-      return component > required;
-    }
-  }
-  return true;
+  const { major, minor } = match.groups ?? {};
+  return (
+    major !== undefined &&
+    minor !== undefined &&
+    (BigInt(major) > 0n || BigInt(minor) >= REQUIRED_MINOR_VERSION)
+  );
+};
+
+const isStandardsSourceWorkspace = (
+  packageJson: Record<string, unknown>,
+  sourceWorkspacePackageText: string | undefined,
+): boolean => {
+  const sourcePackage =
+    sourceWorkspacePackageText === undefined
+      ? undefined
+      : parseJson(
+          sourceWorkspacePackageText,
+          STANDARDS_SOURCE_PACKAGE_FILE,
+          [],
+        );
+  const { scripts: rawScripts, workspaces } = packageJson;
+  const scripts = isRecord(rawScripts) ? rawScripts : undefined;
+  return (
+    packageJson.name === 'standards' &&
+    packageJson.private === true &&
+    Array.isArray(workspaces) &&
+    workspaces.includes('packages/*') &&
+    scripts?.standards === 'bun packages/standards-cli/src/cli.ts' &&
+    isRecord(sourcePackage) &&
+    sourcePackage.name === STANDARDS_PACKAGE &&
+    typeof sourcePackage.version === 'string' &&
+    versionIsCompatible(sourcePackage.version) &&
+    isRecord(sourcePackage.bin) &&
+    sourcePackage.bin.standards === 'src/cli.ts'
+  );
 };
 
 export const inspectSyncPolicy = ({
   packageText,
   policyText,
+  sourceWorkspacePackageText,
 }: SyncPolicyInspectionInput): SyncPolicyInspection => {
   const problems: Array<string> = [];
   const policy = inspectPolicy(policyText, problems);
@@ -165,7 +188,10 @@ export const inspectSyncPolicy = ({
       ? packageJson.devDependencies
       : undefined;
     const version = devDependencies?.[STANDARDS_PACKAGE];
-    if (typeof version !== 'string' || !versionIsCompatible(version)) {
+    if (
+      (typeof version !== 'string' || !versionIsCompatible(version)) &&
+      !isStandardsSourceWorkspace(packageJson, sourceWorkspacePackageText)
+    ) {
       problems.push(compatiblePackageProblem());
     }
   }

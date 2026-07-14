@@ -1,7 +1,11 @@
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
-import { inspectSyncPolicy } from '../../../packages/standards-cli/src/sync-policy.ts';
+import {
+  inspectSyncPolicy,
+  STANDARDS_SOURCE_PACKAGE_FILE,
+  SYNC_POLICY_FILE,
+} from '../../../packages/standards-cli/src/sync-policy.ts';
 
 const readIfPresent = (path) =>
   existsSync(path) ? readFileSync(path, 'utf8') : undefined;
@@ -24,7 +28,10 @@ const main = () => {
 
   const inspection = inspectSyncPolicy({
     packageText: readIfPresent(join(workspace, 'package.json')),
-    policyText: readIfPresent(join(workspace, 'sync-standards.local.json')),
+    policyText: readIfPresent(join(workspace, SYNC_POLICY_FILE)),
+    sourceWorkspacePackageText: readIfPresent(
+      join(workspace, STANDARDS_SOURCE_PACKAGE_FILE),
+    ),
   });
   if (inspection.policy === null || inspection.problems.length > 0) {
     throw new Error(inspection.problems.join('\n'));
@@ -36,7 +43,7 @@ const main = () => {
   console.log(
     runSync
       ? 'standards: sync preflight enabled this run'
-      : 'standards: scheduled sync disabled by sync-standards.local.json',
+      : `standards: scheduled sync disabled by ${SYNC_POLICY_FILE}`,
   );
 };
 

@@ -9,6 +9,7 @@ on:
       - main
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -61,9 +62,10 @@ jobs:
       DATABASE_URL: postgresql://${{ vars.CI_POSTGRES_USER || 'app' }}:${{ vars.CI_POSTGRES_PASSWORD || 'app' }}@127.0.0.1:5432/${{ vars.CI_POSTGRES_DB || 'app' }}
       # `standards check` verifies the declared GitHub settings
       # (.github/settings.json) against the live repository. The token makes
-      # those API reads work on private repos and avoids anonymous rate limits;
-      # it cannot hold the admin permission, so repo merge settings it cannot
-      # see are reported as unverifiable rather than failing the gate.
+      # those API reads work on private repos and avoids anonymous rate limits.
+      # The workflow-level `actions: read` permission grants environment and
+      # deployment-policy reads; the token cannot hold admin permission, so repo
+      # merge settings it cannot see are reported as unverifiable, not drift.
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout

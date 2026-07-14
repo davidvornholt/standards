@@ -155,8 +155,8 @@ describe('standards sync documentation', () => {
     for (const path of POLICY_DOCS) {
       const documentation = readFileSync(path, 'utf8');
       expect(documentation).toContain('@davidvornholt/standards` >=0.5.0');
-      expect(documentation).toContain('declared as an exact stable version');
-      expect(documentation).toContain('for every policy');
+      expect(documentation).toContain('for every consumer policy');
+      expect(documentation).toContain('source workspace is the sole exception');
       expect(documentation).toContain('first land the bucket-2 CLI upgrade');
       expect(documentation).toContain(
         'bun add --dev --exact @davidvornholt/standards@0.5.0',
