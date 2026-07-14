@@ -16,6 +16,11 @@ const CURRENT_POLICY_DOCS = [
   SYNC_SKILL,
 ] as const;
 const MIGRATION_DOCS = [ROOT_README, PACKAGE_README] as const;
+const PREFLIGHT_RUNTIME_VARIABLES = [
+  'GITHUB_EVENT_NAME',
+  'GITHUB_OUTPUT',
+  'GITHUB_WORKSPACE',
+] as const;
 const CONTROL_SEAM_PREFIX =
   'Contract-v1 sources must not manage the repository-owned control seams ';
 const formatList = (values: ReadonlyArray<string>): string => {
@@ -109,5 +114,35 @@ describe('standards sync documentation', () => {
       'bun add --dev --exact @davidvornholt/standards@0.5.0',
     );
     expect(skillDocumentation).not.toContain('STANDARDS_SYNC_TOKEN');
+  });
+});
+
+describe('generated standards sync preflight documentation', () => {
+  it('documents the generated preflight runtime environment', () => {
+    const documentation = readFileSync(PACKAGE_README, 'utf8');
+    const configuration = documentation
+      .split('## Configuration\n', 2)
+      .at(1)
+      ?.split('\n## ', 1)
+      .at(0);
+
+    expect(configuration).toBeDefined();
+    for (const variable of PREFLIGHT_RUNTIME_VARIABLES) {
+      expect(configuration).toContain(`\`${variable}\``);
+    }
+    expect(configuration).toContain(
+      'required for the generated preflight action',
+    );
+    expect(configuration).toContain('no defaults');
+    expect(configuration).toContain('GitHub Actions supplies all three');
+    expect(configuration).toContain('`schedule` or `repository_dispatch`');
+    expect(configuration).toContain('scheduled runs honor `scheduledSync`');
+    expect(configuration).toContain(
+      'repository dispatches always request a sync',
+    );
+    expect(configuration).toContain('writes its `run_sync` output');
+    expect(configuration).toContain('consumer repository root');
+    expect(configuration).toContain('reads `package.json`');
+    expect(configuration).toContain('`sync-standards.local.json`');
   });
 });
