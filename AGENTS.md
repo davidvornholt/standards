@@ -4,7 +4,7 @@ This file is the root operating contract for agents in this repository. Keep roo
 
 Quality gates (lint, types, tests, a11y) are deliberately strict so agents can verify changes mechanically instead of declaring them done. Strengthen gates when you can; never weaken one to make a change pass. CI gating jobs must fail closed — a gate that errors or cannot find the run it depends on fails, never passes by default — and a deploy job must not run unless the quality gate passed for the exact commit being deployed.
 
-Check an expensive or irreversible operation's cheap preconditions before starting it, so work already certain to fail does so before paying its setup cost. This is distinct from validation, which must still gather and report all errors together.
+Check an expensive or irreversible operation's cheap preconditions before starting it — unlike validation, which must still gather and report all errors together.
 
 Treat duplication as a design signal: when a change needs to copy configuration, environment, or logic that another component already owns, stop — the responsibility is probably misplaced. Fix the owner or move the need instead of pasting the copy; if the duplication seems forced by the architecture, surface that instead of proceeding.
 
@@ -53,7 +53,7 @@ Before generating code, inspect the `description` frontmatter for every local sk
 - Features may depend on `src/shared/*` and packages, but not sibling features.
 - `src/shared/*` must not import from `src/features/*`; `packages/*` must not import from `apps/*`.
 - Prefer colocated tests next to the files they protect.
-- The 200-line file limit is gate-enforced (`noExcessiveLinesPerFile`). A file genuinely clearer as a single boundary file — static data, generated-style schema/config, broad test/config coverage — gets a scoped override in the repo's `biome.jsonc` wrapper plus an entry in `docs/quality/no-excessive-lines-per-file-exceptions.md`.
+- A file genuinely clearer as a single boundary file — static data, generated-style schema/config, broad test/config coverage — may exceed the 200-line lint limit via a scoped `biome.jsonc` override plus an entry in `docs/quality/no-excessive-lines-per-file-exceptions.md`.
 
 ## Default shapes
 
@@ -72,7 +72,6 @@ Before generating code, inspect the `description` frontmatter for every local sk
 
 ## Linting
 
-- Lint with Biome. The strict base (`biome.base.jsonc`) is canonical and synced; project-specific overrides live in the repo's `biome.jsonc` wrapper.
 - Fix lint findings in the code. Never resolve them by downgrading or disabling rules globally, and never suppress with `biome-ignore` without a stated reason.
 - Per-file overrides are the escape hatch of last resort: scope them to the narrowest paths and the specific rule that genuinely cannot apply.
 
