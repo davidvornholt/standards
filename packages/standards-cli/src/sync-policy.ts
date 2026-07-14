@@ -1,9 +1,3 @@
-import {
-  isStandardsSourceWorkspace,
-  STANDARDS_PACKAGE,
-  versionIsCompatible,
-} from './sync-source';
-
 export type SyncPolicy = {
   readonly ref: string;
   readonly scheduledSync: boolean;
@@ -16,7 +10,6 @@ export type SyncPolicyInspection = {
 type SyncPolicyInspectionInput = {
   readonly packageText: string | undefined;
   readonly policyText: string | undefined;
-  readonly rootDirectory?: string;
 };
 export const DEFAULT_SYNC_POLICY: SyncPolicy = {
   ref: 'refs/heads/main',
@@ -25,7 +18,11 @@ export const DEFAULT_SYNC_POLICY: SyncPolicy = {
 
 export const SYNC_POLICY_CONTRACT_VERSION = 1;
 export const SYNC_POLICY_FILE = 'sync-standards.local.json';
+const STANDARDS_PACKAGE = '@davidvornholt/standards';
 const PACKAGE_FILE = 'package.json';
+const EXACT_STABLE_SEMVER =
+  /^(?<major>0|[1-9]\d*)\.(?<minor>0|[1-9]\d*)\.(?<patch>0|[1-9]\d*)$/u;
+const REQUIRED_MINOR_VERSION = 5n;
 const FULL_COMMIT_SHA = /^[0-9a-fA-F]{40}$/u;
 const INVALID_REF_CHARACTERS = new Set(['~', '^', ':', '?', '*', '[', '\\']);
 const SPACE_CODE_POINT = 32;
@@ -34,6 +31,15 @@ const POLICY_KEYS = new Set(['ref', 'scheduledSync']);
 
 const compatiblePackageProblem = (): string =>
   `${PACKAGE_FILE} must declare devDependencies["${STANDARDS_PACKAGE}"] as an exact stable version >=0.5.0; run \`bun add --dev --exact ${STANDARDS_PACKAGE}@0.5.0\` before using sync policy`;
+
+const versionIsCompatible = (version: string): boolean => {
+  const { major, minor } = EXACT_STABLE_SEMVER.exec(version)?.groups ?? {};
+  return (
+    major !== undefined &&
+    minor !== undefined &&
+    (BigInt(major) > 0n || BigInt(minor) >= REQUIRED_MINOR_VERSION)
+  );
+};
 
 const parseJson = (
   text: string,
@@ -124,7 +130,6 @@ const inspectPolicy = (
 export const inspectSyncPolicy = ({
   packageText,
   policyText,
-  rootDirectory,
 }: SyncPolicyInspectionInput): SyncPolicyInspection => {
   const problems: Array<string> = [];
   const policy = inspectPolicy(policyText, problems);
@@ -142,10 +147,7 @@ export const inspectSyncPolicy = ({
       ? packageJson.devDependencies
       : undefined;
     const version = devDependencies?.[STANDARDS_PACKAGE];
-    if (
-      (typeof version !== 'string' || !versionIsCompatible(version)) &&
-      !isStandardsSourceWorkspace(packageJson, rootDirectory)
-    ) {
+    if (typeof version !== 'string' || !versionIsCompatible(version)) {
       problems.push(compatiblePackageProblem());
     }
   }

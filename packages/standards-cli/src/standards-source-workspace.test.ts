@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
@@ -15,16 +21,16 @@ const EVENT_NAME_VARIABLE = 'GITHUB_EVENT_NAME';
 const OUTPUT_VARIABLE = 'GITHUB_OUTPUT';
 const WORKSPACE_VARIABLE = 'GITHUB_WORKSPACE';
 const ROOT_PACKAGE = join(ROOT, 'package.json');
+const STANDARDS_PACKAGE = join(ROOT, 'packages/standards-cli');
 const TEMPLATE_PACKAGE = join(ROOT, 'template/package.json');
 const TURBO_CONFIG = join(ROOT, 'turbo.json');
 const readLock = (): string | undefined =>
   existsSync(LOCK) ? readFileSync(LOCK, 'utf8') : undefined;
 
-describe('standards source workspace', () => {
+describe('standards repository', () => {
   it('keeps the complete quality gate behind the cheap live-settings precondition', () => {
     const packageJson = JSON.parse(readFileSync(ROOT_PACKAGE, 'utf8')) as {
       readonly scripts: Readonly<Record<string, string>>;
-      readonly standardsSourceWorkspace?: unknown;
     };
     const templatePackage = JSON.parse(
       readFileSync(TEMPLATE_PACKAGE, 'utf8'),
@@ -42,7 +48,6 @@ describe('standards source workspace', () => {
       `${precondition} && turbo run lint:fix check-types test build test:a11y`,
     );
     expect(packageJson.scripts['test:a11y']).toBe('turbo run test:a11y');
-    expect(packageJson.standardsSourceWorkspace).toBeUndefined();
     expect(templatePackage.scripts).toMatchObject({
       check:
         'standards check && turbo run lint check-types test build test:a11y',
@@ -52,6 +57,28 @@ describe('standards source workspace', () => {
     });
     expect(turbo.tasks).toHaveProperty('build');
     expect(turbo.tasks).toHaveProperty('test:a11y');
+  });
+
+  it('resolves the exact CLI workspace dependency and bin locally', () => {
+    const standardsPackage = JSON.parse(
+      readFileSync(join(STANDARDS_PACKAGE, 'package.json'), 'utf8'),
+    ) as {
+      readonly name: string;
+      readonly version: string;
+      readonly bin: Readonly<Record<string, string>>;
+    };
+    const installedPackage = join(ROOT, 'node_modules', standardsPackage.name);
+    const source = join(
+      STANDARDS_PACKAGE,
+      standardsPackage.bin.standards ?? 'missing',
+    );
+
+    expect(realpathSync(installedPackage)).toBe(
+      realpathSync(STANDARDS_PACKAGE),
+    );
+    expect(realpathSync(join(ROOT, 'node_modules/.bin/standards'))).toBe(
+      realpathSync(source),
+    );
   });
 
   it('passes real-root scheduled and repository-dispatch preflight', () => {

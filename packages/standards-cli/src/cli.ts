@@ -722,7 +722,6 @@ const inspectConsumerSyncPolicy = async (
     packageText:
       (await readTextIfPresent(join(consumer, 'package.json'))) ?? undefined,
     policyText: effectivePolicyText,
-    rootDirectory: consumer,
   });
   if (!existsSync(contractPath)) {
     if (options.allowMissingDefaultContract) {

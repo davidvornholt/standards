@@ -31,7 +31,6 @@ const main = (): void => {
   const inspection = inspectSyncPolicy({
     packageText: readIfPresent(join(workspace, 'package.json')),
     policyText: readIfPresent(join(workspace, SYNC_POLICY_FILE)),
-    rootDirectory: workspace,
   });
   if (inspection.policy === null || inspection.problems.length > 0) {
     throw new Error(inspection.problems.join('\n'));

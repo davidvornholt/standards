@@ -13,18 +13,22 @@ const WORKFLOW = join(ROOT, '.github/workflows/standards-sync.yml');
 const SETTINGS = join(ROOT, '.github/settings.json');
 const MANIFEST = join(ROOT, 'sync-standards.json');
 const SYNC_SKILL = join(ROOT, '.agents/skills/standards-sync/SKILL.md');
+const ROOT_README = join(ROOT, 'README.md');
+const SEED_README = join(ROOT, 'template/README.md');
+const PACKAGE_README = join(ROOT, 'packages/standards-cli/README.md');
 const GATED_STEPS = [
   'Setup Bun',
   'Install dependencies',
   'Sync canonical files from upstream',
   'Open a pull request if the mirror changed',
 ] as const;
-const POLICY_DOCS = [
-  join(ROOT, 'README.md'),
-  join(ROOT, 'template/README.md'),
-  join(ROOT, 'packages/standards-cli/README.md'),
+const CURRENT_POLICY_DOCS = [
+  ROOT_README,
+  SEED_README,
+  PACKAGE_README,
   SYNC_SKILL,
 ] as const;
+const MIGRATION_DOCS = [ROOT_README, PACKAGE_README] as const;
 const RELATIVE_IMPORT = /\bfrom"[.]{1,2}\//u;
 const workflowStep = (workflow: string, name: string): string => {
   const marker = `      - name: ${name}`;
@@ -132,47 +136,18 @@ describe('canonical scheduled sync contract', () => {
 });
 
 describe('standards sync documentation', () => {
-  it('documents migration and configured-ref recovery accurately', () => {
-    for (const path of POLICY_DOCS) {
+  it('documents the current policy and configured-ref recovery accurately', () => {
+    for (const path of CURRENT_POLICY_DOCS) {
       const documentation = readFileSync(path, 'utf8');
       expect(documentation).toContain('@davidvornholt/standards` >=0.5.0');
-      expect(documentation).toContain('for every consumer policy');
-      expect(documentation).toContain(
-        'source repository is the sole exception',
-      );
-      expect(documentation).toContain(
-        'simple string-array workspace declarations',
-      );
-      expect(documentation).toContain(
-        'source-only root metadata are not identity',
-      );
-      expect(documentation).toContain('checked-in explicit-ESM bundle');
+      expect(documentation).toContain('exact direct development dependency');
+      expect(documentation).toContain('checked-in');
+      expect(documentation).toContain('explicit-ESM');
       expect(documentation).not.toContain('script wiring');
-      expect(documentation).toContain('first land the bucket-2 CLI upgrade');
-      expect(documentation).toContain(
-        'bun add --dev --exact @davidvornholt/standards@0.5.0',
-      );
-    }
-    expect(readFileSync(SYNC_SKILL, 'utf8')).toContain(
-      'real sync from configured remote ref',
-    );
-    const rootDocumentation = readFileSync(join(ROOT, 'README.md'), 'utf8');
-    const templateDocumentation = readFileSync(
-      join(ROOT, 'template/README.md'),
-      'utf8',
-    );
-    for (const documentation of [
-      rootDocumentation,
-      templateDocumentation,
-      readFileSync(join(ROOT, 'packages/standards-cli/README.md'), 'utf8'),
-      readFileSync(SYNC_SKILL, 'utf8'),
-    ]) {
       expect(documentation).toContain('protected `standards-sync`');
       expect(documentation).toContain('repository dispatch');
       expect(documentation).toContain('syncPolicyContractVersion');
       expect(documentation).toContain('STANDARDS_SYNC_ENVIRONMENT_TOKEN');
-      expect(documentation).toContain('legacy repository-level');
-      expect(documentation).toContain('STANDARDS_SYNC_TOKEN');
       expect(documentation).toContain('admits protected branches generally');
       expect(documentation).toContain(
         "bind the workflow to the repository's default branch",
@@ -182,10 +157,40 @@ describe('standards sync documentation', () => {
       );
       expect(documentation).not.toContain('protected-branch-only');
       expect(documentation).not.toContain('permits only branches protected');
+    }
+    expect(readFileSync(SYNC_SKILL, 'utf8')).toContain(
+      'real sync from configured remote ref',
+    );
+  });
+
+  it('keeps migration guidance out of the seed and routes the skill to it', () => {
+    for (const path of MIGRATION_DOCS) {
+      const documentation = readFileSync(path, 'utf8');
+      expect(documentation).toContain('v0.4');
+      expect(documentation).toContain(
+        'bun add --dev --exact @davidvornholt/standards@0.5.0',
+      );
+      expect(documentation).toContain('legacy repository-level');
+      expect(documentation).toContain('STANDARDS_SYNC_TOKEN');
       expect(documentation).toContain(
         "run a bare `bun standards sync` from the repository's default branch",
       );
       expect(documentation).toContain('bun standards github --apply');
     }
+
+    const seedDocumentation = readFileSync(SEED_README, 'utf8');
+    expect(seedDocumentation).not.toContain('v0.4');
+    expect(seedDocumentation).not.toContain(
+      'bun add --dev --exact @davidvornholt/standards@0.5.0',
+    );
+    expect(seedDocumentation).not.toContain('legacy repository-level');
+    expect(seedDocumentation).not.toContain('STANDARDS_SYNC_TOKEN');
+
+    const skillDocumentation = readFileSync(SYNC_SKILL, 'utf8');
+    expect(skillDocumentation).toContain('published package migration guide');
+    expect(skillDocumentation).not.toContain(
+      'bun add --dev --exact @davidvornholt/standards@0.5.0',
+    );
+    expect(skillDocumentation).not.toContain('STANDARDS_SYNC_TOKEN');
   });
 });

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'bun';
 
 const packageRoot = join(import.meta.dir, '..');
+const rootPackage = join(packageRoot, '../../package.json');
 const templatePackage = join(packageRoot, '../../template/package.json');
 const directories: Array<string> = [];
 
@@ -24,15 +25,21 @@ const run = (command: ReadonlyArray<string>) => {
 };
 
 describe('published package contract', () => {
-  it('matches the exact CLI version seeded for new consumers', () => {
+  it('matches the exact CLI version in source and seed roots', () => {
     const publicManifest = JSON.parse(
       readFileSync(join(packageRoot, 'package.json'), 'utf8'),
     ) as { readonly name: string; readonly version: string };
+    const rootManifest = JSON.parse(readFileSync(rootPackage, 'utf8')) as {
+      readonly devDependencies: Readonly<Record<string, string>>;
+    };
     const templateManifest = JSON.parse(
       readFileSync(templatePackage, 'utf8'),
     ) as {
       readonly devDependencies: Readonly<Record<string, string>>;
     };
+    expect(rootManifest.devDependencies[publicManifest.name]).toBe(
+      publicManifest.version,
+    );
     expect(templateManifest.devDependencies[publicManifest.name]).toBe(
       publicManifest.version,
     );
@@ -79,7 +86,6 @@ describe('published package contract', () => {
       'package/src/github-environments.ts',
       'package/src/github-settings.ts',
       'package/src/sync-policy.ts',
-      'package/src/sync-source.ts',
     ]);
     const manifestArchive = run([
       'tar',

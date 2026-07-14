@@ -6,6 +6,7 @@
       "name": "standards",
       "devDependencies": {
         "@biomejs/biome": "2.5.3",
+        "@davidvornholt/standards": "0.5.0",
         "turbo": "^2.10.4",
         "typescript": "7.0.2",
       },
