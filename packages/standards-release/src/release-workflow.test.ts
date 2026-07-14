@@ -111,17 +111,26 @@ describe('CLI release workflow', () => {
 describe('CLI release workflow recovery', () => {
   it('recovers from coalesced runs through npm artifact identity', () => {
     const npm = position('- name: Inspect npm release boundary');
-    const ancestry = position(
-      '- name: Verify release commit is in tested history',
-    );
     const pack = position('- name: Pack and inspect package');
-    expect(npm).toBeLessThan(ancestry);
-    expect(ancestry).toBeLessThan(pack);
+    expect(npm).toBeLessThan(pack);
     expect(workflow).toContain("if: steps.npm.outputs.publish == 'true'");
     expect(workflow).toContain(NPM_RELEASE_SHA);
     expect(workflow).toContain(
-      'git merge-base --is-ancestor "$RELEASE_SHA" "$TESTED_SHA"',
+      '"$CURRENT_SHA" "$GITHUB_WORKSPACE" "$RUNNER_TEMP"',
     );
+    expect(workflow).not.toContain(
+      '- name: Verify release commit is in tested history',
+    );
+  });
+
+  it('serializes every pending publish run without job-name authorization', () => {
+    expect(workflow).toContain('group: publish-standards-cli\n  queue: max');
+    expect(workflow).not.toContain('cancel-in-progress:');
+    expect(workflow).not.toContain('github.event.workflow_run.name');
+  });
+
+  it('pins the release artifact format to Bun 1.3.14', () => {
+    expect(workflow.match(/bun-version: 1\.3\.14/gu)).toHaveLength(2);
   });
 
   it('uses the tested helper for fail-closed GitHub reconciliation', () => {

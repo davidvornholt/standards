@@ -19,6 +19,7 @@ export const {
   gen,
   map,
   mapError,
+  never,
   runPromise,
   runPromiseExit,
   runSync,

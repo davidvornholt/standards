@@ -3,9 +3,7 @@ import { spawnSync } from 'bun';
 import { runPromise } from './release-effect';
 import { inspectNpmRelease } from './release-npm';
 import {
-  CURRENT_SHA,
   createReleaseNpmTestFixture,
-  PUBLISHED_SHA,
   type ReleaseNpmTestFixture,
 } from './release-npm-test-fixture';
 
@@ -24,19 +22,21 @@ describe('npm release recovery', () => {
   it('recovers a failed or coalesced bump from the next tested commit', async () => {
     const plan = await runPromise(
       inspectNpmRelease({
-        currentSha: CURRENT_SHA,
+        currentSha: fixture.currentSha,
         fetcher: fixture.fetchRegistry({
           metadataBody: { error: 'Not found' },
           metadataStatus: HTTP_NOT_FOUND,
         }),
         name: '@davidvornholt/standards',
+        repositoryPath: fixture.repository,
+        temporaryDirectory: fixture.temporaryDirectory,
         version: '0.5.0',
       }),
     );
     expect(plan).toEqual({
       publish: true,
       reconcile: true,
-      releaseSha: CURRENT_SHA,
+      releaseSha: fixture.currentSha,
     });
   });
 
@@ -50,7 +50,7 @@ describe('npm release recovery', () => {
           'package/package.json',
         ]).stdout.toString(),
       ),
-    ).toMatchObject({ gitHead: PUBLISHED_SHA });
+    ).toMatchObject({ gitHead: fixture.publishedSha });
     expect(
       await runPromise(
         fixture.effect(
@@ -60,7 +60,7 @@ describe('npm release recovery', () => {
     ).toEqual({
       publish: false,
       reconcile: true,
-      releaseSha: PUBLISHED_SHA,
+      releaseSha: fixture.publishedSha,
     });
   });
 });

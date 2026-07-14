@@ -16,7 +16,7 @@ permissions:
 
 concurrency:
   group: publish-standards-cli
-  cancel-in-progress: false
+  queue: max
 
 jobs:
   publish:
@@ -108,22 +108,7 @@ jobs:
         run: >-
           bun run --cwd packages/standards-release release:state --
           npm "$GITHUB_OUTPUT" "$PACKAGE_NAME" "$RELEASE_VERSION"
-          "$CURRENT_SHA"
-
-      - name: Verify release commit is in tested history
-        if: steps.npm.outputs.reconcile == 'true'
-        env:
-          RELEASE_SHA: ${{ steps.npm.outputs.release_sha }}
-          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
-        run: |
-          if ! git cat-file -e "$RELEASE_SHA^{commit}" 2>/dev/null; then
-            echo "::error::Release commit $RELEASE_SHA is not available"
-            exit 1
-          fi
-          if ! git merge-base --is-ancestor "$RELEASE_SHA" "$TESTED_SHA"; then
-            echo "::error::Release commit $RELEASE_SHA is not an ancestor of tested commit $TESTED_SHA"
-            exit 1
-          fi
+          "$CURRENT_SHA" "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
 
       - name: Pack and inspect package
         id: package

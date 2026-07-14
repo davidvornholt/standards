@@ -1,5 +1,6 @@
 import { ArtifactIdentityError } from './artifact-identity-error';
 import { NpmRegistryError } from './npm-registry-error';
+import { authenticatePublishedArtifact } from './release-artifact-reproduction';
 import {
   decodeUnknown,
   fail,
@@ -13,16 +14,17 @@ import {
   Unknown,
 } from './release-effect';
 import {
+  downloadPublishedArtifact,
+  type ReleaseFetcher,
+} from './release-npm-download';
+import {
   inspectPackedArtifactBytes,
   packedArtifactIntegrity,
   readPackedArtifact,
 } from './release-package-identity';
 import { decideRelease, type ReleasePlan } from './release-state';
 
-export type ReleaseFetcher = (
-  input: RequestInfo | URL,
-  init?: RequestInit,
-) => Promise<Response>;
+export type { ReleaseFetcher } from './release-npm-download';
 
 type NpmInspection = ReleasePlan & { readonly releaseSha: string };
 type PublishedVersion = {
@@ -122,32 +124,6 @@ const loadNpmState = (input: {
     return yield* parseMetadata(body, input.version);
   });
 
-const downloadPublishedArtifact = (fetcher: ReleaseFetcher, tarball: string) =>
-  gen(function* () {
-    const response = yield* tryPromise({
-      try: () =>
-        fetcher(tarball, { headers: { accept: 'application/octet-stream' } }),
-      catch: (cause) =>
-        new NpmRegistryError({
-          message: `Downloading npm artifact failed: ${String(cause)}`,
-        }),
-    });
-    if (response.status !== HTTP_OK) {
-      return yield* fail(
-        new NpmRegistryError({
-          message: `Downloading npm artifact failed with HTTP ${response.status}`,
-        }),
-      );
-    }
-    return yield* tryPromise({
-      try: () => response.arrayBuffer(),
-      catch: (cause) =>
-        new NpmRegistryError({
-          message: `Reading npm artifact failed: ${String(cause)}`,
-        }),
-    }).pipe(map((bytes) => new Uint8Array(bytes)));
-  });
-
 export const npmIntegrity = (artifact: string) =>
   readPackedArtifact(artifact).pipe(map(packedArtifactIntegrity));
 
@@ -156,6 +132,8 @@ export const inspectNpmRelease = (input: {
   readonly fetcher?: ReleaseFetcher;
   readonly name: string;
   readonly registryUrl?: string;
+  readonly repositoryPath: string;
+  readonly temporaryDirectory: string;
   readonly version: string;
 }) =>
   gen(function* () {
@@ -192,8 +170,16 @@ export const inspectNpmRelease = (input: {
         }),
       );
     }
+    const releaseSha = yield* authenticatePublishedArtifact({
+      candidateSha: identity.sha,
+      currentSha: input.currentSha,
+      downloadedBytes: bytes,
+      expectedIntegrity: state.published.integrity,
+      repositoryPath: input.repositoryPath,
+      temporaryDirectory: input.temporaryDirectory,
+    });
     return {
       ...plan,
-      releaseSha: identity.sha,
+      releaseSha,
     } satisfies NpmInspection;
   });

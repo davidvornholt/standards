@@ -11,9 +11,24 @@ import {
 } from './release-effect';
 import { ReleasePackageError } from './release-package-error';
 import { rewritePackedArtifact } from './release-package-rewrite';
-import { argv, nodeLstat, spawn } from './release-runtime';
+import {
+  argv,
+  version as bunVersion,
+  nodeLstat,
+  spawn,
+} from './release-runtime';
 
 export const SOURCE_COMMIT_FILE = 'SOURCE_COMMIT';
+export const RELEASE_BUN_VERSION = '1.3.14';
+
+export const validateReleaseBunVersion = (actualVersion: string) =>
+  actualVersion === RELEASE_BUN_VERSION
+    ? succeed(undefined)
+    : fail(
+        new ReleasePackageError({
+          message: `Packing release artifact requires Bun ${RELEASE_BUN_VERSION}; received ${actualVersion}`,
+        }),
+      );
 
 type CommandResult = {
   readonly exitCode: number;
@@ -120,6 +135,7 @@ const artifactFromResult = (result: CommandResult) => {
 
 export const packReleaseArtifact = (input: ReleasePackageInput) =>
   gen(function* () {
+    yield* validateReleaseBunVersion(bunVersion);
     yield* ensureSourceMarkerAbsent(input.packagePath);
     const artifact = yield* run(
       [

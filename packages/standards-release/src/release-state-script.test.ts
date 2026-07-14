@@ -4,6 +4,7 @@ import { file, env as runtimeEnvironment } from './release-runtime';
 
 const packageRoot = `${import.meta.dir}/..`;
 const directories: Array<string> = [];
+const SHA_LENGTH = 40;
 
 afterEach(() => {
   for (const directory of directories.splice(0)) {
@@ -69,6 +70,19 @@ describe('release workflow wrappers', () => {
     expect(missingOutput.exitCode).toBe(1);
     expect(missingOutput.stderr).toContain(
       '::error::GitHub output path is required',
+    );
+    const missingRepository = await run('release-state.ts', [
+      'npm',
+      '$OUTPUT',
+      '@davidvornholt/standards',
+      '0.5.0',
+      'a'.repeat(SHA_LENGTH),
+      '',
+      '/tmp',
+    ]);
+    expect(missingRepository.exitCode).toBe(1);
+    expect(missingRepository.stderr).toContain(
+      '::error::repository path is required',
     );
   });
 

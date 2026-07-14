@@ -4,6 +4,16 @@ type RuntimeProcess = {
 
 type RuntimeFileSystem = {
   readonly lstat: (path: string) => Promise<unknown>;
+  readonly mkdir: (path: string) => Promise<void>;
+  readonly mkdtemp: (prefix: string) => Promise<string>;
+  readonly rm: (
+    path: string,
+    options: { readonly force: boolean; readonly recursive: boolean },
+  ) => Promise<void>;
+};
+
+type RuntimeCrypto = {
+  readonly timingSafeEqual: (left: Uint8Array, right: Uint8Array) => boolean;
 };
 
 type RuntimeZlib = {
@@ -22,12 +32,22 @@ const fileSystem = (await import(
 const zlib = (await import(
   ['node', 'zlib'].join(':')
 )) as unknown as RuntimeZlib;
+const crypto = (await import(
+  ['node', 'crypto'].join(':')
+)) as unknown as RuntimeCrypto;
 const processModule = (await import(['node', 'process'].join(':'))) as {
   readonly default: RuntimeProcess;
 };
 
-export const { argv, env, file, spawn, spawnSync, stderr, write } = runtime;
-export const { lstat: nodeLstat } = fileSystem;
+export const { argv, env, file, spawn, spawnSync, stderr, version, write } =
+  runtime;
+export const {
+  lstat: nodeLstat,
+  mkdir: nodeMkdir,
+  mkdtemp: nodeMkdtemp,
+  rm: nodeRm,
+} = fileSystem;
 export const { gzipSync: nodeGzipSync, gunzipSync: nodeGunzipSync } = zlib;
+export const { timingSafeEqual: nodeTimingSafeEqual } = crypto;
 export const BunCryptoHasher = runtime.CryptoHasher;
 export const runtimeProcess = processModule.default;

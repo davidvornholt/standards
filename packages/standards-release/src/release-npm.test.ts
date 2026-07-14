@@ -2,9 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { flip, runPromise } from './release-effect';
 import { inspectNpmRelease, type ReleaseFetcher } from './release-npm';
 import {
-  CURRENT_SHA,
   createReleaseNpmTestFixture,
-  PUBLISHED_SHA,
   type ReleaseNpmTestFixture,
   TARBALL_URL,
 } from './release-npm-test-fixture';
@@ -32,7 +30,7 @@ describe('npm release inspection', () => {
     ).toEqual({
       publish: false,
       reconcile: true,
-      releaseSha: PUBLISHED_SHA,
+      releaseSha: fixture.publishedSha,
     });
     expect(
       await runPromise(
@@ -45,7 +43,7 @@ describe('npm release inspection', () => {
     ).toEqual({
       publish: false,
       reconcile: true,
-      releaseSha: PUBLISHED_SHA,
+      releaseSha: fixture.publishedSha,
     });
   });
 
@@ -53,19 +51,21 @@ describe('npm release inspection', () => {
     expect(
       await runPromise(
         inspectNpmRelease({
-          currentSha: CURRENT_SHA,
+          currentSha: fixture.currentSha,
           fetcher: fixture.fetchRegistry({
             metadataBody: { error: 'Not found' },
             metadataStatus: HTTP_NOT_FOUND,
           }),
           name: '@davidvornholt/new-package',
+          repositoryPath: fixture.repository,
+          temporaryDirectory: fixture.temporaryDirectory,
           version: '0.5.0',
         }),
       ),
     ).toEqual({
       publish: true,
       reconcile: true,
-      releaseSha: CURRENT_SHA,
+      releaseSha: fixture.currentSha,
     });
   });
 
@@ -128,11 +128,13 @@ describe('npm artifact identity failures', () => {
       runPromise(
         flip(
           inspectNpmRelease({
-            currentSha: CURRENT_SHA,
+            currentSha: fixture.currentSha,
             fetcher: fixture.fetchRegistry({
               metadataBody: fixture.metadata(),
             }),
             name: '@davidvornholt/other',
+            repositoryPath: fixture.repository,
+            temporaryDirectory: fixture.temporaryDirectory,
             version: '0.5.0',
           }),
         ),
@@ -140,11 +142,13 @@ describe('npm artifact identity failures', () => {
       runPromise(
         flip(
           inspectNpmRelease({
-            currentSha: CURRENT_SHA,
+            currentSha: fixture.currentSha,
             fetcher: fixture.fetchRegistry({
               metadataBody: fixture.metadata({}, '0.6.0', '0.6.0'),
             }),
             name: '@davidvornholt/standards',
+            repositoryPath: fixture.repository,
+            temporaryDirectory: fixture.temporaryDirectory,
             version: '0.6.0',
           }),
         ),

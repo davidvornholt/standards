@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -43,9 +43,13 @@ jobs:
   # an `if:` whereas a service cannot. So gating it keeps one uniform file while
   # skipping a pointless download in repos with nothing to render.
   check:
+    name: ${{ github.event_name == 'pull_request' && 'check' || 'main-check' }}
     if: >-
       (github.event_name == 'pull_request' && github.base_ref == github.event.repository.default_branch) ||
       (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch)
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.ref || github.run_id }}
+      queue: max
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     services:
       postgres:
@@ -79,10 +83,13 @@ jobs:
       # them first: it is the cheapest step, so certain failures cost nothing.
       # The pinless download intentionally tracks the latest release (Dependabot
       # cannot see script-installed binaries, so a pin would go stale silently).
+      # actionlint 1.7.12 predates GitHub's official May 2026 `queue` key. Ignore
+      # only that stale schema message; repository tests parse and enforce every
+      # allowed `queue: max` placement directly.
       - name: Lint workflows
         run: |
           bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash) latest /tmp
-          /tmp/actionlint -color
+          /tmp/actionlint -color -ignore 'unexpected key "queue" for "concurrency" section'
 
       - name: Detect browser a11y suite
         id: a11y

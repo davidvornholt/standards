@@ -22,6 +22,7 @@ import { inspectNpmRelease } from '../src/release-npm';
 import { ReleaseOutputError } from '../src/release-output-error';
 import { packReleaseArtifact } from '../src/release-package';
 import type { ReleasePackageError } from '../src/release-package-error';
+import type { ReleaseReproductionError } from '../src/release-reproduction-error';
 import {
   argv,
   env,
@@ -42,6 +43,7 @@ type ReleaseError =
   | ReleaseInputError
   | ReleaseOutputError
   | ReleasePackageError
+  | ReleaseReproductionError
   | ReleaseValidationError;
 
 const requireValue = (value: string | undefined, name: string) =>
@@ -68,11 +70,23 @@ const writeOutput = (
 
 const inspectNpm = (args: ReadonlyArray<string>) =>
   gen(function* () {
-    const [output, name, version, currentSha] = args;
+    const [
+      output,
+      name,
+      version,
+      currentSha,
+      repositoryPath,
+      temporaryDirectory,
+    ] = args;
     const outputPath = yield* requireValue(output, 'GitHub output path');
     const inspection = yield* inspectNpmRelease({
       currentSha: yield* requireValue(currentSha, 'current tested sha'),
       name: yield* requireValue(name, 'package name'),
+      repositoryPath: yield* requireValue(repositoryPath, 'repository path'),
+      temporaryDirectory: yield* requireValue(
+        temporaryDirectory,
+        'temporary directory',
+      ),
       version: yield* requireValue(version, 'release version'),
     });
     yield* writeOutput(outputPath, {
