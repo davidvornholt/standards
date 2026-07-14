@@ -8,6 +8,7 @@ export type NodeIdentity = {
 };
 
 export type RepositoryRoot = {
+  readonly identity: NodeIdentity;
   readonly label: string;
   readonly path: string;
 };
@@ -79,7 +80,11 @@ export const openRepositoryRoot = async (
     throw new Error(`${label} root must be a real directory: ${lexical}`);
   }
   const canonical = await realpath(lexical);
-  return { label, path: canonical };
+  const canonicalInfo = await lstat(canonical);
+  if (!canonicalInfo.isDirectory()) {
+    throw new Error(`${label} root must be a real directory: ${canonical}`);
+  }
+  return { identity: identityOf(canonicalInfo), label, path: canonical };
 };
 
 export const inspectRepositoryNode = (
@@ -134,7 +139,7 @@ export const inspectRepositoryFile = async (
   }
   const handle = await open(
     node.path,
-    constants.O_RDONLY + constants.O_NOFOLLOW,
+    constants.O_RDONLY + constants.O_NOFOLLOW + constants.O_NONBLOCK,
   );
   try {
     const opened = await handle.stat();

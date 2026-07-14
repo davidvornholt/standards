@@ -1,6 +1,7 @@
 // Drift comparison between declared GitHub settings (github-settings.ts) and
 // the live state returned by the GitHub API. Pure logic; no network.
 
+import { RULESET_COMPARED_KEYS } from './github-ruleset-settings';
 import { isRecord } from './github-settings';
 
 export type SettingsDiff = {
@@ -40,13 +41,6 @@ export const subsetMatches = (declared: unknown, live: unknown): boolean => {
   }
   return declared === live;
 };
-
-const RULESET_COMPARED_KEYS = [
-  'target',
-  'enforcement',
-  'conditions',
-  'bypass_actors',
-] as const;
 
 const diffRules = (
   name: string,

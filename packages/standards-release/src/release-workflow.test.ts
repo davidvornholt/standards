@@ -37,7 +37,8 @@ describe('source-only Effect exception', () => {
 });
 
 describe('CLI release workflow authorization', () => {
-  it('rejects a same-named quality workflow at a different path', () => {
+  it('authorizes a quality run before shared publish queue admission', () => {
+    const workflowHeader = workflow.slice(0, position('jobs:'));
     const publishGuard = workflow.slice(
       position('  publish:'),
       position('    runs-on:'),
@@ -56,6 +57,13 @@ describe('CLI release workflow authorization', () => {
       'github.event.workflow_run.head_repository.full_name == github.repository',
     );
     expect(publishGuard).not.toContain('github.event.workflow_run.name');
+    expect(workflowHeader).not.toContain('concurrency:');
+    expect(publishGuard).toContain(
+      'concurrency:\n      group: publish-standards-cli\n      queue: max',
+    );
+    expect(publishGuard.indexOf('if:')).toBeLessThan(
+      publishGuard.indexOf('concurrency:'),
+    );
     expect(workflow).toMatch(TESTED_SHA_CHECKOUT);
   });
 });
@@ -124,7 +132,9 @@ describe('CLI release workflow recovery', () => {
   });
 
   it('serializes every pending publish run without job-name authorization', () => {
-    expect(workflow).toContain('group: publish-standards-cli\n  queue: max');
+    expect(workflow).toContain(
+      'group: publish-standards-cli\n      queue: max',
+    );
     expect(workflow).not.toContain('cancel-in-progress:');
     expect(workflow).not.toContain('github.event.workflow_run.name');
   });

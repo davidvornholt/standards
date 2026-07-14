@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'bun:test';
+import { declaredRuleset } from './github-ruleset-test-fixture';
 import { loadGithubSettings } from './github-settings';
 
 const canonicalEnvironment = JSON.parse(
   '{"name":"standards-sync","wait_timer":0,"prevent_self_review":false,"reviewers":[],"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false}}',
 ) as Record<string, unknown>;
-
 const canonical = JSON.stringify({
   repository: { allow_auto_merge: true },
-  rulesets: [{ name: 'Protect main', target: 'branch' }],
+  rulesets: [declaredRuleset('Protect main')],
   environments: [canonicalEnvironment],
 });
 
@@ -21,7 +21,7 @@ describe('loadGithubSettings', () => {
   it('merges an additive seam', () => {
     const local = JSON.stringify({
       repository: { has_wiki: false },
-      rulesets: [{ name: 'Protect releases', target: 'branch' }],
+      rulesets: [declaredRuleset('Protect releases')],
       environments: [
         JSON.parse(
           '{"name":"production","wait_timer":0,"prevent_self_review":false,"reviewers":[],"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false}}',
@@ -54,7 +54,7 @@ describe('loadGithubSettings', () => {
   it('rejects overriding a canonical repository key and redefining a canonical ruleset together', () => {
     const local = JSON.stringify({
       repository: { allow_auto_merge: false },
-      rulesets: [{ name: 'Protect main' }],
+      rulesets: [declaredRuleset('Protect main')],
       environments: [{ ...canonicalEnvironment, name: 'Standards-Sync' }],
     });
     const loaded = loadGithubSettings(canonical, local);
@@ -69,7 +69,11 @@ describe('loadGithubSettings', () => {
   it('gathers structural problems from both files', () => {
     const badCanonical = JSON.stringify({
       repositories: {},
-      rulesets: [{ target: 'branch' }, { name: 'Dup' }, { name: 'Dup' }],
+      rulesets: [
+        { target: 'branch' },
+        declaredRuleset('Dup'),
+        declaredRuleset('Dup'),
+      ],
     });
     const badLocal = JSON.stringify({ rulesets: 'nope' });
     const loaded = loadGithubSettings(badCanonical, badLocal);

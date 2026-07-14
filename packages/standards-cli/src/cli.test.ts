@@ -17,7 +17,13 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import process from 'node:process';
+import { declaredRuleset } from './github-ruleset-test-fixture';
 import { DEFAULT_SYNC_POLICY, SYNC_POLICY_FILE } from './sync-policy';
+import {
+  TRANSACTION_DIRECTORY,
+  TRANSACTION_JOURNAL,
+  TRANSACTION_OWNER,
+} from './sync-transaction-types';
 
 const ENGINE = join(import.meta.dir, 'cli.ts');
 const LEGACY_ENGINE = join(
@@ -50,6 +56,7 @@ const STD_PATHS: ReadonlyArray<string> = [
 ];
 const SYNC_POLICY_CONTRACT_VERSION = 1;
 const BARE_SYNC_STEP = /^\s+run: bun standards sync$/mu;
+const FILE_TYPE_MODE_BASE = 0o1000;
 
 type RunResult = { stdout: string; stderr: string; status: number };
 type Lock = {
@@ -61,6 +68,7 @@ type Lock = {
 type RunOptions = {
   readonly engine?: string;
   readonly env?: Readonly<Record<string, string>>;
+  readonly preload?: string;
 };
 
 const tmps: Array<string> = [];
@@ -75,12 +83,84 @@ const write = (root: string, rel: string, content: string): void => {
   mkdirSync(dirname(abs), { recursive: true });
   writeFileSync(abs, content);
 };
+const writePrivate = (root: string, rel: string, content: string): void => {
+  const abs = join(root, rel);
+  mkdirSync(dirname(abs), { recursive: true });
+  writeFileSync(abs, content, { mode: 0o600 });
+};
 const read = (root: string, rel: string): string =>
   readFileSync(join(root, rel), 'utf8');
 const readLock = (root: string): Lock =>
   JSON.parse(read(root, 'sync-standards.lock')) as Lock;
 const sha256 = (value: string): string =>
   createHash('sha256').update(value).digest('hex');
+const writePendingTransaction = (consumer: string): void => {
+  const id = '00000000-0000-4000-8000-000000000000';
+  const root = lstatSync(consumer);
+  const lockContents = read(consumer, 'sync-standards.lock');
+  const lock = lstatSync(join(consumer, 'sync-standards.lock'));
+  const lockState = {
+    dev: String(lock.dev),
+    hash: sha256(lockContents),
+    ino: String(lock.ino),
+    mode: lock.mode % FILE_TYPE_MODE_BASE,
+  };
+  writePrivate(
+    consumer,
+    `${TRANSACTION_DIRECTORY}/${TRANSACTION_JOURNAL}`,
+    `${JSON.stringify({
+      createdParents: [],
+      id,
+      lockRel: 'sync-standards.lock',
+      operations: [
+        {
+          backup: 'old-0',
+          before: lockState,
+          desired: { hash: lockState.hash, mode: lockState.mode },
+          kind: 'write',
+          rel: 'sync-standards.lock',
+          stage: 'new-0',
+        },
+      ],
+      ownerPid: 2_147_483_647,
+      root: { dev: String(root.dev), ino: String(root.ino) },
+      version: 1,
+    })}\n`,
+  );
+  const transaction = lstatSync(join(consumer, TRANSACTION_DIRECTORY));
+  writePrivate(
+    consumer,
+    `${TRANSACTION_DIRECTORY}/${TRANSACTION_OWNER}`,
+    `${JSON.stringify({
+      id,
+      root: { dev: String(root.dev), ino: String(root.ino) },
+      transaction: {
+        dev: String(transaction.dev),
+        ino: String(transaction.ino),
+      },
+      version: 1,
+    })}\n`,
+  );
+};
+const githubRequestTrap = (
+  consumer: string,
+): { readonly marker: string; readonly preload: string } => {
+  const marker = join(consumer, 'github-request-marker');
+  const preload = join(consumer, 'github-request-trap.ts');
+  writeFileSync(
+    preload,
+    [
+      "import { appendFileSync } from 'node:fs';",
+      `const marker = ${JSON.stringify(marker)};`,
+      'globalThis.fetch = ((..._args: Parameters<typeof fetch>) => {',
+      "  appendFileSync(marker, 'request\\n');",
+      "  return Promise.reject(new Error('unexpected GitHub API request'));",
+      '}) as typeof fetch;',
+      '',
+    ].join('\n'),
+  );
+  return { marker, preload };
+};
 const setStandardsVersion = (root: string, version: string): void => {
   const packageJson = JSON.parse(read(root, 'package.json')) as {
     devDependencies: Record<string, string>;
@@ -95,11 +175,17 @@ const run = (
   options: RunOptions = {},
 ): RunResult => {
   try {
-    const stdout = execFileSync('bun', [options.engine ?? ENGINE, ...args], {
-      cwd,
-      encoding: 'utf8',
-      env: { ...process.env, ...options.env },
-    });
+    const preload =
+      options.preload === undefined ? [] : ['--preload', options.preload];
+    const stdout = execFileSync(
+      'bun',
+      [...preload, options.engine ?? ENGINE, ...args],
+      {
+        cwd,
+        encoding: 'utf8',
+        env: { ...process.env, ...options.env },
+      },
+    );
     return { stdout, stderr: '', status: 0 };
   } catch (error) {
     const e = error as { status?: number; stdout?: string; stderr?: string };
@@ -1027,6 +1113,22 @@ describe('legacy policy bootstrap exactness', () => {
   });
 });
 
+describe('source URL safety', () => {
+  it('redacts source credentials and query secrets from fetch errors', () => {
+    const consumer = mkTmp('sync-cons-');
+    const source =
+      'https://sync-user:sync-password@127.0.0.1:1/standards.git?token=query-secret';
+
+    const result = run(consumer, ['init', '--from', source, '--dir', consumer]);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('from https://127.0.0.1:1/standards.git');
+    expect(result.stderr).not.toContain('sync-user');
+    expect(result.stderr).not.toContain('sync-password');
+    expect(result.stderr).not.toContain('query-secret');
+  });
+});
+
 describe('ref resolution', () => {
   it('syncs a raw commit sha and records the exact pin', () => {
     const { up, url, taggedSha } = buildGitUpstream();
@@ -1262,18 +1364,18 @@ describe('canonical workflow', () => {
   });
 });
 
-describe('github', () => {
-  const EmptySeam = JSON.stringify({
-    repository: {},
-    rulesets: [],
-    environments: [],
-  });
-  const Canonical = JSON.stringify({
-    repository: { allow_auto_merge: true },
-    rulesets: [{ name: 'Protect main', target: 'branch' }],
-    environments: [],
-  });
+const EMPTY_GITHUB_SEAM = JSON.stringify({
+  repository: {},
+  rulesets: [],
+  environments: [],
+});
+const CANONICAL_GITHUB_SETTINGS = JSON.stringify({
+  repository: { allow_auto_merge: true },
+  rulesets: [declaredRuleset('Protect main')],
+  environments: [],
+});
 
+describe('github', () => {
   it('fails when the canonical declaration is missing', () => {
     const { consumer } = initConsumer(buildUpstream());
     const result = run(consumer, ['github', '--dir', consumer]);
@@ -1283,8 +1385,8 @@ describe('github', () => {
 
   it('fails closed when the origin remote cannot be resolved', () => {
     const { consumer } = initConsumer(buildUpstream());
-    write(consumer, '.github/settings.json', Canonical);
-    write(consumer, '.github/settings.local.json', EmptySeam);
+    write(consumer, '.github/settings.json', CANONICAL_GITHUB_SETTINGS);
+    write(consumer, '.github/settings.local.json', EMPTY_GITHUB_SEAM);
     const result = run(consumer, ['github', '--check', '--dir', consumer]);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(
@@ -1294,19 +1396,93 @@ describe('github', () => {
 
   it('apply also requires a resolvable origin remote', () => {
     const { consumer } = initConsumer(buildUpstream());
-    write(consumer, '.github/settings.json', Canonical);
-    write(consumer, '.github/settings.local.json', EmptySeam);
+    write(consumer, '.github/settings.json', CANONICAL_GITHUB_SETTINGS);
+    write(consumer, '.github/settings.local.json', EMPTY_GITHUB_SEAM);
     const result = run(consumer, ['github', '--apply', '--dir', consumer]);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(
       'cannot determine the GitHub repository from the origin remote',
     );
   });
+});
 
+describe('github transaction gate', () => {
+  it('apply recovers before loading the declaration or requesting GitHub', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    writePendingTransaction(consumer);
+    const trap = githubRequestTrap(consumer);
+
+    const result = run(consumer, ['github', '--apply', '--dir', consumer], {
+      env: { GH_TOKEN: 'test-token' },
+      preload: trap.preload,
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('.github/settings.json not found');
+    expect(existsSync(join(consumer, TRANSACTION_DIRECTORY))).toBe(false);
+    expect(existsSync(trap.marker)).toBe(false);
+  });
+
+  it('apply makes no request for a valid declaration with irrecoverable WAL', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    write(consumer, '.github/settings.json', CANONICAL_GITHUB_SETTINGS);
+    write(consumer, '.github/settings.local.json', EMPTY_GITHUB_SEAM);
+    git(consumer, ['init', '--quiet']);
+    git(consumer, [
+      'remote',
+      'add',
+      'origin',
+      'https://github.com/example/standards.git',
+    ]);
+    writePendingTransaction(consumer);
+    write(
+      consumer,
+      `${TRANSACTION_DIRECTORY}/${TRANSACTION_JOURNAL}`,
+      '{irrecoverable',
+    );
+    const trap = githubRequestTrap(consumer);
+
+    const result = run(consumer, ['github', '--apply', '--dir', consumer], {
+      env: { GH_TOKEN: 'test-token' },
+      preload: trap.preload,
+    });
+
+    expect(result.status).toBe(1);
+    expect(existsSync(join(consumer, TRANSACTION_DIRECTORY))).toBe(true);
+    expect(existsSync(trap.marker)).toBe(false);
+  });
+
+  it('check fails closed on a pending transaction without requesting GitHub', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    write(consumer, '.github/settings.json', CANONICAL_GITHUB_SETTINGS);
+    write(consumer, '.github/settings.local.json', EMPTY_GITHUB_SEAM);
+    git(consumer, ['init', '--quiet']);
+    git(consumer, [
+      'remote',
+      'add',
+      'origin',
+      'https://github.com/example/standards.git',
+    ]);
+    writePendingTransaction(consumer);
+    const trap = githubRequestTrap(consumer);
+
+    const result = run(consumer, ['github', '--check', '--dir', consumer], {
+      env: { GH_TOKEN: 'test-token' },
+      preload: trap.preload,
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Pending filesystem recovery');
+    expect(existsSync(join(consumer, TRANSACTION_DIRECTORY))).toBe(true);
+    expect(existsSync(trap.marker)).toBe(false);
+  });
+});
+
+describe('github integration', () => {
   it('check gates on the declaration once it is present', () => {
     const { consumer } = initConsumer(buildUpstream());
-    write(consumer, '.github/settings.json', Canonical);
-    write(consumer, '.github/settings.local.json', EmptySeam);
+    write(consumer, '.github/settings.json', CANONICAL_GITHUB_SETTINGS);
+    write(consumer, '.github/settings.local.json', EMPTY_GITHUB_SEAM);
     const result = run(consumer, ['check', '--dir', consumer]);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(
@@ -1316,7 +1492,7 @@ describe('github', () => {
 
   it('doctor requires the local seam once the declaration is synced', () => {
     const { consumer } = initConsumer(buildUpstream());
-    write(consumer, '.github/settings.json', Canonical);
+    write(consumer, '.github/settings.json', CANONICAL_GITHUB_SETTINGS);
     const result = run(consumer, ['doctor', '--dir', consumer]);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('.github/settings.local.json must exist');
@@ -1324,13 +1500,13 @@ describe('github', () => {
 
   it('doctor rejects a seam that overrides canonical values', () => {
     const { consumer } = initConsumer(buildUpstream());
-    write(consumer, '.github/settings.json', Canonical);
+    write(consumer, '.github/settings.json', CANONICAL_GITHUB_SETTINGS);
     write(
       consumer,
       '.github/settings.local.json',
       JSON.stringify({
         repository: { allow_auto_merge: false },
-        rulesets: [{ name: 'Protect main' }],
+        rulesets: [declaredRuleset('Protect main')],
       }),
     );
     const result = run(consumer, ['doctor', '--dir', consumer]);

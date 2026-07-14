@@ -3,6 +3,7 @@
 
 import { defaultBranchProtectionProblems } from './github-default-branch-settings';
 import { environmentListProblems } from './github-environment-settings';
+import { rulesetListProblems } from './github-ruleset-settings';
 import { mergeGithubSettings } from './github-settings-merge';
 
 export type GithubSettings = {
@@ -38,34 +39,6 @@ const REPOSITORY_IDENTITY_KEYS = new Set([
 type ParseResult = {
   readonly settings: GithubSettings | null;
   readonly problems: ReadonlyArray<string>;
-};
-
-const rulesetListProblems = (
-  rulesets: ReadonlyArray<unknown>,
-  label: string,
-): ReadonlyArray<string> => {
-  const problems: Array<string> = [];
-  const names = new Set<string>();
-  for (const [index, ruleset] of rulesets.entries()) {
-    if (
-      !(
-        isRecord(ruleset) &&
-        typeof ruleset.name === 'string' &&
-        ruleset.name.length > 0
-      )
-    ) {
-      problems.push(
-        `${label} rulesets[${index}] must be an object with a non-empty "name"`,
-      );
-    } else if (names.has(ruleset.name)) {
-      problems.push(
-        `${label} declares ruleset "${ruleset.name}" more than once`,
-      );
-    } else {
-      names.add(ruleset.name);
-    }
-  }
-  return problems;
 };
 
 const repositoryProblems = (

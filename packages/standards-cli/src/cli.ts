@@ -42,6 +42,12 @@ import {
   type SyncPolicyInspection,
 } from './sync-policy';
 import { type SourceFile, snapshotRepositoryTrees } from './sync-source';
+import { recoverRepositoryTransactions } from './sync-transaction-recovery';
+import {
+  TRANSACTION_CLEANUP,
+  TRANSACTION_DIRECTORY,
+  TRANSACTION_RESERVATION,
+} from './sync-transaction-types';
 
 const { YAML: BunYaml } = await import('bun');
 
@@ -52,6 +58,9 @@ const SYNC_POLICY_CONTROLLER_FILES = ['action.yml', 'index.mjs'] as const;
 const SYNC_POLICY_GENERATION_EXPORT =
   /\bSYNC_POLICY_CONTRACT_VERSION=(?<version>\d+)\b/u;
 const REPOSITORY_OWNED_CONTROL_SEAMS = [
+  TRANSACTION_CLEANUP,
+  TRANSACTION_DIRECTORY,
+  TRANSACTION_RESERVATION,
   LOCAL_SETTINGS_FILE,
   'AGENTS.local.md',
   'biome.jsonc',
@@ -60,8 +69,6 @@ const REPOSITORY_OWNED_CONTROL_SEAMS = [
 
 // Characters of a sha256 hex digest shown in drift reports; enough to identify.
 const HASH_PREVIEW_LENGTH = 12;
-const DEFAULT_FILE_MODE = 0o666;
-
 const GITHUB_PREFIX = 'github:';
 const FULL_COMMIT_SHA = /^[0-9a-fA-F]{40}$/u;
 
@@ -214,6 +221,15 @@ const assertCompatibleSyncSource = (
 
 const isFullCommitSha = (ref: string): boolean => FULL_COMMIT_SHA.test(ref);
 
+const displaySourceUrl = (source: string): string => {
+  try {
+    const parsed = new URL(source);
+    return `${parsed.protocol}//${parsed.host}${parsed.pathname}`;
+  } catch {
+    return '<redacted source>';
+  }
+};
+
 const assertSupportedRef = (ref: string): void => {
   const isQualified =
     ref.startsWith('refs/heads/') || ref.startsWith('refs/tags/');
@@ -330,6 +346,7 @@ const resolveSource = (src: string, ref: string | undefined): Source => {
     ? `https://github.com/${src.slice(GITHUB_PREFIX.length)}.git`
     : src;
   const target = ref ?? DEFAULT_SYNC_POLICY.ref;
+  const displayUrl = displaySourceUrl(url);
   assertSupportedRef(target);
   const dir = mkdtempSync(join(tmpdir(), 'standards-'));
   const cleanup = (): void => rmSync(dir, { recursive: true, force: true });
@@ -345,7 +362,7 @@ const resolveSource = (src: string, ref: string | undefined): Source => {
   } catch (error) {
     cleanup();
     throw new Error(
-      `Cannot fetch "${target}" from ${url}; expected a qualified branch or tag, or a full commit sha reachable on the remote`,
+      `Cannot fetch "${target}" from ${displayUrl}; expected a qualified branch or tag, or a full commit sha reachable on the remote`,
       { cause: error },
     );
   }
@@ -360,9 +377,12 @@ const resolveSource = (src: string, ref: string | undefined): Source => {
     );
   } catch (error) {
     cleanup();
-    throw new Error(`Cannot check out fetched ref "${target}" from ${url}`, {
-      cause: error,
-    });
+    throw new Error(
+      `Cannot check out fetched ref "${target}" from ${displayUrl}`,
+      {
+        cause: error,
+      },
+    );
   }
   const sha = execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], {
     encoding: 'utf8',
@@ -467,7 +487,7 @@ const prepareMirror = ({
     writes.push({
       before,
       contents: source.contents,
-      mode: before.mode ?? DEFAULT_FILE_MODE,
+      mode: before.mode,
       rel,
     });
     next[rel] = hash;
@@ -608,7 +628,7 @@ const runInit = async ({
       {
         before: lockBefore,
         contents: lock,
-        mode: DEFAULT_FILE_MODE,
+        mode: lockBefore.mode,
         rel: 'sync-standards.lock',
       },
     ],
@@ -687,7 +707,7 @@ const runSync = async ({
     {
       before: currentLock,
       contents: lock,
-      mode: currentLock.mode ?? DEFAULT_FILE_MODE,
+      mode: currentLock.mode,
       rel: 'sync-standards.lock',
     },
   ];
@@ -696,7 +716,7 @@ const runSync = async ({
     controlWrites.push({
       before,
       contents: syncPolicyContents(policyWrite),
-      mode: before.mode ?? DEFAULT_FILE_MODE,
+      mode: before.mode,
       rel: SYNC_POLICY_FILE,
     });
   }
@@ -1216,11 +1236,20 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
   };
 };
 
-const runCheckCommand = async (consumer: string): Promise<boolean> => {
+const openConsumerRoot = async (
+  consumer: string,
+  recover: boolean,
+): Promise<RepositoryRoot> => {
   const consumerRoot = await openRepositoryRoot(
     consumer,
     'consumer repository',
   );
+  await recoverRepositoryTransactions(consumerRoot, recover);
+  return consumerRoot;
+};
+
+const runCheckCommand = async (consumer: string): Promise<boolean> => {
+  const consumerRoot = await openConsumerRoot(consumer, false);
   const policyInspection = await inspectConsumerSyncPolicy(consumerRoot, {
     allowMissingDefaultContract: false,
     policyText: undefined,
@@ -1241,10 +1270,7 @@ const runInitCommand = async (
   consumer: string,
   from: string | undefined,
 ): Promise<void> => {
-  const consumerRoot = await openRepositoryRoot(
-    consumer,
-    'consumer repository',
-  );
+  const consumerRoot = await openConsumerRoot(consumer, true);
   // Refuse before cloning upstream: re-initializing skips the lock, so it
   // would silently overwrite local canonical edits and orphan files that
   // upstream deleted (they leave the lock and no future sync removes them).
@@ -1290,10 +1316,7 @@ const runSyncCommand = async (
   ref: string | undefined,
   dryRun: boolean,
 ): Promise<void> => {
-  const consumerRoot = await openRepositoryRoot(
-    consumer,
-    'consumer repository',
-  );
+  const consumerRoot = await openConsumerRoot(consumer, true);
   const policy = await inspectEffectiveSyncPolicy(consumerRoot, ref);
   const consumerManifest = await loadManifest(consumerRoot);
   const sourceName = from ?? consumerManifest.upstream;
@@ -1359,6 +1382,7 @@ const main = async (): Promise<void> => {
   }
 
   if (command === 'github') {
+    await openConsumerRoot(consumer, apply);
     const converged = apply
       ? await runGithubApply(consumer)
       : await runGithubCheck(consumer);
@@ -1369,10 +1393,7 @@ const main = async (): Promise<void> => {
   }
 
   if (command === 'doctor') {
-    const consumerRoot = await openRepositoryRoot(
-      consumer,
-      'consumer repository',
-    );
+    const consumerRoot = await openConsumerRoot(consumer, false);
     const policyInspection = await inspectConsumerSyncPolicy(consumerRoot, {
       allowMissingDefaultContract: false,
       policyText: undefined,

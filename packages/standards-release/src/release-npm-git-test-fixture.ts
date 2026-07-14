@@ -87,7 +87,22 @@ const createPlainArtifact = async (
   return result.stdout.trim();
 };
 
-const createDivergedHistory = async (repository: string) => {
+const createDivergedHistory = async (
+  repository: string,
+  publishedSha: string,
+) => {
+  await runGit(repository, [
+    'tag',
+    '--annotate',
+    '--message',
+    'candidate tag object',
+    'candidate-object',
+    publishedSha,
+  ]);
+  const annotatedTagSha = await runGit(repository, [
+    'rev-parse',
+    'refs/tags/candidate-object',
+  ]);
   await runGit(repository, ['checkout', '-b', 'unrelated']);
   await write(`${repository}/unrelated`, 'unrelated history\n');
   await runGit(repository, ['add', 'unrelated']);
@@ -108,7 +123,8 @@ const createDivergedHistory = async (repository: string) => {
     'tested descendant',
   ]);
   const currentSha = await runGit(repository, ['rev-parse', 'HEAD']);
-  return { currentSha, nonAncestorSha };
+  await runGit(repository, ['replace', '--graft', currentSha, nonAncestorSha]);
+  return { annotatedTagSha, currentSha, nonAncestorSha };
 };
 
 export const createReleaseNpmGitFixture = async () => {
@@ -143,7 +159,7 @@ export const createReleaseNpmGitFixture = async () => {
     }),
   );
   const integrity = await runPromise(npmIntegrity(artifact));
-  const history = await createDivergedHistory(repository);
+  const history = await createDivergedHistory(repository, publishedSha);
   await write(`${packagePath}/index.js`, 'export const value = "wrong";\n');
   const mismatchedArtifact = await runPromise(
     packReleaseArtifact({

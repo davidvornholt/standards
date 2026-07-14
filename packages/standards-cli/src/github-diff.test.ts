@@ -130,6 +130,20 @@ describe('diffRuleset', () => {
       'ruleset "Protect main": enforcement differs from the declared configuration',
     ]);
   });
+
+  it.each([
+    ['target', 'tag'],
+    [
+      'conditions',
+      { ref_name: { include: ['refs/heads/release'], exclude: [] } },
+    ],
+  ] as const)('compares accepted top-level field %s', (key, value) => {
+    expect(
+      diffRuleset(declaredRuleset, liveRuleset({ [key]: value })).drifted,
+    ).toEqual([
+      `ruleset "Protect main": ${key} differs from the declared configuration`,
+    ]);
+  });
 });
 
 describe('diffRulesets', () => {

@@ -64,6 +64,16 @@ const uniqueIdentities = (
   new Set(summaries.map((ruleset) => String(ruleset.name))).size ===
     summaries.length;
 
+const detailMatchesSummary = (
+  detail: unknown,
+  summary: Readonly<Record<string, unknown>>,
+  repo: string,
+): detail is Record<string, unknown> =>
+  validIdentity(detail, repo) &&
+  detail.id === summary.id &&
+  detail.name === summary.name &&
+  String(detail.source).toLowerCase() === String(summary.source).toLowerCase();
+
 const readDetails = async (
   token: string | null,
   repo: string,
@@ -78,12 +88,31 @@ const readDetails = async (
   if (failed !== undefined) {
     return { problem: apiError('reading a ruleset', failed), rulesets: null };
   }
-  if (!details.every((detail) => validIdentity(detail.body, repo))) {
+  const detailBodies = details.map((detail) => detail.body);
+  if (!detailBodies.every((detail) => validIdentity(detail, repo))) {
     return invalid('an invalid detailed repository ruleset identity');
+  }
+  const validatedDetails = detailBodies as ReadonlyArray<
+    Record<string, unknown>
+  >;
+  if (!uniqueIdentities(validatedDetails)) {
+    return invalid('duplicate detailed repository ruleset identities');
+  }
+  if (
+    !validatedDetails.every((detail, index) => {
+      const summary = summaries[index];
+      return (
+        summary !== undefined && detailMatchesSummary(detail, summary, repo)
+      );
+    })
+  ) {
+    return invalid(
+      'a detailed repository ruleset identity mismatched its summary',
+    );
   }
   return {
     problem: null,
-    rulesets: details.map((detail) => detail.body as Record<string, unknown>),
+    rulesets: validatedDetails,
   };
 };
 

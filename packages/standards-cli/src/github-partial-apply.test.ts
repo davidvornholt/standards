@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import process from 'node:process';
 import { HTTP_CREATED, HTTP_OK } from './github-api';
 import { runGithubApply } from './github-commands';
+import { declaredRuleset } from './github-ruleset-test-fixture';
 
 const originalFetch = globalThis.fetch;
 const originalToken = process.env.GH_TOKEN;
@@ -47,7 +48,6 @@ const createConsumer = (
 const environment = JSON.parse(
   '{"name":"production","wait_timer":0,"prevent_self_review":false,"reviewers":[],"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false}}',
 ) as Record<string, unknown>;
-
 const environmentFailureRead = (url: string): Response => {
   if (url.includes('/rulesets?')) {
     return response(HTTP_OK, []);
@@ -125,10 +125,7 @@ describe('partial GitHub apply reporting', () => {
     const consumer = createConsumer({
       environments: [],
       repository: {},
-      rulesets: [
-        { name: 'First', target: 'branch' },
-        { name: 'Second', target: 'branch' },
-      ],
+      rulesets: [declaredRuleset('First'), declaredRuleset('Second')],
     });
     let creations = 0;
     globalThis.fetch = Object.assign(

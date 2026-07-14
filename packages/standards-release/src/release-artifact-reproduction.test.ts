@@ -16,7 +16,7 @@ import {
   validateReleaseBunVersion,
 } from './release-package';
 import { ReleasePackageError } from './release-package-error';
-import { file } from './release-runtime';
+import { file, spawnSync } from './release-runtime';
 
 let fixture: ReleaseNpmTestFixture;
 const SHA_LENGTH = 40;
@@ -78,14 +78,31 @@ describe('published artifact reproduction', () => {
     expect(await temporaryEntries(fixture.temporaryDirectory)).toEqual([]);
     expect(await file(fixture.scriptSentinel).exists()).toBeFalse();
   });
+});
 
-  it('rejects nonobjects and nonancestors before packing', async () => {
+describe('published artifact candidate validation', () => {
+  it('rejects missing, annotated-tag, and forged-ancestor objects before packing', async () => {
     const downloadedBytes = new Uint8Array(
       await file(fixture.artifact).arrayBuffer(),
     );
+    expect(
+      spawnSync([
+        'git',
+        '-C',
+        fixture.repository,
+        'merge-base',
+        '--is-ancestor',
+        fixture.nonAncestorSha,
+        fixture.currentSha,
+      ]).exitCode,
+    ).toBe(0);
     let packCalls = 0;
     const failures = await Promise.all(
-      ['f'.repeat(SHA_LENGTH), fixture.nonAncestorSha].map((candidateSha) =>
+      [
+        'f'.repeat(SHA_LENGTH),
+        fixture.annotatedTagSha,
+        fixture.nonAncestorSha,
+      ].map((candidateSha) =>
         runPromise(
           flip(
             authenticatePublishedArtifact({
@@ -109,10 +126,18 @@ describe('published artifact reproduction', () => {
     expect(
       failures.every((failure) => failure._tag === 'ReleaseReproductionError'),
     ).toBeTrue();
+    expect(failures[1]).toMatchObject({
+      message: expect.stringContaining('has type tag; expected commit'),
+    });
+    expect(failures[2]).toMatchObject({
+      message: expect.stringContaining('verifying candidate ancestry'),
+    });
     expect(packCalls).toBe(0);
     expect(await temporaryEntries(fixture.temporaryDirectory)).toEqual([]);
   });
+});
 
+describe('published artifact reproduction lifecycle', () => {
   it('cleans the worktree after failure and interruption', async () => {
     const downloadedBytes = new Uint8Array(
       await file(fixture.artifact).arrayBuffer(),

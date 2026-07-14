@@ -1,27 +1,50 @@
 import { randomUUID } from 'node:crypto';
-import { constants } from 'node:fs';
-import { mkdir, open, rename, rmdir, unlink } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
 import {
-  type FileState,
-  identitiesMatch,
-  inspectRepositoryFile,
-  inspectRepositoryNode,
-  type PreparedDirectory,
-  type RepositoryRoot,
-} from './sync-filesystem';
+  assertMutationPlatform,
+  type CreatedDirectory,
+  closePinnedDirectories,
+  openPinnedRoot,
+  type PinnedDirectory,
+  type PinnedTarget,
+} from './sync-directory-handles';
+import type { PreparedDirectory, RepositoryRoot } from './sync-filesystem';
+import { assertPlanSingleFilesystem } from './sync-mount-identity';
+import { type MutationTestHooks, noMutationFault } from './sync-mutation-hooks';
+import {
+  cleanupHooks,
+  publicationHooks,
+  recoverThenThrow,
+} from './sync-mutation-lifecycle';
+import {
+  buildJournal,
+  inspectCreatedParentPlan,
+} from './sync-transaction-build';
+import { cleanupTransaction } from './sync-transaction-cleanup';
+import { commitJournal, markJournalCommitted } from './sync-transaction-commit';
+import { resolveTransactionFailure } from './sync-transaction-failure';
+import { stageWrites, type TransactionWrite } from './sync-transaction-files';
+import { publishJournal } from './sync-transaction-journal';
+import { createParentBinding } from './sync-transaction-parent-binding';
+import { markCreatedParents } from './sync-transaction-parents';
+import type { TransactionDelete } from './sync-transaction-plan';
+import { preparePrunes, prepareTargets } from './sync-transaction-plan';
+import {
+  applyPrunes,
+  assertPreparedParents,
+  assertSingleFilesystem,
+  transactionTargetMap,
+} from './sync-transaction-prepare';
+import { createTransactionDirectory } from './sync-transaction-publication';
+import type {
+  MutationFault,
+  TransactionJournal,
+} from './sync-transaction-types';
+import { verifyDesiredRootTree } from './sync-transaction-verification';
 
-export type PreparedWrite = {
-  readonly before: FileState;
-  readonly contents: Buffer;
-  readonly mode: number;
-  readonly rel: string;
-};
+export type { MutationTestHooks } from './sync-mutation-hooks';
 
-export type PreparedDelete = {
-  readonly before: FileState;
-  readonly rel: string;
-};
+export type PreparedWrite = TransactionWrite;
+export type PreparedDelete = TransactionDelete;
 
 type MutationPlan = {
   readonly deletes: ReadonlyArray<PreparedDelete>;
@@ -30,159 +53,132 @@ type MutationPlan = {
   readonly writes: ReadonlyArray<PreparedWrite>;
 };
 
-const identityOf = (info: { readonly dev: number; readonly ino: number }) => ({
-  dev: info.dev,
-  ino: info.ino,
-});
+const bindCreatedParent =
+  (fault: MutationFault, journal: TransactionJournal, root: PinnedDirectory) =>
+  async ({ rel }: CreatedDirectory, directory: PinnedDirectory) => {
+    await createParentBinding({
+      afterSync: () => fault('parent-binding', rel, 'after'),
+      index: journal.createdParents.indexOf(rel),
+      journal,
+      parent: directory,
+      root,
+    });
+  };
 
-const fileStatesMatch = (left: FileState, right: FileState): boolean =>
-  identitiesMatch(left.identity, right.identity) &&
-  (left.contents === right.contents ||
-    (left.contents !== null &&
-      right.contents !== null &&
-      left.contents.equals(right.contents)));
-
-const assertFileUnchanged = async (
-  root: RepositoryRoot,
-  rel: string,
-  before: FileState,
+export const applyRepositoryMutations = async (
+  { deletes, prunes, root, writes }: MutationPlan,
+  hooks: MutationTestHooks = {},
 ): Promise<void> => {
-  const current = await inspectRepositoryFile(root, rel);
-  if (!fileStatesMatch(before, current)) {
-    throw new Error(`${root.label} file changed after preflight: ${rel}`);
-  }
-};
-
-const assertDirectoryUnchanged = async (
-  root: RepositoryRoot,
-  directory: PreparedDirectory,
-): Promise<void> => {
-  const node = await inspectRepositoryNode(root, directory.rel);
-  if (
-    node.info === null ||
-    !node.info.isDirectory() ||
-    !identitiesMatch(directory.identity, identityOf(node.info))
-  ) {
-    throw new Error(
-      `${root.label} directory changed after preflight: ${directory.rel}`,
-    );
-  }
-};
-
-const ensureParents = async (
-  root: RepositoryRoot,
-  rel: string,
-): Promise<void> => {
-  const parts = dirname(rel)
-    .split('/')
-    .filter((part) => part !== '.');
-  const ensureParent = async (length: number): Promise<void> => {
-    if (length > parts.length) {
-      return;
-    }
-    const parentRel = parts.slice(0, length).join('/');
-    const node = await inspectRepositoryNode(root, parentRel);
-    if (node.info === null) {
-      await mkdir(join(root.path, parentRel));
-      const created = await inspectRepositoryNode(root, parentRel);
-      if (created.info === null || !created.info.isDirectory()) {
-        throw new Error(
-          `${root.label} could not create a real directory: ${parentRel}`,
-        );
-      }
-    } else if (!node.info.isDirectory()) {
-      throw new Error(
-        `${root.label} parent component must be a directory: ${parentRel}`,
+  await assertMutationPlatform();
+  const opened: Array<PinnedDirectory> = [];
+  const created: Array<CreatedDirectory> = [];
+  const fault = hooks.fault ?? noMutationFault;
+  const id = randomUUID();
+  await assertPlanSingleFilesystem(root, [
+    ...writes.map(({ rel }) => rel),
+    ...deletes.map(({ rel }) => rel),
+  ]);
+  const createdParents = await inspectCreatedParentPlan(root, writes);
+  const journal = buildJournal({ createdParents, deletes, id, root, writes });
+  const rootDirectory = await openPinnedRoot(root);
+  opened.push(rootDirectory);
+  const transaction = await createTransactionDirectory(rootDirectory, id, {
+    afterMkdir: hooks.afterTransactionMkdir,
+    afterOwnerFinalSync: hooks.afterOwnerFinalSync,
+    afterOwnerPartialWrite: hooks.afterOwnerPartialWrite,
+    afterOwnerReservationFinalSync: hooks.afterOwnerReservationFinalSync,
+    afterReservationFinalSync: hooks.afterReservationFinalSync,
+    afterReservationPartialWrite: hooks.afterReservationPartialWrite,
+    beforeMkdir: hooks.beforeTransactionMkdir,
+  });
+  opened.push(transaction);
+  let journalPublished = false;
+  let committed = false;
+  let failure: unknown;
+  let needsStartupRecovery = false;
+  let finalDecisionStarted = false;
+  let allTargets: ReadonlyMap<string, PinnedTarget> | undefined;
+  try {
+    await publishJournal(transaction, journal, publicationHooks(hooks));
+    journalPublished = true;
+    await hooks.afterJournal?.();
+    await stageWrites(transaction, writes, fault, journal);
+    const targets = await prepareTargets({
+      afterCreate: bindCreatedParent(fault, journal, rootDirectory),
+      created,
+      deletes,
+      fault,
+      opened,
+      root,
+      writes,
+    });
+    await markCreatedParents(created, journal, fault);
+    assertPreparedParents(createdParents, created);
+    allTargets = transactionTargetMap(targets.writes, targets.deletes);
+    assertSingleFilesystem(transaction, allTargets);
+    const pruneTargets = await preparePrunes(root, prunes, opened, created);
+    await hooks.beforeMutation?.();
+    await commitJournal({
+      beforeCommitMarker: hooks.beforeCommitMarker,
+      fault,
+      journal,
+      root,
+      targets: allTargets,
+      transaction,
+    });
+    finalDecisionStarted = true;
+    await hooks.beforeCommitDecision?.();
+    await verifyDesiredRootTree(root, journal);
+    await markJournalCommitted(transaction, fault);
+    committed = true;
+    await hooks.afterCommitMarker?.();
+    await verifyDesiredRootTree(root, journal);
+    await hooks.afterCommitted?.();
+    await applyPrunes(pruneTargets);
+    await hooks.beforeCleanup?.();
+    const cleanupErrors = await cleanupTransaction({
+      ...cleanupHooks(hooks),
+      committed: true,
+      fault,
+      journal,
+      root,
+      rootDirectory,
+      transaction,
+    });
+    if (cleanupErrors.length > 0) {
+      throw new AggregateError(
+        cleanupErrors,
+        'Standards sync committed; transaction cleanup is pending',
       );
     }
-    await ensureParent(length + 1);
-  };
-  await ensureParent(1);
-};
-
-const writePreparedFile = async (
-  root: RepositoryRoot,
-  write: PreparedWrite,
-): Promise<void> => {
-  await assertFileUnchanged(root, write.rel, write.before);
-  await ensureParents(root, write.rel);
-  await assertFileUnchanged(root, write.rel, write.before);
-  const target = join(root.path, write.rel);
-  const temporary = join(dirname(target), `.standards-${randomUUID()}.tmp`);
-  const handle = await open(
-    temporary,
-    constants.O_CREAT +
-      constants.O_EXCL +
-      constants.O_WRONLY +
-      constants.O_NOFOLLOW,
-    write.mode,
-  );
-  try {
-    await handle.writeFile(write.contents);
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-  try {
-    await assertFileUnchanged(root, write.rel, write.before);
-    await rename(temporary, target);
   } catch (error) {
-    await unlink(temporary).catch(() => undefined);
-    throw error;
+    if (finalDecisionStarted) {
+      failure = error;
+    } else {
+      const resolution = await resolveTransactionFailure({
+        afterCleanupArtifactUnlink: hooks.afterCleanupArtifactUnlink,
+        afterCleanupReservationPartialWrite:
+          hooks.afterCleanupReservationPartialWrite,
+        committed,
+        error,
+        fault,
+        journal,
+        journalPublished,
+        root,
+        rootDirectory,
+        targets: allTargets,
+        transaction,
+      });
+      ({ failure, needsStartupRecovery } = resolution);
+    }
+  } finally {
+    await closePinnedDirectories(opened);
   }
-};
-
-export const applyRepositoryMutations = async ({
-  deletes,
-  prunes,
-  root,
-  writes,
-}: MutationPlan): Promise<void> => {
-  await Promise.all([
-    ...writes.map((write) =>
-      assertFileUnchanged(root, write.rel, write.before),
-    ),
-    ...deletes.map((deletion) =>
-      assertFileUnchanged(root, deletion.rel, deletion.before),
-    ),
-    ...prunes.map((directory) => assertDirectoryUnchanged(root, directory)),
-  ]);
-
-  const applyWrite = async (index: number): Promise<void> => {
-    const write = writes[index];
-    if (write === undefined) {
-      return;
-    }
-    await writePreparedFile(root, write);
-    await applyWrite(index + 1);
-  };
-  const applyDelete = async (index: number): Promise<void> => {
-    const deletion = deletes[index];
-    if (deletion === undefined) {
-      return;
-    }
-    await assertFileUnchanged(root, deletion.rel, deletion.before);
-    await unlink(join(root.path, deletion.rel));
-    await applyDelete(index + 1);
-  };
-  const sortedPrunes = [...prunes].sort(
-    (left, right) => right.rel.length - left.rel.length,
-  );
-  const applyPrune = async (index: number): Promise<void> => {
-    const directory = sortedPrunes[index];
-    if (directory === undefined) {
-      return;
-    }
-    await assertDirectoryUnchanged(root, directory);
-    await rmdir(join(root.path, directory.rel)).catch((error: unknown) => {
-      const { code } = error as { readonly code?: unknown };
-      if (code !== 'ENOENT' && code !== 'ENOTEMPTY') {
-        throw error;
-      }
-    });
-    await applyPrune(index + 1);
-  };
-  await applyWrite(0);
-  await applyDelete(0);
-  await applyPrune(0);
+  if (failure === undefined) {
+    return;
+  }
+  if (!needsStartupRecovery) {
+    throw failure;
+  }
+  return recoverThenThrow(root, failure);
 };

@@ -67,4 +67,42 @@ describe('repository ruleset reads', () => {
       (await fetchLiveRulesets('token', 'owner/repo')).rulesets,
     ).toBeNull();
   });
+
+  it('fails closed when a detail identity mismatches its requested summary', async () => {
+    globalThis.fetch = Object.assign(
+      (input: URL | RequestInfo) =>
+        Promise.resolve(
+          response(
+            String(input).includes('rulesets?')
+              ? [identity(1)]
+              : { ...(identity(1) as Record<string, unknown>), name: 'Other' },
+          ),
+        ),
+      { preconnect: originalFetch.preconnect },
+    );
+    expect(await fetchLiveRulesets('token', 'owner/repo')).toEqual({
+      problem:
+        'listing rulesets: GitHub returned a detailed repository ruleset identity mismatched its summary',
+      rulesets: null,
+    });
+  });
+
+  it('fails closed when detailed identities collapse to a duplicate', async () => {
+    globalThis.fetch = Object.assign(
+      (input: URL | RequestInfo) =>
+        Promise.resolve(
+          response(
+            String(input).includes('rulesets?')
+              ? [identity(1), identity(2)]
+              : identity(1),
+          ),
+        ),
+      { preconnect: originalFetch.preconnect },
+    );
+    expect(await fetchLiveRulesets('token', 'owner/repo')).toEqual({
+      problem:
+        'listing rulesets: GitHub returned duplicate detailed repository ruleset identities',
+      rulesets: null,
+    });
+  });
 });

@@ -35,6 +35,7 @@ const runGit = (
       spawnSync(
         [
           'git',
+          '--no-replace-objects',
           '-c',
           'core.hooksPath=/dev/null',
           '-C',
@@ -47,7 +48,7 @@ const runGit = (
   }).pipe(
     flatMap((result) =>
       result.exitCode === 0
-        ? succeed(undefined)
+        ? succeed(result.stdout.toString().trim())
         : fail(
             reproductionFailure(
               operation,
@@ -71,11 +72,19 @@ const verifyCandidate = (input: {
         ),
       );
     }
-    yield* runGit(
+    const objectType = yield* runGit(
       input.repositoryPath,
-      ['cat-file', '-e', `${input.candidateSha}^{commit}`],
-      'resolving the candidate commit',
+      ['cat-file', '-t', input.candidateSha],
+      'resolving the candidate object',
     );
+    if (objectType !== 'commit') {
+      return yield* fail(
+        reproductionFailure(
+          'validating the candidate object',
+          `${input.candidateSha} has type ${objectType}; expected commit`,
+        ),
+      );
+    }
     yield* runGit(
       input.repositoryPath,
       ['merge-base', '--is-ancestor', input.candidateSha, input.currentSha],

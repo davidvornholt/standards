@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
 import { runGithubApply } from './github-commands';
+import { declaredRuleset } from './github-ruleset-test-fixture';
 import { loadGithubSettings } from './github-settings';
 
 const originalFetch = globalThis.fetch;
@@ -28,6 +29,7 @@ const identityKeys: Array<string> = [
   'private',
   'visibility',
 ];
+const validRuleset = declaredRuleset('Protect main');
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
@@ -133,6 +135,44 @@ describe('required signatures declaration boundary', () => {
     >;
     protection[REQUIRED_SIGNATURES] = true;
     const applied = await applyRequestCount(canonical, empty);
+    expect(applied).toEqual({ requests: 0, result: false });
+  });
+});
+
+describe('ruleset declaration boundary', () => {
+  it.each([
+    ['unknown top-level state', { ...validRuleset, ignored: true }],
+    ['a non-record rule', { ...validRuleset, rules: ['deletion'] }],
+    [
+      'duplicate rule types',
+      {
+        ...validRuleset,
+        rules: [{ type: 'deletion' }, { type: 'deletion' }],
+      },
+    ],
+    [
+      'malformed rule parameters',
+      {
+        ...validRuleset,
+        rules: [{ parameters: {}, type: 'pull_request' }],
+      },
+    ],
+    [
+      'an excessive approving-review count',
+      {
+        ...validRuleset,
+        rules: [
+          JSON.parse(
+            '{"type":"pull_request","parameters":{"required_approving_review_count":11,"dismiss_stale_reviews_on_push":true,"required_reviewers":[],"require_code_owner_review":false,"require_last_push_approval":false,"required_review_thread_resolution":true,"allowed_merge_methods":["squash"]}}',
+          ) as unknown,
+        ],
+      },
+    ],
+  ] as const)('rejects %s before any API request', async (_label, ruleset) => {
+    const applied = await applyRequestCount(
+      { ...empty, rulesets: [ruleset] },
+      empty,
+    );
     expect(applied).toEqual({ requests: 0, result: false });
   });
 });
