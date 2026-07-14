@@ -58,7 +58,6 @@ Before generating code, inspect the `description` frontmatter for every local sk
 
 ## Workspace scripts
 
-- Workspace and root script shapes, internal versioning, package `exports`, tsconfig inheritance, and browser a11y wiring are enforced by `standards structure` (included in `standards check`); its findings state the expected shape.
 - Operational scripts belong to the owning workspace. Put the real command in that workspace's `package.json`, and keep root scripts minimal: the quality gates plus narrowly useful filtered Turbo convenience aliases.
 
 ## Linting
