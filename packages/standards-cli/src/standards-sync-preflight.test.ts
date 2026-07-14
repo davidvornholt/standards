@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import {
+  cpSync,
   existsSync,
   mkdtempSync,
   readFileSync,
@@ -13,10 +14,7 @@ import process from 'node:process';
 import { DEFAULT_SYNC_POLICY, SYNC_POLICY_FILE } from './sync-policy';
 
 const ROOT = join(import.meta.dir, '../../..');
-const PREFLIGHT = join(
-  ROOT,
-  '.github/actions/standards-sync-preflight/index.mjs',
-);
+const PREFLIGHT_ACTION = join(ROOT, '.github/actions/standards-sync-preflight');
 const STANDARDS_PACKAGE = '@davidvornholt/standards';
 const FULL_SHA_LENGTH = 40;
 
@@ -37,6 +35,8 @@ const runPreflight = (
   const directory = mkdtempSync(join(tmpdir(), 'standards-preflight-'));
   temporaryDirectories.push(directory);
   const outputPath = join(directory, 'github-output');
+  const action = join(directory, '.github/actions/standards-sync-preflight');
+  cpSync(PREFLIGHT_ACTION, action, { recursive: true });
   if (policyJson !== undefined) {
     writeFileSync(join(directory, SYNC_POLICY_FILE), policyJson);
   }
@@ -51,7 +51,7 @@ const runPreflight = (
   environment[outputVariable] = outputPath;
   environment[workspaceVariable] = directory;
 
-  const result = spawnSync('node', [PREFLIGHT], {
+  const result = spawnSync('node', [join(action, 'index.mjs')], {
     cwd: directory,
     encoding: 'utf8',
     env: environment,

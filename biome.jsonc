@@ -11,5 +11,24 @@
   // Workflow harness validates them at run time.
   "files": {
     "includes": ["**", "!!**/template", "!.claude/workflows"]
-  }
+  },
+  "overrides": [
+    {
+      // Source-only owner of the generated zero-install action. Console output
+      // and process environment access are its runner-facing interface.
+      "includes": [
+        "packages/standards-cli/src/standards-sync-preflight-action.ts"
+      ],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noConsole": "off"
+          },
+          "style": {
+            "noProcessEnv": "off"
+          }
+        }
+      }
+    }
+  ]
 }

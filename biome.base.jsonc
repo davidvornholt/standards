@@ -166,6 +166,19 @@
       }
     },
     {
+      // This zero-install action is a deterministic checked-in Bun bundle.
+      // Its typed owner and byte-for-byte generation contract are checked in
+      // the standards source repo; formatting or lint-fixing the artifact
+      // would make it diverge from that owner.
+      "includes": [".github/actions/standards-sync-preflight/index.mjs"],
+      "formatter": {
+        "enabled": false
+      },
+      "linter": {
+        "enabled": false
+      }
+    },
+    {
       // Playwright specs: @playwright/test exports only `test` (no `it`
       // alias), so the repo-wide `it` preference cannot apply here.
       "includes": ["**/a11y/*.a11y.ts"],

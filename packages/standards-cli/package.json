@@ -16,6 +16,7 @@
   "bin": {
     "standards": "src/cli.ts"
   },
+  "exports": {},
   "files": [
     "LICENSE",
     "README.md",
@@ -30,10 +31,12 @@
     "src/github-environment-settings.ts",
     "src/github-environments.ts",
     "src/github-settings.ts",
-    "src/sync-policy.ts"
+    "src/sync-policy.ts",
+    "src/sync-source.ts"
   ],
   "scripts": {
     "standards": "cd ../.. && bun packages/standards-cli/src/cli.ts",
+    "generate:sync-policy-action": "bun build src/standards-sync-preflight-action.ts --target node --format esm --packages bundle --reject-unresolved --minify-syntax --minify-whitespace --banner='// Generated from packages/standards-cli/src/standards-sync-preflight-action.ts and its sync-policy closure; do not edit.' --outfile ../../.github/actions/standards-sync-preflight/index.mjs",
     "lint": "biome check --error-on-warnings .",
     "lint:fix": "biome check --write --error-on-warnings .",
     "check-types": "tsc --noEmit",

@@ -33,12 +33,8 @@ const POLICY_SEED = join(
 );
 const SYNC_POLICY_CONTROLLER_PATH = '.github/actions/standards-sync-preflight';
 const SYNC_POLICY_CONTROLLER_FILES = ['action.yml', 'index.mjs'] as const;
-const SYNC_POLICY_CONTRACT_PATH = 'packages/standards-cli/src/sync-policy.ts';
-const SYNC_POLICY_CONTRACT = join(
-  import.meta.dir,
-  '../../../',
-  SYNC_POLICY_CONTRACT_PATH,
-);
+const SYNC_POLICY_CONTRACT_PATH = `${SYNC_POLICY_CONTROLLER_PATH}/index.mjs`;
+const LEGACY_ORPHAN_POLICY_PATH = 'packages/standards-cli/src/sync-policy.ts';
 const SYNC_POLICY_CONTROLLER_SOURCE = join(
   import.meta.dir,
   '../../../',
@@ -48,7 +44,6 @@ const STD_PATHS: ReadonlyArray<string> = [
   'sync-standards.json',
   'managed',
   SYNC_POLICY_CONTROLLER_PATH,
-  SYNC_POLICY_CONTRACT_PATH,
 ];
 const SYNC_POLICY_CONTRACT_VERSION = 1;
 const BARE_SYNC_STEP = /^\s+run: bun standards sync$/mu;
@@ -170,11 +165,6 @@ const buildUpstream = (paths: ReadonlyArray<string> = STD_PATHS): string => {
       readFileSync(join(SYNC_POLICY_CONTROLLER_SOURCE, file), 'utf8'),
     );
   }
-  write(
-    up,
-    SYNC_POLICY_CONTRACT_PATH,
-    readFileSync(SYNC_POLICY_CONTRACT, 'utf8'),
-  );
   return up;
 };
 const initConsumer = (up: string): { consumer: string; result: RunResult } => {
@@ -184,7 +174,6 @@ const initConsumer = (up: string): { consumer: string; result: RunResult } => {
 };
 const removeSyncPolicyController = (consumer: string): void => {
   rmSync(join(consumer, SYNC_POLICY_CONTROLLER_PATH), { recursive: true });
-  rmSync(join(consumer, SYNC_POLICY_CONTRACT_PATH));
 };
 const sync = (
   up: string,
@@ -226,7 +215,6 @@ const buildGitUpstream = (): {
       read(up, `${SYNC_POLICY_CONTROLLER_PATH}/${file}`),
     ]),
   );
-  const syncPolicyContract = read(up, SYNC_POLICY_CONTRACT_PATH);
   write(
     up,
     'sync-standards.json',
@@ -238,7 +226,6 @@ const buildGitUpstream = (): {
   );
   rmSync(join(up, 'template', SYNC_POLICY_FILE));
   rmSync(join(up, '.github'), { recursive: true });
-  rmSync(join(up, SYNC_POLICY_CONTRACT_PATH));
   git(up, ['add', '-A']);
   git(up, ['commit', '--quiet', '-m', 'v0.4.0']);
   git(up, ['tag', 'v0.4.0']);
@@ -256,7 +243,6 @@ const buildGitUpstream = (): {
   for (const [file, content] of Object.entries(controllerFiles)) {
     write(up, `${SYNC_POLICY_CONTROLLER_PATH}/${file}`, content);
   }
-  write(up, SYNC_POLICY_CONTRACT_PATH, syncPolicyContract);
   git(up, ['add', '-A']);
   git(up, ['commit', '--quiet', '-m', 'v1']);
   git(up, ['tag', 'v1']);
@@ -301,6 +287,7 @@ describe('init', () => {
     );
     expect(readLock(consumer).ref).toBe(DEFAULT_SYNC_POLICY.ref);
     expect(readLock(consumer).files['managed/a.txt']).toBeDefined();
+    expect(existsSync(join(consumer, 'packages/standards-cli'))).toBe(false);
   });
 
   it('never clobbers a pre-existing seed destination', () => {
@@ -586,39 +573,34 @@ describe('sync policy integration', () => {
 
 describe('sync source compatibility', () => {
   it('rejects a v1 source that omits a managed controller boundary', () => {
-    for (const requiredPath of [
-      SYNC_POLICY_CONTROLLER_PATH,
-      SYNC_POLICY_CONTRACT_PATH,
-    ]) {
-      const up = buildUpstream();
-      const { consumer } = initConsumer(up);
-      const lockBefore = read(consumer, 'sync-standards.lock');
-      const managedBefore = read(consumer, 'managed/a.txt');
-      const controllerBefore = read(consumer, SYNC_POLICY_CONTRACT_PATH);
-      const policyBefore = read(consumer, SYNC_POLICY_FILE);
-      write(up, 'managed/a.txt', 'should not apply\n');
-      write(
-        up,
-        'sync-standards.json',
-        JSON.stringify({
-          upstream: up,
-          seedDir: 'template',
-          syncPolicyContractVersion: SYNC_POLICY_CONTRACT_VERSION,
-          paths: STD_PATHS.filter((path) => path !== requiredPath),
-        }),
-      );
+    const up = buildUpstream();
+    const { consumer } = initConsumer(up);
+    const lockBefore = read(consumer, 'sync-standards.lock');
+    const managedBefore = read(consumer, 'managed/a.txt');
+    const controllerBefore = read(consumer, SYNC_POLICY_CONTRACT_PATH);
+    const policyBefore = read(consumer, SYNC_POLICY_FILE);
+    write(up, 'managed/a.txt', 'should not apply\n');
+    write(
+      up,
+      'sync-standards.json',
+      JSON.stringify({
+        upstream: up,
+        seedDir: 'template',
+        syncPolicyContractVersion: SYNC_POLICY_CONTRACT_VERSION,
+        paths: STD_PATHS.filter((path) => path !== SYNC_POLICY_CONTROLLER_PATH),
+      }),
+    );
 
-      const result = sync(up, consumer);
+    const result = sync(up, consumer);
 
-      expect(result.status).toBe(1);
-      expect(result.stderr).toContain(
-        `requires managed path "${requiredPath}"`,
-      );
-      expect(read(consumer, 'managed/a.txt')).toBe(managedBefore);
-      expect(read(consumer, SYNC_POLICY_CONTRACT_PATH)).toBe(controllerBefore);
-      expect(read(consumer, SYNC_POLICY_FILE)).toBe(policyBefore);
-      expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
-    }
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      `requires managed path "${SYNC_POLICY_CONTROLLER_PATH}"`,
+    );
+    expect(read(consumer, 'managed/a.txt')).toBe(managedBefore);
+    expect(read(consumer, SYNC_POLICY_CONTRACT_PATH)).toBe(controllerBefore);
+    expect(read(consumer, SYNC_POLICY_FILE)).toBe(policyBefore);
+    expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
   });
 
   it('rejects v1 sources missing any required controller file before mutation', () => {
@@ -655,8 +637,8 @@ describe('sync source compatibility', () => {
       up,
       SYNC_POLICY_CONTRACT_PATH,
       read(up, SYNC_POLICY_CONTRACT_PATH).replace(
-        'SYNC_POLICY_CONTRACT_VERSION = 1',
-        'SYNC_POLICY_CONTRACT_VERSION = 2',
+        'SYNC_POLICY_CONTRACT_VERSION=1',
+        'SYNC_POLICY_CONTRACT_VERSION=2',
       ),
     );
 
@@ -664,7 +646,7 @@ describe('sync source compatibility', () => {
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(
-      'must export SYNC_POLICY_CONTRACT_VERSION = 1',
+      'must be generated for SYNC_POLICY_CONTRACT_VERSION = 1',
     );
     expect(read(consumer, 'managed/a.txt')).toBe(managedBefore);
     expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
@@ -672,6 +654,26 @@ describe('sync source compatibility', () => {
 });
 
 describe('sync', () => {
+  it('prunes the legacy orphan CLI workspace after its managed file is removed', () => {
+    const up = buildUpstream([...STD_PATHS, LEGACY_ORPHAN_POLICY_PATH]);
+    write(up, LEGACY_ORPHAN_POLICY_PATH, 'legacy generated policy\n');
+    const { consumer } = initConsumer(up);
+    expect(existsSync(join(consumer, 'packages/standards-cli'))).toBe(true);
+    write(
+      up,
+      'sync-standards.json',
+      JSON.stringify({
+        upstream: up,
+        seedDir: 'template',
+        syncPolicyContractVersion: SYNC_POLICY_CONTRACT_VERSION,
+        paths: STD_PATHS,
+      }),
+    );
+
+    expect(sync(up, consumer).status).toBe(0);
+    expect(existsSync(join(consumer, 'packages/standards-cli'))).toBe(false);
+  });
+
   it('uses new managed paths from the upstream manifest immediately', () => {
     const up = buildUpstream();
     const { consumer } = initConsumer(up);

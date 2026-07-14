@@ -12,13 +12,7 @@ const ACTION = join(
 const WORKFLOW = join(ROOT, '.github/workflows/standards-sync.yml');
 const SETTINGS = join(ROOT, '.github/settings.json');
 const MANIFEST = join(ROOT, 'sync-standards.json');
-const AGENT_CONTRACT = join(ROOT, 'AGENTS.md');
 const SYNC_SKILL = join(ROOT, '.agents/skills/standards-sync/SKILL.md');
-const ZERO_INSTALL_EFFECT_BOUNDARIES = [
-  '`.github/actions/standards-sync-preflight` action and its dependency-free helper closure',
-  '`packages/standards-release/scripts/classify-release.ts` and its dependency-free helper closure',
-  'published `packages/standards-cli/src/cli.ts` executable and its built-in-only helper closure listed in the package `files` allowlist',
-] as const;
 const GATED_STEPS = [
   'Setup Bun',
   'Install dependencies',
@@ -31,7 +25,7 @@ const POLICY_DOCS = [
   join(ROOT, 'packages/standards-cli/README.md'),
   SYNC_SKILL,
 ] as const;
-
+const RELATIVE_IMPORT = /\bfrom"[.]{1,2}\//u;
 const workflowStep = (workflow: string, name: string): string => {
   const marker = `      - name: ${name}`;
   const start = workflow.indexOf(marker);
@@ -43,19 +37,6 @@ const workflowStep = (workflow: string, name: string): string => {
 };
 
 describe('canonical scheduled sync contract', () => {
-  it('enumerates the complete dependency-free Effect exception boundary', () => {
-    const contract = readFileSync(AGENT_CONTRACT, 'utf8');
-    expect(contract).toContain(
-      'Zero-install preconditions and the published standalone bootstrap CLI are the only exceptions to the Effect rules',
-    );
-    for (const boundary of ZERO_INSTALL_EFFECT_BOUNDARIES) {
-      expect(contract).toContain(boundary);
-    }
-    expect(contract).toContain(
-      'All code outside those enumerated boundaries, including release packing, registry inspection, publishing decisions, and GitHub Release reconciliation',
-    );
-  });
-
   it('uses a runner-managed JavaScript action before every paid step', () => {
     const workflow = readFileSync(WORKFLOW, 'utf8');
     const action = readFileSync(ACTION, 'utf8');
@@ -95,12 +76,12 @@ describe('canonical scheduled sync contract', () => {
     expect(preflightStep).not.toContain('run: node');
     expect(action).toContain('using: node24');
     expect(action).toContain('main: index.mjs');
-    expect(
-      readFileSync(
-        join(ROOT, '.github/actions/standards-sync-preflight/index.mjs'),
-        'utf8',
-      ),
-    ).toContain('../../../packages/standards-cli/src/sync-policy.ts');
+    const actionBundle = readFileSync(
+      join(ROOT, '.github/actions/standards-sync-preflight/index.mjs'),
+      'utf8',
+    );
+    expect(actionBundle).toContain('Generated from packages/standards-cli');
+    expect(actionBundle).not.toMatch(RELATIVE_IMPORT);
     for (const name of GATED_STEPS) {
       expect(workflowStep(workflow, name)).toContain(
         "if: steps.preflight.outputs.run_sync == 'true'",
@@ -141,9 +122,9 @@ describe('canonical scheduled sync contract', () => {
     expect(manifest.paths).toContain(
       '.github/actions/standards-sync-preflight',
     );
-    expect(manifest.paths).toContain(
-      'packages/standards-cli/src/sync-policy.ts',
-    );
+    expect(
+      manifest.paths.some((path) => path.startsWith('packages/standards-cli')),
+    ).toBe(false);
     expect(manifest.paths).not.toContain(
       '.github/scripts/standards-sync-preflight.mjs',
     );
@@ -157,6 +138,9 @@ describe('standards sync documentation', () => {
       expect(documentation).toContain('@davidvornholt/standards` >=0.5.0');
       expect(documentation).toContain('for every consumer policy');
       expect(documentation).toContain('source workspace is the sole exception');
+      expect(documentation).toContain('versioned root declaration');
+      expect(documentation).toContain('checked-in explicit-ESM bundle');
+      expect(documentation).not.toContain('script wiring');
       expect(documentation).toContain('first land the bucket-2 CLI upgrade');
       expect(documentation).toContain(
         'bun add --dev --exact @davidvornholt/standards@0.5.0',

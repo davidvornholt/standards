@@ -1,3 +1,12 @@
+import {
+  isStandardsSourceWorkspace,
+  STANDARDS_SOURCE_PACKAGE_FILE as SOURCE_PACKAGE_FILE,
+  STANDARDS_PACKAGE,
+  versionIsCompatible,
+} from './sync-source';
+
+export const STANDARDS_SOURCE_PACKAGE_FILE = SOURCE_PACKAGE_FILE;
+
 export type SyncPolicy = {
   readonly ref: string;
   readonly scheduledSync: boolean;
@@ -19,15 +28,8 @@ export const DEFAULT_SYNC_POLICY: SyncPolicy = {
 
 export const SYNC_POLICY_CONTRACT_VERSION = 1;
 export const SYNC_POLICY_FILE = 'sync-standards.local.json';
-export const STANDARDS_SOURCE_PACKAGE_FILE =
-  'packages/standards-cli/package.json';
-
 const PACKAGE_FILE = 'package.json';
-const STANDARDS_PACKAGE = '@davidvornholt/standards';
 const FULL_COMMIT_SHA = /^[0-9a-fA-F]{40}$/u;
-const EXACT_STABLE_SEMVER =
-  /^(?<major>0|[1-9]\d*)\.(?<minor>0|[1-9]\d*)\.(?<patch>0|[1-9]\d*)$/u;
-const REQUIRED_MINOR_VERSION = 5n;
 const INVALID_REF_CHARACTERS = new Set(['~', '^', ':', '?', '*', '[', '\\']);
 const SPACE_CODE_POINT = 32;
 const DELETE_CODE_POINT = 127;
@@ -122,19 +124,9 @@ const inspectPolicy = (
     : null;
 };
 
-const versionIsCompatible = (version: string): boolean => {
-  const { major, minor } = EXACT_STABLE_SEMVER.exec(version)?.groups ?? {};
-  return (
-    major !== undefined &&
-    minor !== undefined &&
-    (BigInt(major) > 0n || BigInt(minor) >= REQUIRED_MINOR_VERSION)
-  );
-};
-
-const isStandardsSourceWorkspace = (
-  packageJson: Record<string, unknown>,
+const sourcePackageFrom = (
   sourceWorkspacePackageText: string | undefined,
-): boolean => {
+): unknown => {
   const sourcePackage =
     sourceWorkspacePackageText === undefined
       ? undefined
@@ -143,29 +135,7 @@ const isStandardsSourceWorkspace = (
           STANDARDS_SOURCE_PACKAGE_FILE,
           [],
         );
-  const { scripts: rawScripts, workspaces } = packageJson;
-  const scripts = isRecord(rawScripts) ? rawScripts : undefined;
-  return (
-    packageJson.name === 'standards' &&
-    packageJson.private === true &&
-    Array.isArray(workspaces) &&
-    workspaces.includes('packages/*') &&
-    scripts?.standards ===
-      'turbo run standards --filter @davidvornholt/standards --' &&
-    scripts.check ===
-      'turbo run standards --filter @davidvornholt/standards -- github --check && turbo run lint check-types test' &&
-    scripts['check:fix'] ===
-      'turbo run standards --filter @davidvornholt/standards -- github --check && turbo run lint:fix check-types test' &&
-    isRecord(sourcePackage) &&
-    sourcePackage.name === STANDARDS_PACKAGE &&
-    typeof sourcePackage.version === 'string' &&
-    versionIsCompatible(sourcePackage.version) &&
-    isRecord(sourcePackage.bin) &&
-    sourcePackage.bin.standards === 'src/cli.ts' &&
-    isRecord(sourcePackage.scripts) &&
-    sourcePackage.scripts.standards ===
-      'cd ../.. && bun packages/standards-cli/src/cli.ts'
-  );
+  return sourcePackage;
 };
 
 export const inspectSyncPolicy = ({
@@ -191,7 +161,11 @@ export const inspectSyncPolicy = ({
     const version = devDependencies?.[STANDARDS_PACKAGE];
     if (
       (typeof version !== 'string' || !versionIsCompatible(version)) &&
-      !isStandardsSourceWorkspace(packageJson, sourceWorkspacePackageText)
+      !isStandardsSourceWorkspace(
+        packageJson,
+        sourcePackageFrom(sourceWorkspacePackageText),
+        SYNC_POLICY_CONTRACT_VERSION,
+      )
     ) {
       problems.push(compatiblePackageProblem());
     }

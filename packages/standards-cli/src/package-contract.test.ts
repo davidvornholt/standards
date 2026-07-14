@@ -36,6 +36,9 @@ describe('published package contract', () => {
     expect(templateManifest.devDependencies[publicManifest.name]).toBe(
       publicManifest.version,
     );
+    expect(
+      JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8')),
+    ).toHaveProperty('exports', {});
   });
 
   it('packs only the zero-dependency public CLI', () => {
@@ -73,6 +76,7 @@ describe('published package contract', () => {
       'package/src/github-environments.ts',
       'package/src/github-settings.ts',
       'package/src/sync-policy.ts',
+      'package/src/sync-source.ts',
     ]);
     const manifestArchive = run([
       'tar',
@@ -83,10 +87,12 @@ describe('published package contract', () => {
     expect(manifestArchive.exitCode).toBe(0);
     const manifest = JSON.parse(manifestArchive.output) as {
       readonly dependencies?: unknown;
+      readonly exports?: unknown;
       readonly files?: ReadonlyArray<string>;
       readonly scripts?: Readonly<Record<string, string>>;
     };
     expect(manifest.dependencies).toBeUndefined();
+    expect(manifest.exports).toEqual({});
     expect(manifest.files).toContain('SOURCE_COMMIT');
     expect(manifest.scripts).not.toHaveProperty('release:state');
   });

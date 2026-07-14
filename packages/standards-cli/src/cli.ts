@@ -24,6 +24,7 @@ import {
   readdir,
   readFile,
   rm,
+  rmdir,
   stat,
   writeFile,
 } from 'node:fs/promises';
@@ -54,11 +55,11 @@ import {
 const { YAML: BunYaml } = await import('bun');
 
 const DEFAULT_UPSTREAM = 'github:davidvornholt/standards';
-const SYNC_POLICY_CONTRACT_FILE = 'packages/standards-cli/src/sync-policy.ts';
 const SYNC_POLICY_CONTROLLER_PATH = '.github/actions/standards-sync-preflight';
+const SYNC_POLICY_CONTRACT_FILE = `${SYNC_POLICY_CONTROLLER_PATH}/index.mjs`;
 const SYNC_POLICY_CONTROLLER_FILES = ['action.yml', 'index.mjs'] as const;
 const SYNC_POLICY_GENERATION_EXPORT =
-  /^export const SYNC_POLICY_CONTRACT_VERSION = (?<version>\d+);$/mu;
+  /\bSYNC_POLICY_CONTRACT_VERSION=(?<version>\d+)\b/u;
 
 // Characters of a sha256 hex digest shown in drift reports; enough to identify.
 const HASH_PREVIEW_LENGTH = 12;
@@ -185,11 +186,6 @@ const assertCompatibleSyncSource = (
       `syncPolicyContractVersion ${SYNC_POLICY_CONTRACT_VERSION} requires managed path "${SYNC_POLICY_CONTROLLER_PATH}"`,
     );
   }
-  if (!manifest.paths.includes(SYNC_POLICY_CONTRACT_FILE)) {
-    throw new Error(
-      `syncPolicyContractVersion ${SYNC_POLICY_CONTRACT_VERSION} requires managed path "${SYNC_POLICY_CONTRACT_FILE}"`,
-    );
-  }
   for (const file of SYNC_POLICY_CONTROLLER_FILES) {
     const path = join(sourceDir, SYNC_POLICY_CONTROLLER_PATH, file);
     if (!(existsSync(path) && statSync(path).isFile())) {
@@ -206,7 +202,7 @@ const assertCompatibleSyncSource = (
     ?.version;
   if (generation !== String(SYNC_POLICY_CONTRACT_VERSION)) {
     throw new Error(
-      `${SYNC_POLICY_CONTRACT_FILE} must export SYNC_POLICY_CONTRACT_VERSION = ${SYNC_POLICY_CONTRACT_VERSION}`,
+      `${SYNC_POLICY_CONTRACT_FILE} must be generated for SYNC_POLICY_CONTRACT_VERSION = ${SYNC_POLICY_CONTRACT_VERSION}`,
     );
   }
 };
@@ -403,6 +399,26 @@ const listManaged = async (
 const isUnder = (a: string, b: string): boolean =>
   a === b || a.startsWith(`${b}/`);
 
+const pruneEmptyParents = async (
+  deletedFile: string,
+  consumer: string,
+): Promise<void> => {
+  const directory = dirname(deletedFile);
+  if (directory === consumer) {
+    return;
+  }
+  try {
+    await rmdir(directory);
+  } catch (error) {
+    const { code } = error as { readonly code?: unknown };
+    if (code === 'ENOENT' || code === 'ENOTEMPTY') {
+      return;
+    }
+    throw error;
+  }
+  await pruneEmptyParents(directory, consumer);
+};
+
 // Managed (bucket 1) paths and seed (bucket 2) targets must never overlap, or a
 // file would have two owners and `sync` could clobber a repo-owned seed.
 const assertDisjoint = (
@@ -483,6 +499,9 @@ const mirror = async ({
   );
   if (!dryRun) {
     await Promise.all(deleted.map((rel) => rm(join(consumer, rel))));
+    await Promise.all(
+      deleted.map((rel) => pruneEmptyParents(join(consumer, rel), consumer)),
+    );
   }
   return { files: next, created, updated, deleted, tampered };
 };

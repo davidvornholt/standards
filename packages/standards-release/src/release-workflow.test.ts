@@ -7,12 +7,30 @@ const workflow = await file(
 const classifier = await file(
   `${import.meta.dir}/../scripts/classify-release.ts`,
 ).text();
+const agentContract = await file(
+  `${import.meta.dir}/../../../AGENTS.md`,
+).text();
+const localAgentContract = await file(
+  `${import.meta.dir}/../../../AGENTS.local.md`,
+).text();
 const ABSOLUTE_PACKAGE_PATH =
   /PACKAGE_PATH: \$\{\{ github\.workspace \}\}\/packages\/standards-cli/u;
 const TESTED_SHA_CHECKOUT =
   /ref: \$\{\{ github\.event\.workflow_run\.head_sha \}\}/u;
 
 const position = (text: string): number => workflow.indexOf(text);
+
+describe('source-only Effect exception', () => {
+  it('keeps release classification out of the canonical consumer contract', () => {
+    expect(agentContract).not.toContain('packages/standards-release');
+    expect(localAgentContract).toContain(
+      '`packages/standards-release/scripts/classify-release.ts` executable and its dependency-free helper closure',
+    );
+    expect(localAgentContract).toContain(
+      'GitHub Release reconciliation, follows the Effect and tagged-error rules',
+    );
+  });
+});
 
 describe('CLI release workflow authorization', () => {
   it('rejects a same-named quality workflow at a different path', () => {

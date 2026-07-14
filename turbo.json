@@ -6,6 +6,10 @@
       "cache": false,
       "outputs": []
     },
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": [".next/**", "!.next/cache/**", "dist/**"]
+    },
     "lint": {
       "outputs": []
     },
@@ -18,6 +22,10 @@
     },
     "test": {
       "outputs": []
+    },
+    "test:a11y": {
+      "dependsOn": ["build"],
+      "cache": false
     }
   }
 }

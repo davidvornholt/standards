@@ -9,6 +9,7 @@
   ],
   "scripts": {
     "standards": "standards",
+    "test:a11y": "turbo run test:a11y",
     "check": "standards check && turbo run lint check-types test build test:a11y",
     "check:fix": "standards check && turbo run lint:fix check-types test build test:a11y"
   },

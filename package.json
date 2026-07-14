@@ -6,10 +6,15 @@
   "workspaces": [
     "packages/*"
   ],
+  "standardsSourceWorkspace": {
+    "path": "packages/standards-cli",
+    "syncPolicyContractVersion": 1
+  },
   "scripts": {
     "standards": "turbo run standards --filter @davidvornholt/standards --",
-    "check": "turbo run standards --filter @davidvornholt/standards -- github --check && turbo run lint check-types test",
-    "check:fix": "turbo run standards --filter @davidvornholt/standards -- github --check && turbo run lint:fix check-types test"
+    "test:a11y": "turbo run test:a11y",
+    "check": "turbo run standards --filter @davidvornholt/standards -- github --check && turbo run lint check-types test build test:a11y",
+    "check:fix": "turbo run standards --filter @davidvornholt/standards -- github --check && turbo run lint:fix check-types test build test:a11y"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.3",
