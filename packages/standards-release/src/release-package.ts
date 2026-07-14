@@ -2,15 +2,17 @@ import { ArtifactIdentityError } from './artifact-identity-error';
 import {
   all,
   effectTry,
+  either,
   fail,
   flatMap,
   gen,
+  isLeft,
   succeed,
   tryPromise,
 } from './release-effect';
 import { ReleasePackageError } from './release-package-error';
-import { withGeneratedMarker } from './release-package-marker';
-import { argv, spawn } from './release-runtime';
+import { rewritePackedArtifact } from './release-package-rewrite';
+import { argv, nodeLstat, spawn } from './release-runtime';
 
 export const SOURCE_COMMIT_FILE = 'SOURCE_COMMIT';
 const ARCHIVE_SOURCE_COMMIT = `package/${SOURCE_COMMIT_FILE}`;
@@ -60,33 +62,6 @@ const releasePackageOperationError: OperationError<ReleasePackageError> = (
     message: `Packing release artifact failed while ${operation}: ${String(cause)}`,
   });
 
-const packGeneratedMarker = (
-  marker: string,
-  input: {
-    readonly destination: string;
-    readonly expectedSha: string;
-    readonly packagePath: string;
-  },
-) =>
-  withGeneratedMarker(marker, `${input.expectedSha}\n`, () =>
-    gen(function* () {
-      return yield* run(
-        [
-          argv[0] ?? 'bun',
-          'pm',
-          'pack',
-          '--cwd',
-          input.packagePath,
-          '--destination',
-          input.destination,
-          '--ignore-scripts',
-          '--quiet',
-        ],
-        releasePackageOperationError,
-      );
-    }),
-  );
-
 export const verifyArtifactSourceCommit = (input: {
   readonly artifact: string;
   readonly expectedSha: string;
@@ -117,40 +92,85 @@ export const verifyArtifactSourceCommit = (input: {
     }),
   );
 
-const packWithMarker = (input: {
+type ReleasePackageInput = {
   readonly destination: string;
   readonly expectedSha: string;
   readonly packagePath: string;
-}) => {
-  const marker = `${input.packagePath}/${SOURCE_COMMIT_FILE}`;
-  return packGeneratedMarker(marker, input).pipe(
+};
+
+const ensureSourceMarkerAbsent = (packagePath: string) => {
+  const marker = `${packagePath}/${SOURCE_COMMIT_FILE}`;
+  return tryPromise({
+    try: () => nodeLstat(marker),
+    catch: (cause) => cause,
+  }).pipe(
+    either,
     flatMap((result) => {
-      if (result.exitCode !== 0) {
+      if (!isLeft(result)) {
         return fail(
           new ReleasePackageError({
-            message: `Packing release artifact failed: ${result.stderr.trim() || `exit ${result.exitCode}`}`,
+            message: `Packing release artifact refused caller-owned source marker ${marker}`,
           }),
         );
       }
-      const artifact = result.stdout.trim();
-      return artifact === '' || artifact.includes('\n')
-        ? fail(
-            new ReleasePackageError({
-              message: 'Packing release artifact returned an invalid path',
-            }),
-          )
-        : succeed(artifact);
+      const cause = result.left;
+      if (
+        typeof cause === 'object' &&
+        cause !== null &&
+        'code' in cause &&
+        cause.code === 'ENOENT'
+      ) {
+        return succeed(undefined);
+      }
+      return fail(
+        releasePackageOperationError(
+          'inspecting the source package marker',
+          cause,
+        ),
+      );
     }),
   );
 };
 
-export const packReleaseArtifact = (input: {
-  readonly destination: string;
-  readonly expectedSha: string;
-  readonly packagePath: string;
-}) =>
+const artifactFromResult = (result: CommandResult) => {
+  if (result.exitCode !== 0) {
+    return fail(
+      new ReleasePackageError({
+        message: `Packing release artifact failed: ${result.stderr.trim() || `exit ${result.exitCode}`}`,
+      }),
+    );
+  }
+  const artifact = result.stdout.trim();
+  return artifact === '' || artifact.includes('\n')
+    ? fail(
+        new ReleasePackageError({
+          message: 'Packing release artifact returned an invalid path',
+        }),
+      )
+    : succeed(artifact);
+};
+
+export const packReleaseArtifact = (input: ReleasePackageInput) =>
   gen(function* () {
-    const artifact = yield* packWithMarker(input);
+    yield* ensureSourceMarkerAbsent(input.packagePath);
+    const artifact = yield* run(
+      [
+        argv[0] ?? 'bun',
+        'pm',
+        'pack',
+        '--cwd',
+        input.packagePath,
+        '--destination',
+        input.destination,
+        '--ignore-scripts',
+        '--quiet',
+      ],
+      releasePackageOperationError,
+    ).pipe(flatMap(artifactFromResult));
+    yield* rewritePackedArtifact({
+      artifact,
+      expectedSha: input.expectedSha,
+    });
     yield* verifyArtifactSourceCommit({
       artifact,
       expectedSha: input.expectedSha,

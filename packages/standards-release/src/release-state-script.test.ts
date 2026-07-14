@@ -15,7 +15,6 @@ const run = (
   script: string,
   args: ReadonlyArray<string>,
   env?: Readonly<Record<string, string>>,
-  scriptDirectory = 'scripts',
 ) => {
   const directory = spawnSync([
     'mktemp',
@@ -29,7 +28,7 @@ const run = (
   const result = spawnSync(
     [
       'bun',
-      `${scriptDirectory}/${script}`,
+      `scripts/${script}`,
       ...args.map((arg) => (arg === '$OUTPUT' ? output : arg)),
     ],
     {
@@ -108,28 +107,5 @@ describe('release workflow wrappers', () => {
     expect(result.stderr).toContain(
       '::error::Expected release-state command pack, npm, github-inspect, or github-reconcile',
     );
-  });
-
-  it('reports compound packing and cleanup failures as separate safe commands', async () => {
-    const directory = spawnSync([
-      'mktemp',
-      '-d',
-      '/tmp/release-state-compound-XXXXXX',
-    ])
-      .stdout.toString()
-      .trim();
-    directories.push(directory);
-    const result = await run(
-      'release-state-compound-failure.fixture.ts',
-      [`${directory}/SOURCE_COMMIT`],
-      undefined,
-      'src',
-    );
-    expect(result).toEqual({
-      exitCode: 1,
-      output: '',
-      stderr:
-        '::error::packing failed%25%0Acontinued\n::error::cleanup failed%0Dnext\n',
-    });
   });
 });

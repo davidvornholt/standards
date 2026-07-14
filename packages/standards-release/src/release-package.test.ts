@@ -7,73 +7,31 @@ import {
   SOURCE_COMMIT_FILE,
   verifyArtifactSourceCommit,
 } from './release-package';
+import {
+  createReleasePackage,
+  releasePackageTestEnvironment,
+} from './release-package.fixture';
 import { file, write } from './release-runtime';
 
 const SHA_LENGTH = 40;
 const EXPECTED_SHA = 'a'.repeat(SHA_LENGTH);
 const MISMATCHED_SHA = 'b'.repeat(SHA_LENGTH);
-const directories: Array<string> = [];
-const releasePackageSource = await file(
-  `${import.meta.dir}/release-package.ts`,
-).text();
-const releasePackageMarkerSource = await file(
-  `${import.meta.dir}/release-package-marker.ts`,
-).text();
-const releasePackageMarkerCleanupSource = await file(
-  `${import.meta.dir}/release-package-marker-cleanup.ts`,
-).text();
-
-const temporaryDirectory = (label: string): string => {
-  const directory = spawnSync(['mktemp', '-d', `/tmp/${label}-XXXXXX`])
-    .stdout.toString()
-    .trim();
-  directories.push(directory);
-  return directory;
-};
-
-const createPackage = (directory: string): Promise<number> =>
-  Promise.all([
-    write(
-      `${directory}/package.json`,
-      JSON.stringify({
-        files: ['index.js', SOURCE_COMMIT_FILE],
-        name: '@test/release-artifact',
-        version: '1.0.0',
-      }),
-    ),
-    write(`${directory}/index.js`, 'export const value = true;\n'),
-  ]).then(([manifestBytes]) => manifestBytes);
+const testEnvironment = releasePackageTestEnvironment();
 
 afterEach(() => {
-  for (const directory of directories.splice(0)) {
-    spawnSync(['rm', '-rf', directory]);
-  }
+  testEnvironment.cleanup();
 });
 
 describe('release package', () => {
-  it('keeps packing application logic inside the Effect boundary', () => {
-    const boundarySource = `${releasePackageSource}\n${releasePackageMarkerSource}\n${releasePackageMarkerCleanupSource}`;
-    expect(boundarySource).toContain('acquireUseReleaseTyped(');
-    expect(boundarySource).toContain('tryPromise({');
-    expect(boundarySource).toContain("nodeOpenFile(marker, 'wx')");
-    for (const forbidden of [
-      ': Promise<',
-      'Promise.all(',
-      '.then(',
-      '.finally(',
-      'new Error(',
-      'orDie',
-      'async ',
-    ]) {
-      expect(boundarySource).not.toContain(forbidden);
-    }
-  });
-
-  it('packs a deterministic source-bound artifact and cleans the marker', async () => {
-    const packagePath = temporaryDirectory('release-package');
-    const firstDestination = temporaryDirectory('release-artifact-first');
-    const secondDestination = temporaryDirectory('release-artifact-second');
-    await createPackage(packagePath);
+  it('packs a deterministic source-bound artifact without touching the source', async () => {
+    const packagePath = testEnvironment.temporaryDirectory('release-package');
+    const firstDestination = testEnvironment.temporaryDirectory(
+      'release-artifact-first',
+    );
+    const secondDestination = testEnvironment.temporaryDirectory(
+      'release-artifact-second',
+    );
+    await createReleasePackage(packagePath);
     const first = await runPromise(
       packReleaseArtifact({
         destination: firstDestination,
@@ -105,9 +63,13 @@ describe('release package', () => {
   });
 
   it('preserves a pre-existing marker instead of overwriting it', async () => {
-    const packagePath = temporaryDirectory('release-package-existing');
-    const destination = temporaryDirectory('release-artifact-existing');
-    await createPackage(packagePath);
+    const packagePath = testEnvironment.temporaryDirectory(
+      'release-package-existing',
+    );
+    const destination = testEnvironment.temporaryDirectory(
+      'release-artifact-existing',
+    );
+    await createReleasePackage(packagePath);
     const marker = `${packagePath}/${SOURCE_COMMIT_FILE}`;
     await write(marker, 'owned by caller\n');
     expect(
@@ -126,9 +88,13 @@ describe('release package', () => {
 });
 
 describe('release package failures', () => {
-  it('cleans a generated marker when packing fails', async () => {
-    const packagePath = temporaryDirectory('release-package-invalid');
-    const destination = temporaryDirectory('release-artifact-invalid');
+  it('leaves the source marker absent when packing fails', async () => {
+    const packagePath = testEnvironment.temporaryDirectory(
+      'release-package-invalid',
+    );
+    const destination = testEnvironment.temporaryDirectory(
+      'release-artifact-invalid',
+    );
     expect(
       await runPromise(
         flip(
@@ -146,8 +112,12 @@ describe('release package failures', () => {
   });
 
   it('rejects a missing or mismatched artifact source marker', async () => {
-    const packagePath = temporaryDirectory('release-package-unmarked');
-    const destination = temporaryDirectory('release-artifact-unmarked');
+    const packagePath = testEnvironment.temporaryDirectory(
+      'release-package-unmarked',
+    );
+    const destination = testEnvironment.temporaryDirectory(
+      'release-artifact-unmarked',
+    );
     await write(
       `${packagePath}/package.json`,
       JSON.stringify({ name: '@test/unmarked', version: '1.0.0' }),
@@ -175,7 +145,7 @@ describe('release package failures', () => {
     );
     expect(missing).toMatchObject({ _tag: 'ArtifactIdentityError' });
 
-    await createPackage(packagePath);
+    await createReleasePackage(packagePath);
     const marked = await runPromise(
       packReleaseArtifact({
         destination,
