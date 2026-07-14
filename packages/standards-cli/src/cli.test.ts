@@ -87,8 +87,11 @@ const buildUpstream = (paths: ReadonlyArray<string> = STD_PATHS): string => {
     'template/package.json',
     JSON.stringify({
       scripts: {
-        check: 'standards check',
-        'check:fix': 'standards check',
+        standards: 'standards',
+        check:
+          'standards check && turbo run lint check-types test build test:a11y',
+        'check:fix':
+          'standards check && turbo run lint:fix check-types test build test:a11y',
       },
       devDependencies: { '@davidvornholt/standards': '0.1.0' },
     }),
@@ -296,6 +299,31 @@ describe('doctor', () => {
 
     expect(doctor.status).toBe(0);
     expect(doctor.stdout).toContain('consumer integration seams are wired');
+  });
+});
+
+describe('structure', () => {
+  it('check fails when a root gate script loses its canonical command', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    write(
+      consumer,
+      'package.json',
+      JSON.stringify({
+        scripts: { check: 'standards check', 'check:fix': 'standards check' },
+        devDependencies: { '@davidvornholt/standards': '0.1.0' },
+      }),
+    );
+    const check = run(consumer, ['check', '--dir', consumer]);
+    expect(check.status).toBe(1);
+    expect(check.stderr).toContain('monorepo structure problem(s)');
+    expect(check.stderr).toContain('root script "check" must run');
+  });
+
+  it('the structure command validates structure in isolation', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    const ok = run(consumer, ['structure', '--dir', consumer]);
+    expect(ok.status).toBe(0);
+    expect(ok.stdout).toContain('workspace layout matches the standards');
   });
 });
 
