@@ -45,7 +45,6 @@ import { loadGithubSettings } from './github-settings';
 import {
   DEFAULT_SYNC_POLICY,
   inspectSyncPolicy,
-  STANDARDS_SOURCE_PACKAGE_FILE,
   SYNC_POLICY_CONTRACT_VERSION,
   SYNC_POLICY_FILE,
   type SyncPolicy,
@@ -723,10 +722,7 @@ const inspectConsumerSyncPolicy = async (
     packageText:
       (await readTextIfPresent(join(consumer, 'package.json'))) ?? undefined,
     policyText: effectivePolicyText,
-    sourceWorkspacePackageText:
-      (await readTextIfPresent(
-        join(consumer, STANDARDS_SOURCE_PACKAGE_FILE),
-      )) ?? undefined,
+    rootDirectory: consumer,
   });
   if (!existsSync(contractPath)) {
     if (options.allowMissingDefaultContract) {

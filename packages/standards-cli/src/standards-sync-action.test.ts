@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import {
   cpSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -54,11 +55,17 @@ describe('generated standards sync preflight action', () => {
       expect(generated).toBe(readFileSync(ACTION, 'utf8'));
       expect(generated.startsWith(`${BANNER}\n`)).toBe(true);
       expect(generated).toContain('SYNC_POLICY_CONTRACT_VERSION=1');
+      expect(generated).not.toContain('standardsSourceWorkspace');
+      expect(generated).not.toContain('packages/standards-cli/package.json');
       const imports = Array.from(
         generated.matchAll(/\bfrom"(?<specifier>[^"]+)"/gu),
         (match) => match.groups?.specifier,
       );
-      expect(imports).toEqual(['node:fs', 'node:path', 'node:process']);
+      expect(Array.from(new Set(imports)).sort()).toEqual([
+        'node:fs',
+        'node:path',
+        'node:process',
+      ]);
       const metadata = JSON.parse(readFileSync(metafile, 'utf8')) as {
         readonly inputs: Readonly<Record<string, unknown>>;
       };
@@ -71,7 +78,9 @@ describe('generated standards sync preflight action', () => {
       rmSync(directory, { force: true, recursive: true });
     }
   });
+});
 
+describe('generated standards sync preflight execution', () => {
   it('runs from a CommonJS consumer root without a CLI workspace projection', () => {
     const directory = mkdtempSync(join(tmpdir(), 'standards-action-cjs-'));
     const action = join(directory, '.github/actions/standards-sync-preflight');
@@ -83,6 +92,52 @@ describe('generated standards sync preflight action', () => {
         JSON.stringify({
           type: 'commonjs',
           devDependencies: { '@davidvornholt/standards': '0.5.0' },
+        }),
+      );
+      const result = spawnSync('node', [join(action, 'index.mjs')], {
+        cwd: directory,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          [EVENT_NAME_VARIABLE]: 'schedule',
+          [OUTPUT_VARIABLE]: output,
+          [WORKSPACE_VARIABLE]: directory,
+        },
+      });
+
+      expect(result.status).toBe(0);
+      expect(readFileSync(output, 'utf8')).toBe('run_sync=true\n');
+      expect(existsSync(join(directory, 'packages/standards-cli'))).toBe(false);
+    } finally {
+      rmSync(directory, { force: true, recursive: true });
+    }
+  });
+
+  it('discovers a moved source package from a CommonJS root', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'standards-action-source-'));
+    const action = join(directory, '.github/actions/standards-sync-preflight');
+    const packagePath = 'tooling/standards-runtime';
+    const output = join(directory, 'github-output');
+    try {
+      cpSync(ACTION_DIRECTORY, action, { recursive: true });
+      writeFileSync(
+        join(directory, 'package.json'),
+        JSON.stringify({
+          name: 'standards',
+          private: true,
+          type: 'commonjs',
+          workspaces: ['tooling/*'],
+        }),
+      );
+      mkdirSync(join(directory, packagePath), { recursive: true });
+      writeFileSync(
+        join(directory, packagePath, 'package.json'),
+        JSON.stringify({
+          name: '@davidvornholt/standards',
+          version: '0.5.0',
+          repository: { directory: packagePath },
+          bin: { standards: 'src/cli.ts' },
+          exports: {},
         }),
       );
       const result = spawnSync('node', [join(action, 'index.mjs')], {

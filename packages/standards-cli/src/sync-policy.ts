@@ -1,11 +1,8 @@
 import {
   isStandardsSourceWorkspace,
-  STANDARDS_SOURCE_PACKAGE_FILE as SOURCE_PACKAGE_FILE,
   STANDARDS_PACKAGE,
   versionIsCompatible,
 } from './sync-source';
-
-export const STANDARDS_SOURCE_PACKAGE_FILE = SOURCE_PACKAGE_FILE;
 
 export type SyncPolicy = {
   readonly ref: string;
@@ -19,7 +16,7 @@ export type SyncPolicyInspection = {
 type SyncPolicyInspectionInput = {
   readonly packageText: string | undefined;
   readonly policyText: string | undefined;
-  readonly sourceWorkspacePackageText: string | undefined;
+  readonly rootDirectory?: string;
 };
 export const DEFAULT_SYNC_POLICY: SyncPolicy = {
   ref: 'refs/heads/main',
@@ -124,24 +121,10 @@ const inspectPolicy = (
     : null;
 };
 
-const sourcePackageFrom = (
-  sourceWorkspacePackageText: string | undefined,
-): unknown => {
-  const sourcePackage =
-    sourceWorkspacePackageText === undefined
-      ? undefined
-      : parseJson(
-          sourceWorkspacePackageText,
-          STANDARDS_SOURCE_PACKAGE_FILE,
-          [],
-        );
-  return sourcePackage;
-};
-
 export const inspectSyncPolicy = ({
   packageText,
   policyText,
-  sourceWorkspacePackageText,
+  rootDirectory,
 }: SyncPolicyInspectionInput): SyncPolicyInspection => {
   const problems: Array<string> = [];
   const policy = inspectPolicy(policyText, problems);
@@ -161,11 +144,7 @@ export const inspectSyncPolicy = ({
     const version = devDependencies?.[STANDARDS_PACKAGE];
     if (
       (typeof version !== 'string' || !versionIsCompatible(version)) &&
-      !isStandardsSourceWorkspace(
-        packageJson,
-        sourcePackageFrom(sourceWorkspacePackageText),
-        SYNC_POLICY_CONTRACT_VERSION,
-      )
+      !isStandardsSourceWorkspace(packageJson, rootDirectory)
     ) {
       problems.push(compatiblePackageProblem());
     }

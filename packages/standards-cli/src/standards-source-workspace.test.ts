@@ -24,6 +24,7 @@ describe('standards source workspace', () => {
   it('keeps the complete quality gate behind the cheap live-settings precondition', () => {
     const packageJson = JSON.parse(readFileSync(ROOT_PACKAGE, 'utf8')) as {
       readonly scripts: Readonly<Record<string, string>>;
+      readonly standardsSourceWorkspace?: unknown;
     };
     const templatePackage = JSON.parse(
       readFileSync(TEMPLATE_PACKAGE, 'utf8'),
@@ -41,6 +42,7 @@ describe('standards source workspace', () => {
       `${precondition} && turbo run lint:fix check-types test build test:a11y`,
     );
     expect(packageJson.scripts['test:a11y']).toBe('turbo run test:a11y');
+    expect(packageJson.standardsSourceWorkspace).toBeUndefined();
     expect(templatePackage.scripts).toMatchObject({
       check:
         'standards check && turbo run lint check-types test build test:a11y',

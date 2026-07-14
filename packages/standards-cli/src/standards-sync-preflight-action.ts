@@ -4,7 +4,6 @@ import process from 'node:process';
 import {
   inspectSyncPolicy,
   SYNC_POLICY_CONTRACT_VERSION as POLICY_CONTRACT_VERSION,
-  STANDARDS_SOURCE_PACKAGE_FILE,
   SYNC_POLICY_FILE,
 } from './sync-policy';
 
@@ -32,9 +31,7 @@ const main = (): void => {
   const inspection = inspectSyncPolicy({
     packageText: readIfPresent(join(workspace, 'package.json')),
     policyText: readIfPresent(join(workspace, SYNC_POLICY_FILE)),
-    sourceWorkspacePackageText: readIfPresent(
-      join(workspace, STANDARDS_SOURCE_PACKAGE_FILE),
-    ),
+    rootDirectory: workspace,
   });
   if (inspection.policy === null || inspection.problems.length > 0) {
     throw new Error(inspection.problems.join('\n'));

@@ -6,10 +6,6 @@
   "workspaces": [
     "packages/*"
   ],
-  "standardsSourceWorkspace": {
-    "path": "packages/standards-cli",
-    "syncPolicyContractVersion": 1
-  },
   "scripts": {
     "standards": "turbo run standards --filter @davidvornholt/standards --",
     "test:a11y": "turbo run test:a11y",

@@ -137,8 +137,15 @@ describe('standards sync documentation', () => {
       const documentation = readFileSync(path, 'utf8');
       expect(documentation).toContain('@davidvornholt/standards` >=0.5.0');
       expect(documentation).toContain('for every consumer policy');
-      expect(documentation).toContain('source workspace is the sole exception');
-      expect(documentation).toContain('versioned root declaration');
+      expect(documentation).toContain(
+        'source repository is the sole exception',
+      );
+      expect(documentation).toContain(
+        'simple string-array workspace declarations',
+      );
+      expect(documentation).toContain(
+        'source-only root metadata are not identity',
+      );
       expect(documentation).toContain('checked-in explicit-ESM bundle');
       expect(documentation).not.toContain('script wiring');
       expect(documentation).toContain('first land the bucket-2 CLI upgrade');
