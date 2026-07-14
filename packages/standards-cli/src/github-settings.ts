@@ -3,6 +3,10 @@
 
 import { defaultBranchProtectionProblems } from './github-default-branch-settings';
 import { environmentListProblems } from './github-environment-settings';
+import {
+  repositorySettingValueProblem,
+  SUPPORTED_REPOSITORY_SETTING_KEYS,
+} from './github-repository-settings';
 import { rulesetListProblems } from './github-ruleset-settings';
 import { mergeGithubSettings } from './github-settings-merge';
 
@@ -35,28 +39,9 @@ const REPOSITORY_IDENTITY_KEYS = new Set([
   'private',
   'visibility',
 ]);
-export const SUPPORTED_REPOSITORY_SETTING_KEYS = [
-  'allow_auto_merge',
-  'allow_merge_commit',
-  'allow_rebase_merge',
-  'allow_squash_merge',
-  'delete_branch_on_merge',
-  'squash_merge_commit_message',
-  'squash_merge_commit_title',
-] as const;
 const REPOSITORY_SETTING_KEYS = new Set<string>(
   SUPPORTED_REPOSITORY_SETTING_KEYS,
 );
-const BOOLEAN_REPOSITORY_SETTINGS = new Set([
-  'allow_auto_merge',
-  'allow_merge_commit',
-  'allow_rebase_merge',
-  'allow_squash_merge',
-  'delete_branch_on_merge',
-]);
-const SQUASH_COMMIT_MESSAGES = new Set(['BLANK', 'COMMIT_MESSAGES', 'PR_BODY']);
-const SQUASH_COMMIT_TITLES = new Set(['COMMIT_OR_PR_TITLE', 'PR_TITLE']);
-
 type ParseResult = {
   readonly settings: GithubSettings | null;
   readonly problems: ReadonlyArray<string>;
@@ -78,26 +63,12 @@ const repositoryProblems = (
     if (!REPOSITORY_SETTING_KEYS.has(key)) {
       return [`${label} repository has unknown key "${key}"`];
     }
-    if (BOOLEAN_REPOSITORY_SETTINGS.has(key) && typeof value !== 'boolean') {
-      return [`${label} repository."${key}" must be a boolean`];
-    }
-    if (
-      key === 'squash_merge_commit_message' &&
-      !(typeof value === 'string' && SQUASH_COMMIT_MESSAGES.has(value))
-    ) {
-      return [
-        `${label} repository."${key}" must be BLANK, COMMIT_MESSAGES, or PR_BODY`,
-      ];
-    }
-    if (
-      key === 'squash_merge_commit_title' &&
-      !(typeof value === 'string' && SQUASH_COMMIT_TITLES.has(value))
-    ) {
-      return [
-        `${label} repository."${key}" must be COMMIT_OR_PR_TITLE or PR_TITLE`,
-      ];
-    }
-    return [];
+    const problem = repositorySettingValueProblem(
+      key,
+      value,
+      `${label} repository`,
+    );
+    return problem === null ? [] : [problem];
   });
 };
 

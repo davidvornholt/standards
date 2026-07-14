@@ -72,6 +72,7 @@ const conditionsProblems = (
 export const rulesetListProblems = (
   rulesets: ReadonlyArray<unknown>,
   label: string,
+  integrationIdRequired = true,
 ): ReadonlyArray<string> => {
   const problems: Array<string> = [];
   const names = new Set<string>();
@@ -85,7 +86,7 @@ export const rulesetListProblems = (
       }
       names.add(ruleset.name);
     }
-    problems.push(...rulesetProblems(ruleset, prefix));
+    problems.push(...rulesetProblems(ruleset, prefix, integrationIdRequired));
   }
   return problems;
 };
@@ -93,6 +94,7 @@ export const rulesetListProblems = (
 const rulesetProblems = (
   ruleset: unknown,
   prefix: string,
+  integrationIdRequired: boolean,
 ): ReadonlyArray<string> => {
   if (
     !isRecord(ruleset) ||
@@ -114,6 +116,6 @@ const rulesetProblems = (
     ruleset.bypass_actors.length === 0
       ? []
       : [`${prefix}.bypass_actors must be an empty array`]),
-    ...rulesProblems(ruleset.rules, `${prefix}.rules`),
+    ...rulesProblems(ruleset.rules, `${prefix}.rules`, integrationIdRequired),
   ];
 };

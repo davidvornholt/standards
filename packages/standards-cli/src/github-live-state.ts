@@ -13,6 +13,7 @@ import {
   fetchLiveEnvironment,
   type LiveEnvironment,
 } from './github-environments';
+import { decodeLiveRepositorySettings } from './github-repository-settings';
 import { fetchLiveRulesets, type LiveRulesets } from './github-rulesets';
 import { type GithubSettings, isRecord } from './github-settings';
 
@@ -26,6 +27,7 @@ export type GithubLiveState = {
   readonly environments: ReadonlyArray<EnvironmentSnapshot>;
   readonly problems: ReadonlyArray<string>;
   readonly repository: Readonly<Record<string, unknown>>;
+  readonly repositoryInvalidKeys: ReadonlySet<string>;
   readonly rulesets: LiveRulesets;
 };
 
@@ -76,17 +78,24 @@ export const readGithubLiveState = async (
     repositoryResponse.status !== HTTP_OK ||
     !isRecord(repositoryResponse.body)
   ) {
+    const problem = apiError(`reading repository ${repo}`, repositoryResponse);
     return {
       defaultBranch: null,
       environments: [],
-      problems: [apiError(`reading repository ${repo}`, repositoryResponse)],
+      problems: [problem],
       repository: {},
+      repositoryInvalidKeys: new Set(Object.keys(declared.repository)),
       rulesets: {
         problem: 'rulesets were not read because repository identity failed',
         rulesets: null,
       },
     };
   }
+  const repository = decodeLiveRepositorySettings(
+    repositoryResponse.body,
+    declared.repository,
+    detailRequired,
+  );
   const [defaultBranch, rulesets, environments] = await Promise.all([
     declared.defaultBranchProtection === null
       ? Promise.resolve(null)
@@ -96,7 +105,7 @@ export const readGithubLiveState = async (
           repositoryResponse.body,
           detailRequired,
         ),
-    fetchLiveRulesets(token, repo),
+    fetchLiveRulesets(token, repo, detailRequired),
     Promise.all(
       declared.environments.map(async (environment) => ({
         declared: environment,
@@ -105,6 +114,7 @@ export const readGithubLiveState = async (
     ),
   ]);
   const problems = [
+    ...repository.problems,
     ...(defaultBranch?.problem === null || defaultBranch === null
       ? []
       : [defaultBranch.problem]),
@@ -117,7 +127,8 @@ export const readGithubLiveState = async (
     defaultBranch,
     environments,
     problems,
-    repository: repositoryResponse.body,
+    repository: repository.settings,
+    repositoryInvalidKeys: repository.invalidKeys,
     rulesets,
   };
 };
@@ -129,8 +140,13 @@ export const diffGithubLiveState = (
   readonly drifted: ReadonlyArray<string>;
   readonly unverifiable: ReadonlyArray<string>;
 } => {
+  const comparableRepositoryDeclaration = Object.fromEntries(
+    Object.entries(declared.repository).filter(
+      ([key]) => !live.repositoryInvalidKeys.has(key),
+    ),
+  );
   const repository = diffRepositorySettings(
-    declared.repository,
+    comparableRepositoryDeclaration,
     live.repository,
   );
   const rulesets =

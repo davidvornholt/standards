@@ -1,5 +1,8 @@
 import { apiError, HTTP_OK, request } from './github-api';
-import { isRecord } from './github-settings';
+import {
+  decodeRepositoryRulesetDetail,
+  isRepositoryRulesetIdentity,
+} from './github-ruleset-response';
 
 export type LiveRulesets = {
   readonly problem: string | null;
@@ -8,19 +11,6 @@ export type LiveRulesets = {
 
 const PAGE_SIZE = 100;
 const MAX_PAGES = 100;
-
-const validIdentity = (
-  value: unknown,
-  repo: string,
-): value is Record<string, unknown> =>
-  isRecord(value) &&
-  Number.isSafeInteger(value.id) &&
-  Number(value.id) > 0 &&
-  typeof value.name === 'string' &&
-  value.name.length > 0 &&
-  value.source_type === 'Repository' &&
-  typeof value.source === 'string' &&
-  value.source.toLowerCase() === repo.toLowerCase();
 
 const invalid = (detail: string): LiveRulesets => ({
   problem: `listing rulesets: GitHub returned ${detail}`,
@@ -47,7 +37,11 @@ const readSummaries = async (
       rulesets: null,
     };
   }
-  if (!pageResponse.body.every((ruleset) => validIdentity(ruleset, repo))) {
+  if (
+    !pageResponse.body.every((ruleset) =>
+      isRepositoryRulesetIdentity(ruleset, repo),
+    )
+  ) {
     return invalid(`an invalid repository ruleset identity on page ${page}`);
   }
   const summaries = [...previous, ...pageResponse.body];
@@ -69,7 +63,7 @@ const detailMatchesSummary = (
   summary: Readonly<Record<string, unknown>>,
   repo: string,
 ): detail is Record<string, unknown> =>
-  validIdentity(detail, repo) &&
+  isRepositoryRulesetIdentity(detail, repo) &&
   detail.id === summary.id &&
   detail.name === summary.name &&
   String(detail.source).toLowerCase() === String(summary.source).toLowerCase();
@@ -78,6 +72,7 @@ const readDetails = async (
   token: string | null,
   repo: string,
   summaries: ReadonlyArray<Record<string, unknown>>,
+  detailRequired: boolean,
 ): Promise<LiveRulesets> => {
   const details = await Promise.all(
     summaries.map((ruleset) =>
@@ -88,13 +83,19 @@ const readDetails = async (
   if (failed !== undefined) {
     return { problem: apiError('reading a ruleset', failed), rulesets: null };
   }
-  const detailBodies = details.map((detail) => detail.body);
-  if (!detailBodies.every((detail) => validIdentity(detail, repo))) {
-    return invalid('an invalid detailed repository ruleset identity');
+  const decoded = details.map((detail) =>
+    decodeRepositoryRulesetDetail(detail.body, repo, detailRequired),
+  );
+  const failedDecode = decoded.find(({ value }) => value === null);
+  if (failedDecode !== undefined) {
+    return {
+      problem: `listing rulesets: ${failedDecode.problem ?? 'GitHub returned an invalid detailed repository ruleset state'}`,
+      rulesets: null,
+    };
   }
-  const validatedDetails = detailBodies as ReadonlyArray<
-    Record<string, unknown>
-  >;
+  const validatedDetails = decoded.flatMap(({ value }) =>
+    value === null ? [] : [value],
+  );
   if (!uniqueIdentities(validatedDetails)) {
     return invalid('duplicate detailed repository ruleset identities');
   }
@@ -119,6 +120,7 @@ const readDetails = async (
 export const fetchLiveRulesets = async (
   token: string | null,
   repo: string,
+  detailRequired: boolean,
 ): Promise<LiveRulesets> => {
   const summaryRead = await readSummaries(token, repo, 1, []);
   if (summaryRead.rulesets === null) {
@@ -127,5 +129,5 @@ export const fetchLiveRulesets = async (
   if (!uniqueIdentities(summaryRead.rulesets)) {
     return invalid('duplicate repository ruleset identities');
   }
-  return readDetails(token, repo, summaryRead.rulesets);
+  return readDetails(token, repo, summaryRead.rulesets, detailRequired);
 };

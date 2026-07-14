@@ -120,6 +120,7 @@ describe('default branch protection responses', () => {
           environments: [],
           problems: [problem],
           repository: {},
+          repositoryInvalidKeys: new Set(),
           rulesets: { problem: null, rulesets: [] },
         },
       ).drifted,

@@ -36,6 +36,8 @@
     "src/github-environment-settings.ts",
     "src/github-environments.ts",
     "src/github-live-state.ts",
+    "src/github-repository-settings.ts",
+    "src/github-ruleset-response.ts",
     "src/github-ruleset-rule-settings.ts",
     "src/github-ruleset-settings.ts",
     "src/github-rulesets.ts",

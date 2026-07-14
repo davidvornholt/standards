@@ -88,6 +88,7 @@ const pullRequestParameterProblems = (
 const statusParameterProblems = (
   value: unknown,
   prefix: string,
+  integrationIdRequired: boolean,
 ): ReadonlyArray<string> => {
   if (!isRecord(value)) {
     return [`${prefix} must be an object`];
@@ -102,14 +103,17 @@ const statusParameterProblems = (
         unknownKeyProblems(check, STATUS_CHECK_KEYS, prefix).length === 0 &&
         typeof check.context === 'string' &&
         check.context.length > 0 &&
-        Number.isSafeInteger(check.integration_id) &&
-        Number(check.integration_id) > 0,
+        (check.integration_id === undefined
+          ? !integrationIdRequired
+          : Number.isSafeInteger(check.integration_id) &&
+            Number(check.integration_id) > 0),
     );
   const identities = Array.isArray(checks)
     ? checks.flatMap((check) =>
         isRecord(check) &&
         typeof check.context === 'string' &&
-        Number.isSafeInteger(check.integration_id)
+        (check.integration_id === undefined ||
+          Number.isSafeInteger(check.integration_id))
           ? [`${check.context}\u0000${String(check.integration_id)}`]
           : [],
       )
@@ -134,6 +138,7 @@ const statusParameterProblems = (
 const ruleProblems = (
   value: unknown,
   prefix: string,
+  integrationIdRequired: boolean,
 ): ReadonlyArray<string> => {
   if (
     !isRecord(value) ||
@@ -154,7 +159,11 @@ const ruleProblems = (
   if (value.type === 'required_status_checks') {
     return [
       ...unknownKeyProblems(value, RULE_KEYS, prefix),
-      ...statusParameterProblems(value.parameters, `${prefix}.parameters`),
+      ...statusParameterProblems(
+        value.parameters,
+        `${prefix}.parameters`,
+        integrationIdRequired,
+      ),
     ];
   }
   return [`${prefix}.type "${value.type}" is not supported`];
@@ -163,6 +172,7 @@ const ruleProblems = (
 export const rulesProblems = (
   value: unknown,
   prefix: string,
+  integrationIdRequired = true,
 ): ReadonlyArray<string> => {
   if (!Array.isArray(value) || value.length === 0) {
     return [`${prefix} must be a non-empty array`];
@@ -172,7 +182,7 @@ export const rulesProblems = (
   );
   return [
     ...value.flatMap((rule, index) =>
-      ruleProblems(rule, `${prefix}[${index}]`),
+      ruleProblems(rule, `${prefix}[${index}]`, integrationIdRequired),
     ),
     ...(types.length === new Set(types).size
       ? []

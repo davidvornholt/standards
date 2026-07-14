@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { SUPPORTED_REPOSITORY_SETTING_KEYS } from './github-settings';
+import { SUPPORTED_REPOSITORY_SETTING_KEYS } from './github-repository-settings';
 import { REPOSITORY_OWNED_CONTROL_SEAMS } from './sync-control-seams';
 
 const ROOT = join(import.meta.dir, '../../..');

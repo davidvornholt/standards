@@ -120,7 +120,7 @@ export const applyRulesets = async (
 ): Promise<ReadonlyArray<string>> =>
   applyPrefetchedRulesets({
     declared,
-    live: await fetchLiveRulesets(token, repo),
+    live: await fetchLiveRulesets(token, repo, true),
     reportAction,
     repo,
     token,

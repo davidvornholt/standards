@@ -68,6 +68,7 @@ describe('optional classic protection sections', () => {
           environments: [],
           problems: [],
           repository: {},
+          repositoryInvalidKeys: new Set(),
           rulesets: { problem: null, rulesets: [] },
         },
       ).drifted,
