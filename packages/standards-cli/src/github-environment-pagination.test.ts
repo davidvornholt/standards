@@ -5,6 +5,7 @@ const originalFetch = globalThis.fetch;
 const PAGE_SIZE = 100;
 const TOTAL_COUNT = 'total_count';
 const BRANCH_POLICIES = 'branch_policies';
+const NODE_ID = 'node_id';
 
 const response = (body: unknown): Response =>
   new Response(JSON.stringify(body), {
@@ -32,7 +33,7 @@ describe('environment deployment-policy pagination', () => {
                 (_, index) => ({
                   id: page * PAGE_SIZE * PAGE_SIZE + index,
                   name: `p-${page}-${index}`,
-                  type: 'branch',
+                  [NODE_ID]: `node-${page}-${index}`,
                 }),
               ),
             }),

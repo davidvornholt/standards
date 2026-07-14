@@ -95,7 +95,7 @@ describe('applyEnvironment', () => {
     expect(methods).toEqual(['GET', 'GET']);
   });
 
-  it('updates protection before deleting undeclared branch policies', async () => {
+  it('deletes undeclared branch policies before disabling custom mode', async () => {
     const methods: Array<string> = [];
     globalThis.fetch = mockFetch((input, init) => {
       methods.push(init?.method ?? 'GET');
@@ -106,7 +106,7 @@ describe('applyEnvironment', () => {
         return response(
           HTTP_OK,
           JSON.parse(
-            '{"total_count":1,"branch_policies":[{"id":7,"name":"main","type":"branch"}]}',
+            '{"total_count":1,"branch_policies":[{"id":7,"node_id":"node-7","name":"main"}]}',
           ),
         );
       }
@@ -126,10 +126,10 @@ describe('applyEnvironment', () => {
 
     const actions = await applyEnvironment('token', 'owner/repo', declared);
 
-    expect(methods).toEqual(['GET', 'GET', 'GET', 'PUT', 'DELETE']);
+    expect(methods).toEqual(['GET', 'GET', 'GET', 'DELETE', 'PUT']);
     expect(actions).toEqual([
-      'updated environment "standards-sync" protection',
       'deleted undeclared deployment policy "main" from environment "standards-sync"',
+      'updated environment "standards-sync" protection',
     ]);
   });
 });

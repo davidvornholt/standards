@@ -9,6 +9,7 @@ const { MAX_SAFE_INTEGER } = Number;
 const PREVENT_SELF_REVIEW = 'prevent_self_review';
 const TOTAL_COUNT = 'total_count';
 const BRANCH_POLICIES = 'branch_policies';
+const NODE_ID = 'node_id';
 
 const environment = (protectionRules: unknown): unknown =>
   JSON.parse(
@@ -47,18 +48,25 @@ describe('decodeEnvironmentResponse', () => {
 });
 
 describe('decodePolicyPage', () => {
-  it('accepts positive safe ids and nonnegative safe totals at the boundary', () => {
+  it('accepts the official response shape without synthesizing a policy type', () => {
     const decoded = decodePolicyPage(
       {
         [TOTAL_COUNT]: MAX_SAFE_INTEGER,
         [BRANCH_POLICIES]: [
-          { id: MAX_SAFE_INTEGER, name: 'release/*', type: 'tag' },
+          {
+            id: MAX_SAFE_INTEGER,
+            [NODE_ID]: 'MDg6R2F0ZTM=',
+            name: 'release/*',
+          },
         ],
       },
       'production',
     );
 
-    expect(decoded.value).not.toBeNull();
+    expect(decoded.value).toEqual({
+      policies: [{ id: MAX_SAFE_INTEGER, name: 'release/*' }],
+      totalCount: MAX_SAFE_INTEGER,
+    });
   });
 
   it('rejects negative or unsafe totals', () => {
@@ -70,6 +78,21 @@ describe('decodePolicyPage', () => {
         ).problem,
       ).toContain('invalid deployment-policy page');
     }
+  });
+
+  it('rejects duplicate policy names as ambiguous live state', () => {
+    expect(
+      decodePolicyPage(
+        {
+          [TOTAL_COUNT]: 2,
+          [BRANCH_POLICIES]: [
+            { id: 1, [NODE_ID]: 'node-1', name: 'main' },
+            { id: 2, [NODE_ID]: 'node-2', name: 'main' },
+          ],
+        },
+        'production',
+      ).problem,
+    ).toContain('duplicate deployment policy name');
   });
 });
 

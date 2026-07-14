@@ -118,7 +118,7 @@ describe('loadGithubSettings', () => {
 describe('environment settings validation', () => {
   it('rejects unknown keys at every environment record boundary', () => {
     const withUnknownKeys = JSON.parse(
-      '{"name":"standards-sync","wait_timer":0,"prevent_self_review":false,"reviewers":[{"type":"User","id":1,"login":"ignored"}],"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true,"protected_branch":false},"deployment_branch_policies":[{"name":"main","type":"branch","pattern":"main"}],"waitTimer":0}',
+      '{"name":"standards-sync","wait_timer":0,"prevent_self_review":false,"reviewers":[{"type":"User","id":1,"login":"ignored"}],"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true,"protected_branch":false},"deployment_branch_policies":[{"name":"main","pattern":"main"}],"waitTimer":0}',
     );
     const loaded = loadGithubSettings(
       JSON.stringify({ environments: [withUnknownKeys] }),
@@ -136,7 +136,7 @@ describe('environment settings validation', () => {
 
   it('rejects malformed environment protection and deployment policy data', () => {
     const malformed = JSON.parse(
-      '{"name":"standards-sync","wait_timer":-1,"prevent_self_review":"no","reviewers":{},"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":true},"deployment_branch_policies":[{"name":"","type":"branch"}]}',
+      '{"name":"standards-sync","wait_timer":-1,"prevent_self_review":"no","reviewers":{},"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":true},"deployment_branch_policies":[{"name":""}]}',
     );
     const loaded = loadGithubSettings(
       JSON.stringify({ environments: [malformed] }),
@@ -148,7 +148,7 @@ describe('environment settings validation', () => {
       '.github/settings.json environments[0].prevent_self_review must be a boolean',
       '.github/settings.json environments[0].reviewers must be an array',
       '.github/settings.json environments[0].deployment_branch_policy must enable exactly one branch-policy mode',
-      '.github/settings.json environments[0].deployment_branch_policies[0] must have a non-empty name and type "branch" or "tag"',
+      '.github/settings.json environments[0].deployment_branch_policies[0] must have a non-empty branch name pattern',
     ]);
   });
 });

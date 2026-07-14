@@ -60,7 +60,7 @@ const declared = (usesCustomBranches: boolean) => ({
     [CUSTOM_BRANCH_POLICIES]: usesCustomBranches,
   },
   [DEPLOYMENT_BRANCH_POLICIES]: usesCustomBranches
-    ? [{ name: 'release/*', type: 'branch' }]
+    ? [{ name: 'release/*' }]
     : [],
 });
 
@@ -100,7 +100,7 @@ describe('environment reconciliation ordering', () => {
       if (url.includes(branchPath)) {
         return response(HTTP_OK, {
           [TOTAL_COUNT]: 1,
-          [BRANCH_POLICIES]: [{ id: 7, name: 'old/*', type: 'branch' }],
+          [BRANCH_POLICIES]: [{ id: 7, name: 'old/*' }],
         });
       }
       return response(HTTP_OK, environment(true));
@@ -167,7 +167,7 @@ describe('environment reconciliation ordering', () => {
       if (url.includes(branchPath)) {
         return response(HTTP_OK, {
           [TOTAL_COUNT]: 1,
-          [BRANCH_POLICIES]: [{ id: 7, name: 'old/*', type: 'branch' }],
+          [BRANCH_POLICIES]: [{ id: 7, name: 'old/*' }],
         });
       }
       return response(HTTP_OK, environment(true));
@@ -179,8 +179,8 @@ describe('environment reconciliation ordering', () => {
       ),
     ).rejects.toThrow('deleting custom deployment protection rule');
     expect(reported).toEqual([
-      'updated environment "production" protection',
       'deleted undeclared deployment policy "old/*" from environment "production"',
+      'updated environment "production" protection',
     ]);
   });
 });

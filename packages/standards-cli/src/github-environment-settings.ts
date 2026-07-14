@@ -16,7 +16,7 @@ const BRANCH_POLICY_MODE_KEYS = new Set([
   'protected_branches',
   'custom_branch_policies',
 ]);
-const DEPLOYMENT_POLICY_KEYS = new Set(['name', 'type']);
+const DEPLOYMENT_POLICY_KEYS = new Set(['name']);
 const MAX_ENVIRONMENT_NAME_LENGTH = 255;
 export const MAX_WAIT_TIMER = 43_200;
 export const MAX_REVIEWERS = 6;
@@ -94,32 +94,27 @@ const deploymentPolicyProblems = (
   return policies.flatMap((policy, index) => {
     const policyPrefix = `${prefix}.deployment_branch_policies[${index}]`;
     if (!isRecord(policy)) {
-      return [
-        `${policyPrefix} must have a non-empty name and type "branch" or "tag"`,
-      ];
+      return [`${policyPrefix} must have a non-empty branch name pattern`];
     }
-    const validShape =
-      typeof policy.name === 'string' &&
-      policy.name.length > 0 &&
-      (policy.type === 'branch' || policy.type === 'tag');
+    const name =
+      typeof policy.name === 'string' && policy.name.length > 0
+        ? policy.name
+        : null;
     const problems = [
       ...unknownKeyProblems(policy, DEPLOYMENT_POLICY_KEYS, policyPrefix),
-      ...(validShape
-        ? []
-        : [
-            `${policyPrefix} must have a non-empty name and type "branch" or "tag"`,
-          ]),
+      ...(name === null
+        ? [`${policyPrefix} must have a non-empty branch name pattern`]
+        : []),
     ];
-    if (!validShape) {
+    if (name === null) {
       return problems;
     }
-    const key = `${policy.type}:${policy.name}`;
-    if (names.has(key)) {
+    if (names.has(name)) {
       problems.push(
         `${prefix} declares deployment policy "${policy.name}" more than once`,
       );
     } else {
-      names.add(key);
+      names.add(name);
     }
     return problems;
   });

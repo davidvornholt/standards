@@ -22,7 +22,7 @@ describe('diffEnvironment', () => {
       diffEnvironment(
         declared,
         JSON.parse(
-          '{"name":"standards-sync","wait_timer":0,"prevent_self_review":false,"reviewers":[],"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false},"deployment_branch_policies":[{"name":"main","type":"branch","id":1}],"custom_deployment_protection_rules":[]}',
+          '{"name":"standards-sync","wait_timer":0,"prevent_self_review":false,"reviewers":[],"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false},"deployment_branch_policies":[{"name":"main","id":1}],"custom_deployment_protection_rules":[]}',
         ) as Record<string, unknown>,
       ),
     ).toEqual([

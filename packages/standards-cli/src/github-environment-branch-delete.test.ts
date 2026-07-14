@@ -47,7 +47,7 @@ describe('environment branch-policy deletion failure', () => {
             response(
               HTTP_OK,
               JSON.parse(
-                '{"total_count":1,"branch_policies":[{"id":7,"name":"old/*","type":"branch"}]}',
+                '{"total_count":1,"branch_policies":[{"id":7,"node_id":"node-7","name":"old/*"}]}',
               ) as unknown,
             ),
           );
@@ -69,7 +69,7 @@ describe('environment branch-policy deletion failure', () => {
         'token',
         'owner/repo',
         JSON.parse(
-          '{"name":"production","wait_timer":0,"prevent_self_review":false,"reviewers":[],"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true},"deployment_branch_policies":[{"name":"release/*","type":"branch"}]}',
+          '{"name":"production","wait_timer":0,"prevent_self_review":false,"reviewers":[],"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true},"deployment_branch_policies":[{"name":"release/*"}]}',
         ) as Record<string, unknown>,
         (action) => reported.push(action),
       ),

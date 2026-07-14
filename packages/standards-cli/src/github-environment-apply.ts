@@ -1,5 +1,7 @@
 import { apiError, HTTP_NO_CONTENT, HTTP_OK, request } from './github-api';
-import { diffEnvironment } from './github-diff';
+import { subsetMatches } from './github-diff';
+import type { ReportAction } from './github-environment-branch-apply';
+import { reconcileBranchPolicies } from './github-environment-transition-apply';
 import {
   environmentPath,
   fetchLiveEnvironment,
@@ -12,8 +14,12 @@ const PREVENT_SELF_REVIEW = 'prevent_self_review';
 const DEPLOYMENT_BRANCH_POLICY = 'deployment_branch_policy';
 const DEPLOYMENT_BRANCH_POLICIES = 'deployment_branch_policies';
 const CUSTOM_DEPLOYMENT_PROTECTION_RULES = 'custom_deployment_protection_rules';
-
-type ReportAction = (action: string) => void;
+const PROTECTION_KEYS = [
+  WAIT_TIMER,
+  PREVENT_SELF_REVIEW,
+  'reviewers',
+  DEPLOYMENT_BRANCH_POLICY,
+] as const;
 
 type ApplyContext = {
   readonly token: string;
@@ -21,8 +27,8 @@ type ApplyContext = {
   readonly name: string;
 };
 
-const policyKey = (policy: Readonly<Record<string, unknown>>): string =>
-  `${String(policy.type)}:${String(policy.name)}`;
+const usesCustomPolicies = (policy: unknown): boolean =>
+  isRecord(policy) && policy.custom_branch_policies === true;
 
 const updateProtection = async (
   context: ApplyContext,
@@ -31,12 +37,8 @@ const updateProtection = async (
 ): Promise<string | null> => {
   const protectionDrifted =
     live.environment !== null &&
-    diffEnvironment(declared, live.environment).some(
-      (problem) =>
-        !(
-          problem.includes(DEPLOYMENT_BRANCH_POLICIES) ||
-          problem.includes(CUSTOM_DEPLOYMENT_PROTECTION_RULES)
-        ),
+    PROTECTION_KEYS.some(
+      (key) => !subsetMatches(declared[key], live.environment?.[key]),
     );
   if (!(live.missing || protectionDrifted)) {
     return null;
@@ -53,66 +55,6 @@ const updateProtection = async (
     );
   }
   return `${live.missing ? 'created' : 'updated'} environment "${context.name}" protection`;
-};
-
-const deleteUndeclaredPolicies = async (
-  context: ApplyContext,
-  livePolicies: ReadonlyArray<Readonly<Record<string, unknown>>>,
-  declaredKeys: ReadonlySet<string>,
-  reportAction: ReportAction,
-): Promise<ReadonlyArray<string>> => {
-  const actions: Array<string> = [];
-  for (const policy of livePolicies) {
-    if (!declaredKeys.has(policyKey(policy))) {
-      // biome-ignore lint/performance/noAwaitInLoops: GitHub write requests are intentionally serialized to avoid secondary rate limits.
-      const deleted = await request(
-        context.token,
-        'DELETE',
-        `${context.path}/deployment-branch-policies/${policy.id}`,
-      );
-      if (deleted.status !== HTTP_NO_CONTENT) {
-        throw new Error(
-          apiError(
-            `deleting deployment policy from "${context.name}"`,
-            deleted,
-          ),
-        );
-      }
-      const action = `deleted undeclared deployment policy "${policy.name}" from environment "${context.name}"`;
-      actions.push(action);
-      reportAction(action);
-    }
-  }
-  return actions;
-};
-
-const createMissingPolicies = async (
-  context: ApplyContext,
-  declaredPolicies: ReadonlyArray<Readonly<Record<string, unknown>>>,
-  liveKeys: ReadonlySet<string>,
-  reportAction: ReportAction,
-): Promise<ReadonlyArray<string>> => {
-  const actions: Array<string> = [];
-  for (const policy of declaredPolicies) {
-    if (!liveKeys.has(policyKey(policy))) {
-      // biome-ignore lint/performance/noAwaitInLoops: GitHub write requests are intentionally serialized to avoid secondary rate limits.
-      const created = await request(
-        context.token,
-        'POST',
-        `${context.path}/deployment-branch-policies`,
-        { name: policy.name, type: policy.type },
-      );
-      if (created.status !== HTTP_OK) {
-        throw new Error(
-          apiError(`creating deployment policy in "${context.name}"`, created),
-        );
-      }
-      const action = `created deployment policy "${policy.name}" for environment "${context.name}"`;
-      actions.push(action);
-      reportAction(action);
-    }
-  }
-  return actions;
 };
 
 const deleteCustomProtectionRules = async (
@@ -170,26 +112,21 @@ export const applyEnvironment = async (
   )
     ? live.environment[CUSTOM_DEPLOYMENT_PROTECTION_RULES].filter(isRecord)
     : [];
-  const actions: Array<string> = [];
-  const protection = await updateProtection(context, declared, live);
-  if (protection !== null) {
-    actions.push(protection);
-    reportAction(protection);
-  }
-  const created = await createMissingPolicies(
-    context,
-    declaredPolicies,
-    new Set(livePolicies.map(policyKey)),
-    reportAction,
-  );
-  actions.push(...created);
-  const deleted = await deleteUndeclaredPolicies(
-    context,
-    livePolicies,
-    new Set(declaredPolicies.map(policyKey)),
-    reportAction,
-  );
-  actions.push(...deleted);
+  const actions = [
+    ...(await reconcileBranchPolicies({
+      context,
+      declaredPolicies,
+      declaredUsesCustom: usesCustomPolicies(
+        declared[DEPLOYMENT_BRANCH_POLICY],
+      ),
+      livePolicies,
+      liveUsesCustom: usesCustomPolicies(
+        live.environment?.[DEPLOYMENT_BRANCH_POLICY],
+      ),
+      reportAction,
+      updateProtection: () => updateProtection(context, declared, live),
+    })),
+  ];
   const deletedCustom = await deleteCustomProtectionRules(
     context,
     customProtectionRules,

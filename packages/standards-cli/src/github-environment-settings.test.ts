@@ -9,6 +9,8 @@ const WAIT_TIMER = 'wait_timer';
 const PREVENT_SELF_REVIEW = 'prevent_self_review';
 const DEPLOYMENT_BRANCH_POLICY = 'deployment_branch_policy';
 const DEPLOYMENT_BRANCH_POLICIES = 'deployment_branch_policies';
+const PROTECTED_BRANCHES = 'protected_branches';
+const CUSTOM_BRANCH_POLICIES = 'custom_branch_policies';
 
 const validEnvironment = (name: string): Record<string, unknown> => ({
   ...JSON.parse(
@@ -78,9 +80,9 @@ describe('environmentListProblems', () => {
         '{"protected_branches":true,"custom_branch_policies":true,"typo":false}',
       ),
       [DEPLOYMENT_BRANCH_POLICIES]: [
-        { name: 'main', type: 'branch', extra: true },
-        { name: 'main', type: 'branch', duplicate: true },
-        { name: '', type: 'commit', pattern: '*' },
+        { name: 'main', extra: true },
+        { name: 'main', duplicate: true },
+        { name: '', pattern: '*' },
         null,
       ],
     };
@@ -107,7 +109,24 @@ describe('environmentListProblems', () => {
       'settings environments[0].deployment_branch_policies[2] has unknown key "pattern"',
     );
     expect(problems).toContain(
-      'settings environments[0].deployment_branch_policies[3] must have a non-empty name and type "branch" or "tag"',
+      'settings environments[0].deployment_branch_policies[3] must have a non-empty branch name pattern',
     );
+  });
+
+  it('rejects policy types that cannot be reconciled from GitHub reads', () => {
+    for (const type of ['branch', 'tag']) {
+      const environment = {
+        ...validEnvironment('standards-sync'),
+        [DEPLOYMENT_BRANCH_POLICY]: {
+          [PROTECTED_BRANCHES]: false,
+          [CUSTOM_BRANCH_POLICIES]: true,
+        },
+        [DEPLOYMENT_BRANCH_POLICIES]: [{ name: 'main', type }],
+      };
+
+      expect(environmentListProblems([environment], 'settings')).toEqual([
+        'settings environments[0].deployment_branch_policies[0] has unknown key "type"',
+      ]);
+    }
   });
 });

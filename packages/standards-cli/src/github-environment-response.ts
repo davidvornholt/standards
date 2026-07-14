@@ -174,16 +174,20 @@ export const decodePolicyPage = (
     return invalid(context, 'an invalid deployment-policy page');
   }
   const policies: Array<Readonly<Record<string, unknown>>> = [];
+  const names = new Set<string>();
   for (const policy of body.branch_policies) {
     if (
       !(isRecord(policy) && isPositiveSafeInteger(policy.id)) ||
       typeof policy.name !== 'string' ||
-      policy.name.length === 0 ||
-      (policy.type !== 'branch' && policy.type !== 'tag')
+      policy.name.length === 0
     ) {
       return invalid(context, 'an invalid deployment policy');
     }
-    policies.push({ id: policy.id, name: policy.name, type: policy.type });
+    if (names.has(policy.name)) {
+      return invalid(context, 'a duplicate deployment policy name');
+    }
+    names.add(policy.name);
+    policies.push({ id: policy.id, name: policy.name });
   }
   return {
     problem: null,
