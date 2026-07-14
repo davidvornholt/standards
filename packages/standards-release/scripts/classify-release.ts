@@ -1,5 +1,5 @@
 import { appendGithubOutput } from '../src/github-output';
-import { classifyReleaseDeclaration } from '../src/release-declaration';
+import { parseStableVersion } from '../src/release-declaration';
 import { argv, runtimeProcess, stderr, write } from '../src/release-runtime';
 
 const FAILURE_EXIT_CODE = 1;
@@ -16,7 +16,7 @@ const reportError = (message: string): Promise<typeof FAILURE_EXIT_CODE> =>
 const main = (): Promise<
   typeof FAILURE_EXIT_CODE | typeof SUCCESS_EXIT_CODE
 > => {
-  const [output, version, parentVersion] = argv.slice(2);
+  const [output, version] = argv.slice(2);
   const outputPath = required(output, 'GitHub output path');
   if (!outputPath.ok) {
     return reportError(outputPath.message);
@@ -25,18 +25,12 @@ const main = (): Promise<
   if (!releaseVersion.ok) {
     return reportError(releaseVersion.message);
   }
-  const classification = classifyReleaseDeclaration({
-    parentVersion:
-      parentVersion === undefined || parentVersion === ''
-        ? null
-        : parentVersion,
-    version: releaseVersion.value,
-  });
-  if (!classification.ok) {
-    return reportError(classification.message);
+  if (parseStableVersion(releaseVersion.value) === null) {
+    return reportError(
+      `Version ${releaseVersion.value} must be a stable SemVer`,
+    );
   }
   return appendGithubOutput(outputPath.value, {
-    declared: classification.declared,
     tag: `v${releaseVersion.value}`,
     version: releaseVersion.value,
   })

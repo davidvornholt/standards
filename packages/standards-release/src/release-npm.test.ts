@@ -2,8 +2,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { flip, runPromise } from './release-effect';
 import { inspectNpmRelease, type ReleaseFetcher } from './release-npm';
 import {
+  CURRENT_SHA,
   createReleaseNpmTestFixture,
+  PUBLISHED_SHA,
   type ReleaseNpmTestFixture,
+  TARBALL_URL,
 } from './release-npm-test-fixture';
 
 let fixture: ReleaseNpmTestFixture;
@@ -19,177 +22,163 @@ afterAll(async () => {
 });
 
 describe('npm release inspection', () => {
-  it('accepts matching registry bytes and source metadata', async () => {
-    expect(
-      await runPromise(fixture.effect(fixture.fetchJson(fixture.metadata()))),
-    ).toEqual({
-      integrity: fixture.integrity,
-      publish: false,
-      reconcile: true,
-    });
-  });
-
-  it('reconciles an identity-verified historical version behind latest', async () => {
+  it('verifies an immutable published artifact and returns its source', async () => {
     expect(
       await runPromise(
         fixture.effect(
-          fixture.fetchJson(fixture.metadata({ gitHead: undefined }, '0.6.0')),
+          fixture.fetchRegistry({ metadataBody: fixture.metadata() }),
         ),
       ),
     ).toEqual({
-      integrity: fixture.integrity,
       publish: false,
       reconcile: true,
+      releaseSha: PUBLISHED_SHA,
+    });
+    expect(
+      await runPromise(
+        fixture.effect(
+          fixture.fetchRegistry({
+            metadataBody: fixture.metadata({}, '0.6.0'),
+          }),
+        ),
+      ),
+    ).toEqual({
+      publish: false,
+      reconcile: true,
+      releaseSha: PUBLISHED_SHA,
     });
   });
 
-  it('publishes a packed initial artifact only after package 404', async () => {
+  it('publishes an absent current version regardless of its parent hint', async () => {
     expect(
       await runPromise(
         inspectNpmRelease({
-          artifact: fixture.artifact,
-          expectedSha: 'expected',
-          fetcher: fixture.fetchJson({ error: 'Not found' }, HTTP_NOT_FOUND),
+          currentSha: CURRENT_SHA,
+          fetcher: fixture.fetchRegistry({
+            metadataBody: { error: 'Not found' },
+            metadataStatus: HTTP_NOT_FOUND,
+          }),
           name: '@davidvornholt/new-package',
-          parentVersion: null,
-          version: '0.1.0',
+          version: '0.5.0',
         }),
       ),
-    ).toEqual({ integrity: fixture.integrity, publish: true, reconcile: true });
+    ).toEqual({
+      publish: true,
+      reconcile: true,
+      releaseSha: CURRENT_SHA,
+    });
   });
 
-  it('rejects missing or invalid latest on package metadata 200', async () => {
-    const cases = [
-      { expectedTag: 'NpmRegistryError', tags: {} },
-      { expectedTag: 'NpmRegistryError', tags: { latest: 42 } },
-      {
-        expectedTag: 'ReleaseValidationError',
-        tags: { latest: 'not-semver' },
-      },
-    ] as const;
+  it('rejects invalid metadata and an absent version behind latest', async () => {
     const failures = await Promise.all(
-      cases.map(({ tags }) =>
+      [
+        { 'dist-tags': {}, versions: {} },
+        { 'dist-tags': { latest: 42 }, versions: {} },
+        { 'dist-tags': { latest: 'not-semver' }, versions: {} },
+        { 'dist-tags': { latest: '0.6.0' }, versions: {} },
+      ].map((metadataBody) =>
         runPromise(
-          flip(
-            fixture.effect(
-              fixture.fetchJson({
-                'dist-tags': tags,
-                versions: {},
-              }),
-            ),
-          ),
+          flip(fixture.effect(fixture.fetchRegistry({ metadataBody }))),
         ),
       ),
     );
-    for (const [index, failure] of failures.entries()) {
-      expect(failure).toMatchObject({
-        _tag: cases[index]?.expectedTag,
-      });
-    }
-  });
-
-  it('rejects publishing an absent historical version behind latest', async () => {
-    expect(
-      await runPromise(
-        flip(
-          fixture.effect(
-            fixture.fetchJson({
-              'dist-tags': { latest: '0.6.0' },
-              versions: {},
-            }),
-          ),
-        ),
-      ),
-    ).toMatchObject({
-      _tag: 'ReleaseValidationError',
-      message: 'Manifest version 0.5.0 is behind npm latest 0.6.0',
-    });
+    expect(failures.map((failure) => failure._tag)).toEqual([
+      'NpmRegistryError',
+      'NpmRegistryError',
+      'ReleaseValidationError',
+      'ReleaseValidationError',
+    ]);
   });
 });
 
 describe('npm artifact identity failures', () => {
-  it('rejects mismatched registry bytes and source metadata', async () => {
-    const integrityFailure = await runPromise(
-      flip(
-        fixture.effect(
-          fixture.fetchJson(
-            fixture.metadata({ dist: { integrity: 'sha512-other' } }),
-          ),
-        ),
-      ),
-    );
-    expect(integrityFailure).toMatchObject({
-      _tag: 'ArtifactIdentityError',
-      message: `Existing npm artifact integrity sha512-other does not match expected ${fixture.integrity}`,
-    });
-    const sourceFailure = await runPromise(
-      flip(
-        fixture.effect(
-          fixture.fetchJson(fixture.metadata({ gitHead: 'other' })),
-        ),
-      ),
-    );
-    expect(sourceFailure).toMatchObject({
-      _tag: 'ArtifactIdentityError',
-      message:
-        'Existing npm artifact gitHead other does not match expected expected',
-    });
-    const markerFailure = await runPromise(
-      flip(
-        inspectNpmRelease({
-          artifact: fixture.artifact,
-          expectedSha: 'other',
-          fetcher: fixture.fetchJson(fixture.metadata({ gitHead: undefined })),
-          name: '@davidvornholt/standards',
-          parentVersion: '0.4.0',
-          version: '0.5.0',
+  it('rejects mismatched SRI and legacy artifacts', async () => {
+    const cases = [
+      {
+        fetcher: fixture.fetchRegistry({
+          metadataBody: fixture.metadata({
+            dist: { integrity: 'sha512-other', tarball: TARBALL_URL },
+          }),
         }),
+        message: 'does not match expected sha512-other',
+      },
+      {
+        fetcher: fixture.fetchRegistry({
+          artifactPath: fixture.unmarkedArtifact,
+          metadataBody: fixture.metadata({
+            dist: {
+              integrity: fixture.unmarkedIntegrity,
+              tarball: TARBALL_URL,
+            },
+          }),
+        }),
+        message: 'Package artifact has no package/SOURCE_COMMIT',
+      },
+    ];
+    const failures = await Promise.all(
+      cases.map((testCase) =>
+        runPromise(flip(fixture.effect(testCase.fetcher))),
       ),
     );
-    expect(markerFailure).toMatchObject({
-      _tag: 'ArtifactIdentityError',
-      message: 'Package source commit expected does not match expected other',
-    });
-  });
-
-  it('fails closed for a legacy artifact without a source marker', async () => {
-    expect(
-      await runPromise(
+    for (const [index, failure] of failures.entries()) {
+      expect(failure).toMatchObject({ _tag: 'ArtifactIdentityError' });
+      expect(failure.message).toContain(cases[index]?.message ?? 'missing');
+    }
+    const manifestMismatches = await Promise.all([
+      runPromise(
         flip(
           inspectNpmRelease({
-            artifact: fixture.unmarkedArtifact,
-            expectedSha: 'expected',
-            fetcher: fixture.fetchJson(
-              fixture.metadata(
-                { gitHead: undefined },
-                '0.5.0',
-                fixture.unmarkedIntegrity,
-              ),
-            ),
-            name: '@davidvornholt/standards',
-            parentVersion: '0.4.0',
+            currentSha: CURRENT_SHA,
+            fetcher: fixture.fetchRegistry({
+              metadataBody: fixture.metadata(),
+            }),
+            name: '@davidvornholt/other',
             version: '0.5.0',
           }),
         ),
       ),
-    ).toMatchObject({
-      _tag: 'ArtifactIdentityError',
-      message: 'Package artifact has no readable package/SOURCE_COMMIT',
-    });
+      runPromise(
+        flip(
+          inspectNpmRelease({
+            currentSha: CURRENT_SHA,
+            fetcher: fixture.fetchRegistry({
+              metadataBody: fixture.metadata({}, '0.6.0', '0.6.0'),
+            }),
+            name: '@davidvornholt/standards',
+            version: '0.6.0',
+          }),
+        ),
+      ),
+    ]);
+    expect(
+      manifestMismatches.every(
+        (failure) => failure._tag === 'ArtifactIdentityError',
+      ),
+    ).toBeTrue();
   });
 
-  it('fails closed on registry and transport errors', async () => {
-    const apiFailure = await runPromise(
+  it('fails closed on incomplete metadata, registry, and transport errors', async () => {
+    const incomplete = await runPromise(
       flip(
         fixture.effect(
-          fixture.fetchJson({ error: 'unavailable' }, HTTP_UNAVAILABLE),
+          fixture.fetchRegistry({
+            metadataBody: fixture.metadata({ dist: {} }),
+          }),
         ),
       ),
     );
-    expect(apiFailure).toMatchObject({
-      _tag: 'NpmRegistryError',
-      message: 'Reading npm metadata failed with HTTP 503',
-    });
+    expect(incomplete).toMatchObject({ _tag: 'NpmRegistryError' });
+    const unavailable = await runPromise(
+      flip(
+        fixture.effect(
+          fixture.fetchRegistry({
+            metadataBody: fixture.metadata(),
+            tarballStatus: HTTP_UNAVAILABLE,
+          }),
+        ),
+      ),
+    );
+    expect(unavailable).toMatchObject({ _tag: 'NpmRegistryError' });
     const failingFetch: ReleaseFetcher = () =>
       Promise.reject(new Error('network down'));
     expect(await runPromise(flip(fixture.effect(failingFetch)))).toMatchObject({

@@ -3,7 +3,9 @@ import { spawnSync } from 'bun';
 import { runPromise } from './release-effect';
 import { inspectNpmRelease } from './release-npm';
 import {
+  CURRENT_SHA,
   createReleaseNpmTestFixture,
+  PUBLISHED_SHA,
   type ReleaseNpmTestFixture,
 } from './release-npm-test-fixture';
 
@@ -18,8 +20,27 @@ afterAll(async () => {
   await fixture.dispose();
 });
 
-describe('npm first-publish retry identity', () => {
-  it('accepts retry identity after rewriting a stale caller gitHead', async () => {
+describe('npm release recovery', () => {
+  it('recovers a failed or coalesced bump from the next tested commit', async () => {
+    const plan = await runPromise(
+      inspectNpmRelease({
+        currentSha: CURRENT_SHA,
+        fetcher: fixture.fetchRegistry({
+          metadataBody: { error: 'Not found' },
+          metadataStatus: HTTP_NOT_FOUND,
+        }),
+        name: '@davidvornholt/standards',
+        version: '0.5.0',
+      }),
+    );
+    expect(plan).toEqual({
+      publish: true,
+      reconcile: true,
+      releaseSha: CURRENT_SHA,
+    });
+  });
+
+  it('reconciles npm-success/GitHub-failure to the published source', async () => {
     expect(
       JSON.parse(
         spawnSync([
@@ -29,29 +50,17 @@ describe('npm first-publish retry identity', () => {
           'package/package.json',
         ]).stdout.toString(),
       ),
-    ).toMatchObject({ gitHead: 'expected' });
+    ).toMatchObject({ gitHead: PUBLISHED_SHA });
     expect(
       await runPromise(
-        inspectNpmRelease({
-          artifact: fixture.artifact,
-          expectedSha: 'expected',
-          fetcher: fixture.fetchJson({ error: 'Not found' }, HTTP_NOT_FOUND),
-          name: '@davidvornholt/new-package',
-          parentVersion: null,
-          version: '0.1.0',
-        }),
+        fixture.effect(
+          fixture.fetchRegistry({ metadataBody: fixture.metadata() }),
+        ),
       ),
     ).toEqual({
-      integrity: fixture.integrity,
-      publish: true,
-      reconcile: true,
-    });
-    expect(
-      await runPromise(fixture.effect(fixture.fetchJson(fixture.metadata()))),
-    ).toEqual({
-      integrity: fixture.integrity,
       publish: false,
       reconcile: true,
+      releaseSha: PUBLISHED_SHA,
     });
   });
 });

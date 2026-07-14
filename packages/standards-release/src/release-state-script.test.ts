@@ -48,19 +48,10 @@ const run = (
 };
 
 describe('release workflow wrappers', () => {
-  it('classifies declarations and writes stable workflow outputs', async () => {
-    expect(
-      await run('classify-release.ts', ['$OUTPUT', '0.5.0', '0.4.0']),
-    ).toEqual({
+  it('validates declarations and writes stable workflow outputs', async () => {
+    expect(await run('classify-release.ts', ['$OUTPUT', '0.5.0'])).toEqual({
       exitCode: 0,
-      output: 'declared=true\ntag=v0.5.0\nversion=0.5.0\n',
-      stderr: '',
-    });
-    expect(
-      await run('classify-release.ts', ['$OUTPUT', '0.5.0', '0.5.0']),
-    ).toEqual({
-      exitCode: 0,
-      output: 'declared=false\ntag=v0.5.0\nversion=0.5.0\n',
+      output: 'tag=v0.5.0\nversion=0.5.0\n',
       stderr: '',
     });
   });
@@ -69,17 +60,12 @@ describe('release workflow wrappers', () => {
     const invalidVersion = await run('classify-release.ts', [
       '$OUTPUT',
       'not-semver',
-      'not-semver',
     ]);
     expect(invalidVersion.exitCode).toBe(1);
     expect(invalidVersion.stderr).toContain(
       '::error::Version not-semver must be a stable SemVer',
     );
-    const missingOutput = await run('classify-release.ts', [
-      '',
-      '0.5.0',
-      '0.4.0',
-    ]);
+    const missingOutput = await run('classify-release.ts', ['', '0.5.0']);
     expect(missingOutput.exitCode).toBe(1);
     expect(missingOutput.stderr).toContain(
       '::error::GitHub output path is required',

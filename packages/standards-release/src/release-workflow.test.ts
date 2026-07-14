@@ -17,6 +17,10 @@ const ABSOLUTE_PACKAGE_PATH =
   /PACKAGE_PATH: \$\{\{ github\.workspace \}\}\/packages\/standards-cli/u;
 const TESTED_SHA_CHECKOUT =
   /ref: \$\{\{ github\.event\.workflow_run\.head_sha \}\}/u;
+const githubExpression = (value: string): string => `$${`{{ ${value} }}`}`;
+const NPM_RELEASE_SHA = `RELEASE_SHA: ${githubExpression('steps.npm.outputs.release_sha')}`;
+const RELEASE_JOB_SHA = `RELEASE_SHA: ${githubExpression('needs.publish.outputs.release_sha')}`;
+const RELEASE_TOOL_CHECKOUT = `ref: ${githubExpression('needs.publish.outputs.tool_sha')}`;
 
 const position = (text: string): number => workflow.indexOf(text);
 
@@ -57,7 +61,7 @@ describe('CLI release workflow authorization', () => {
 });
 
 describe('CLI release workflow', () => {
-  it('classifies before install and gates release work on the declaration', () => {
+  it('validates cheaply before authoritative npm inspection', () => {
     const declaration = position('- name: Determine release declaration');
     const install = position('- name: Install release tooling');
     const pack = position('- name: Pack and inspect package');
@@ -68,13 +72,15 @@ describe('CLI release workflow', () => {
       -1,
     );
     expect(declaration).toBeLessThan(install);
-    expect(install).toBeLessThan(pack);
-    expect(pack).toBeLessThan(npm);
-    expect(npm).toBeLessThan(github);
+    expect(install).toBeLessThan(npm);
+    expect(npm).toBeLessThan(pack);
+    expect(pack).toBeLessThan(github);
     expect(github).toBeLessThan(publish);
-    expect(workflow).toContain('npm "$GITHUB_OUTPUT" "$PACKAGE_NAME"');
-    expect(workflow).toContain('github-inspect');
     expect(workflow).toContain(
+      'npm "$GITHUB_OUTPUT" "$PACKAGE_NAME" "$RELEASE_VERSION"',
+    );
+    expect(workflow).toContain('github-inspect');
+    expect(workflow).not.toContain(
       "if: steps.declaration.outputs.declared == 'true'",
     );
     expect(workflow).toContain('run: bun install --frozen-lockfile');
@@ -84,6 +90,8 @@ describe('CLI release workflow', () => {
     expect(workflow).toContain(
       '.devDependencies[$name] | select(type == "string")',
     );
+    expect(workflow).toContain('ROOT_PACKAGE_PATH: package.json');
+    expect(workflow).toContain('"$root_version" != "$version"');
     expect(workflow).toContain('"$template_version" != "$version"');
     expect(workflow).toContain(
       'pack "$GITHUB_OUTPUT" "$PACKAGE_PATH" "$artifact_dir" "$RELEASE_SHA"',
@@ -93,11 +101,27 @@ describe('CLI release workflow', () => {
     expect(classifier).not.toContain("from 'effect");
   });
 
-  it('represents a missing parent without making git show fatal', () => {
-    expect(workflow).toContain(
-      'if git cat-file -e "$RELEASE_SHA^:$PACKAGE_PATH" 2>/dev/null; then',
+  it('does not let first-parent state gate npm inspection', () => {
+    expect(workflow).not.toContain('parent_version');
+    expect(workflow).not.toContain('$RELEASE_SHA^:');
+    expect(workflow).toContain('"$GITHUB_OUTPUT" "$version"');
+  });
+});
+
+describe('CLI release workflow recovery', () => {
+  it('recovers from coalesced runs through npm artifact identity', () => {
+    const npm = position('- name: Inspect npm release boundary');
+    const ancestry = position(
+      '- name: Verify release commit is in tested history',
     );
-    expect(workflow).toContain('"$GITHUB_OUTPUT" "$version" "$parent_version"');
+    const pack = position('- name: Pack and inspect package');
+    expect(npm).toBeLessThan(ancestry);
+    expect(ancestry).toBeLessThan(pack);
+    expect(workflow).toContain("if: steps.npm.outputs.publish == 'true'");
+    expect(workflow).toContain(NPM_RELEASE_SHA);
+    expect(workflow).toContain(
+      'git merge-base --is-ancestor "$RELEASE_SHA" "$TESTED_SHA"',
+    );
   });
 
   it('uses the tested helper for fail-closed GitHub reconciliation', () => {
@@ -144,8 +168,11 @@ describe('CLI release workflow', () => {
     );
     expect(outputs).toContain('reconcile:');
     expect(outputs).toContain('tag:');
-    expect(outputs).toContain('sha:');
+    expect(outputs).toContain('release_sha:');
+    expect(outputs).toContain('tool_sha:');
     expect(outputs).not.toContain('publish:');
     expect(outputs).not.toContain('version:');
+    expect(workflow).toContain(RELEASE_TOOL_CHECKOUT);
+    expect(workflow).toContain(RELEASE_JOB_SHA);
   });
 });

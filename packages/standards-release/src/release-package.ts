@@ -1,4 +1,3 @@
-import { ArtifactIdentityError } from './artifact-identity-error';
 import {
   all,
   effectTry,
@@ -15,7 +14,6 @@ import { rewritePackedArtifact } from './release-package-rewrite';
 import { argv, nodeLstat, spawn } from './release-runtime';
 
 export const SOURCE_COMMIT_FILE = 'SOURCE_COMMIT';
-const ARCHIVE_SOURCE_COMMIT = `package/${SOURCE_COMMIT_FILE}`;
 
 type CommandResult = {
   readonly exitCode: number;
@@ -61,36 +59,6 @@ const releasePackageOperationError: OperationError<ReleasePackageError> = (
   new ReleasePackageError({
     message: `Packing release artifact failed while ${operation}: ${String(cause)}`,
   });
-
-export const verifyArtifactSourceCommit = (input: {
-  readonly artifact: string;
-  readonly expectedSha: string;
-}) =>
-  run(
-    ['tar', '-xOzf', input.artifact, ARCHIVE_SOURCE_COMMIT],
-    (operation, cause) =>
-      new ArtifactIdentityError({
-        message: `Reading package source commit failed while ${operation}: ${String(cause)}`,
-      }),
-  ).pipe(
-    flatMap((result) => {
-      if (result.exitCode !== 0) {
-        return fail(
-          new ArtifactIdentityError({
-            message: `Package artifact has no readable ${ARCHIVE_SOURCE_COMMIT}`,
-          }),
-        );
-      }
-      const actualSha = result.stdout.trim();
-      return actualSha === input.expectedSha
-        ? succeed(undefined)
-        : fail(
-            new ArtifactIdentityError({
-              message: `Package source commit ${actualSha || 'empty'} does not match expected ${input.expectedSha}`,
-            }),
-          );
-    }),
-  );
 
 type ReleasePackageInput = {
   readonly destination: string;
@@ -168,10 +136,6 @@ export const packReleaseArtifact = (input: ReleasePackageInput) =>
       releasePackageOperationError,
     ).pipe(flatMap(artifactFromResult));
     yield* rewritePackedArtifact({
-      artifact,
-      expectedSha: input.expectedSha,
-    });
-    yield* verifyArtifactSourceCommit({
       artifact,
       expectedSha: input.expectedSha,
     });

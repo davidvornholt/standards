@@ -5,7 +5,13 @@ import {
   type ReleaseFetcher,
 } from './release-npm';
 import { packReleaseArtifact, SOURCE_COMMIT_FILE } from './release-package';
-import { argv, spawn, write } from './release-runtime';
+import { argv, file, spawn, write } from './release-runtime';
+
+const SHA_LENGTH = 40;
+const HTTP_OK = 200;
+export const PUBLISHED_SHA = 'a'.repeat(SHA_LENGTH);
+export const CURRENT_SHA = 'b'.repeat(SHA_LENGTH);
+export const TARBALL_URL = 'https://registry.example/standards.tgz';
 
 const run = (command: ReadonlyArray<string>) => {
   const subprocess = spawn([...command], { stderr: 'pipe', stdout: 'pipe' });
@@ -34,7 +40,7 @@ export const createReleaseNpmTestFixture = async () => {
       `${packagePath}/package.json`,
       JSON.stringify({
         files: ['index.js'],
-        name: '@test/npm-inspection',
+        name: '@davidvornholt/standards',
         version: '0.5.0',
       }),
     ),
@@ -57,14 +63,14 @@ export const createReleaseNpmTestFixture = async () => {
     JSON.stringify({
       files: ['index.js', SOURCE_COMMIT_FILE],
       gitHead: 'caller-owned-stale-sha',
-      name: '@test/npm-inspection',
+      name: '@davidvornholt/standards',
       version: '0.5.0',
     }),
   );
   const artifact = await runPromise(
     packReleaseArtifact({
       destination: markedDestination,
-      expectedSha: 'expected',
+      expectedSha: PUBLISHED_SHA,
       packagePath,
     }),
   );
@@ -72,35 +78,52 @@ export const createReleaseNpmTestFixture = async () => {
   const metadata = (
     overrides: Record<string, unknown> = {},
     latest = '0.5.0',
-    artifactIntegrity = integrity,
+    version = '0.5.0',
   ) => ({
     'dist-tags': { latest },
     versions: {
-      '0.5.0': {
-        dist: { integrity: artifactIntegrity },
-        gitHead: 'expected',
+      [version]: {
+        dist: { integrity, tarball: TARBALL_URL },
         ...overrides,
       },
     },
   });
-  const fetchJson =
-    (body: unknown, status = 200): ReleaseFetcher =>
-    () =>
-      Promise.resolve(Response.json(body, { status }));
+  const fetchRegistry =
+    (input: {
+      readonly artifactPath?: string;
+      readonly metadataBody: unknown;
+      readonly metadataStatus?: number;
+      readonly tarballStatus?: number;
+    }): ReleaseFetcher =>
+    (url) => {
+      if (String(url) === TARBALL_URL) {
+        return file(input.artifactPath ?? artifact)
+          .arrayBuffer()
+          .then(
+            (bytes) =>
+              new Response(bytes, {
+                status: input.tarballStatus ?? HTTP_OK,
+              }),
+          );
+      }
+      return Promise.resolve(
+        Response.json(input.metadataBody, {
+          status: input.metadataStatus ?? HTTP_OK,
+        }),
+      );
+    };
   const effect = (fetcher: ReleaseFetcher) =>
     inspectNpmRelease({
-      artifact,
-      expectedSha: 'expected',
+      currentSha: CURRENT_SHA,
       fetcher,
       name: '@davidvornholt/standards',
-      parentVersion: '0.4.0',
       version: '0.5.0',
     });
   return {
     artifact,
     dispose: () => run(['rm', '-rf', directory]),
     effect,
-    fetchJson,
+    fetchRegistry,
     integrity,
     metadata,
     unmarkedArtifact,

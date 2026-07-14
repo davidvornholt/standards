@@ -32,6 +32,7 @@ import {
 import type { ReleaseValidationError } from '../src/release-validation-error';
 
 const environment = env;
+const RELEASE_SHA_OUTPUT = 'release_sha';
 
 type ReleaseError =
   | ArtifactIdentityError
@@ -47,11 +48,6 @@ const requireValue = (value: string | undefined, name: string) =>
   value === undefined || value === ''
     ? fail(new ReleaseInputError({ message: `${name} is required` }))
     : succeed(value);
-
-const nullableArg = (value: string | undefined): string | null => {
-  const present = value ?? '';
-  return present === '' ? null : present;
-};
 
 const firstNonEmpty = (
   values: ReadonlyArray<string | undefined>,
@@ -72,16 +68,18 @@ const writeOutput = (
 
 const inspectNpm = (args: ReadonlyArray<string>) =>
   gen(function* () {
-    const [output, name, version, parentVersion, artifact, expectedSha] = args;
+    const [output, name, version, currentSha] = args;
     const outputPath = yield* requireValue(output, 'GitHub output path');
     const inspection = yield* inspectNpmRelease({
-      artifact: yield* requireValue(artifact, 'package artifact'),
-      expectedSha: yield* requireValue(expectedSha, 'release sha'),
+      currentSha: yield* requireValue(currentSha, 'current tested sha'),
       name: yield* requireValue(name, 'package name'),
-      parentVersion: nullableArg(parentVersion),
       version: yield* requireValue(version, 'release version'),
     });
-    yield* writeOutput(outputPath, inspection);
+    yield* writeOutput(outputPath, {
+      publish: inspection.publish,
+      reconcile: inspection.reconcile,
+      [RELEASE_SHA_OUTPUT]: inspection.releaseSha,
+    });
   });
 
 const pack = (args: ReadonlyArray<string>) =>

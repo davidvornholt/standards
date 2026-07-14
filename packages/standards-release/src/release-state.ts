@@ -1,7 +1,5 @@
-import { ArtifactIdentityError } from './artifact-identity-error';
 import { GithubStateError } from './github-state-error';
 import {
-  classifyReleaseDeclaration as classifyDeclaration,
   compareStableVersions,
   parseStableVersion,
 } from './release-declaration';
@@ -27,27 +25,12 @@ const parseVersion = (version: string, label = 'Version') => {
   return succeed(parsed);
 };
 
-export const classifyReleaseDeclaration = (input: {
-  readonly parentVersion: string | null;
-  readonly version: string;
-}) => {
-  const result = classifyDeclaration(input);
-  return result.ok
-    ? succeed(result.declared)
-    : fail(new ReleaseValidationError({ message: result.message }));
-};
-
 export const decideRelease = (input: {
   readonly npmLatest: string | null;
   readonly npmVersionExists: boolean;
-  readonly parentVersion: string | null;
   readonly version: string;
 }) =>
   gen(function* () {
-    const declaration = yield* classifyReleaseDeclaration(input);
-    if (!declaration) {
-      return { publish: false, reconcile: false } satisfies ReleasePlan;
-    }
     const version = yield* parseVersion(input.version);
     if (input.npmLatest !== null) {
       const npmLatest = yield* parseVersion(input.npmLatest, 'npm latest');
@@ -74,40 +57,6 @@ export const decideRelease = (input: {
       reconcile: true,
     } satisfies ReleasePlan;
   });
-
-export const verifyArtifactIdentity = (input: {
-  readonly expectedIntegrity: string;
-  readonly expectedSha: string;
-  readonly npmGitHead: string | null;
-  readonly npmIntegrity: string | null;
-  readonly npmVersionExists: boolean;
-}) => {
-  if (!input.npmVersionExists) {
-    return succeed(undefined);
-  }
-  if (input.npmIntegrity === null) {
-    return fail(
-      new ArtifactIdentityError({
-        message: 'Existing npm version has no dist.integrity',
-      }),
-    );
-  }
-  if (input.npmIntegrity !== input.expectedIntegrity) {
-    return fail(
-      new ArtifactIdentityError({
-        message: `Existing npm artifact integrity ${input.npmIntegrity} does not match expected ${input.expectedIntegrity}`,
-      }),
-    );
-  }
-  if (input.npmGitHead !== null && input.npmGitHead !== input.expectedSha) {
-    return fail(
-      new ArtifactIdentityError({
-        message: `Existing npm artifact gitHead ${input.npmGitHead} does not match expected ${input.expectedSha}`,
-      }),
-    );
-  }
-  return succeed(undefined);
-};
 
 export const decideReconciliation = (input: {
   readonly expectedSha: string;

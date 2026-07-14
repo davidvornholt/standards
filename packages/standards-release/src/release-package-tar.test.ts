@@ -25,8 +25,14 @@ const releasePackageTarReaderSource = await file(
 const releasePackageRewriteSource = await file(
   `${import.meta.dir}/release-package-rewrite.ts`,
 ).text();
+const releasePackageIdentitySource = await file(
+  `${import.meta.dir}/release-package-identity.ts`,
+).text();
 const releaseTarHeaderSource = await file(
   `${import.meta.dir}/release-tar-header.ts`,
+).text();
+const releaseTarFieldReaderSource = await file(
+  `${import.meta.dir}/release-tar-field-reader.ts`,
 ).text();
 
 afterEach(() => {
@@ -35,7 +41,7 @@ afterEach(() => {
 
 describe('release package tar rewrite', () => {
   it('keeps packing application logic inside the Effect boundary', () => {
-    const boundarySource = `${releasePackageSource}\n${releasePackageTarSource}\n${releasePackageTarReaderSource}\n${releasePackageRewriteSource}\n${releaseTarHeaderSource}`;
+    const boundarySource = `${releasePackageSource}\n${releasePackageTarSource}\n${releasePackageTarReaderSource}\n${releasePackageRewriteSource}\n${releasePackageIdentitySource}\n${releaseTarHeaderSource}\n${releaseTarFieldReaderSource}`;
     expect(boundarySource).toContain('nodeLstat(marker)');
     expect(boundarySource).toContain('nodeGzipSync(');
     expect(boundarySource).toContain('tryPromise({');

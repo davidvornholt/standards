@@ -17,6 +17,14 @@ import {
 } from './release-tar-header';
 
 const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+const fullCommitSha = /^[0-9a-f]{40}$/u;
+
+export type ReleaseTarIdentity = {
+  readonly name: string;
+  readonly sha: string;
+  readonly version: string;
+};
 
 const rewriteManifest = (
   archive: Uint8Array,
@@ -80,20 +88,62 @@ export const rewriteReleaseTar = (archive: Uint8Array, expectedSha: string) =>
     ),
   );
 
-export const verifyReleaseTarGitHead = (
+const readScannedIdentity = (
+  archive: Uint8Array,
+  scan: ReleaseTarScan,
+): Effect<ReleaseTarIdentity, ReleasePackageError> => {
+  const markerEntry = scan.marker;
+  if (markerEntry === null) {
+    return releaseTarFailure(`Package artifact has no ${RELEASE_MARKER_PATH}`);
+  }
+  return readReleaseManifest(archive, scan.manifest).pipe(
+    flatMap((manifest) => {
+      if (
+        typeof manifest.gitHead !== 'string' ||
+        !fullCommitSha.test(manifest.gitHead) ||
+        typeof manifest.name !== 'string' ||
+        manifest.name === '' ||
+        typeof manifest.version !== 'string' ||
+        manifest.version === ''
+      ) {
+        return releaseTarFailure(
+          `Package artifact ${RELEASE_MANIFEST_PATH} requires non-empty string name and version plus a full lowercase commit SHA gitHead`,
+        );
+      }
+      const marker = decoder.decode(
+        archive.subarray(
+          markerEntry.contentOffset,
+          markerEntry.contentOffset + markerEntry.size,
+        ),
+      );
+      return marker === `${manifest.gitHead}\n`
+        ? succeed({
+            name: manifest.name,
+            sha: manifest.gitHead,
+            version: manifest.version,
+          })
+        : releaseTarFailure(
+            `Package artifact ${RELEASE_MARKER_PATH} does not match ${RELEASE_MANIFEST_PATH} gitHead`,
+          );
+    }),
+  );
+};
+
+export const readReleaseTarIdentity = (archive: Uint8Array) =>
+  scanReleaseTar(archive, false).pipe(
+    flatMap((scan) => readScannedIdentity(archive, scan)),
+  );
+
+export const verifyReleaseTarIdentity = (
   archive: Uint8Array,
   expectedSha: string,
 ) =>
-  scanReleaseTar(archive, false).pipe(
-    flatMap((scan) =>
-      readReleaseManifest(archive, scan.manifest).pipe(
-        flatMap((manifest) =>
-          manifest.gitHead === expectedSha
-            ? succeed(undefined)
-            : releaseTarFailure(
-                `Package artifact ${RELEASE_MANIFEST_PATH} gitHead does not match expected ${expectedSha}`,
-              ),
-        ),
-      ),
+  readReleaseTarIdentity(archive).pipe(
+    flatMap((identity) =>
+      identity.sha === expectedSha
+        ? succeed(undefined)
+        : releaseTarFailure(
+            `Package artifact source commit ${identity.sha} does not match expected ${expectedSha}`,
+          ),
     ),
   );

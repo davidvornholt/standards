@@ -6,32 +6,32 @@ import {
   gen,
   map,
   mapError,
-  optional,
   SchemaRecord,
   SchemaString,
   Struct,
   tryPromise,
   Unknown,
 } from './release-effect';
-import { verifyArtifactSourceCommit } from './release-package';
-import { BunCryptoHasher, file } from './release-runtime';
 import {
-  decideRelease,
-  type ReleasePlan,
-  verifyArtifactIdentity,
-} from './release-state';
+  inspectPackedArtifactBytes,
+  packedArtifactIntegrity,
+  readPackedArtifact,
+} from './release-package-identity';
+import { decideRelease, type ReleasePlan } from './release-state';
 
 export type ReleaseFetcher = (
   input: RequestInfo | URL,
   init?: RequestInit,
 ) => Promise<Response>;
 
-type NpmInspection = ReleasePlan & { readonly integrity: string };
+type NpmInspection = ReleasePlan & { readonly releaseSha: string };
+type PublishedVersion = {
+  readonly integrity: string;
+  readonly tarball: string;
+};
 type NpmState = {
-  readonly gitHead: string | null;
-  readonly integrity: string | null;
   readonly latest: string | null;
-  readonly versionExists: boolean;
+  readonly published: PublishedVersion | null;
 };
 
 const HTTP_NOT_FOUND = 404;
@@ -42,9 +42,8 @@ const packageMetadataSchema = Struct({
   versions: SchemaRecord({ key: SchemaString, value: Unknown }),
 });
 
-const declaredVersionSchema = Struct({
-  dist: Struct({ integrity: optional(SchemaString) }),
-  gitHead: optional(SchemaString),
+const publishedVersionSchema = Struct({
+  dist: Struct({ integrity: SchemaString, tarball: SchemaString }),
 });
 
 const decodePackageMetadata = (body: unknown) =>
@@ -64,25 +63,26 @@ const parseMetadata = (body: unknown, version: string) =>
     const declared = metadata.versions[version];
     if (declared === undefined) {
       return {
-        gitHead: null,
-        integrity: null,
         latest: metadata['dist-tags'].latest,
-        versionExists: false,
+        published: null,
       } satisfies NpmState;
     }
-    const identity = yield* decodeUnknown(declaredVersionSchema)(declared).pipe(
+    const identity = yield* decodeUnknown(publishedVersionSchema)(
+      declared,
+    ).pipe(
       mapError(
         () =>
           new NpmRegistryError({
-            message: `npm metadata for ${version} requires dist metadata and a string gitHead when present`,
+            message: `npm metadata for ${version} requires string dist.integrity and dist.tarball`,
           }),
       ),
     );
     return {
-      gitHead: identity.gitHead ?? null,
-      integrity: identity.dist.integrity ?? null,
       latest: metadata['dist-tags'].latest,
-      versionExists: true,
+      published: {
+        integrity: identity.dist.integrity,
+        tarball: identity.dist.tarball,
+      },
     } satisfies NpmState;
   });
 
@@ -97,9 +97,7 @@ const loadNpmState = (input: {
       try: () =>
         input.fetcher(
           `${input.registryUrl}/${encodeURIComponent(input.name)}`,
-          {
-            headers: { accept: 'application/json' },
-          },
+          { headers: { accept: 'application/json' } },
         ),
       catch: (cause) =>
         new NpmRegistryError({
@@ -107,12 +105,7 @@ const loadNpmState = (input: {
         }),
     });
     if (response.status === HTTP_NOT_FOUND) {
-      return {
-        gitHead: null,
-        integrity: null,
-        latest: null,
-        versionExists: false,
-      } satisfies NpmState;
+      return { latest: null, published: null } satisfies NpmState;
     }
     if (response.status !== HTTP_OK) {
       return yield* fail(
@@ -129,55 +122,78 @@ const loadNpmState = (input: {
     return yield* parseMetadata(body, input.version);
   });
 
+const downloadPublishedArtifact = (fetcher: ReleaseFetcher, tarball: string) =>
+  gen(function* () {
+    const response = yield* tryPromise({
+      try: () =>
+        fetcher(tarball, { headers: { accept: 'application/octet-stream' } }),
+      catch: (cause) =>
+        new NpmRegistryError({
+          message: `Downloading npm artifact failed: ${String(cause)}`,
+        }),
+    });
+    if (response.status !== HTTP_OK) {
+      return yield* fail(
+        new NpmRegistryError({
+          message: `Downloading npm artifact failed with HTTP ${response.status}`,
+        }),
+      );
+    }
+    return yield* tryPromise({
+      try: () => response.arrayBuffer(),
+      catch: (cause) =>
+        new NpmRegistryError({
+          message: `Reading npm artifact failed: ${String(cause)}`,
+        }),
+    }).pipe(map((bytes) => new Uint8Array(bytes)));
+  });
+
 export const npmIntegrity = (artifact: string) =>
-  tryPromise({
-    try: () => file(artifact).arrayBuffer(),
-    catch: (cause) =>
-      new ArtifactIdentityError({
-        message: `Reading package artifact failed: ${String(cause)}`,
-      }),
-  }).pipe(
-    map((bytes) => {
-      const digest = new BunCryptoHasher('sha512')
-        .update(bytes)
-        .digest('base64');
-      return `sha512-${digest}`;
-    }),
-  );
+  readPackedArtifact(artifact).pipe(map(packedArtifactIntegrity));
 
 export const inspectNpmRelease = (input: {
-  readonly artifact: string;
-  readonly expectedSha: string;
+  readonly currentSha: string;
   readonly fetcher?: ReleaseFetcher;
   readonly name: string;
-  readonly parentVersion: string | null;
   readonly registryUrl?: string;
   readonly version: string;
 }) =>
   gen(function* () {
-    yield* verifyArtifactSourceCommit({
-      artifact: input.artifact,
-      expectedSha: input.expectedSha,
-    });
-    const expectedIntegrity = yield* npmIntegrity(input.artifact);
+    const fetcher = input.fetcher ?? fetch;
     const state = yield* loadNpmState({
-      fetcher: input.fetcher ?? fetch,
+      fetcher,
       name: input.name,
       registryUrl: input.registryUrl ?? 'https://registry.npmjs.org',
       version: input.version,
     });
-    yield* verifyArtifactIdentity({
-      expectedIntegrity,
-      expectedSha: input.expectedSha,
-      npmGitHead: state.gitHead,
-      npmIntegrity: state.integrity,
-      npmVersionExists: state.versionExists,
-    });
     const plan = yield* decideRelease({
       npmLatest: state.latest,
-      npmVersionExists: state.versionExists,
-      parentVersion: input.parentVersion,
+      npmVersionExists: state.published !== null,
       version: input.version,
     });
-    return { ...plan, integrity: expectedIntegrity } satisfies NpmInspection;
+    if (state.published === null) {
+      return {
+        ...plan,
+        releaseSha: input.currentSha,
+      } satisfies NpmInspection;
+    }
+    const bytes = yield* downloadPublishedArtifact(
+      fetcher,
+      state.published.tarball,
+    );
+    const identity = yield* inspectPackedArtifactBytes({
+      bytes,
+      expectedIntegrity: state.published.integrity,
+    });
+    if (identity.name !== input.name || identity.version !== input.version) {
+      return yield* fail(
+        new ArtifactIdentityError({
+          message: `Package artifact declares ${identity.name}@${identity.version}, expected ${input.name}@${input.version}`,
+        }),
+      );
+    }
+    return {
+      ...plan,
+      releaseSha: identity.sha,
+    } satisfies NpmInspection;
   });

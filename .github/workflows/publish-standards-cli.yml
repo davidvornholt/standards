@@ -2,7 +2,8 @@ name: Publish standards CLI
 
 # A reviewed version in the package manifest is the release declaration. Wait
 # for the canonical quality gate to finish so publishing is hard-gated on the
-# exact main-branch commit that is packaged and tagged.
+# exact main-branch tooling commit. npm's immutable artifact is authoritative
+# when a later successful run must finish an interrupted release.
 on:
   workflow_run:
     workflows:
@@ -37,8 +38,9 @@ jobs:
       id-token: write
     outputs:
       reconcile: ${{ steps.npm.outputs.reconcile }}
+      release_sha: ${{ steps.npm.outputs.release_sha }}
       tag: ${{ steps.declaration.outputs.tag }}
-      sha: ${{ github.event.workflow_run.head_sha }}
+      tool_sha: ${{ github.event.workflow_run.head_sha }}
     steps:
       - name: Checkout tested commit
         uses: actions/checkout@v6
@@ -67,7 +69,7 @@ jobs:
         env:
           PACKAGE_NAME: "@davidvornholt/standards"
           PACKAGE_PATH: packages/standards-cli/package.json
-          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+          ROOT_PACKAGE_PATH: package.json
           TEMPLATE_PACKAGE_PATH: template/package.json
         run: |
           name="$(jq -er '.name | select(type == "string")' "$PACKAGE_PATH")"
@@ -77,6 +79,13 @@ jobs:
           fi
 
           version="$(jq -er '.version | select(type == "string")' "$PACKAGE_PATH")"
+          root_version="$(jq -er --arg name "$PACKAGE_NAME" \
+            '.devDependencies[$name] | select(type == "string")' \
+            "$ROOT_PACKAGE_PATH")"
+          if [[ "$root_version" != "$version" ]]; then
+            echo "::error::$ROOT_PACKAGE_PATH must declare $PACKAGE_NAME@$version exactly; received $root_version"
+            exit 1
+          fi
           template_version="$(jq -er --arg name "$PACKAGE_NAME" \
             '.devDependencies[$name] | select(type == "string")' \
             "$TEMPLATE_PACKAGE_PATH")"
@@ -84,51 +93,55 @@ jobs:
             echo "::error::$TEMPLATE_PACKAGE_PATH must declare $PACKAGE_NAME@$version exactly; received $template_version"
             exit 1
           fi
-          parent_version=
-          if git cat-file -e "$RELEASE_SHA^:$PACKAGE_PATH" 2>/dev/null; then
-            parent_version="$(git show "$RELEASE_SHA^:$PACKAGE_PATH" | \
-              jq -r 'if (.version | type) == "string" then .version else "" end')"
-          fi
-
           bun run --cwd packages/standards-release release:classify -- \
-            "$GITHUB_OUTPUT" "$version" "$parent_version"
-          printf '%s' "$parent_version" >"$RUNNER_TEMP/release-parent-version"
+            "$GITHUB_OUTPUT" "$version"
 
       - name: Install release tooling
-        if: steps.declaration.outputs.declared == 'true'
         run: bun install --frozen-lockfile
+
+      - name: Inspect npm release boundary
+        id: npm
+        env:
+          PACKAGE_NAME: "@davidvornholt/standards"
+          CURRENT_SHA: ${{ github.event.workflow_run.head_sha }}
+          RELEASE_VERSION: ${{ steps.declaration.outputs.version }}
+        run: >-
+          bun run --cwd packages/standards-release release:state --
+          npm "$GITHUB_OUTPUT" "$PACKAGE_NAME" "$RELEASE_VERSION"
+          "$CURRENT_SHA"
+
+      - name: Verify release commit is in tested history
+        if: steps.npm.outputs.reconcile == 'true'
+        env:
+          RELEASE_SHA: ${{ steps.npm.outputs.release_sha }}
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          if ! git cat-file -e "$RELEASE_SHA^{commit}" 2>/dev/null; then
+            echo "::error::Release commit $RELEASE_SHA is not available"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$RELEASE_SHA" "$TESTED_SHA"; then
+            echo "::error::Release commit $RELEASE_SHA is not an ancestor of tested commit $TESTED_SHA"
+            exit 1
+          fi
 
       - name: Pack and inspect package
         id: package
-        if: steps.declaration.outputs.declared == 'true'
+        if: steps.npm.outputs.publish == 'true'
         env:
           PACKAGE_PATH: ${{ github.workspace }}/packages/standards-cli
-          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+          RELEASE_SHA: ${{ steps.npm.outputs.release_sha }}
         run: |
           artifact_dir="$RUNNER_TEMP/standards-cli-package"
           mkdir "$artifact_dir"
           bun run --cwd packages/standards-release release:state -- \
             pack "$GITHUB_OUTPUT" "$PACKAGE_PATH" "$artifact_dir" "$RELEASE_SHA"
 
-      - name: Inspect npm release boundary
-        id: npm
-        if: steps.declaration.outputs.declared == 'true'
-        env:
-          PACKAGE_ARTIFACT: ${{ steps.package.outputs.artifact }}
-          PACKAGE_NAME: "@davidvornholt/standards"
-          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
-          RELEASE_VERSION: ${{ steps.declaration.outputs.version }}
-        run: >-
-          bun run --cwd packages/standards-release release:state --
-          npm "$GITHUB_OUTPUT" "$PACKAGE_NAME" "$RELEASE_VERSION"
-          "$(<"$RUNNER_TEMP/release-parent-version")"
-          "$PACKAGE_ARTIFACT" "$RELEASE_SHA"
-
       - name: Preflight GitHub release boundary
         if: steps.npm.outputs.reconcile == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+          RELEASE_SHA: ${{ steps.npm.outputs.release_sha }}
           RELEASE_TAG: ${{ steps.declaration.outputs.tag }}
         run: >-
           bun run --cwd packages/standards-release release:state --
@@ -176,12 +189,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Checkout released commit
+      - name: Checkout tested release tooling
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
           persist-credentials: false
-          ref: ${{ needs.publish.outputs.sha }}
+          ref: ${{ needs.publish.outputs.tool_sha }}
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -194,7 +207,7 @@ jobs:
       - name: Reconcile verified GitHub tag and release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_SHA: ${{ needs.publish.outputs.sha }}
+          RELEASE_SHA: ${{ needs.publish.outputs.release_sha }}
           RELEASE_TAG: ${{ needs.publish.outputs.tag }}
         run: >-
           bun run --cwd packages/standards-release release:state --

@@ -1,6 +1,7 @@
 import type { Effect } from './release-effect';
 import { effectTry, fail, flatMap, gen, succeed } from './release-effect';
 import { ReleasePackageError } from './release-package-error';
+import { isZeroTarRange } from './release-tar-field-reader';
 import {
   isZeroTarBlock,
   parseTarHeader,
@@ -22,6 +23,12 @@ export type TarEntry = {
 export type ReleaseTarScan = {
   readonly end: number;
   readonly manifest: TarEntry;
+  readonly marker: TarEntry | null;
+};
+
+type TarEntries = {
+  readonly manifest: TarEntry | null;
+  readonly marker: TarEntry | null;
 };
 
 export const releaseTarFailure = <A = never>(
@@ -30,20 +37,27 @@ export const releaseTarFailure = <A = never>(
 
 const inspectEntry = (input: {
   readonly entry: TarEntry;
-  readonly manifest: TarEntry | null;
+  readonly entries: TarEntries;
   readonly name: string;
   readonly rejectSourceCommit: boolean;
-}): Effect<TarEntry | null, ReleasePackageError> => {
-  if (input.rejectSourceCommit && input.name === RELEASE_MARKER_PATH) {
-    return releaseTarFailure(
-      `Packing release artifact refused existing archive entry ${RELEASE_MARKER_PATH}`,
-    );
+}): Effect<TarEntries, ReleasePackageError> => {
+  if (input.name === RELEASE_MARKER_PATH) {
+    if (input.rejectSourceCommit) {
+      return releaseTarFailure(
+        `Packing release artifact refused existing archive entry ${RELEASE_MARKER_PATH}`,
+      );
+    }
+    return input.entries.marker === null
+      ? succeed({ ...input.entries, marker: input.entry })
+      : releaseTarFailure(
+          `Packing release artifact contains duplicate ${RELEASE_MARKER_PATH}`,
+        );
   }
   if (input.name !== RELEASE_MANIFEST_PATH) {
-    return succeed(input.manifest);
+    return succeed(input.entries);
   }
-  return input.manifest === null
-    ? succeed(input.entry)
+  return input.entries.manifest === null
+    ? succeed({ ...input.entries, manifest: input.entry })
     : releaseTarFailure(
         `Packing release artifact contains duplicate ${RELEASE_MANIFEST_PATH}`,
       );
@@ -52,18 +66,25 @@ const inspectEntry = (input: {
 const completeScan = (
   bytes: Uint8Array,
   offset: number,
-  manifest: TarEntry | null,
+  entries: TarEntries,
 ): Effect<ReleaseTarScan, ReleasePackageError> => {
-  if (!isZeroTarBlock(bytes, offset + TAR_BLOCK_SIZE)) {
+  if (
+    offset + TAR_BLOCK_SIZE * TAR_END_BLOCKS !== bytes.length ||
+    !isZeroTarBlock(bytes, offset + TAR_BLOCK_SIZE)
+  ) {
     return releaseTarFailure(
       'Packing release artifact produced an invalid tar payload',
     );
   }
-  return manifest === null
+  return entries.manifest === null
     ? releaseTarFailure(
         `Packing release artifact has no ${RELEASE_MANIFEST_PATH}`,
       )
-    : succeed({ end: offset, manifest });
+    : succeed({
+        end: offset,
+        manifest: entries.manifest,
+        marker: entries.marker,
+      });
 };
 
 const readEntry = (
@@ -80,9 +101,13 @@ const readEntry = (
     );
   }
   const contentOffset = offset + TAR_BLOCK_SIZE;
+  const contentEnd = contentOffset + header.size;
   const nextOffset =
     contentOffset + Math.ceil(header.size / TAR_BLOCK_SIZE) * TAR_BLOCK_SIZE;
-  if (nextOffset > bytes.length) {
+  if (
+    nextOffset > bytes.length ||
+    !isZeroTarRange(bytes, contentEnd, nextOffset)
+  ) {
     return releaseTarFailure(
       'Packing release artifact produced an invalid tar payload',
     );
@@ -104,15 +129,15 @@ export const scanReleaseTar = (
 ): Effect<ReleaseTarScan, ReleasePackageError> =>
   gen(function* () {
     let offset = 0;
-    let manifest: TarEntry | null = null;
+    let entries: TarEntries = { manifest: null, marker: null };
     while (offset + TAR_BLOCK_SIZE * TAR_END_BLOCKS <= bytes.length) {
       if (isZeroTarBlock(bytes, offset)) {
-        return yield* completeScan(bytes, offset, manifest);
+        return yield* completeScan(bytes, offset, entries);
       }
       const { entry, name } = yield* readEntry(bytes, offset);
-      manifest = yield* inspectEntry({
+      entries = yield* inspectEntry({
         entry,
-        manifest,
+        entries,
         name,
         rejectSourceCommit,
       });

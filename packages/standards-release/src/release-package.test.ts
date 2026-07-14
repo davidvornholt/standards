@@ -2,15 +2,12 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { spawnSync } from 'bun';
 import { flip, runPromise } from './release-effect';
 import { npmIntegrity } from './release-npm';
-import {
-  packReleaseArtifact,
-  SOURCE_COMMIT_FILE,
-  verifyArtifactSourceCommit,
-} from './release-package';
+import { packReleaseArtifact, SOURCE_COMMIT_FILE } from './release-package';
 import {
   createReleasePackage,
   releasePackageTestEnvironment,
 } from './release-package.fixture';
+import { verifyPackedArtifact } from './release-package-identity';
 import { file, write } from './release-runtime';
 
 const SHA_LENGTH = 40;
@@ -54,12 +51,12 @@ describe('release package', () => {
     );
     expect(
       await runPromise(
-        verifyArtifactSourceCommit({
+        verifyPackedArtifact({
           artifact: first,
           expectedSha: EXPECTED_SHA,
         }),
       ),
-    ).toBeUndefined();
+    ).toStartWith('sha512-');
   });
 
   it('preserves a pre-existing marker instead of overwriting it', async () => {
@@ -137,7 +134,7 @@ describe('release package failures', () => {
       .trim();
     const missing = await runPromise(
       flip(
-        verifyArtifactSourceCommit({
+        verifyPackedArtifact({
           artifact: packed,
           expectedSha: EXPECTED_SHA,
         }),
@@ -155,7 +152,7 @@ describe('release package failures', () => {
     );
     const mismatch = await runPromise(
       flip(
-        verifyArtifactSourceCommit({
+        verifyPackedArtifact({
           artifact: marked,
           expectedSha: MISMATCHED_SHA,
         }),
