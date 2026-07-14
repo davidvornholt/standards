@@ -8,6 +8,7 @@ import { openRepositoryRoot } from './sync-filesystem';
 import {
   cleanupFixtures,
   readFixture,
+  replaceFixtureDirectory,
   temporaryRoot,
   transactionArtifacts,
   writeFixture,
@@ -111,8 +112,7 @@ describe('atomic transaction ownership publication', () => {
     const root = setup();
     expect(crashAt(root, 'after-transaction-mkdir')).toBe('SIGKILL');
     const transaction = join(root, '.standards-transaction');
-    rmdirSync(transaction);
-    mkdirSync(transaction);
+    replaceFixtureDirectory(transaction);
 
     await expect(recover(root)).rejects.toThrow(
       'Owner publication token does not match active inode',

@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { existsSync, mkdirSync, rmdirSync, writeFileSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { inspectRepositoryFiles, openRepositoryRoot } from './sync-filesystem';
 import { applyRepositoryMutations } from './sync-mutations';
 import {
   cleanupFixtures,
   readFixture,
+  replaceFixtureDirectory,
   requiredState,
   temporaryRoot,
   transactionArtifacts,
@@ -72,8 +73,7 @@ describe('created-parent ownership recovery', () => {
       timing: 'after' | 'before' = 'after',
     ): Promise<void> => {
       if (operation === 'mkdir' && rel === 'new-parent' && timing === 'after') {
-        rmdirSync(join(rootPath, 'new-parent'));
-        mkdirSync(join(rootPath, 'new-parent'));
+        replaceFixtureDirectory(join(rootPath, 'new-parent'));
         return Promise.reject(new Error('replaced markerless parent'));
       }
       return Promise.resolve();

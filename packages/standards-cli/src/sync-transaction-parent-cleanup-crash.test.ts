@@ -1,19 +1,13 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  rmdirSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
 import { openRepositoryRoot } from './sync-filesystem';
 import {
   cleanupFixtures,
   readFixture,
+  replaceFixtureDirectory,
   temporaryRoot,
   transactionArtifacts,
   writeFixture,
@@ -88,8 +82,7 @@ describe('durable created-parent cleanup', () => {
       'SIGKILL',
     );
     const parent = join(root, 'new-parent');
-    rmdirSync(parent);
-    mkdirSync(parent);
+    replaceFixtureDirectory(parent);
 
     await expect(recover(root)).rejects.toThrow(
       'Filesystem recovery retained .standards-transaction',
@@ -112,8 +105,7 @@ describe('durable created-parent binding', () => {
       readFileSync(join(root, '.standards-transaction/journal.json'), 'utf8'),
     ) as { readonly id: string };
     const parent = join(root, 'new-parent');
-    rmSync(parent, { recursive: true });
-    mkdirSync(parent);
+    replaceFixtureDirectory(parent);
     writeFileSync(join(parent, `.standards-parent-${journal.id}`), journal.id);
 
     await expect(recover(root)).rejects.toThrow(
@@ -153,8 +145,7 @@ describe('durable created-parent binding', () => {
       readFileSync(join(root, '.standards-transaction/journal.json'), 'utf8'),
     ) as { readonly id: string };
     const parent = join(root, 'new-parent');
-    rmSync(parent, { recursive: true });
-    mkdirSync(parent);
+    replaceFixtureDirectory(parent);
     writeFileSync(join(parent, `.standards-parent-${journal.id}`), journal.id);
     writeFileSync(join(parent, 'new.txt'), 'new nested\n');
 

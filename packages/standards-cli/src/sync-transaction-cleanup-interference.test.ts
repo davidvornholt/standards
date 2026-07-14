@@ -1,17 +1,12 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import {
-  existsSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, readFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { inspectRepositoryFiles, openRepositoryRoot } from './sync-filesystem';
 import { applyRepositoryMutations } from './sync-mutations';
 import {
   cleanupFixtures,
   readFixture,
+  replaceFixtureFile,
   requiredState,
   temporaryRoot,
   transactionArtifacts,
@@ -84,8 +79,7 @@ describe('transaction cleanup interference', () => {
     await expect(
       apply({
         afterCleanupParents: () => {
-          rmSync(stage);
-          writeFileSync(stage, 'actor stage\n');
+          replaceFixtureFile(stage, 'actor stage\n');
           return Promise.resolve();
         },
       }),

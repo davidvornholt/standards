@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { inspectRepositoryFiles, openRepositoryRoot } from './sync-filesystem';
 import { applyRepositoryMutations, type PreparedWrite } from './sync-mutations';
 import {
   cleanupFixtures,
   readFixture,
+  replaceFixtureFile,
   requiredState,
   temporaryRoot,
   transactionArtifacts,
@@ -85,8 +86,7 @@ describe('transaction interference safety', () => {
         },
         {
           beforeMutation: () => {
-            unlinkSync(join(rootPath, 'managed/a.txt'));
-            writeFileSync(
+            replaceFixtureFile(
               join(rootPath, 'managed/a.txt'),
               'actor replacement\n',
             );
@@ -117,8 +117,7 @@ describe('backup interference safety', () => {
         rel === 'managed/a.txt' &&
         timing === 'before'
       ) {
-        unlinkSync(join(rootPath, rel));
-        writeFileSync(join(rootPath, rel), 'actor replacement\n');
+        replaceFixtureFile(join(rootPath, rel), 'actor replacement\n');
       }
       return Promise.resolve();
     };

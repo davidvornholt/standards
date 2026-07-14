@@ -3,8 +3,10 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -34,7 +36,41 @@ export const readFixture = (root: string, rel: string): string =>
   readFileSync(join(root, rel), 'utf8');
 
 export const transactionArtifacts = (root: string): ReadonlyArray<string> =>
-  readdirSync(root).filter((name) => name.startsWith('.standards-'));
+  readdirSync(root)
+    .filter((name) => name.startsWith('.standards-'))
+    .sort();
+
+const assertIdentityChanged = (
+  before: { readonly dev: number; readonly ino: number },
+  path: string,
+): void => {
+  const after = statSync(path);
+  if (before.dev === after.dev && before.ino === after.ino) {
+    throw new Error(`Fixture replacement reused its original inode: ${path}`);
+  }
+};
+
+export const replaceFixtureDirectory = (path: string): void => {
+  const before = statSync(path);
+  const replacement = `${path}.replacement`;
+  mkdirSync(replacement);
+  rmSync(path, { recursive: true });
+  renameSync(replacement, path);
+  assertIdentityChanged(before, path);
+};
+
+export const replaceFixtureFile = (
+  path: string,
+  contents: string,
+  mode?: number,
+): void => {
+  const before = statSync(path);
+  const replacement = `${path}.replacement`;
+  writeFileSync(replacement, contents, { mode });
+  unlinkSync(path);
+  renameSync(replacement, path);
+  assertIdentityChanged(before, path);
+};
 
 export const requiredState = (
   states: ReadonlyMap<string, FileState>,

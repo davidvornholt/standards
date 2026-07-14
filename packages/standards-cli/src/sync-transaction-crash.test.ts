@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, rmdirSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
 import { openRepositoryRoot } from './sync-filesystem';
 import {
   cleanupFixtures,
   readFixture,
+  replaceFixtureDirectory,
   temporaryRoot,
   transactionArtifacts,
   writeFixture,
@@ -99,8 +100,7 @@ describe('durable filesystem transaction recovery', () => {
   it('preserves a replaced empty markerless parent after a crash', async () => {
     const root = setup();
     expect(crashAt(root, 'after-parent-mkdir')).toBe('SIGKILL');
-    rmdirSync(join(root, 'new-parent'));
-    mkdirSync(join(root, 'new-parent'));
+    replaceFixtureDirectory(join(root, 'new-parent'));
 
     await expect(recover(root)).rejects.toThrow(
       'Filesystem recovery retained .standards-transaction',

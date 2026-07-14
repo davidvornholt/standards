@@ -1,12 +1,13 @@
 import { afterEach, expect, it } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
 import { openRepositoryRoot } from './sync-filesystem';
 import {
   cleanupFixtures,
   readFixture,
+  replaceFixtureFile,
   temporaryRoot,
   writeFixture,
 } from './sync-mutations-test-helpers';
@@ -45,8 +46,7 @@ const recover = async (rootPath: string): Promise<void> => {
 it('preserves a same-content committed stage replacement and its WAL', async () => {
   const rootPath = crashCommitted();
   const stage = join(rootPath, TRANSACTION_DIRECTORY, 'new-1');
-  rmSync(stage);
-  writeFileSync(stage, 'new b\n');
+  replaceFixtureFile(stage, 'new b\n');
   const actorInode = statSync(stage).ino;
 
   await expect(recover(rootPath)).rejects.toThrow(
@@ -80,8 +80,7 @@ it('preserves a same-content committed backup replacement and its WAL', async ()
     throw new Error('Missing committed backup fixture');
   }
   const backup = join(rootPath, TRANSACTION_DIRECTORY, operation.backup);
-  rmSync(backup);
-  writeFileSync(backup, 'old b\n', { mode: operation.before.mode });
+  replaceFixtureFile(backup, 'old b\n', operation.before.mode);
   const actorInode = statSync(backup).ino;
 
   await expect(recover(rootPath)).rejects.toThrow(

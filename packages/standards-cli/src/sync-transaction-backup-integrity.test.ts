@@ -6,7 +6,6 @@ import {
   readFileSync,
   statSync,
   truncateSync,
-  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -14,6 +13,7 @@ import process from 'node:process';
 import { openRepositoryRoot } from './sync-filesystem';
 import {
   cleanupFixtures,
+  replaceFixtureFile,
   temporaryRoot,
   transactionArtifacts,
   writeFixture,
@@ -99,8 +99,7 @@ const damageBackup = (
     truncateSync(backupPath, 2);
     return;
   }
-  unlinkSync(backupPath);
-  writeFileSync(backupPath, 'stale\n', { mode });
+  replaceFixtureFile(backupPath, 'stale\n', mode);
 };
 
 describe('recovery backup integrity', () => {
