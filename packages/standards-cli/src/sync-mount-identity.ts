@@ -28,50 +28,52 @@ const decodeMountPath = (value: string): string => {
   );
 };
 
+const parseMountEntry = (line: string, lineNumber: number): MountEntry => {
+  const fields = line.split(' ');
+  const [idField, parentField, device, root, mountPoint, options] = fields;
+  const separator = fields.findIndex(
+    (field, index) => index >= REQUIRED_PREFIX_FIELDS && field === '-',
+  );
+  const optionalFields = fields.slice(REQUIRED_PREFIX_FIELDS, separator);
+  const suffix = separator < 0 ? [] : fields.slice(separator + 1);
+  const id = Number(idField);
+  const parentId = Number(parentField);
+  const deviceParts = device?.split(':').map(Number) ?? [];
+  const checks: ReadonlyArray<readonly [string, boolean]> = [
+    ['fields-nonempty', fields.every((field) => field.length > 0)],
+    ['id-syntax', idField !== undefined && DECIMAL.test(idField)],
+    ['id-range', Number.isSafeInteger(id) && id > 0],
+    ['parent-syntax', parentField !== undefined && DECIMAL.test(parentField)],
+    ['parent-range', Number.isSafeInteger(parentId) && parentId >= 0],
+    ['device-syntax', device !== undefined && DEVICE.test(device)],
+    ['device-range', deviceParts.every(Number.isSafeInteger)],
+    ['root-path', root?.startsWith('/') === true],
+    ['mount-point-path', mountPoint?.startsWith('/') === true],
+    ['options', options !== undefined && options.length > 0],
+    ['separator', separator >= REQUIRED_PREFIX_FIELDS],
+    ['optional-fields', optionalFields.every((field) => field.length > 0)],
+    ['suffix-count', suffix.length === REQUIRED_SUFFIX_FIELDS],
+    ['suffix-fields', suffix.every((field) => field.length > 0)],
+  ];
+  const failed = checks
+    .filter(([, valid]) => !valid)
+    .map(([name]) => name)
+    .join(',');
+  if (failed.length > 0) {
+    throw new Error(
+      `Linux mountinfo contains an invalid mount entry at line ${lineNumber} (fields=${fields.length}, separator=${separator}, suffix=${suffix.length}; failed=${failed})`,
+    );
+  }
+  decodeMountPath(root);
+  return { id, mountPoint: decodeMountPath(mountPoint) };
+};
+
 export const parseMountInfo = (contents: string): ReadonlyArray<MountEntry> =>
   contents
     .split('\n')
-    .filter((line) => line.length > 0)
-    .map((line) => {
-      const fields = line.split(' ');
-      const [idField, parentField, device, root, mountPoint, options] = fields;
-      const separator = fields.findIndex(
-        (field, index) => index >= REQUIRED_PREFIX_FIELDS && field === '-',
-      );
-      const optionalFields = fields.slice(REQUIRED_PREFIX_FIELDS, separator);
-      const suffix = fields.slice(separator + 1);
-      const id = Number(idField);
-      const parentId = Number(parentField);
-      const deviceParts = device?.split(':').map(Number) ?? [];
-      if (
-        !(
-          fields.every((field) => field.length > 0) &&
-          idField !== undefined &&
-          DECIMAL.test(idField) &&
-          Number.isSafeInteger(id) &&
-          id > 0 &&
-          parentField !== undefined &&
-          DECIMAL.test(parentField) &&
-          Number.isSafeInteger(parentId) &&
-          parentId >= 0 &&
-          device !== undefined &&
-          DEVICE.test(device) &&
-          deviceParts.every(Number.isSafeInteger) &&
-          root?.startsWith('/') &&
-          mountPoint?.startsWith('/') &&
-          options !== undefined &&
-          options.length > 0 &&
-          separator >= REQUIRED_PREFIX_FIELDS &&
-          optionalFields.every((field) => field.length > 0) &&
-          suffix.length === REQUIRED_SUFFIX_FIELDS &&
-          suffix.every((field) => field.length > 0)
-        )
-      ) {
-        throw new Error('Linux mountinfo contains an invalid mount entry');
-      }
-      decodeMountPath(root);
-      return { id, mountPoint: decodeMountPath(mountPoint) };
-    });
+    .flatMap((line, lineIndex) =>
+      line.length === 0 ? [] : [parseMountEntry(line, lineIndex + 1)],
+    );
 
 const containsPath = (mountPoint: string, path: string): boolean =>
   mountPoint === '/' ||

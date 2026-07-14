@@ -4,6 +4,18 @@ import { mountIdForPath, parseMountInfo } from './sync-mount-identity';
 const PARENT_MOUNT_ID = 11;
 const FILE_MOUNT_ID = 12;
 
+const parseErrorMessage = (contents: string): string => {
+  try {
+    parseMountInfo(contents);
+  } catch (error) {
+    if (error instanceof Error) {
+      return error.message;
+    }
+    throw error;
+  }
+  throw new Error('Expected mountinfo parsing to fail');
+};
+
 it('decodes mountinfo paths and selects the deepest file mount', () => {
   const entries = parseMountInfo(
     [
@@ -52,4 +64,19 @@ it('fails closed on malformed or truncated mountinfo records', () => {
   expect(() =>
     parseMountInfo('10 1 0:1 /bad\\999 / rw - rootfs rootfs rw'),
   ).toThrow('Linux mountinfo contains an invalid path escape');
+});
+
+it('reports path-safe structural diagnostics for invalid entries', () => {
+  const message = parseErrorMessage(
+    [
+      '10 1 0:1 / / rw - rootfs rootfs rw',
+      '11 10 bad /private/credentials /private/credentials rw - ext4 /private/source rw extra',
+    ].join('\n'),
+  );
+
+  expect(message).toBe(
+    'Linux mountinfo contains an invalid mount entry at line 2 (fields=11, separator=6, suffix=4; failed=device-syntax,device-range,suffix-count)',
+  );
+  expect(message).not.toContain('credentials');
+  expect(message).not.toContain('/private/source');
 });
