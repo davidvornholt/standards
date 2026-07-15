@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { flip, runPromise } from './release-effect';
-import { releasePackageTestEnvironment } from './release-package.fixture';
 import { rewriteReleaseTar } from './release-package-tar';
+import { releasePackageTestEnvironment } from './release-package-test-fixture';
 import { spawnSync } from './release-runtime';
 import {
   CHECKSUM_LENGTH,

@@ -8,7 +8,7 @@ import { packReleaseArtifact } from './release-package';
 import {
   createReleasePackage,
   releasePackageTestEnvironment,
-} from './release-package.fixture';
+} from './release-package-test-fixture';
 import { file, nodeRename, write } from './release-runtime';
 
 const DEFAULT_BRANCH = 'default_branch';

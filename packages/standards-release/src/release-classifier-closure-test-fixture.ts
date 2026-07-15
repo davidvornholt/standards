@@ -1,4 +1,4 @@
-import { inspectClassifierSource } from './release-classifier-closure-test-parser';
+import { inspectModuleSyntax } from '@davidvornholt/module-syntax-inspection';
 
 export type ReadClassifierModule = (module: URL) => Promise<string>;
 
@@ -11,7 +11,7 @@ export const forbiddenClassifierSpecifiers = (
   sources: ReadonlyArray<string>,
 ): ReadonlyArray<string> =>
   sources
-    .flatMap((source) => inspectClassifierSource(source).specifiers)
+    .flatMap((source) => inspectModuleSyntax(source).specifiers)
     .filter(
       (specifier) =>
         !(specifier.startsWith('.') || ALLOWED_BUILTINS.has(specifier)),
@@ -27,7 +27,7 @@ export const readClassifierModuleClosure = async (
   }
   visited.add(module.href);
   const source = await readModule(module);
-  const inspection = inspectClassifierSource(source);
+  const inspection = inspectModuleSyntax(source);
   if (inspection.problems.length > 0) {
     throw new Error(inspection.problems.join('\n'));
   }

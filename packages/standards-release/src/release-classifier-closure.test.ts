@@ -1,9 +1,9 @@
 import { expect, it } from 'bun:test';
+import { inspectModuleSyntax } from '@davidvornholt/module-syntax-inspection';
 import {
   forbiddenClassifierSpecifiers,
   readClassifierModuleClosure,
 } from './release-classifier-closure-test-fixture';
-import { inspectClassifierSource } from './release-classifier-closure-test-parser';
 import { file } from './release-runtime';
 
 const classifier = await file(
@@ -16,7 +16,7 @@ const readModule = (module: URL): Promise<string> => file(module).text();
 
 it('discovers every supported runtime and type-only module form', () => {
   expect(
-    inspectClassifierSource(`
+    inspectModuleSyntax(`
       import type { Type } from 'type-package';
       import 'side-effect-package';
       export type { Reexport } from 'reexport-package';
@@ -63,15 +63,15 @@ it('rejects opaque loaders without matching comments or strings', () => {
       'require(packageName);',
       'require.resolve(packageName);',
       "require?.('effect');",
-    ].flatMap((source) => inspectClassifierSource(source).problems),
+    ].flatMap((source) => inspectModuleSyntax(source).problems),
   ).toEqual([
     'import requires a statically known specifier',
     'require requires a statically known specifier',
     'require.resolve requires a statically known specifier',
-    'require uses unsupported syntax',
+    'require uses unsupported loader syntax',
   ]);
   expect(
-    inspectClassifierSource(`
+    inspectModuleSyntax(`
       const example = "import('./ghost')";
       // require('effect');
     `),
@@ -100,7 +100,7 @@ it('keeps the eager classifier closure narrow and built-in-only', async () => {
     readModule,
   );
   expect(forbiddenClassifierSpecifiers(closure)).toEqual([]);
-  expect(inspectClassifierSource(classifierRuntime)).toMatchObject({
+  expect(inspectModuleSyntax(classifierRuntime)).toMatchObject({
     problems: [],
     specifiers: expect.arrayContaining(['node:fs/promises', 'node:process']),
   });

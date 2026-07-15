@@ -156,6 +156,7 @@
     "test": "bun test"
   },
   "devDependencies": {
+    "@davidvornholt/module-syntax-inspection": "workspace:*",
     "@davidvornholt/typescript-config": "workspace:*",
     "@types/bun": "^1.3.14",
     "standards-v04": "npm:@davidvornholt/standards@0.4.0",

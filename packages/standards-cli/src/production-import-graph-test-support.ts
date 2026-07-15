@@ -1,7 +1,6 @@
 import { readFileSync } from 'node:fs';
-import { isBuiltin } from 'node:module';
 import { dirname, join, normalize } from 'node:path';
-import { moduleSyntax } from './production-import-graph-test-scanner';
+import { inspectModuleSyntax } from '@davidvornholt/module-syntax-inspection';
 
 const LEADING_CURRENT_DIRECTORY = /^\.\//u;
 
@@ -41,15 +40,22 @@ type ImportGraph = {
   readonly forbidden: ReadonlyArray<string>;
   readonly graph: ReadonlyMap<string, ReadonlyArray<string>>;
   readonly unreachable: ReadonlyArray<string>;
+  readonly unusedAllowedBuiltins: ReadonlyArray<string>;
   readonly unsupported: ReadonlyArray<string>;
   readonly unresolved: ReadonlyArray<string>;
 };
 
-const BUN_BUILTINS: ReadonlySet<string> = new Set(['bun', 'bun:ffi']);
-
-const isAllowedBuiltin = (specifier: string): boolean =>
-  BUN_BUILTINS.has(specifier) ||
-  (specifier.startsWith('node:') && isBuiltin(specifier));
+const ALLOWED_PRODUCTION_BUILTINS: ReadonlySet<string> = new Set([
+  'bun',
+  'bun:ffi',
+  'node:child_process',
+  'node:crypto',
+  'node:fs',
+  'node:fs/promises',
+  'node:os',
+  'node:path',
+  'node:process',
+]);
 
 export const productionImportGraph = (
   overrides: ReadonlyMap<string, string> = new Map(),
@@ -59,6 +65,7 @@ export const productionImportGraph = (
   const productionFileSet = new Set(files);
   const forbidden: Array<string> = [];
   const graph = new Map<string, ReadonlyArray<string>>();
+  const usedBuiltins = new Set<string>();
   const unsupported: Array<string> = [];
   const unresolved = productionEntrypoints
     .filter((path) => !productionFileSet.has(path))
@@ -68,11 +75,15 @@ export const productionImportGraph = (
       overrides.get(path) ??
       additionalFiles.get(path) ??
       readFileSync(join(packageRoot, path), 'utf8');
-    const syntax = moduleSyntax(source);
-    unsupported.push(...syntax.unsupported.map((call) => `${path} -> ${call}`));
+    const syntax = inspectModuleSyntax(source);
+    unsupported.push(
+      ...syntax.problems.map((problem) => `${path} -> ${problem}`),
+    );
     const dependencies = syntax.specifiers.flatMap((specifier) => {
       if (!specifier.startsWith('.')) {
-        if (!isAllowedBuiltin(specifier)) {
+        if (ALLOWED_PRODUCTION_BUILTINS.has(specifier)) {
+          usedBuiltins.add(specifier);
+        } else {
           forbidden.push(`${path} -> ${specifier}`);
         }
         return [];
@@ -107,7 +118,17 @@ export const productionImportGraph = (
     }
   }
   const unreachable = files.filter((path) => !reachable.has(path));
-  return { forbidden, graph, unreachable, unsupported, unresolved };
+  const unusedAllowedBuiltins = [...ALLOWED_PRODUCTION_BUILTINS].filter(
+    (specifier) => !usedBuiltins.has(specifier),
+  );
+  return {
+    forbidden,
+    graph,
+    unreachable,
+    unusedAllowedBuiltins,
+    unsupported,
+    unresolved,
+  };
 };
 
 export const mutatedProductionGraph = (addition: string): ImportGraph => {

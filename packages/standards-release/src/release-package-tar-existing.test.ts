@@ -2,11 +2,11 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { spawnSync } from 'bun';
 import { flip, runPromise } from './release-effect';
 import { SOURCE_COMMIT_FILE } from './release-package';
+import { rewritePackedArtifact } from './release-package-rewrite';
 import {
   createReleasePackage,
   releasePackageTestEnvironment,
-} from './release-package.fixture';
-import { rewritePackedArtifact } from './release-package-rewrite';
+} from './release-package-test-fixture';
 import { file, write } from './release-runtime';
 
 const SHA_LENGTH = 40;

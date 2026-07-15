@@ -5,7 +5,7 @@ import { packReleaseArtifact, SOURCE_COMMIT_FILE } from './release-package';
 import {
   createReleasePackage,
   releasePackageTestEnvironment,
-} from './release-package.fixture';
+} from './release-package-test-fixture';
 import { file } from './release-runtime';
 
 const SHA_LENGTH = 40;

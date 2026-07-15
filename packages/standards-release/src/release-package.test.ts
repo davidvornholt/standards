@@ -3,11 +3,11 @@ import { spawnSync } from 'bun';
 import { flip, runPromise } from './release-effect';
 import { npmIntegrity } from './release-npm';
 import { packReleaseArtifact, SOURCE_COMMIT_FILE } from './release-package';
+import { verifyPackedArtifact } from './release-package-identity';
 import {
   createReleasePackage,
   releasePackageTestEnvironment,
-} from './release-package.fixture';
-import { verifyPackedArtifact } from './release-package-identity';
+} from './release-package-test-fixture';
 import { file, write } from './release-runtime';
 
 const SHA_LENGTH = 40;

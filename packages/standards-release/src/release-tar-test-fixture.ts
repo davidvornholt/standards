@@ -1,7 +1,7 @@
 import {
   createReleasePackage,
   type releasePackageTestEnvironment,
-} from './release-package.fixture';
+} from './release-package-test-fixture';
 import { file, nodeGunzipSync, spawnSync } from './release-runtime';
 
 export const TAR_BLOCK_SIZE = 512;

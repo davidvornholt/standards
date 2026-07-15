@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { moduleSyntax } from './production-import-graph-test-scanner';
+import { inspectModuleSyntax } from '@davidvornholt/module-syntax-inspection';
 import {
   importCycle,
   mutatedProductionGraph,
@@ -16,9 +16,9 @@ describe('published production import graph', () => {
       /* require(moduleName); */
       // type T = import('third-party').T
     `;
-    expect(moduleSyntax(source)).toEqual({
+    expect(inspectModuleSyntax(source)).toEqual({
+      problems: [],
       specifiers: ['./valid'],
-      unsupported: [],
     });
   });
 
@@ -28,12 +28,14 @@ describe('published production import graph', () => {
       cycle: importCycle(result.graph),
       forbidden: result.forbidden,
       unreachable: result.unreachable,
+      unusedAllowedBuiltins: result.unusedAllowedBuiltins,
       unsupported: result.unsupported,
       unresolved: result.unresolved,
     }).toEqual({
       cycle: null,
       forbidden: [],
       unreachable: [],
+      unusedAllowedBuiltins: [],
       unsupported: [],
       unresolved: [],
     });
@@ -63,25 +65,40 @@ describe('published production import graph', () => {
     [
       'computed import',
       'const moduleName = "node:fs"; void import(moduleName);',
-      'import',
+      'import requires a statically known specifier',
     ],
     [
       'computed require',
       'const moduleName = "node:fs"; require(moduleName);',
-      'require',
+      'require requires a statically known specifier',
     ],
     [
       'computed require.resolve',
       'const moduleName = "node:fs"; require.resolve(moduleName);',
-      'require.resolve',
+      'require.resolve requires a statically known specifier',
     ],
-    ['optional require', "require?.('third-party');", 'require'],
-    ['parenthesized require', "(require)('third-party');", 'require'],
-    ['template import', computedTemplateImport, 'import'],
-  ])('rejects the %s mutation', (_label, addition, call) => {
+    [
+      'optional require',
+      "require?.('third-party');",
+      'require uses unsupported loader syntax',
+    ],
+    [
+      'template import',
+      computedTemplateImport,
+      'import requires a statically known specifier',
+    ],
+  ])('rejects the %s mutation', (_label, addition, problem) => {
     expect(mutatedProductionGraph(addition).unsupported).toEqual([
-      `src/cli.ts -> ${call}`,
+      `src/cli.ts -> ${problem}`,
     ]);
+  });
+});
+
+describe('published production closure policy', () => {
+  it('rejects a parenthesized third-party require mutation', () => {
+    expect(
+      mutatedProductionGraph("(require)('third-party');").forbidden,
+    ).toEqual(['src/cli.ts -> third-party']);
   });
 
   it('rejects an external TypeScript import-type mutation', () => {
@@ -89,6 +106,41 @@ describe('published production import graph', () => {
       mutatedProductionGraph("type External = import('third-party').Type;")
         .forbidden,
     ).toEqual(['src/cli.ts -> third-party']);
+  });
+
+  it('rejects createRequire as an alternate loader for Effect', () => {
+    const mutation = `
+      import { createRequire } from 'node:module';
+      const load = createRequire(import.meta.url);
+      load('effect');
+    `;
+    expect(mutatedProductionGraph(mutation).forbidden).toEqual([
+      'src/cli.ts -> node:module',
+    ]);
+  });
+
+  it('rejects process.getBuiltinModule as an alternate loader', () => {
+    const mutation = `
+      const module = process.getBuiltinModule('module');
+      module.createRequire(import.meta.url)('effect');
+    `;
+    expect(mutatedProductionGraph(mutation).unsupported).toEqual([
+      'src/cli.ts -> getBuiltinModule uses unsupported loader syntax',
+    ]);
+  });
+
+  it('rejects aliased process bindings as alternate loaders', () => {
+    const mutations = [
+      "const processAlias = process; processAlias.getBuiltinModule('module');",
+      "const processAlias = require('node:process'); processAlias.getBuiltinModule('module');",
+      "const processAlias = await import('node:process'); processAlias.getBuiltinModule('module');",
+      "import processAlias = require('node:process'); processAlias.getBuiltinModule('module');",
+    ];
+    for (const mutation of mutations) {
+      expect(mutatedProductionGraph(mutation).unsupported).toEqual([
+        'src/cli.ts -> getBuiltinModule uses unsupported loader syntax',
+      ]);
+    }
   });
 
   it('rejects an allowlisted production module outside public entrypoints', () => {
