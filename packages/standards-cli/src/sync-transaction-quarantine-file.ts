@@ -4,11 +4,8 @@ import {
   directoryEntryPath,
   type PinnedDirectory,
 } from './sync-directory-handles';
-import {
-  identitiesMatch,
-  identityOf,
-  type NodeIdentity,
-} from './sync-filesystem';
+import { identitiesMatch, identityOf } from './sync-filesystem';
+import type { NodeIdentity } from './sync-node-identity';
 import { MAX_QUARANTINE_RECORD_BYTES } from './sync-transaction-quarantine-schema';
 
 export const readQuarantineRecordHandle = async (handle: FileHandle) => {

@@ -4,12 +4,9 @@ import {
   directoryEntryPath,
   type PinnedDirectory,
 } from './sync-directory-handles';
-import {
-  identitiesMatch,
-  identityOf,
-  type NodeIdentity,
-} from './sync-filesystem';
+import { identitiesMatch, identityOf } from './sync-filesystem';
 import { isMissingFilesystemError } from './sync-filesystem-error';
+import type { NodeIdentity } from './sync-node-identity';
 
 const FILE_TYPE_MODE_BASE = 0o1000;
 const DECIMAL_RADIX = 10;

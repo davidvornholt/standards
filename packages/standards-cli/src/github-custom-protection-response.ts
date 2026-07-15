@@ -1,5 +1,5 @@
 import { isPositiveSafeInteger } from './github-environment-settings';
-import { isRecord } from './github-settings';
+import { isRecord } from './github-settings-value';
 
 type DecodeResult<T> = {
   readonly problem: string | null;

@@ -3,7 +3,8 @@ import {
   directoryEntryPath,
   type PinnedDirectory,
 } from './sync-directory-handles';
-import { identitiesMatch, type NodeIdentity } from './sync-filesystem';
+import { identitiesMatch } from './sync-filesystem';
+import type { NodeIdentity } from './sync-node-identity';
 import { isAtomicRecordTemporaryName } from './sync-transaction-artifact-names';
 import { regularAtomicRecordIdentity } from './sync-transaction-atomic-record';
 import { bindAndRemoveEntry } from './sync-transaction-bound-remove';

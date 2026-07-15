@@ -4,10 +4,10 @@ import process from 'node:process';
 import {
   identitiesMatch,
   identityOf,
-  type NodeIdentity,
   type RepositoryRoot,
 } from './sync-filesystem';
 import { assertNoReplaceRenameAvailable } from './sync-linux-rename';
+import type { NodeIdentity } from './sync-node-identity';
 
 export type PinnedDirectory = {
   readonly handle: FileHandle;

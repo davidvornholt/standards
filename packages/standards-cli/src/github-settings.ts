@@ -9,21 +9,12 @@ import {
 } from './github-repository-settings';
 import { rulesetListProblems } from './github-ruleset-settings';
 import { mergeGithubSettings } from './github-settings-merge';
-
-export type GithubSettings = {
-  readonly defaultBranchProtection: Readonly<Record<string, unknown>> | null;
-  readonly repository: Readonly<Record<string, unknown>>;
-  readonly rulesets: ReadonlyArray<Readonly<Record<string, unknown>>>;
-  readonly environments: ReadonlyArray<Readonly<Record<string, unknown>>>;
-};
+import { type GithubSettings, isRecord } from './github-settings-value';
 
 export type LoadedGithubSettings = {
   readonly merged: GithubSettings | null;
   readonly problems: ReadonlyArray<string>;
 };
-
-export const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const SETTINGS_KEYS = new Set([
   'default_branch_protection',

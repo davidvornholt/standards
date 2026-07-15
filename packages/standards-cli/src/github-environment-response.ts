@@ -3,7 +3,7 @@ import {
   MAX_REVIEWERS,
   MAX_WAIT_TIMER,
 } from './github-environment-settings';
-import { isRecord } from './github-settings';
+import { isRecord } from './github-settings-value';
 
 const WAIT_TIMER = 'wait_timer';
 const REQUIRED_REVIEWERS = 'required_reviewers';

@@ -1,5 +1,4 @@
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
+import { isRecord } from './github-settings-value';
 
 const RULE_KEYS = new Set(['type', 'parameters']);
 const PULL_REQUEST_PARAMETER_KEYS = new Set([

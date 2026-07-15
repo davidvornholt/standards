@@ -1,5 +1,6 @@
 import type { PinnedDirectory } from './sync-directory-handles';
-import { identitiesMatch, type NodeIdentity } from './sync-filesystem';
+import { identitiesMatch } from './sync-filesystem';
+import type { NodeIdentity } from './sync-node-identity';
 import { publishAtomicTransactionRecord } from './sync-transaction-atomic-record';
 import {
   type ParentCleanupReservation,

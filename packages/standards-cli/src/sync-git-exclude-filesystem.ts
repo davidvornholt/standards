@@ -7,11 +7,7 @@ import {
   type PinnedDirectory,
   syncPinnedDirectory,
 } from './sync-directory-handles';
-import {
-  identitiesMatch,
-  identityOf,
-  type NodeIdentity,
-} from './sync-filesystem';
+import { identitiesMatch, identityOf } from './sync-filesystem';
 import {
   type GitExcludeSnapshot,
   gitExcludeSnapshotsMatch,
@@ -19,6 +15,7 @@ import {
 } from './sync-git-exclude-snapshot';
 import { pinAbsoluteGitDirectory } from './sync-git-metadata-directory';
 import { exchangeNames, renameNoReplace } from './sync-linux-rename';
+import type { NodeIdentity } from './sync-node-identity';
 
 const DEFAULT_MODE = 0o644;
 

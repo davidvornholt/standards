@@ -1,5 +1,5 @@
 import { rulesetListProblems } from './github-ruleset-settings';
-import { isRecord } from './github-settings';
+import { isRecord } from './github-settings-value';
 
 type DecodeResult = {
   readonly problem: string | null;

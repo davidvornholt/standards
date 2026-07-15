@@ -5,7 +5,7 @@ import {
   mutate,
 } from './github-api';
 import type { LiveEnvironment } from './github-environments';
-import { isRecord } from './github-settings';
+import { isRecord } from './github-settings-value';
 
 const CUSTOM_DEPLOYMENT_PROTECTION_RULES = 'custom_deployment_protection_rules';
 

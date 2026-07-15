@@ -1,4 +1,4 @@
-import { isRecord } from './github-settings';
+import { isRecord } from './github-settings-value';
 
 const APP_ID = 'app_id';
 const BYPASS_ALLOWANCES = 'bypass_pull_request_allowances';

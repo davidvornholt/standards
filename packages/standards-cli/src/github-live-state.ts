@@ -15,7 +15,7 @@ import {
 } from './github-environments';
 import { decodeLiveRepositorySettings } from './github-repository-settings';
 import { fetchLiveRulesets, type LiveRulesets } from './github-rulesets';
-import { type GithubSettings, isRecord } from './github-settings';
+import { type GithubSettings, isRecord } from './github-settings-value';
 
 export type EnvironmentSnapshot = {
   readonly declared: Readonly<Record<string, unknown>>;

@@ -1,8 +1,11 @@
 import { createHash } from 'node:crypto';
 import { dirname } from 'node:path';
 import process from 'node:process';
-import type { FileState, NodeIdentity } from './sync-filesystem';
-import { assertFilesystemIdentityComponent } from './sync-node-identity';
+import type { FileState } from './sync-filesystem';
+import {
+  assertFilesystemIdentityComponent,
+  type NodeIdentity,
+} from './sync-node-identity';
 import type { LinuxProcessIdentity } from './sync-process-identity';
 
 export const TRANSACTION_DIRECTORY = '.standards-transaction';

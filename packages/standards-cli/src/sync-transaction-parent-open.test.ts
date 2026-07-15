@@ -6,9 +6,9 @@ import {
   openPinnedRoot,
   type PinnedDirectory,
 } from './sync-directory-handles';
-import type { NodeIdentity } from './sync-filesystem';
 import { openRepositoryRoot } from './sync-filesystem';
 import { cleanupFixtures, temporaryRoot } from './sync-mutations-test-helpers';
+import type { NodeIdentity } from './sync-node-identity';
 import { bindAndRemoveEntry } from './sync-transaction-bound-remove';
 import { openCreatedParent } from './sync-transaction-parent-open';
 

@@ -1,4 +1,7 @@
-import type { NodeIdentity } from './sync-filesystem';
+export type NodeIdentity = {
+  readonly dev: bigint;
+  readonly ino: bigint;
+};
 
 export const MAX_FILESYSTEM_IDENTITY = 18_446_744_073_709_551_615n;
 

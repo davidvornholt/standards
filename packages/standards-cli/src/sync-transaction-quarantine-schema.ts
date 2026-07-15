@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import type { NodeIdentity } from './sync-filesystem';
 import {
   MAX_FILESYSTEM_IDENTITY,
+  type NodeIdentity,
   parseStoredNodeIdentity,
   storedNodeIdentity,
 } from './sync-node-identity';

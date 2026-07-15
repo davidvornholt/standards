@@ -27,7 +27,7 @@ const assertExactArtifact = async (
   transaction: PinnedDirectory,
   name: string,
   contents: Buffer,
-  expected?: import('./sync-filesystem').NodeIdentity,
+  expected?: import('./sync-node-identity').NodeIdentity,
 ): Promise<void> => {
   const state = await inspectPinnedFile(
     artifact(
@@ -55,7 +55,7 @@ const validateArtifact = async ({
   readonly committed: boolean;
   readonly journal: TransactionJournal;
   readonly name: string;
-  readonly expected?: import('./sync-filesystem').NodeIdentity;
+  readonly expected?: import('./sync-node-identity').NodeIdentity;
   readonly root: RepositoryRoot;
   readonly transaction: PinnedDirectory;
 }): Promise<void> => {

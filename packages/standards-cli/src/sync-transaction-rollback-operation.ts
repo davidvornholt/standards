@@ -5,7 +5,7 @@ import {
   type PinnedTarget,
   syncPinnedDirectory,
 } from './sync-directory-handles';
-import { identitiesMatch, type NodeIdentity } from './sync-filesystem';
+import { identitiesMatch } from './sync-filesystem';
 import {
   rollbackBindingName,
   unlinkPinnedIdentity,
@@ -38,7 +38,7 @@ const restoreBackup = async ({
   transaction,
 }: {
   readonly backup: PinnedTarget;
-  readonly backupIdentity: NodeIdentity;
+  readonly backupIdentity: import('./sync-node-identity').NodeIdentity;
   readonly fault: MutationFault;
   readonly target: PinnedTarget;
   readonly transaction: PinnedDirectory;
@@ -70,7 +70,7 @@ const removeInstalled = async ({
 }: {
   readonly bindingName: string;
   readonly fault: MutationFault;
-  readonly installedIdentity: NodeIdentity;
+  readonly installedIdentity: import('./sync-node-identity').NodeIdentity;
   readonly target: PinnedTarget;
   readonly transaction: PinnedDirectory;
 }): Promise<void> => {

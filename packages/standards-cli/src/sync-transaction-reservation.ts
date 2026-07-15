@@ -5,8 +5,9 @@ import {
   type PinnedDirectory,
   syncPinnedDirectory,
 } from './sync-directory-handles';
-import { identitiesMatch, type NodeIdentity } from './sync-filesystem';
+import { identitiesMatch } from './sync-filesystem';
 import { isMissingFilesystemError } from './sync-filesystem-error';
+import type { NodeIdentity } from './sync-node-identity';
 import { publishAtomicTransactionRecord } from './sync-transaction-atomic-record';
 import { bindAndRemoveEntry } from './sync-transaction-bound-remove';
 import { hasRemovedTransactionReservation } from './sync-transaction-reservation-quarantine';

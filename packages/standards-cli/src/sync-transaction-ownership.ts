@@ -4,8 +4,9 @@ import {
   directoryEntryPath,
   type PinnedDirectory,
 } from './sync-directory-handles';
-import { identitiesMatch, type NodeIdentity } from './sync-filesystem';
+import { identitiesMatch } from './sync-filesystem';
 import {
+  type NodeIdentity,
   parseStoredNodeIdentity,
   type StoredNodeIdentity,
   storedNodeIdentity,

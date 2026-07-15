@@ -29,6 +29,7 @@ export const expectedPackedFiles = [
   'package/src/github-ruleset-settings.ts',
   'package/src/github-rulesets.ts',
   'package/src/github-settings-merge.ts',
+  'package/src/github-settings-value.ts',
   'package/src/github-settings.ts',
   'package/src/sync-control-seams.ts',
   'package/src/sync-descriptor-write.ts',

@@ -7,10 +7,10 @@ import {
   type PinnedDirectory,
   syncPinnedDirectory,
 } from './sync-directory-handles';
-import type { NodeIdentity } from './sync-filesystem';
 import { identitiesMatch, identityOf } from './sync-filesystem';
 import { isMissingFilesystemError } from './sync-filesystem-error';
 import { linkDescriptorNoReplace } from './sync-linux-link';
+import type { NodeIdentity } from './sync-node-identity';
 import { atomicRecordTemporaryName } from './sync-transaction-artifact-names';
 import { bindAndRemoveEntry } from './sync-transaction-bound-remove';
 

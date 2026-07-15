@@ -17,6 +17,7 @@ const ABSOLUTE_PACKAGE_PATH =
   /PACKAGE_PATH: \$\{\{ github\.workspace \}\}\/packages\/standards-cli/u;
 const githubExpression = (value: string): string => `$${`{{ ${value} }}`}`;
 const NPM_RELEASE_SHA = `RELEASE_SHA: ${githubExpression('steps.npm.outputs.release_sha')}`;
+const PACKAGE_INTEGRITY = `PACKAGE_INTEGRITY: ${githubExpression('steps.package.outputs.integrity')}`;
 const RELEASE_JOB_SHA = `RELEASE_SHA: ${githubExpression('needs.publish.outputs.release_sha')}`;
 const RELEASE_TOOL_CHECKOUT = `ref: ${githubExpression('needs.publish.outputs.tool_sha')}`;
 
@@ -69,6 +70,10 @@ describe('CLI release workflow', () => {
     expect(workflow).toContain('"$template_version" != "$version"');
     expect(workflow).toContain(
       'pack "$GITHUB_OUTPUT" "$PACKAGE_PATH" "$artifact_dir" "$RELEASE_SHA"',
+    );
+    expect(workflow).toContain(PACKAGE_INTEGRITY);
+    expect(workflow).toContain(
+      'npm-publish "$RELEASE_SHA" "$PACKAGE_INTEGRITY" "$PACKAGE_TARBALL"',
     );
     expect(workflow).toMatch(ABSOLUTE_PACKAGE_PATH);
     expect(classifier).not.toContain('release-effect');

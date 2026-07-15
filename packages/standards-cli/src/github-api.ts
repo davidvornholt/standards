@@ -5,7 +5,7 @@
 import { execFileSync } from 'node:child_process';
 import process from 'node:process';
 import { gitChildEnvironment } from './git-child-environment';
-import { isRecord } from './github-settings';
+import { isRecord } from './github-settings-value';
 import type { RepositoryRoot } from './sync-filesystem';
 import { assertRepositoryRootUnchanged } from './sync-repository-root-generation';
 

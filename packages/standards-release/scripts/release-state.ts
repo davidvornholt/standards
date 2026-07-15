@@ -22,6 +22,7 @@ import { publishAuthorizedNpmArtifact } from '../src/release-npm-publish';
 import type { ReleaseOutputError } from '../src/release-output-error';
 import { packReleaseArtifact } from '../src/release-package';
 import type { ReleasePackageError } from '../src/release-package-error';
+import { verifyPackedArtifact } from '../src/release-package-identity';
 import type { ReleaseReproductionError } from '../src/release-reproduction-error';
 import {
   argv,
@@ -93,12 +94,17 @@ const pack = (args: ReadonlyArray<string>) =>
   gen(function* () {
     const [output, packagePath, destination, expectedSha] = args;
     const outputPath = yield* requireValue(output, 'GitHub output path');
+    const releaseSha = yield* requireValue(expectedSha, 'release sha');
     const artifact = yield* packReleaseArtifact({
       destination: yield* requireValue(destination, 'artifact destination'),
-      expectedSha: yield* requireValue(expectedSha, 'release sha'),
+      expectedSha: releaseSha,
       packagePath: yield* requireValue(packagePath, 'package path'),
     });
-    yield* writeOutput(outputPath, { artifact });
+    const integrity = yield* verifyPackedArtifact({
+      artifact,
+      expectedSha: releaseSha,
+    });
+    yield* writeOutput(outputPath, { artifact, integrity });
   });
 
 const github = (mode: 'inspect' | 'reconcile', args: ReadonlyArray<string>) =>
@@ -125,9 +131,13 @@ const github = (mode: 'inspect' | 'reconcile', args: ReadonlyArray<string>) =>
 
 const publishNpm = (args: ReadonlyArray<string>) =>
   gen(function* () {
-    const [expectedSha, artifact] = args;
+    const [expectedSha, expectedIntegrity, artifact] = args;
     yield* publishAuthorizedNpmArtifact({
       artifact: yield* requireValue(artifact, 'package tarball'),
+      expectedIntegrity: yield* requireValue(
+        expectedIntegrity,
+        'package integrity',
+      ),
       expectedSha: yield* requireValue(expectedSha, 'release sha'),
       token: yield* requireValue(
         firstNonEmpty([environment.GH_TOKEN, environment.GITHUB_TOKEN]),

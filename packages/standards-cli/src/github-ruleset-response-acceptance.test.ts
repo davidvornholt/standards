@@ -7,7 +7,7 @@ import {
   repositoryRulesetDetail,
 } from './github-ruleset-response-test-fixture';
 import { fetchLiveRulesets } from './github-rulesets';
-import type { GithubSettings } from './github-settings';
+import type { GithubSettings } from './github-settings-value';
 
 const originalFetch = globalThis.fetch;
 const ACTOR_ID = 'actor_id';

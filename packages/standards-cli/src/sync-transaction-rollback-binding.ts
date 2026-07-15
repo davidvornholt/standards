@@ -1,5 +1,6 @@
 import type { PinnedDirectory, PinnedTarget } from './sync-directory-handles';
-import type { FileState, NodeIdentity } from './sync-filesystem';
+import type { FileState } from './sync-filesystem';
+import type { NodeIdentity } from './sync-node-identity';
 import { rollbackBindingTarget } from './sync-transaction-bound-unlink';
 import {
   fileMatchesExpected,

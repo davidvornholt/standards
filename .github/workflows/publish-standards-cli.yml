@@ -145,11 +145,12 @@ jobs:
         if: steps.npm.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PACKAGE_INTEGRITY: ${{ steps.package.outputs.integrity }}
           PACKAGE_TARBALL: ${{ steps.package.outputs.artifact }}
           RELEASE_SHA: ${{ steps.npm.outputs.release_sha }}
         run: >-
           bun run --cwd packages/standards-release release:state --
-          npm-publish "$RELEASE_SHA" "$PACKAGE_TARBALL"
+          npm-publish "$RELEASE_SHA" "$PACKAGE_INTEGRITY" "$PACKAGE_TARBALL"
 
   release:
     needs: publish

@@ -2,7 +2,7 @@
 // the live state returned by the GitHub API. Pure logic; no network.
 
 import { RULESET_COMPARED_KEYS } from './github-ruleset-settings';
-import { isRecord } from './github-settings';
+import { isRecord } from './github-settings-value';
 
 export type SettingsDiff = {
   readonly drifted: ReadonlyArray<string>;

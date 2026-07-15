@@ -6,7 +6,7 @@ import {
   defaultBranchResponse,
 } from './github-default-branch-test-fixture';
 import { declaredRuleset } from './github-ruleset-test-fixture';
-import type { GithubSettings } from './github-settings';
+import type { GithubSettings } from './github-settings-value';
 
 const originalFetch = globalThis.fetch;
 const CANONICAL_ID = 1;

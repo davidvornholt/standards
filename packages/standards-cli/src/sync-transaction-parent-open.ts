@@ -4,8 +4,9 @@ import {
   type PinnedTarget,
 } from './sync-directory-handles';
 import { pinTarget } from './sync-directory-traversal';
-import type { NodeIdentity, RepositoryRoot } from './sync-filesystem';
+import type { RepositoryRoot } from './sync-filesystem';
 import { isMissingFilesystemError } from './sync-filesystem-error';
+import type { NodeIdentity } from './sync-node-identity';
 import { openRemovalBindingDirectory } from './sync-transaction-quarantine-read';
 
 export const openCreatedParent = async (

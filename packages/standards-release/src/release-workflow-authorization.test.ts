@@ -59,7 +59,12 @@ describe('CLI release workflow authorization', () => {
     expect(publish).toContain(
       `RELEASE_SHA: ${githubExpression('steps.npm.outputs.release_sha')}`,
     );
-    expect(publish).toContain('npm-publish "$RELEASE_SHA" "$PACKAGE_TARBALL"');
+    expect(publish).toContain(
+      `PACKAGE_INTEGRITY: ${githubExpression('steps.package.outputs.integrity')}`,
+    );
+    expect(publish).toContain(
+      'npm-publish "$RELEASE_SHA" "$PACKAGE_INTEGRITY" "$PACKAGE_TARBALL"',
+    );
     const reconcile = workflow.slice(
       position('- name: Reconcile verified GitHub tag and release'),
     );

@@ -9,9 +9,11 @@ import {
   tryPromise,
 } from './release-effect';
 import type { GithubConnectionInput } from './release-github-client';
+import { verifyPackedArtifact } from './release-package-identity';
 import { env, spawn } from './release-runtime';
 
 type Publisher = (artifact: string) => Effect<void, NpmRegistryError>;
+type ArtifactVerifier = typeof verifyPackedArtifact;
 
 const GITHUB_TOKEN_VARIABLES = new Set(['GH_TOKEN', 'GITHUB_TOKEN']);
 
@@ -79,11 +81,18 @@ const publishWithNpm: Publisher = (artifact) =>
 export const publishAuthorizedNpmArtifact = (
   input: GithubConnectionInput & {
     readonly artifact: string;
+    readonly expectedIntegrity: string;
     readonly expectedSha: string;
   },
   publisher: Publisher = publishWithNpm,
+  verifyArtifact: ArtifactVerifier = verifyPackedArtifact,
 ) =>
   gen(function* () {
     yield* authorizeReleaseSha(input);
+    yield* verifyArtifact({
+      artifact: input.artifact,
+      expectedIntegrity: input.expectedIntegrity,
+      expectedSha: input.expectedSha,
+    });
     yield* publisher(input.artifact);
   });

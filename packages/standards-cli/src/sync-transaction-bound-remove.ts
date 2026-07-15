@@ -2,8 +2,9 @@ import {
   type PinnedDirectory,
   syncPinnedDirectory,
 } from './sync-directory-handles';
-import { identitiesMatch, type NodeIdentity } from './sync-filesystem';
+import { identitiesMatch } from './sync-filesystem';
 import { renameNoReplace } from './sync-linux-rename';
+import type { NodeIdentity } from './sync-node-identity';
 import { publishQuarantineRecord } from './sync-transaction-quarantine-publication';
 import { inspectQuarantineEntry } from './sync-transaction-quarantine-read';
 import {

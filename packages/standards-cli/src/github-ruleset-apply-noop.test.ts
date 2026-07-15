@@ -1,6 +1,6 @@
 import { afterEach, expect, it } from 'bun:test';
 import { applyPrefetchedRulesets } from './github-apply';
-import type { GithubSettings } from './github-settings';
+import type { GithubSettings } from './github-settings-value';
 
 const originalFetch = globalThis.fetch;
 

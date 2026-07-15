@@ -1,7 +1,5 @@
 import { rulesProblems } from './github-ruleset-rule-settings';
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
+import { isRecord } from './github-settings-value';
 
 export const RULESET_COMPARED_KEYS = [
   'target',

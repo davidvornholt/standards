@@ -2,12 +2,11 @@ import { type BigIntStats, constants } from 'node:fs';
 import { lstat, open, realpath } from 'node:fs/promises';
 import { isAbsolute, join, normalize, relative, sep } from 'node:path';
 import { isMissingFilesystemError } from './sync-filesystem-error';
-import { assertFilesystemIdentityComponent } from './sync-node-identity';
+import {
+  assertFilesystemIdentityComponent,
+  type NodeIdentity,
+} from './sync-node-identity';
 import { inspectRealDirectoryPath } from './sync-root-path';
-export type NodeIdentity = {
-  readonly dev: bigint;
-  readonly ino: bigint;
-};
 
 export type RepositoryRoot = {
   readonly identity: NodeIdentity;

@@ -6,13 +6,9 @@ import {
   type PinnedTarget,
   syncPinnedDirectory,
 } from './sync-directory-handles';
-import {
-  type FileState,
-  identitiesMatch,
-  identityOf,
-  type NodeIdentity,
-} from './sync-filesystem';
+import { type FileState, identitiesMatch, identityOf } from './sync-filesystem';
 import { isMissingFilesystemError } from './sync-filesystem-error';
+import type { NodeIdentity } from './sync-node-identity';
 import {
   type ExpectedFile,
   effectiveMode,

@@ -94,7 +94,7 @@ export const validateOperationArtifact = async ({
   readonly committed: boolean;
   readonly journal: TransactionJournal;
   readonly name: string;
-  readonly expected?: import('./sync-filesystem').NodeIdentity;
+  readonly expected?: import('./sync-node-identity').NodeIdentity;
   readonly root: RepositoryRoot;
   readonly transaction: PinnedDirectory;
 }): Promise<void> => {

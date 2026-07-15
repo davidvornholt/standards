@@ -4,8 +4,9 @@ import {
   directoryEntryPath,
   type PinnedDirectory,
 } from './sync-directory-handles';
-import { identitiesMatch, type NodeIdentity } from './sync-filesystem';
+import { identitiesMatch } from './sync-filesystem';
 import { isMissingFilesystemError } from './sync-filesystem-error';
+import type { NodeIdentity } from './sync-node-identity';
 import { publishAtomicTransactionRecord } from './sync-transaction-atomic-record';
 import { removeBoundAtomicPartialTails } from './sync-transaction-atomic-recovery';
 import { resolveRemovalEntryName } from './sync-transaction-quarantine-read';

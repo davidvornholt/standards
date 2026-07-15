@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { diffGithubLiveState } from './github-live-state';
 import { decodeLiveRepositorySettings } from './github-repository-settings';
-import type { GithubSettings } from './github-settings';
+import type { GithubSettings } from './github-settings-value';
 
 const MALFORMED_KEY = 'allow_auto_merge';
 const DRIFTED_KEY = 'allow_merge_commit';

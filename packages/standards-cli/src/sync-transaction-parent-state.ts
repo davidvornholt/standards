@@ -4,8 +4,9 @@ import {
   directoryEntryPath,
   type PinnedDirectory,
 } from './sync-directory-handles';
-import { identityOf, type NodeIdentity } from './sync-filesystem';
+import { identityOf } from './sync-filesystem';
 import { isMissingFilesystemError } from './sync-filesystem-error';
+import type { NodeIdentity } from './sync-node-identity';
 import { resolveRemovalEntryName } from './sync-transaction-quarantine-read';
 import {
   assertTransactionReservation,

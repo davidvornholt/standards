@@ -39,6 +39,7 @@ it('does not invoke npm after same-name head divergence', async () => {
           {
             apiUrl: 'https://github.test',
             artifact: 'package.tgz',
+            expectedIntegrity: 'sha512-expected',
             expectedSha: 'expected',
             fetcher,
             repo: 'owner/repo',

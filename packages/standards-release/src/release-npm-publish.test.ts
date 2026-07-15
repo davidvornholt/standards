@@ -1,5 +1,5 @@
 import { expect, it } from 'bun:test';
-import { effectVoid, flip, runPromise } from './release-effect';
+import { effectVoid, flip, runPromise, succeed } from './release-effect';
 import type { ReleaseFetcher } from './release-github-request';
 import {
   npmPublishCommand,
@@ -36,6 +36,7 @@ it('authorizes immediately inside the npm mutation owner', async () => {
       {
         apiUrl: 'https://github.test',
         artifact: 'package.tgz',
+        expectedIntegrity: 'sha512-expected',
         expectedSha: 'expected',
         fetcher,
         repo: 'owner/repo',
@@ -45,6 +46,12 @@ it('authorizes immediately inside the npm mutation owner', async () => {
         calls.push(`publish ${artifact}`);
         return effectVoid;
       },
+      (input) => {
+        calls.push(
+          `verify ${input.artifact} ${input.expectedIntegrity} ${input.expectedSha}`,
+        );
+        return succeed(input.expectedIntegrity ?? '');
+      },
     ),
   );
 
@@ -53,6 +60,7 @@ it('authorizes immediately inside the npm mutation owner', async () => {
     '/repos/owner/repo/compare/expected...main',
     '/repos/owner/repo',
     '/repos/owner/repo/compare/expected...main',
+    'verify package.tgz sha512-expected expected',
     'publish package.tgz',
   ]);
 });
@@ -106,6 +114,7 @@ it('does not invoke npm when live default-branch authorization fails', async () 
           {
             apiUrl: 'https://github.test',
             artifact: 'package.tgz',
+            expectedIntegrity: 'sha512-expected',
             expectedSha: 'expected',
             fetcher,
             repo: 'owner/repo',
@@ -151,6 +160,7 @@ it('does not invoke npm after a renamed or malformed trailing default branch', a
             {
               apiUrl: 'https://github.test',
               artifact: 'package.tgz',
+              expectedIntegrity: 'sha512-expected',
               expectedSha: 'expected',
               fetcher,
               repo: 'owner/repo',

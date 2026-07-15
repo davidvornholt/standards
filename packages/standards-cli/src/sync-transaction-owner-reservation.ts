@@ -5,9 +5,12 @@ import {
   type PinnedDirectory,
   syncPinnedDirectory,
 } from './sync-directory-handles';
-import { identitiesMatch, type NodeIdentity } from './sync-filesystem';
+import { identitiesMatch } from './sync-filesystem';
 import { renameDirectoryNoReplace } from './sync-linux-rename';
-import { assertFilesystemIdentityComponent } from './sync-node-identity';
+import {
+  assertFilesystemIdentityComponent,
+  type NodeIdentity,
+} from './sync-node-identity';
 import { resolveRemovalEntryName } from './sync-transaction-quarantine-read';
 import { TRANSACTION_OWNER_PUBLICATION_PREFIX } from './sync-transaction-types';
 

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'bun:test';
-import { identitiesMatch, type NodeIdentity } from './sync-filesystem';
+import { identitiesMatch } from './sync-filesystem';
 import {
   MAX_FILESYSTEM_IDENTITY,
+  type NodeIdentity,
   parseStoredNodeIdentity,
   storedNodeIdentity,
 } from './sync-node-identity';

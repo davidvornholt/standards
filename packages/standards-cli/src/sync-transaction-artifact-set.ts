@@ -4,7 +4,8 @@ import {
   type PinnedDirectory,
   type PinnedTarget,
 } from './sync-directory-handles';
-import { identitiesMatch, type NodeIdentity } from './sync-filesystem';
+import { identitiesMatch } from './sync-filesystem';
+import type { NodeIdentity } from './sync-node-identity';
 import { isAtomicRecordTemporaryName } from './sync-transaction-artifact-names';
 import { inspectPinnedFile } from './sync-transaction-files';
 import {

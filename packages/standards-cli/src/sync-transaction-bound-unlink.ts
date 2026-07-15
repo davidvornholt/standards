@@ -1,5 +1,5 @@
 import type { PinnedDirectory, PinnedTarget } from './sync-directory-handles';
-import type { NodeIdentity } from './sync-filesystem';
+import type { NodeIdentity } from './sync-node-identity';
 import { bindAndRemoveEntry } from './sync-transaction-bound-remove';
 import { resolveRemovalEntryName } from './sync-transaction-quarantine-read';
 

@@ -1,7 +1,6 @@
 // Structural validation for declarative GitHub Actions environments.
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
+import { isRecord } from './github-settings-value';
 
 const ENVIRONMENT_KEYS = new Set([
   'name',

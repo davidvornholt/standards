@@ -7,7 +7,7 @@ import { diffRuleset, diffRulesets } from './github-diff';
 import { deleteVerifiedUndeclaredRuleset } from './github-ruleset-deletion';
 import { reconcileRuleset } from './github-ruleset-reconcile';
 import { fetchLiveRulesets, type LiveRulesets } from './github-rulesets';
-import type { GithubSettings } from './github-settings';
+import type { GithubSettings } from './github-settings-value';
 
 type ReportAction = (action: string) => void;
 

@@ -2,7 +2,6 @@ import { afterEach, expect, it } from 'bun:test';
 import { statSync } from 'node:fs';
 import { join } from 'node:path';
 import { openPinnedRoot } from './sync-directory-handles';
-import type { NodeIdentity } from './sync-filesystem';
 import { openRepositoryRoot } from './sync-filesystem';
 import {
   cleanupFixtures,
@@ -10,6 +9,7 @@ import {
   temporaryRoot,
   writeFixture,
 } from './sync-mutations-test-helpers';
+import type { NodeIdentity } from './sync-node-identity';
 import { validatedTransactionArtifacts } from './sync-transaction-artifact-set';
 import { bindAndRemoveEntry } from './sync-transaction-bound-remove';
 

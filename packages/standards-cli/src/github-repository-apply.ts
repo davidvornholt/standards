@@ -6,7 +6,7 @@ import {
 } from './github-api';
 import { diffRepositorySettings } from './github-diff';
 import { decodeLiveRepositorySettings } from './github-repository-settings';
-import { type GithubSettings, isRecord } from './github-settings';
+import { type GithubSettings, isRecord } from './github-settings-value';
 
 type ApplyRepositorySettingsInput = {
   readonly beforeMutation: BeforeGithubMutation;

@@ -1,5 +1,5 @@
 import { environmentIdentity } from './github-environment-settings';
-import type { GithubSettings } from './github-settings';
+import type { GithubSettings } from './github-settings-value';
 
 type MergeResult = {
   readonly merged: GithubSettings | null;

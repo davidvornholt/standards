@@ -14,7 +14,7 @@ import {
 } from './github-default-branch';
 import { decodeDefaultBranch } from './github-default-branch-response';
 import { subsetMatches } from './github-diff';
-import { isRecord } from './github-settings';
+import { isRecord } from './github-settings-value';
 
 const REQUIRED_REVIEWS = 'required_pull_request_reviews';
 const BYPASS_ALLOWANCES = 'bypass_pull_request_allowances';

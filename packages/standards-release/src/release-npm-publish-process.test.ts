@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { flip, runPromise } from './release-effect';
+import { flip, runPromise, succeed } from './release-effect';
 import type { ReleaseFetcher } from './release-github-request';
 import { publishAuthorizedNpmArtifact } from './release-npm-publish';
 import { env, file, spawnSync, write } from './release-runtime';
@@ -82,14 +82,19 @@ if [ "$FAKE_NPM_MODE" = silent ]; then exit 7; fi
 };
 
 const publish = (artifact = 'package artifact.tgz') =>
-  publishAuthorizedNpmArtifact({
-    apiUrl: 'https://github.test',
-    artifact,
-    expectedSha: 'expected',
-    fetcher: authorize,
-    repo: 'owner/repo',
-    token: 'api-token',
-  });
+  publishAuthorizedNpmArtifact(
+    {
+      apiUrl: 'https://github.test',
+      artifact,
+      expectedIntegrity: 'sha512-expected',
+      expectedSha: 'expected',
+      fetcher: authorize,
+      repo: 'owner/repo',
+      token: 'api-token',
+    },
+    undefined,
+    () => succeed('sha512-expected'),
+  );
 
 describe('production npm publisher', () => {
   it('executes exact arguments with OIDC inputs and without GitHub tokens', async () => {

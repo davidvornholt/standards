@@ -5,12 +5,9 @@ import {
   openPinnedChild,
   type PinnedDirectory,
 } from './sync-directory-handles';
-import {
-  identitiesMatch,
-  identityOf,
-  type NodeIdentity,
-} from './sync-filesystem';
+import { identitiesMatch, identityOf } from './sync-filesystem';
 import { isMissingFilesystemError } from './sync-filesystem-error';
+import type { NodeIdentity } from './sync-node-identity';
 import { readQuarantineRecords } from './sync-transaction-quarantine-record';
 import {
   type QuarantineRecord,

@@ -7,7 +7,7 @@ import {
 } from './github-default-branch-test-fixture';
 import { deleteVerifiedUndeclaredRuleset } from './github-ruleset-deletion';
 import { declaredRuleset } from './github-ruleset-test-fixture';
-import type { GithubSettings } from './github-settings';
+import type { GithubSettings } from './github-settings-value';
 
 const originalFetch = globalThis.fetch;
 const OLD_ID = 2;

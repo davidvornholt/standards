@@ -1,5 +1,6 @@
-import { identitiesMatch, type NodeIdentity } from './sync-filesystem';
+import { identitiesMatch } from './sync-filesystem';
 import {
+  type NodeIdentity,
   parseStoredNodeIdentity,
   type StoredNodeIdentity,
   storedNodeIdentity,
