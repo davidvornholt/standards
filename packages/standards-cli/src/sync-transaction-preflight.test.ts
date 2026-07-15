@@ -18,6 +18,10 @@ const crossDeviceFixture = join(
   import.meta.dir,
   'sync-transaction-cross-device-fixture.ts',
 );
+const pruneMountFixture = join(
+  import.meta.dir,
+  'sync-transaction-prune-mount-fixture.ts',
+);
 const namespaceProbe = spawnSync('unshare', [
   '-Urnm',
   'sh',
@@ -95,6 +99,24 @@ if (namespaceUnavailable === '') {
     expect(result.status).toBe(0);
     expect(result.stderr.toString()).toBe('');
     expect(transactionArtifacts(rootPath)).toEqual([]);
+  });
+
+  it('preserves an unmanaged nested mount while pruning managed parents', () => {
+    const rootPath = temporaryRoot();
+    writeFixture(rootPath, 'legacy/nested/old.txt', 'retired\n');
+    writeFixture(rootPath, 'sync-standards.lock', 'old lock\n');
+
+    const result = spawnSync('unshare', [
+      '-Urnm',
+      process.execPath,
+      pruneMountFixture,
+      rootPath,
+    ]);
+
+    expect(result.status).toBe(0);
+    expect(result.stderr.toString()).toBe('');
+    expect(existsSync(join(rootPath, 'legacy/unmanaged-mounted'))).toBe(true);
+    expect(existsSync(join(rootPath, 'legacy/nested'))).toBe(false);
   });
 } else {
   // biome-ignore lint/suspicious/noSkippedTests: bind mounts require user namespaces; the skipped test name records the probe failure

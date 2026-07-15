@@ -58,6 +58,13 @@ export const isQuarantineDraftName = (name: string): boolean => {
   return parts === null ? false : parts.suffix.startsWith('.draft.');
 };
 
+export const quarantineArtifactTokenFromName = (
+  name: string,
+): string | null => {
+  const parts = artifactParts(name);
+  return parts === null ? null : parts.token;
+};
+
 export const quarantineRecordTokenFromName = (name: string): string | null => {
   const parts = artifactParts(name);
   return parts !== null && ['.json', '.tail'].includes(parts.suffix)

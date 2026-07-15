@@ -1,18 +1,14 @@
-import {
-  apiError,
-  HTTP_OK,
-  loadDeclared,
-  request,
-  resolveGithubRepo,
-  resolveToken,
-} from './github-api';
+import { resolveGithubRepo, resolveToken } from './github-api';
 import { applyPrefetchedRulesets } from './github-apply';
+import {
+  assertGithubDeclarationUnchanged,
+  loadDeclared,
+} from './github-declaration';
 import { applyDefaultBranchProtection } from './github-default-branch-apply';
-import { diffRepositorySettings } from './github-diff';
 import { applyPrefetchedEnvironment } from './github-environment-apply';
 import { diffGithubLiveState, readGithubLiveState } from './github-live-state';
-import { decodeLiveRepositorySettings } from './github-repository-settings';
-import { type GithubSettings, isRecord } from './github-settings';
+import { applyRepositorySettings } from './github-repository-apply';
+import { openRepositoryRoot, type RepositoryRoot } from './sync-filesystem';
 
 const reportProblems = (problems: ReadonlyArray<string>): void => {
   console.error(
@@ -21,41 +17,18 @@ const reportProblems = (problems: ReadonlyArray<string>): void => {
   console.error(problems.map((problem) => `  - ${problem}`).join('\n'));
 };
 
-const assertRepositoryUpdateConverged = (
-  declared: GithubSettings,
-  response: unknown,
-): void => {
-  if (!isRecord(response)) {
-    throw new Error(
-      'updating repository settings: GitHub returned an invalid repository response',
-    );
-  }
-  const decoded = decodeLiveRepositorySettings(
-    response,
-    declared.repository,
-    true,
-  );
-  const diff = diffRepositorySettings(declared.repository, decoded.settings);
-  const problems = [
-    ...decoded.problems,
-    ...diff.drifted,
-    ...diff.unverifiable.map(
-      (key) => `repository setting "${key}" remained unverifiable`,
-    ),
-  ];
-  if (problems.length > 0) {
-    throw new Error(
-      `updating repository settings did not prove convergence: ${problems.join('; ')}`,
-    );
-  }
-};
-
-export const runGithubCheck = async (consumer: string): Promise<boolean> => {
-  const declared = await loadDeclared(consumer);
+export const runGithubCheck = async (
+  consumer: string,
+  repositoryRoot?: RepositoryRoot,
+): Promise<boolean> => {
+  const root =
+    repositoryRoot ??
+    (await openRepositoryRoot(consumer, 'consumer repository'));
+  const declared = await loadDeclared(root);
   const problems = [...declared.problems];
   try {
     if (declared.merged !== null) {
-      const repo = resolveGithubRepo(consumer);
+      const repo = resolveGithubRepo(root.path);
       if (repo === null) {
         problems.push(
           'cannot determine the GitHub repository from the origin remote',
@@ -94,13 +67,19 @@ export const runGithubCheck = async (consumer: string): Promise<boolean> => {
   return true;
 };
 
-export const runGithubApply = async (consumer: string): Promise<boolean> => {
-  const declared = await loadDeclared(consumer);
+export const runGithubApply = async (
+  consumer: string,
+  repositoryRoot?: RepositoryRoot,
+): Promise<boolean> => {
+  const root =
+    repositoryRoot ??
+    (await openRepositoryRoot(consumer, 'consumer repository'));
+  const declared = await loadDeclared(root);
   if (declared.merged === null) {
     reportProblems(declared.problems);
     return false;
   }
-  const repo = resolveGithubRepo(consumer);
+  const repo = resolveGithubRepo(root.path);
   if (repo === null) {
     console.error(
       'standards github: cannot determine the GitHub repository from the origin remote',
@@ -115,6 +94,12 @@ export const runGithubApply = async (consumer: string): Promise<boolean> => {
     return false;
   }
   try {
+    const { snapshot } = declared;
+    if (snapshot === null) {
+      throw new Error('GitHub settings declaration snapshot is unavailable');
+    }
+    const beforeMutation = (): Promise<void> =>
+      assertGithubDeclarationUnchanged(snapshot);
     const live = await readGithubLiveState(token, repo, declared.merged, true);
     if (live.problems.length > 0) {
       throw new Error(live.problems.join('; '));
@@ -124,24 +109,15 @@ export const runGithubApply = async (consumer: string): Promise<boolean> => {
       actionCount += 1;
       console.log(`  ${action}`);
     };
-    const repositoryDiff = diffRepositorySettings(
-      declared.merged.repository,
-      live.repository,
-    );
     if (
-      repositoryDiff.drifted.length > 0 ||
-      repositoryDiff.unverifiable.length > 0
-    ) {
-      const patched = await request(
+      await applyRepositorySettings({
+        beforeMutation,
+        declared: declared.merged,
+        live: live.repository,
+        repo,
         token,
-        'PATCH',
-        `/repos/${repo}`,
-        declared.merged.repository,
-      );
-      if (patched.status !== HTTP_OK) {
-        throw new Error(apiError('updating repository settings', patched));
-      }
-      assertRepositoryUpdateConverged(declared.merged, patched.body);
+      })
+    ) {
       reportAction('updated repository merge settings');
     }
     if (
@@ -151,6 +127,7 @@ export const runGithubApply = async (consumer: string): Promise<boolean> => {
       await applyDefaultBranchProtection({
         declared: declared.merged.defaultBranchProtection,
         live: live.defaultBranch,
+        beforeMutation,
         reportAction,
         repo,
         token,
@@ -161,6 +138,7 @@ export const runGithubApply = async (consumer: string): Promise<boolean> => {
       await applyPrefetchedEnvironment({
         declared: environment.declared,
         live: environment.live,
+        beforeMutation,
         reportAction,
         repo,
         token,
@@ -169,6 +147,7 @@ export const runGithubApply = async (consumer: string): Promise<boolean> => {
     await applyPrefetchedRulesets({
       declared: declared.merged,
       live: live.rulesets,
+      beforeMutation,
       reportAction,
       repo,
       token,

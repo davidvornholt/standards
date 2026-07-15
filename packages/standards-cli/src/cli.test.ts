@@ -2,21 +2,24 @@
 // throwaway temp fixtures and assert its documented status/stdout/stderr.
 
 import { afterEach, describe, expect, it } from 'bun:test';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
+  chmodSync,
+  cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import process from 'node:process';
 import { declaredRuleset } from './github-ruleset-test-fixture';
 import { DEFAULT_SYNC_POLICY, SYNC_POLICY_FILE } from './sync-policy';
@@ -64,6 +67,9 @@ const PROTOTYPE_NAMED_FILE_SET: ReadonlySet<string> = new Set(
 const SYNC_POLICY_CONTRACT_VERSION = 1;
 const BARE_SYNC_STEP = /^\s+run: bun standards sync$/mu;
 const FILE_TYPE_MODE_BASE = 0o1000;
+const EXECUTABLE_MODE = 0o755;
+const FETCH_WAIT_ATTEMPTS = 500;
+const FETCH_WAIT_INTERVAL_MS = 10;
 const COMMIT_SHA_LENGTH = 40;
 const SHA256_LENGTH = 64;
 const TRANSACTION_ID = '11111111-1111-4111-8111-111111111111';
@@ -82,6 +88,11 @@ type RunOptions = {
   readonly engine?: string;
   readonly env?: Readonly<Record<string, string>>;
   readonly preload?: string;
+};
+
+type PausedRun = {
+  readonly args: ReadonlyArray<string>;
+  readonly consumer: string;
 };
 
 const tmps: Array<string> = [];
@@ -220,6 +231,64 @@ const run = (
   }
 };
 
+const waitForFile = async (path: string): Promise<void> => {
+  for (let attempt = 0; attempt < FETCH_WAIT_ATTEMPTS; attempt += 1) {
+    if (existsSync(path)) {
+      return;
+    }
+    // biome-ignore lint/performance/noAwaitInLoops: This polls a marker created by a deliberately paused child process.
+    await new Promise((resolveDelay) =>
+      setTimeout(resolveDelay, FETCH_WAIT_INTERVAL_MS),
+    );
+  }
+  throw new Error(`timed out waiting for ${path}`);
+};
+
+const pausedGitFetchRun = async ({
+  args,
+  consumer,
+}: PausedRun): Promise<RunResult> => {
+  const control = mkTmp('sync-git-pause-');
+  const bin = join(control, 'bin');
+  const marker = join(control, 'fetch-started');
+  const release = join(control, 'fetch-release');
+  mkdirSync(bin);
+  const wrapper = join(bin, 'git');
+  const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+  writeFileSync(
+    wrapper,
+    `#!/bin/sh\nfor arg in "$@"; do\n  if [ "$arg" = fetch ]; then\n    : > ${JSON.stringify(marker)}\n    while [ ! -f ${JSON.stringify(release)} ]; do sleep 0.01; done\n  fi\ndone\nexec ${JSON.stringify(realGit)} "$@"\n`,
+  );
+  chmodSync(wrapper, EXECUTABLE_MODE);
+  const child = spawn('bun', [ENGINE, ...args], {
+    cwd: consumer,
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}` },
+  });
+  let stderr = '';
+  let stdout = '';
+  child.stderr.setEncoding('utf8');
+  child.stdout.setEncoding('utf8');
+  child.stderr.on('data', (chunk: string) => {
+    stderr += chunk;
+  });
+  child.stdout.on('data', (chunk: string) => {
+    stdout += chunk;
+  });
+  const exited = new Promise<number>((resolveExit, rejectExit) => {
+    child.once('error', rejectExit);
+    child.once('close', (code) => resolveExit(code ?? 1));
+  });
+  await waitForFile(marker);
+  write(
+    consumer,
+    SYNC_POLICY_FILE,
+    JSON.stringify({ ref: DEFAULT_SYNC_POLICY.ref, scheduledSync: false }),
+  );
+  writeFileSync(release, 'continue\n');
+  const status = await exited;
+  return { status, stderr, stdout };
+};
+
 // A fake upstream: its own manifest, a `template/` seed dir, two managed files.
 const buildUpstream = (paths: ReadonlyArray<string> = STD_PATHS): string => {
   const up = mkTmp('sync-up-');
@@ -347,6 +416,10 @@ const git = (dir: string, args: ReadonlyArray<string>): string =>
     ],
     { encoding: 'utf8' },
   ).trim();
+const retainedRecoveryArtifacts = (root: string): ReadonlyArray<string> =>
+  readdirSync(root)
+    .filter((name) => name.startsWith('.standards-removal-'))
+    .sort();
 
 // A git-backed upstream with a real pre-contract snapshot, then a compatible
 // tagged snapshot, then main. The compatibility marker and controller do not
@@ -1379,6 +1452,28 @@ describe('sync', () => {
     expect(existsSync(join(consumer, 'packages/standards-cli'))).toBe(false);
   });
 
+  it('preserves unmanaged empty descendants while pruning managed parents', () => {
+    const retired = 'legacy/nested/old.txt';
+    const up = buildUpstream([...STD_PATHS, retired]);
+    write(up, retired, 'retired\n');
+    const { consumer } = initConsumer(up);
+    mkdirSync(join(consumer, 'legacy/unmanaged/empty'), { recursive: true });
+    write(
+      up,
+      'sync-standards.json',
+      JSON.stringify({
+        upstream: up,
+        seedDir: 'template',
+        syncPolicyContractVersion: SYNC_POLICY_CONTRACT_VERSION,
+        paths: STD_PATHS,
+      }),
+    );
+
+    expect(sync(up, consumer).status).toBe(0);
+    expect(existsSync(join(consumer, 'legacy/nested'))).toBe(false);
+    expect(existsSync(join(consumer, 'legacy/unmanaged/empty'))).toBe(true);
+  });
+
   it('uses new managed paths from the upstream manifest immediately', () => {
     const up = buildUpstream();
     const { consumer } = initConsumer(up);
@@ -1608,6 +1703,79 @@ describe('sync mirror', () => {
     expect(dry.status).toBe(0);
     expect(dry.stdout).toContain('dry run: already in sync; no changes');
   });
+
+  it('creates no transaction artifacts when already in sync', () => {
+    const up = buildUpstream();
+    const { consumer } = initConsumer(up);
+    const before = listRelativeFiles(consumer);
+
+    const result = sync(up, consumer);
+
+    expect(result.status).toBe(0);
+    expect(listRelativeFiles(consumer)).toEqual(before);
+  });
+
+  it('keeps existing recovery history out of Git status and staging', () => {
+    const up = buildUpstream();
+    const { consumer, result: initialized } = initConsumer(up);
+    expect(initialized.status).toBe(0);
+    const retainedAfterInit = retainedRecoveryArtifacts(consumer);
+    expect(retainedAfterInit.length).toBeGreaterThan(0);
+    git(consumer, ['init', '--quiet', '-b', 'main']);
+    expect(git(consumer, ['status', '--short'])).toContain('.standards-');
+
+    const noOp = sync(up, consumer);
+    expect(noOp.status).toBe(0);
+    expect(retainedRecoveryArtifacts(consumer)).toEqual(retainedAfterInit);
+    expect(git(consumer, ['status', '--short'])).not.toContain('.standards-');
+    git(consumer, ['add', '-A']);
+    expect(git(consumer, ['diff', '--cached', '--name-only'])).not.toContain(
+      '.standards-',
+    );
+    git(consumer, ['commit', '--quiet', '-m', 'initial']);
+    expect(git(consumer, ['status', '--short'])).toBe('');
+
+    write(up, 'managed/a.txt', 'alpha v2\n');
+    const changed = sync(up, consumer);
+    expect(changed.status).toBe(0);
+    expect(retainedRecoveryArtifacts(consumer).length).toBeGreaterThan(
+      retainedAfterInit.length,
+    );
+    const status = git(consumer, ['status', '--short']);
+    expect(status).toContain('managed/a.txt');
+    expect(status).toContain('sync-standards.lock');
+    expect(status).not.toContain('.standards-');
+
+    git(consumer, ['add', '-A']);
+    const staged = git(consumer, ['diff', '--cached', '--name-only']);
+    expect(staged).toContain('managed/a.txt');
+    expect(staged).toContain('sync-standards.lock');
+    expect(staged).not.toContain('.standards-');
+  });
+});
+
+describe('Git exclusion filesystem boundary', () => {
+  it('rejects a linked Git exclusion target before consumer mutation', () => {
+    const up = buildUpstream();
+    const { consumer } = initConsumer(up);
+    git(consumer, ['init', '--quiet', '-b', 'main']);
+    const outside = mkTmp('sync-git-exclude-outside-');
+    write(outside, 'exclude', 'outside unchanged\n');
+    const exclude = join(consumer, '.git/info/exclude');
+    rmSync(exclude);
+    symlinkSync(join(outside, 'exclude'), exclude);
+    const managedBefore = read(consumer, 'managed/a.txt');
+    const lockBefore = read(consumer, 'sync-standards.lock');
+    write(up, 'managed/a.txt', 'must not apply\n');
+
+    const result = sync(up, consumer);
+
+    expect(result.status).toBe(1);
+    expect(read(consumer, 'managed/a.txt')).toBe(managedBefore);
+    expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
+    expect(read(outside, 'exclude')).toBe('outside unchanged\n');
+    expect(lstatSync(exclude).isSymbolicLink()).toBe(true);
+  });
 });
 
 describe('prototype-named lock entries', () => {
@@ -1790,6 +1958,34 @@ describe('ref pinning', () => {
   });
 });
 
+describe('sync policy source-resolution snapshot', () => {
+  for (const command of ['bare', 'explicit ref'] as const) {
+    it(`rejects a concurrent policy edit during ${command} source resolution`, async () => {
+      const { up, url } = buildGitUpstream();
+      const { consumer } = initConsumer(up);
+      const lockBefore = read(consumer, 'sync-standards.lock');
+      const managedBefore = read(consumer, 'managed/a.txt');
+      const args =
+        command === 'bare'
+          ? ['sync', '--dir', consumer]
+          : ['sync', '--from', url, '--ref', 'refs/tags/v1', '--dir', consumer];
+
+      const result = await pausedGitFetchRun({ args, consumer });
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        `${SYNC_POLICY_FILE} changed during sync source selection`,
+      );
+      expect(JSON.parse(read(consumer, SYNC_POLICY_FILE))).toEqual({
+        ref: DEFAULT_SYNC_POLICY.ref,
+        scheduledSync: false,
+      });
+      expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
+      expect(read(consumer, 'managed/a.txt')).toBe(managedBefore);
+    });
+  }
+});
+
 describe('policy validation', () => {
   it('requires both policy fields and a supported ref', () => {
     const { up } = buildGitUpstream();
@@ -1922,6 +2118,117 @@ describe('source URL safety', () => {
     expect(result.stderr).not.toContain('sync-user');
     expect(result.stderr).not.toContain('sync-password');
     expect(result.stderr).not.toContain('query-secret');
+  });
+
+  it('does not let CWD paths shadow persisted or explicit remote sources', () => {
+    const { up } = buildGitUpstream();
+    const caller = mkTmp('sync-caller-');
+    const shadow = join(caller, 'github:davidvornholt', 'standards');
+    cpSync(up, shadow, { recursive: true });
+    write(shadow, 'managed/a.txt', 'shadow source\n');
+    const relativeShadow = join(caller, 'standards-source');
+    cpSync(up, relativeShadow, { recursive: true });
+    write(relativeShadow, 'managed/a.txt', 'relative shadow source\n');
+    const bin = join(caller, 'bin');
+    mkdirSync(bin);
+    const wrapper = join(bin, 'git');
+    const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+    writeFileSync(
+      wrapper,
+      `#!/bin/sh\nfor arg in "$@"; do\n  if [ "$arg" = fetch ]; then exit 71; fi\ndone\nexec ${JSON.stringify(realGit)} "$@"\n`,
+    );
+    chmodSync(wrapper, EXECUTABLE_MODE);
+
+    const cases = [
+      {
+        explicit: false,
+        upstream: 'github:davidvornholt/standards',
+      },
+      {
+        explicit: true,
+        upstream: 'github:davidvornholt/standards',
+      },
+      { explicit: false, upstream: './standards-source' },
+    ] as const;
+    for (const source of cases) {
+      const { consumer } = initConsumer(up);
+      const lock = readLock(consumer);
+      write(
+        consumer,
+        'sync-standards.lock',
+        `${JSON.stringify({ ...lock, upstream: source.upstream })}\n`,
+      );
+      const args = [
+        'sync',
+        ...(source.explicit ? ['--from', source.upstream] : []),
+        '--dir',
+        consumer,
+      ];
+
+      const result = run(caller, args, {
+        env: { PATH: `${bin}:${process.env.PATH ?? ''}` },
+      });
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('Cannot fetch');
+      expect(read(consumer, 'managed/a.txt')).toBe('alpha v2\n');
+    }
+  });
+});
+
+describe('persisted local source authority', () => {
+  it('rejects a non-normal absolute upstream path', () => {
+    const { up } = buildGitUpstream();
+    const { consumer } = initConsumer(up);
+    const lock = readLock(consumer);
+    const managedBefore = read(consumer, 'managed/a.txt');
+    const nonNormal = `${up}/../${basename(up)}`;
+    write(
+      consumer,
+      'sync-standards.lock',
+      `${JSON.stringify({ ...lock, upstream: nonNormal })}\n`,
+    );
+    const lockBefore = read(consumer, 'sync-standards.lock');
+
+    const result = run(consumer, ['sync', '--dir', consumer]);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      'Persisted local standards source must be its canonical absolute realpath',
+    );
+    expect(read(consumer, 'managed/a.txt')).toBe(managedBefore);
+    expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
+  });
+
+  it('rejects a persisted source after a parent becomes a symlink', () => {
+    const { up } = buildGitUpstream();
+    const authority = mkTmp('sync-authority-');
+    const parent = join(authority, 'A');
+    const source = join(parent, 'source');
+    const replacement = join(authority, 'B', 'source');
+    cpSync(up, source, { recursive: true });
+    cpSync(up, replacement, { recursive: true });
+    write(replacement, 'managed/a.txt', 'replacement authority\n');
+    const { consumer } = initConsumer(source);
+    const lock = readLock(consumer);
+    write(
+      consumer,
+      'sync-standards.lock',
+      `${JSON.stringify({ ...lock, upstream: source })}\n`,
+    );
+    const lockBefore = read(consumer, 'sync-standards.lock');
+    const managedBefore = read(consumer, 'managed/a.txt');
+    renameSync(parent, join(authority, 'A-old'));
+    symlinkSync('B', parent);
+
+    const result = run(consumer, ['sync', '--dir', consumer]);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      'Persisted local standards source must be its canonical absolute realpath',
+    );
+    expect(read(consumer, 'managed/a.txt')).toBe(managedBefore);
+    expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
   });
 });
 

@@ -1,8 +1,17 @@
-import { apiError, HTTP_NO_CONTENT, HTTP_OK, request } from './github-api';
+import {
+  apiError,
+  type BeforeGithubMutation,
+  HTTP_NO_CONTENT,
+  HTTP_OK,
+  mutate,
+  noGithubMutationGuard,
+  request,
+} from './github-api';
 import { assertFreshDefaultBranchProtection } from './github-default-branch-apply';
 import { decodeRepositoryRulesetDetail } from './github-ruleset-response';
 
 type DeleteRulesetInput = {
+  readonly beforeMutation?: BeforeGithubMutation;
   readonly declaredNames: ReadonlySet<string>;
   readonly defaultBranchProtection: Readonly<Record<string, unknown>>;
   readonly liveRuleset: Readonly<Record<string, unknown>>;
@@ -51,11 +60,12 @@ export const deleteVerifiedUndeclaredRuleset = async (
 
   // GitHub's ruleset DELETE endpoint exposes no conditional validator, so the
   // exact identity read remains the final request before this destructive one.
-  const deleted = await request(
-    input.token,
-    'DELETE',
-    `/repos/${input.repo}/rulesets/${input.liveRuleset.id}`,
-  );
+  const deleted = await mutate({
+    beforeMutation: input.beforeMutation ?? noGithubMutationGuard,
+    method: 'DELETE',
+    path: `/repos/${input.repo}/rulesets/${input.liveRuleset.id}`,
+    token: input.token,
+  });
   if (deleted.status !== HTTP_NO_CONTENT) {
     throw new Error(apiError(`deleting ruleset "${input.name}"`, deleted));
   }

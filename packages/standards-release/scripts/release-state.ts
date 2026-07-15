@@ -4,7 +4,6 @@ import type { GithubApiError } from '../src/github-api-error';
 import { appendGithubOutput } from '../src/github-output';
 import type { GithubStateError } from '../src/github-state-error';
 import type { NpmRegistryError } from '../src/npm-registry-error';
-import { authorizeReleaseSha } from '../src/release-authorization';
 import { renderReleaseCause } from '../src/release-cause-output';
 import {
   type Effect,
@@ -20,6 +19,7 @@ import {
 } from '../src/release-github';
 import { ReleaseInputError } from '../src/release-input-error';
 import { inspectNpmRelease } from '../src/release-npm';
+import { publishAuthorizedNpmArtifact } from '../src/release-npm-publish';
 import { ReleaseOutputError } from '../src/release-output-error';
 import { packReleaseArtifact } from '../src/release-package';
 import type { ReleasePackageError } from '../src/release-package-error';
@@ -131,10 +131,11 @@ const github = (mode: 'inspect' | 'reconcile', args: ReadonlyArray<string>) =>
     yield* writeOutput(outputPath, { action });
   });
 
-const authorize = (args: ReadonlyArray<string>) =>
+const publishNpm = (args: ReadonlyArray<string>) =>
   gen(function* () {
-    const [expectedSha] = args;
-    yield* authorizeReleaseSha({
+    const [expectedSha, artifact] = args;
+    yield* publishAuthorizedNpmArtifact({
+      artifact: yield* requireValue(artifact, 'package tarball'),
       expectedSha: yield* requireValue(expectedSha, 'release sha'),
       token: yield* requireValue(
         firstNonEmpty([environment.GH_TOKEN, environment.GITHUB_TOKEN]),
@@ -155,19 +156,19 @@ const main = (): Effect<void, ReleaseError> => {
   if (command === 'npm') {
     return inspectNpm(args);
   }
+  if (command === 'npm-publish') {
+    return publishNpm(args);
+  }
   if (command === 'github-inspect') {
     return github('inspect', args);
   }
   if (command === 'github-reconcile') {
     return github('reconcile', args);
   }
-  if (command === 'github-authorize') {
-    return authorize(args);
-  }
   return fail(
     new ReleaseInputError({
       message:
-        'Expected release-state command pack, npm, github-authorize, github-inspect, or github-reconcile',
+        'Expected release-state command pack, npm, npm-publish, github-inspect, or github-reconcile',
     }),
   );
 };

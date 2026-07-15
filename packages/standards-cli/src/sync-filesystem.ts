@@ -1,7 +1,8 @@
 import { type BigIntStats, constants } from 'node:fs';
 import { lstat, open, realpath } from 'node:fs/promises';
-import { isAbsolute, join, normalize, relative, resolve, sep } from 'node:path';
+import { isAbsolute, join, normalize, relative, sep } from 'node:path';
 import { assertFilesystemIdentityComponent } from './sync-node-identity';
+import { inspectRealDirectoryPath } from './sync-root-path';
 export type NodeIdentity = {
   readonly dev: bigint;
   readonly ino: bigint;
@@ -23,6 +24,14 @@ export type PreparedDirectory = {
   readonly identity: NodeIdentity;
   readonly rel: string;
 };
+
+export const fileStatesMatch = (left: FileState, right: FileState): boolean =>
+  identitiesMatch(left.identity, right.identity) &&
+  left.mode === right.mode &&
+  (left.contents === right.contents ||
+    (left.contents !== null &&
+      right.contents !== null &&
+      left.contents.equals(right.contents)));
 
 const FILE_TYPE_MODE_BASE = 0o1000;
 
@@ -77,17 +86,8 @@ export const openRepositoryRoot = async (
   path: string,
   label: string,
 ): Promise<RepositoryRoot> => {
-  const lexical = resolve(path);
-  const lexicalInfo = await lstat(lexical, { bigint: true });
-  if (lexicalInfo.isSymbolicLink() || !lexicalInfo.isDirectory()) {
-    throw new Error(`${label} root must be a real directory: ${lexical}`);
-  }
-  const canonical = await realpath(lexical);
-  const canonicalInfo = await lstat(canonical, { bigint: true });
-  if (!canonicalInfo.isDirectory()) {
-    throw new Error(`${label} root must be a real directory: ${canonical}`);
-  }
-  return { identity: identityOf(canonicalInfo), label, path: canonical };
+  const { canonical, info } = await inspectRealDirectoryPath(path, label);
+  return { identity: identityOf(info), label, path: canonical };
 };
 
 export const inspectRepositoryNode = (

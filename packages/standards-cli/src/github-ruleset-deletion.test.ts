@@ -123,6 +123,7 @@ describe('ruleset deletion safety proof', () => {
       'GET /repos/owner/repo',
       'GET /repos/owner/repo/branches/trunk',
       'GET /repos/owner/repo/branches/trunk/protection',
+      'GET /repos/owner/repo',
       'GET /repos/owner/repo/rulesets/2',
       'DELETE /repos/owner/repo/rulesets/2',
     ]);

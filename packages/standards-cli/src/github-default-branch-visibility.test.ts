@@ -146,7 +146,7 @@ describe('disabled optional protection repair', () => {
       repo: 'owner/repo',
       token: 'token',
     });
-    expect(methods).toEqual(['PUT', 'GET', 'GET', 'GET']);
+    expect(methods).toEqual(['PUT', 'GET', 'GET', 'GET', 'GET']);
     expect(actions).toEqual([
       'updated classic protection for default branch "trunk"',
     ]);

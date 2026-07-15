@@ -1,4 +1,12 @@
-import { apiError, HTTP_NO_CONTENT, HTTP_OK, request } from './github-api';
+import {
+  apiError,
+  type BeforeGithubMutation,
+  HTTP_NO_CONTENT,
+  HTTP_OK,
+  mutate,
+  noGithubMutationGuard,
+  request,
+} from './github-api';
 import {
   defaultBranchPath,
   fetchDefaultBranchProtection,
@@ -13,6 +21,7 @@ const BYPASS_ALLOWANCES = 'bypass_pull_request_allowances';
 const REQUIRED_CHECKS = 'required_status_checks';
 
 type ApplyDefaultBranchInput = {
+  readonly beforeMutation?: BeforeGithubMutation;
   readonly declared: Readonly<Record<string, unknown>>;
   readonly live: LiveDefaultBranch;
   readonly reportAction: (action: string) => void;
@@ -26,6 +35,25 @@ type FreshDefaultBranchInput = Pick<
 > & {
   readonly context: string;
   readonly expectedBranch: string | null;
+};
+
+const readRepositoryDefaultBranch = async (
+  input: Pick<FreshDefaultBranchInput, 'repo' | 'token'>,
+): Promise<{ readonly body: unknown; readonly value: string }> => {
+  const repository = await request(input.token, 'GET', `/repos/${input.repo}`);
+  if (repository.status !== HTTP_OK) {
+    throw new Error(
+      apiError('verifying repository default branch protection', repository),
+    );
+  }
+  const decoded = decodeDefaultBranch(repository.body);
+  if (decoded.value === null) {
+    throw new Error(
+      decoded.problem ??
+        'GitHub returned an invalid repository default branch during protection verification',
+    );
+  }
+  return { body: repository.body, value: decoded.value };
 };
 
 const updateBody = (declared: Readonly<Record<string, unknown>>) => {
@@ -49,19 +77,7 @@ const updateBody = (declared: Readonly<Record<string, unknown>>) => {
 export const assertFreshDefaultBranchProtection = async (
   input: FreshDefaultBranchInput,
 ): Promise<string> => {
-  const repository = await request(input.token, 'GET', `/repos/${input.repo}`);
-  if (repository.status !== HTTP_OK) {
-    throw new Error(
-      apiError('verifying repository default branch protection', repository),
-    );
-  }
-  const currentDefault = decodeDefaultBranch(repository.body);
-  if (currentDefault.value === null) {
-    throw new Error(
-      currentDefault.problem ??
-        'GitHub returned an invalid repository default branch during protection verification',
-    );
-  }
+  const currentDefault = await readRepositoryDefaultBranch(input);
   if (
     input.expectedBranch !== null &&
     currentDefault.value !== input.expectedBranch
@@ -73,9 +89,15 @@ export const assertFreshDefaultBranchProtection = async (
   const verified = await fetchDefaultBranchProtection(
     input.token,
     input.repo,
-    repository.body,
+    currentDefault.body,
     true,
   );
+  const trailingDefault = await readRepositoryDefaultBranch(input);
+  if (trailingDefault.value !== currentDefault.value) {
+    throw new Error(
+      `Repository default branch changed from "${currentDefault.value}" to "${trailingDefault.value}" during protection verification`,
+    );
+  }
   if (
     verified.problem !== null ||
     !verified.classicProtection ||
@@ -105,6 +127,7 @@ export const applyDefaultBranchProtection = async (
   input: ApplyDefaultBranchInput,
 ): Promise<void> => {
   const { declared, live, reportAction, repo, token } = input;
+  const beforeMutation = input.beforeMutation ?? noGithubMutationGuard;
   if (live.branch === null || live.problem !== null || live.unverifiable) {
     throw new Error(
       live.problem ??
@@ -116,7 +139,13 @@ export const applyDefaultBranchProtection = async (
     live.protection === null || !subsetMatches(declared, live.protection);
   const path = `${defaultBranchPath(repo, live.branch)}/protection`;
   if (protectionDrift) {
-    const updated = await request(token, 'PUT', path, updateBody(declared));
+    const updated = await mutate({
+      beforeMutation,
+      body: updateBody(declared),
+      method: 'PUT',
+      path,
+      token,
+    });
     if (updated.status !== HTTP_OK) {
       throw new Error(
         apiError(
@@ -130,11 +159,12 @@ export const applyDefaultBranchProtection = async (
     );
   }
   if (signatureDrift && declared.required_signatures === false) {
-    const removed = await request(
+    const removed = await mutate({
+      beforeMutation,
+      method: 'DELETE',
+      path: `${path}/required_signatures`,
       token,
-      'DELETE',
-      `${path}/required_signatures`,
-    );
+    });
     if (removed.status !== HTTP_NO_CONTENT) {
       throw new Error(
         apiError(

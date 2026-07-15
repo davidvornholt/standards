@@ -90,6 +90,7 @@ describe('default branch apply final verification', () => {
         method: 'GET',
         path: '/repos/owner/repo/branches/trunk/protection',
       },
+      { method: 'GET', path: '/repos/owner/repo' },
     ]);
     expect(actions).toEqual([
       'updated classic protection for default branch "trunk"',

@@ -11,9 +11,15 @@
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, mkdtempSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import process from 'node:process';
 import { CANONICAL_SETTINGS_FILE, LOCAL_SETTINGS_FILE } from './github-api';
 import { runGithubApply, runGithubCheck } from './github-commands';
@@ -25,6 +31,7 @@ import {
 import {
   assertRepositoryRelativePath,
   type FileState,
+  fileStatesMatch,
   inspectRepositoryDirectories,
   inspectRepositoryFile,
   inspectRepositoryFiles,
@@ -32,6 +39,7 @@ import {
   openRepositoryRoot,
   type RepositoryRoot,
 } from './sync-filesystem';
+import { ensureGitRecoveryArtifactsExcluded } from './sync-git-exclude';
 import {
   applyRepositoryMutations,
   type PreparedDelete,
@@ -110,7 +118,18 @@ type Lock = {
 
 type ConsumerSyncPolicyInspectionOptions = {
   readonly allowMissingDefaultContract: boolean;
+  readonly policyState?: FileState;
   readonly policyText: string | undefined;
+};
+
+type ConsumerSyncPolicySnapshot = {
+  readonly inspection: SyncPolicyInspection;
+  readonly state: FileState;
+};
+
+type EffectiveSyncPolicy = {
+  readonly policy: SyncPolicy;
+  readonly state: FileState;
 };
 
 type Source = {
@@ -118,6 +137,8 @@ type Source = {
   readonly sha: string;
   readonly cleanup: () => void;
 };
+
+type LocalSourceMode = 'explicit' | 'persisted' | null;
 
 type Command = 'check' | 'doctor' | 'github' | 'help' | 'init' | 'sync';
 
@@ -266,6 +287,14 @@ const displaySourceUrl = (source: string): string => {
     return '<redacted source>';
   }
 };
+
+const isExplicitLocalSource = (source: string): boolean =>
+  existsSync(source) &&
+  (isAbsolute(source) ||
+    source === '.' ||
+    source === '..' ||
+    source.startsWith('./') ||
+    source.startsWith('../'));
 
 const assertSupportedRef = (ref: string): void => {
   const isQualified =
@@ -445,29 +474,52 @@ const assertFetchedCommitObject = (
 // prove the engine before the public repo exists and in tests), a github:
 // shorthand, or any git URL. Remote refs are namespace-qualified branches or
 // tags, or full commit shas, so a same-named branch and tag cannot collide.
-const resolveSource = (src: string, ref: string | undefined): Source => {
-  if (existsSync(src)) {
-    const sourceInfo = lstatSync(src);
-    if (sourceInfo.isSymbolicLink() || !sourceInfo.isDirectory()) {
-      throw new Error(
-        `Local standards source must be a real directory: ${src}`,
-      );
-    }
-    if (ref !== undefined) {
-      throw new Error(
-        `--ref requires a git URL source; a local path is used as-is: ${src}`,
-      );
-    }
-    let sha = 'local';
-    try {
-      sha = execFileSync('git', ['-C', src, 'rev-parse', 'HEAD'], {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-      }).trim();
-    } catch {
-      // Not a git checkout; a content-independent marker is fine for local use.
-    }
-    return { dir: resolve(src), sha, cleanup: () => undefined };
+const resolveLocalSource = (
+  src: string,
+  ref: string | undefined,
+  mode: Exclude<LocalSourceMode, null>,
+): Source => {
+  let canonical: string;
+  try {
+    canonical = realpathSync(src);
+  } catch (error) {
+    throw new Error(`Local standards source cannot be resolved: ${src}`, {
+      cause: error,
+    });
+  }
+  if (mode === 'persisted' && canonical !== src) {
+    throw new Error(
+      `Persisted local standards source must be its canonical absolute realpath: ${src}`,
+    );
+  }
+  const sourceInfo = lstatSync(src);
+  if (sourceInfo.isSymbolicLink() || !sourceInfo.isDirectory()) {
+    throw new Error(`Local standards source must be a real directory: ${src}`);
+  }
+  if (ref !== undefined) {
+    throw new Error(
+      `--ref requires a git URL source; a local path is used as-is: ${src}`,
+    );
+  }
+  let sha = 'local';
+  try {
+    sha = execFileSync('git', ['-C', src, 'rev-parse', 'HEAD'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    // Not a git checkout; a content-independent marker is fine for local use.
+  }
+  return { dir: canonical, sha, cleanup: () => undefined };
+};
+
+const resolveSource = (
+  src: string,
+  ref: string | undefined,
+  localMode: LocalSourceMode,
+): Source => {
+  if (localMode !== null) {
+    return resolveLocalSource(src, ref, localMode);
   }
   const url = src.startsWith(GITHUB_PREFIX)
     ? `https://github.com/${src.slice(GITHUB_PREFIX.length)}.git`
@@ -515,6 +567,16 @@ const resolveSource = (src: string, ref: string | undefined): Source => {
     encoding: 'utf8',
   }).trim();
   return { dir, sha, cleanup };
+};
+
+const localSourceMode = (
+  from: string | undefined,
+  source: string,
+): LocalSourceMode => {
+  if (from === undefined) {
+    return isAbsolute(source) ? 'persisted' : null;
+  }
+  return isExplicitLocalSource(source) ? 'explicit' : null;
 };
 
 // Managed (bucket 1) paths and seed (bucket 2) targets must never overlap, or a
@@ -654,12 +716,14 @@ const prepareMirror = ({
     } else if (currentHash !== hash) {
       updated.push(rel);
     }
-    writes.push({
-      before,
-      contents: source.contents,
-      mode: before.mode,
-      rel,
-    });
+    if (currentHash !== hash) {
+      writes.push({
+        before,
+        contents: source.contents,
+        mode: before.mode,
+        rel,
+      });
+    }
     next.set(rel, hash);
   }
   const deleted = [...previous.keys()].filter(
@@ -851,6 +915,7 @@ type RunSyncOptions = {
   readonly lockInspection: LockInspection;
   readonly managed: ReadonlyMap<string, SourceFile>;
   readonly policyWrite: SyncPolicy | null;
+  readonly policyState: FileState;
   readonly requestedRef: string;
   readonly seeds: ReadonlyMap<string, SourceFile>;
 };
@@ -863,6 +928,7 @@ const runSync = async ({
   lockInspection,
   managed,
   policyWrite,
+  policyState,
   requestedRef,
   seeds,
 }: RunSyncOptions): Promise<void> => {
@@ -882,7 +948,7 @@ const runSync = async ({
     ...managed.keys(),
     ...previous.keys(),
     SYNC_LOCK_FILE,
-    ...(policyWrite === null ? [] : [SYNC_POLICY_FILE]),
+    SYNC_POLICY_FILE,
   ];
   const states = await inspectRepositoryFiles(consumer, targetPaths);
   const currentLock = requiredState(states, SYNC_LOCK_FILE);
@@ -895,6 +961,10 @@ const runSync = async ({
     )
   ) {
     throw new Error('sync-standards.lock changed during sync preflight');
+  }
+  const currentPolicy = requiredState(states, SYNC_POLICY_FILE);
+  if (!fileStatesMatch(currentPolicy, policyState)) {
+    throw new Error(`${SYNC_POLICY_FILE} changed during sync source selection`);
   }
   const mirror = prepareMirror({ managed, previous, states });
   const prunes = await inspectRepositoryDirectories(
@@ -913,10 +983,20 @@ const runSync = async ({
   const policyContents =
     policyWrite === null ? null : syncPolicyContents(policyWrite);
   const policyChanged =
-    policyContents !== null &&
-    !requiredState(states, SYNC_POLICY_FILE).contents?.equals(policyContents);
+    policyContents !== null && !policyState.contents?.equals(policyContents);
   reportMirror(mirror.result, dryRun, lockMetadataChanged, policyChanged);
   if (dryRun) {
+    return;
+  }
+  if (
+    mirror.writes.length === 0 &&
+    mirror.deletes.length === 0 &&
+    !lockMetadataChanged &&
+    !policyChanged
+  ) {
+    console.log(
+      `sync complete: ${mirror.result.files.size} managed file(s) at ${src.sha}`,
+    );
     return;
   }
   const controlWrites: Array<PreparedWrite> = [
@@ -928,11 +1008,10 @@ const runSync = async ({
     },
   ];
   if (policyWrite !== null && policyContents !== null) {
-    const before = requiredState(states, SYNC_POLICY_FILE);
     controlWrites.push({
-      before,
+      before: policyState,
       contents: policyContents,
-      mode: before.mode,
+      mode: policyState.mode,
       rel: SYNC_POLICY_FILE,
     });
   }
@@ -1038,12 +1117,15 @@ const isDefaultSyncPolicy = (policy: SyncPolicy): boolean =>
 const inspectConsumerSyncPolicy = async (
   consumer: RepositoryRoot,
   options: ConsumerSyncPolicyInspectionOptions,
-): Promise<SyncPolicyInspection> => {
+): Promise<ConsumerSyncPolicySnapshot> => {
   const contractText = await readTextIfPresent(
     consumer,
     SYNC_POLICY_CONTRACT_FILE,
   );
-  const storedPolicyText = await readTextIfPresent(consumer, SYNC_POLICY_FILE);
+  const state =
+    options.policyState ??
+    (await inspectRepositoryFile(consumer, SYNC_POLICY_FILE));
+  const storedPolicyText = state.contents?.toString('utf8') ?? null;
   const effectivePolicyText =
     options.policyText ?? storedPolicyText ?? undefined;
   const result = inspectSyncPolicy({
@@ -1054,27 +1136,33 @@ const inspectConsumerSyncPolicy = async (
   if (contractText === null) {
     if (options.allowMissingDefaultContract) {
       return {
-        ...result,
-        problems: [
-          ...result.problems,
-          ...(result.policy !== null && !isDefaultSyncPolicy(result.policy)
-            ? [
-                `${SYNC_POLICY_FILE} may be absent or contain only the exact default policy while ${SYNC_POLICY_CONTRACT_FILE} is missing; upgrade @davidvornholt/standards, run a bare sync from the repository's default branch, then pin a non-default ref`,
-              ]
-            : []),
-        ],
+        inspection: {
+          ...result,
+          problems: [
+            ...result.problems,
+            ...(result.policy !== null && !isDefaultSyncPolicy(result.policy)
+              ? [
+                  `${SYNC_POLICY_FILE} may be absent or contain only the exact default policy while ${SYNC_POLICY_CONTRACT_FILE} is missing; upgrade @davidvornholt/standards, run a bare sync from the repository's default branch, then pin a non-default ref`,
+                ]
+              : []),
+          ],
+        },
+        state,
       };
     }
     return {
-      packageJson: result.packageJson,
-      policy: null,
-      problems: [
-        `${SYNC_POLICY_CONTRACT_FILE} must exist; run \`bun standards sync\``,
-        ...result.problems,
-      ],
+      inspection: {
+        packageJson: result.packageJson,
+        policy: null,
+        problems: [
+          `${SYNC_POLICY_CONTRACT_FILE} must exist; run \`bun standards sync\``,
+          ...result.problems,
+        ],
+      },
+      state,
     };
   }
-  return result;
+  return { inspection: result, state };
 };
 
 const requireValidSyncPolicy = (
@@ -1089,21 +1177,25 @@ const requireValidSyncPolicy = (
 const inspectEffectiveSyncPolicy = async (
   consumer: RepositoryRoot,
   requestedRef: string | undefined,
-): Promise<SyncPolicy> => {
-  const currentInspection = await inspectConsumerSyncPolicy(consumer, {
+): Promise<EffectiveSyncPolicy> => {
+  const currentSnapshot = await inspectConsumerSyncPolicy(consumer, {
     allowMissingDefaultContract: true,
     policyText: undefined,
   });
-  const currentPolicy = requireValidSyncPolicy(currentInspection);
+  const currentPolicy = requireValidSyncPolicy(currentSnapshot.inspection);
   if (requestedRef === undefined) {
-    return currentPolicy;
+    return { policy: currentPolicy, state: currentSnapshot.state };
   }
   const proposedPolicy = { ...currentPolicy, ref: requestedRef };
-  const proposedInspection = await inspectConsumerSyncPolicy(consumer, {
+  const proposedSnapshot = await inspectConsumerSyncPolicy(consumer, {
     allowMissingDefaultContract: false,
+    policyState: currentSnapshot.state,
     policyText: JSON.stringify(proposedPolicy),
   });
-  return requireValidSyncPolicy(proposedInspection);
+  return {
+    policy: requireValidSyncPolicy(proposedSnapshot.inspection),
+    state: currentSnapshot.state,
+  };
 };
 
 const isNonEmptyString = (value: unknown): value is string =>
@@ -1459,6 +1551,9 @@ const openConsumerRoot = async (
     consumer,
     'consumer repository',
   );
+  if (recover) {
+    await ensureGitRecoveryArtifactsExcluded(consumerRoot);
+  }
   await recoverRepositoryTransactions(consumerRoot, recover);
   return consumerRoot;
 };
@@ -1486,10 +1581,13 @@ const openSyncConsumerRoot = async (
 
 const runCheckCommand = async (consumer: string): Promise<boolean> => {
   const consumerRoot = await openConsumerRoot(consumer, false);
-  const policyInspection = await inspectConsumerSyncPolicy(consumerRoot, {
-    allowMissingDefaultContract: false,
-    policyText: undefined,
-  });
+  const { inspection: policyInspection } = await inspectConsumerSyncPolicy(
+    consumerRoot,
+    {
+      allowMissingDefaultContract: false,
+      policyText: undefined,
+    },
+  );
   const driftIsClean = await runCheck(consumerRoot, policyInspection.policy);
   const integrationIsValid = await runDoctor(consumerRoot, policyInspection);
   // The GitHub gate activates with the synced declaration and then fails
@@ -1498,7 +1596,7 @@ const runCheckCommand = async (consumer: string): Promise<boolean> => {
   const githubIsConverged =
     (await readTextIfPresent(consumerRoot, CANONICAL_SETTINGS_FILE)) === null
       ? true
-      : await runGithubCheck(consumer);
+      : await runGithubCheck(consumer, consumerRoot);
   return driftIsClean && integrationIsValid && githubIsConverged;
 };
 
@@ -1517,7 +1615,11 @@ const runInitCommand = async (
     process.exitCode = 1;
     return;
   }
-  const source = resolveSource(from ?? DEFAULT_UPSTREAM, undefined);
+  const source = resolveSource(
+    from ?? DEFAULT_UPSTREAM,
+    undefined,
+    from !== undefined && isExplicitLocalSource(from) ? 'explicit' : null,
+  );
   try {
     const sourceRoot = await openRepositoryRoot(
       source.dir,
@@ -1554,7 +1656,7 @@ const runSyncCommand = async (
 ): Promise<void> => {
   const consumerRoot = await openSyncConsumerRoot(consumer, dryRun);
   const lockInspection = await inspectLock(consumerRoot);
-  const policy = await inspectEffectiveSyncPolicy(consumerRoot, ref);
+  const policySnapshot = await inspectEffectiveSyncPolicy(consumerRoot, ref);
   const legacyManifest =
     from === undefined && lockInspection.lock === null
       ? await loadManifest(consumerRoot)
@@ -1566,11 +1668,12 @@ const runSyncCommand = async (
       'Cannot select a standards source without --from, a valid sync-standards.lock, or a legacy sync-standards.json',
     );
   }
-  const sourceIsLocal = existsSync(sourceName);
-  const requestedRef = ref ?? policy.ref;
+  const localMode = localSourceMode(from, sourceName);
+  const requestedRef = ref ?? policySnapshot.policy.ref;
   const source = resolveSource(
     sourceName,
-    sourceIsLocal && ref === undefined ? undefined : requestedRef,
+    localMode !== null && ref === undefined ? undefined : requestedRef,
+    localMode,
   );
   try {
     const sourceRoot = await openRepositoryRoot(
@@ -1595,7 +1698,8 @@ const runSyncCommand = async (
       dryRun,
       lockInspection,
       managed,
-      policyWrite: ref === undefined ? null : policy,
+      policyWrite: ref === undefined ? null : policySnapshot.policy,
+      policyState: policySnapshot.state,
       requestedRef,
       seeds,
     });
@@ -1629,10 +1733,10 @@ const main = async (): Promise<void> => {
   }
 
   if (command === 'github') {
-    await openConsumerRoot(consumer, apply);
+    const consumerRoot = await openConsumerRoot(consumer, apply);
     const converged = apply
-      ? await runGithubApply(consumer)
-      : await runGithubCheck(consumer);
+      ? await runGithubApply(consumer, consumerRoot)
+      : await runGithubCheck(consumer, consumerRoot);
     if (!converged) {
       process.exitCode = 1;
     }
@@ -1641,10 +1745,13 @@ const main = async (): Promise<void> => {
 
   if (command === 'doctor') {
     const consumerRoot = await openConsumerRoot(consumer, false);
-    const policyInspection = await inspectConsumerSyncPolicy(consumerRoot, {
-      allowMissingDefaultContract: false,
-      policyText: undefined,
-    });
+    const { inspection: policyInspection } = await inspectConsumerSyncPolicy(
+      consumerRoot,
+      {
+        allowMissingDefaultContract: false,
+        policyText: undefined,
+      },
+    );
     if (!(await runDoctor(consumerRoot, policyInspection))) {
       process.exitCode = 1;
     }

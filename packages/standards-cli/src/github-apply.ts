@@ -2,50 +2,17 @@
 // delete live rulesets so they converge on exactly the declared set. Mutations
 // throw on the first API failure so a partial apply is reported, not hidden.
 
-import { apiError, HTTP_CREATED, HTTP_OK, request } from './github-api';
+import { type BeforeGithubMutation, noGithubMutationGuard } from './github-api';
 import { diffRuleset, diffRulesets } from './github-diff';
 import { deleteVerifiedUndeclaredRuleset } from './github-ruleset-deletion';
+import { reconcileRuleset } from './github-ruleset-reconcile';
 import { fetchLiveRulesets, type LiveRulesets } from './github-rulesets';
 import type { GithubSettings } from './github-settings';
 
 type ReportAction = (action: string) => void;
 
-const reconcileRuleset = async (
-  token: string,
-  repo: string,
-  ruleset: Readonly<Record<string, unknown>>,
-  liveRuleset: Readonly<Record<string, unknown>> | undefined,
-): Promise<string | null> => {
-  const name = String(ruleset.name);
-  if (liveRuleset === undefined) {
-    const created = await request(
-      token,
-      'POST',
-      `/repos/${repo}/rulesets`,
-      ruleset,
-    );
-    if (created.status !== HTTP_CREATED) {
-      throw new Error(apiError(`creating ruleset "${name}"`, created));
-    }
-    return `created ruleset "${name}"`;
-  }
-  const diff = diffRuleset(ruleset, liveRuleset);
-  if (diff.drifted.length === 0 && diff.unverifiable.length === 0) {
-    return null;
-  }
-  const updated = await request(
-    token,
-    'PUT',
-    `/repos/${repo}/rulesets/${liveRuleset.id}`,
-    ruleset,
-  );
-  if (updated.status !== HTTP_OK) {
-    throw new Error(apiError(`updating ruleset "${name}"`, updated));
-  }
-  return `updated ruleset "${name}"`;
-};
-
 type ApplyRulesetsInput = {
+  readonly beforeMutation?: BeforeGithubMutation;
   readonly declared: GithubSettings;
   readonly live: LiveRulesets;
   readonly reportAction: ReportAction;
@@ -99,6 +66,7 @@ const assertExactRulesetState = (
 };
 
 export const applyPrefetchedRulesets = async ({
+  beforeMutation = noGithubMutationGuard,
   declared,
   live,
   reportAction,
@@ -114,12 +82,13 @@ export const applyPrefetchedRulesets = async ({
   let declaredMutationOccurred = false;
   for (const ruleset of declared.rulesets) {
     // biome-ignore lint/performance/noAwaitInLoops: GitHub advises against concurrent write requests (secondary rate limits); mutations run sequentially on purpose.
-    const action = await reconcileRuleset(
-      token,
+    const action = await reconcileRuleset({
+      beforeMutation,
+      liveRuleset: liveByName.get(String(ruleset.name)),
       repo,
       ruleset,
-      liveByName.get(String(ruleset.name)),
-    );
+      token,
+    });
     if (action !== null) {
       declaredMutationOccurred = true;
       actions.push(action);
@@ -151,6 +120,7 @@ export const applyPrefetchedRulesets = async ({
       // biome-ignore lint/performance/noAwaitInLoops: GitHub writes and their fresh safety proofs are intentionally serialized.
       const action = await deleteVerifiedUndeclaredRuleset({
         declaredNames,
+        beforeMutation,
         defaultBranchProtection: declared.defaultBranchProtection,
         liveRuleset,
         name,

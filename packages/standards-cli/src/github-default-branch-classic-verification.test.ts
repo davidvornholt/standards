@@ -65,5 +65,6 @@ it('fails when the branch summary reports classic protection disabled', async ()
       method: 'GET',
       path: '/repos/owner/repo/branches/trunk/protection',
     },
+    { method: 'GET', path: '/repos/owner/repo' },
   ]);
 });

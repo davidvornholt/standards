@@ -51,27 +51,22 @@ describe('CLI release workflow authorization', () => {
     expect(workflow).not.toContain('origin/main');
   });
 
-  it('freshly authorizes both mutation paths through tested release tooling', () => {
-    expect(workflow.match(/github-authorize "\$RELEASE_SHA"/gu)).toHaveLength(
-      2,
+  it('delegates each mutation path to one tested authorization owner', () => {
+    const publish = workflow.slice(
+      position('- name: Authorize and publish package'),
+      position('  release:'),
     );
-    const publishAuthorization = workflow.slice(
-      position('- name: Authorize release SHA on the live default branch'),
-      position('- name: Publish package'),
-    );
-    expect(publishAuthorization).toContain(
+    expect(publish).toContain(
       `RELEASE_SHA: ${githubExpression('steps.npm.outputs.release_sha')}`,
     );
-    const releaseJob = position('  release:');
-    const releaseAuthorization = workflow.slice(
-      workflow.indexOf(
-        '- name: Authorize release SHA on the live default branch',
-        releaseJob,
-      ),
+    expect(publish).toContain('npm-publish "$RELEASE_SHA" "$PACKAGE_TARBALL"');
+    const reconcile = workflow.slice(
       position('- name: Reconcile verified GitHub tag and release'),
     );
-    expect(releaseAuthorization).toContain(
+    expect(reconcile).toContain(
       `RELEASE_SHA: ${githubExpression('needs.publish.outputs.release_sha')}`,
     );
+    expect(reconcile).toContain('github-reconcile');
+    expect(workflow).not.toContain('github-authorize');
   });
 });

@@ -41,7 +41,7 @@ describe('CLI release workflow', () => {
     const pack = position('- name: Pack and inspect package');
     const npm = position('- name: Inspect npm release boundary');
     const github = position('- name: Preflight GitHub release boundary');
-    const publish = position('- name: Publish package');
+    const publish = position('- name: Authorize and publish package');
     expect([declaration, install, pack, npm, github, publish]).not.toContain(
       -1,
     );
@@ -140,7 +140,7 @@ describe('CLI release workflow recovery', () => {
     expect(publishJob).toContain('contents: write');
     expect(publishJob).toContain('id-token: write');
     const preflight = position('- name: Preflight GitHub release boundary');
-    const publish = position('- name: Publish package');
+    const publish = position('- name: Authorize and publish package');
     expect(preflight).toBeGreaterThan(position('  publish:'));
     expect(preflight).toBeLessThan(position('  release:'));
     expect(preflight).toBeLessThan(publish);

@@ -109,3 +109,28 @@ it('recovers repeatedly after a publisher crash at the post-bind boundary', asyn
     ),
   ).toBe(true);
 });
+
+it('reports and recovers repeatedly after a publisher crash before binding', async () => {
+  const rootPath = temporaryRoot();
+  const finalName = TRANSACTION_RESERVATION;
+  const crash = spawnSync(
+    process.execPath,
+    [fixture, rootPath, finalName, 'before-bind'],
+    { stdio: 'pipe' },
+  );
+  expect(crash.signal).toBe('SIGKILL');
+
+  const root = await openRepositoryRoot(rootPath, 'consumer');
+  const directory = await openPinnedRoot(root);
+  try {
+    await expect(
+      recoverAtomicPublicationTails(directory, finalName, false),
+    ).rejects.toThrow('Pending atomic transaction record cleanup');
+    await recoverAtomicPublicationTails(directory, finalName);
+    await recoverAtomicPublicationTails(directory, finalName);
+  } finally {
+    await directory.handle.close();
+  }
+
+  expect(readFixture(rootPath, finalName)).toBe('owned\n');
+});

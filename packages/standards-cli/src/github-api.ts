@@ -3,15 +3,8 @@
 // commands live in github-commands.ts.
 
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import process from 'node:process';
-import {
-  isRecord,
-  type LoadedGithubSettings,
-  loadGithubSettings,
-} from './github-settings';
+import { isRecord } from './github-settings';
 
 const API_ROOT = 'https://api.github.com';
 const SCP_GITHUB_REMOTE = /^git@github\.com:(?<path>[^:]+)$/u;
@@ -110,6 +103,16 @@ export const resolveGithubRepo = (consumer: string): string | null => {
 
 export type ApiResponse = { readonly status: number; readonly body: unknown };
 
+export type BeforeGithubMutation = () => Promise<void>;
+
+type GithubMutation = {
+  readonly beforeMutation: BeforeGithubMutation;
+  readonly body?: unknown;
+  readonly method: 'DELETE' | 'PATCH' | 'POST' | 'PUT';
+  readonly path: string;
+  readonly token: string;
+};
+
 export const request = async (
   token: string | null,
   method: string,
@@ -136,29 +139,18 @@ export const request = async (
   return { status: response.status, body: parsed };
 };
 
+export const noGithubMutationGuard: BeforeGithubMutation = () =>
+  Promise.resolve();
+
+export const mutate = async (input: GithubMutation): Promise<ApiResponse> => {
+  await input.beforeMutation();
+  return request(input.token, input.method, input.path, input.body);
+};
+
 export const apiError = (context: string, response: ApiResponse): string => {
   const message =
     isRecord(response.body) && typeof response.body.message === 'string'
       ? response.body.message
       : 'unexpected response';
   return `${context}: HTTP ${response.status} ${message}`;
-};
-
-export const loadDeclared = async (
-  consumer: string,
-): Promise<LoadedGithubSettings> => {
-  const canonicalPath = join(consumer, CANONICAL_SETTINGS_FILE);
-  if (!existsSync(canonicalPath)) {
-    return {
-      merged: null,
-      problems: [
-        `${CANONICAL_SETTINGS_FILE} not found; run \`bun standards sync\` first`,
-      ],
-    };
-  }
-  const localPath = join(consumer, LOCAL_SETTINGS_FILE);
-  return loadGithubSettings(
-    await readFile(canonicalPath, 'utf8'),
-    existsSync(localPath) ? await readFile(localPath, 'utf8') : null,
-  );
 };

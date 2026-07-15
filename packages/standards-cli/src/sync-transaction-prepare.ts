@@ -1,12 +1,10 @@
-import { readdir } from 'node:fs/promises';
-import {
-  type CreatedDirectory,
-  directoryEntryPath,
-  openPinnedChild,
-  type PinnedDirectory,
-  type PinnedTarget,
+import type {
+  CreatedDirectory,
+  PinnedDirectory,
+  PinnedTarget,
 } from './sync-directory-handles';
 import { bindAndRemoveEntry } from './sync-transaction-bound-remove';
+import { assertPruneTargetDirectlyEmpty } from './sync-transaction-prune-validation';
 
 export const transactionTargetMap = (
   writes: ReadonlyArray<PinnedTarget>,
@@ -48,7 +46,9 @@ export const applyPrunes = async (
   }>,
 ): Promise<void> => {
   const deepestFirst = [...targets].sort(
-    (left, right) => left.target.rel.length - right.target.rel.length,
+    (left, right) =>
+      right.target.rel.split('/').length - left.target.rel.split('/').length ||
+      left.target.rel.localeCompare(right.target.rel),
   );
   for (const { directory, target } of deepestFirst) {
     try {
@@ -59,7 +59,7 @@ export const applyPrunes = async (
         kind: 'directory',
         name: target.name,
         validateBound: async () => {
-          await assertDirectoryTreeEmpty(directory);
+          await assertPruneTargetDirectlyEmpty(directory);
         },
       });
     } catch (error) {
@@ -67,26 +67,6 @@ export const applyPrunes = async (
       if (!String(error).includes('Prune target is not empty')) {
         throw error;
       }
-    }
-  }
-};
-
-const assertDirectoryTreeEmpty = async (
-  directory: PinnedDirectory,
-): Promise<void> => {
-  const entries = await readdir(directoryEntryPath(directory, '.'), {
-    withFileTypes: true,
-  });
-  for (const entry of entries) {
-    if (!entry.isDirectory()) {
-      throw new Error('Prune target is not empty');
-    }
-    // biome-ignore lint/performance/noAwaitInLoops: every descendant is pinned and validated before logical removal
-    const child = await openPinnedChild(directory, entry.name);
-    try {
-      await assertDirectoryTreeEmpty(child);
-    } finally {
-      await child.handle.close();
     }
   }
 };

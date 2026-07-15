@@ -1,16 +1,24 @@
-import { apiError, HTTP_NO_CONTENT, HTTP_OK, request } from './github-api';
+import {
+  apiError,
+  type BeforeGithubMutation,
+  HTTP_OK,
+  mutate,
+  noGithubMutationGuard,
+} from './github-api';
 import { diffEnvironment, subsetMatches } from './github-diff';
+import {
+  customProtectionRulesFrom,
+  deleteCustomProtectionRules,
+} from './github-environment-custom-apply';
 import {
   environmentPath,
   fetchLiveEnvironment,
   type LiveEnvironment,
 } from './github-environments';
-import { isRecord } from './github-settings';
 
 const WAIT_TIMER = 'wait_timer';
 const PREVENT_SELF_REVIEW = 'prevent_self_review';
 const DEPLOYMENT_BRANCH_POLICY = 'deployment_branch_policy';
-const CUSTOM_DEPLOYMENT_PROTECTION_RULES = 'custom_deployment_protection_rules';
 const PROTECTION_KEYS = [
   WAIT_TIMER,
   PREVENT_SELF_REVIEW,
@@ -19,6 +27,7 @@ const PROTECTION_KEYS = [
 ] as const;
 
 type ApplyContext = {
+  readonly beforeMutation: BeforeGithubMutation;
   readonly token: string;
   readonly path: string;
   readonly name: string;
@@ -68,13 +77,6 @@ const assertEnvironmentConverged = (
   }
 };
 
-const customProtectionRulesFrom = (
-  live: LiveEnvironment,
-): ReadonlyArray<Readonly<Record<string, unknown>>> =>
-  Array.isArray(live.environment?.[CUSTOM_DEPLOYMENT_PROTECTION_RULES])
-    ? live.environment[CUSTOM_DEPLOYMENT_PROTECTION_RULES].filter(isRecord)
-    : [];
-
 const updateProtection = async (
   context: ApplyContext,
   declared: Readonly<Record<string, unknown>>,
@@ -88,11 +90,17 @@ const updateProtection = async (
   if (!(live.missing || protectionDrifted)) {
     return null;
   }
-  const updated = await request(context.token, 'PUT', context.path, {
-    [WAIT_TIMER]: declared[WAIT_TIMER],
-    [PREVENT_SELF_REVIEW]: declared[PREVENT_SELF_REVIEW],
-    reviewers: declared.reviewers,
-    [DEPLOYMENT_BRANCH_POLICY]: declared[DEPLOYMENT_BRANCH_POLICY],
+  const updated = await mutate({
+    beforeMutation: context.beforeMutation,
+    body: {
+      [WAIT_TIMER]: declared[WAIT_TIMER],
+      [PREVENT_SELF_REVIEW]: declared[PREVENT_SELF_REVIEW],
+      reviewers: declared.reviewers,
+      [DEPLOYMENT_BRANCH_POLICY]: declared[DEPLOYMENT_BRANCH_POLICY],
+    },
+    method: 'PUT',
+    path: context.path,
+    token: context.token,
   });
   if (updated.status !== HTTP_OK) {
     throw new Error(
@@ -102,36 +110,8 @@ const updateProtection = async (
   return `${live.missing ? 'created' : 'updated'} environment "${context.name}" protection`;
 };
 
-const deleteCustomProtectionRules = async (
-  context: ApplyContext,
-  rules: ReadonlyArray<Readonly<Record<string, unknown>>>,
-  reportAction: ReportAction,
-): Promise<ReadonlyArray<string>> => {
-  const actions: Array<string> = [];
-  for (const rule of rules) {
-    // biome-ignore lint/performance/noAwaitInLoops: GitHub write requests are intentionally serialized to avoid secondary rate limits.
-    const deleted = await request(
-      context.token,
-      'DELETE',
-      `${context.path}/deployment_protection_rules/${rule.id}`,
-    );
-    const app = isRecord(rule.app) ? rule.app : {};
-    if (deleted.status !== HTTP_NO_CONTENT) {
-      throw new Error(
-        apiError(
-          `deleting custom deployment protection rule "${String(app.slug)}" from "${context.name}"`,
-          deleted,
-        ),
-      );
-    }
-    const action = `deleted undeclared custom deployment protection rule "${String(app.slug)}" from environment "${context.name}"`;
-    actions.push(action);
-    reportAction(action);
-  }
-  return actions;
-};
-
 type ApplyEnvironmentInput = {
+  readonly beforeMutation?: BeforeGithubMutation;
   readonly declared: Readonly<Record<string, unknown>>;
   readonly live: LiveEnvironment;
   readonly reportAction: ReportAction;
@@ -140,6 +120,7 @@ type ApplyEnvironmentInput = {
 };
 
 export const applyPrefetchedEnvironment = async ({
+  beforeMutation = noGithubMutationGuard,
   declared,
   live,
   reportAction,
@@ -148,7 +129,7 @@ export const applyPrefetchedEnvironment = async ({
 }: ApplyEnvironmentInput): Promise<ReadonlyArray<string>> => {
   const name = String(declared.name);
   const path = environmentPath(repo, name);
-  const context = { token, path, name };
+  const context = { beforeMutation, token, path, name };
   if (live.problem !== null) {
     throw new Error(live.problem);
   }
@@ -168,11 +149,11 @@ export const applyPrefetchedEnvironment = async ({
     assertProtectionConverged(declared, verifiedLive);
   }
   const customProtectionRules = customProtectionRulesFrom(verifiedLive);
-  const deletedCustom = await deleteCustomProtectionRules(
-    context,
-    customProtectionRules,
+  const deletedCustom = await deleteCustomProtectionRules({
+    ...context,
     reportAction,
-  );
+    rules: customProtectionRules,
+  });
   actions.push(...deletedCustom);
   if (deletedCustom.length > 0) {
     assertEnvironmentConverged(

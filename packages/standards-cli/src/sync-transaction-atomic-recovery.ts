@@ -7,8 +7,12 @@ import { identitiesMatch, type NodeIdentity } from './sync-filesystem';
 import { isAtomicRecordTemporaryName } from './sync-transaction-artifact-names';
 import { regularAtomicRecordIdentity } from './sync-transaction-atomic-record';
 import { bindAndRemoveEntry } from './sync-transaction-bound-remove';
-import { findRemovalBinding } from './sync-transaction-quarantine-read';
+import {
+  findRemovalBinding,
+  inspectQuarantineEntry,
+} from './sync-transaction-quarantine-read';
 import { readQuarantineRecords } from './sync-transaction-quarantine-record';
+import type { QuarantineRecord } from './sync-transaction-quarantine-schema';
 
 const temporaryNames = async (
   directory: PinnedDirectory,
@@ -17,6 +21,33 @@ const temporaryNames = async (
   (await readdir(directoryEntryPath(directory, '.')))
     .filter((name) => isAtomicRecordTemporaryName(name, finalName))
     .sort();
+
+const retainedTailIsPending = async (
+  directory: PinnedDirectory,
+  name: string,
+  identity: NodeIdentity,
+  generations: ReadonlyArray<QuarantineRecord>,
+): Promise<boolean> => {
+  const matching = generations.filter((record) =>
+    identitiesMatch(record.identity, identity),
+  );
+  if (matching.length === 0) {
+    return false;
+  }
+  if (matching.length !== 1) {
+    throw new Error(`Multiple quarantine records exist for ${name}`);
+  }
+  const bound = await inspectQuarantineEntry(
+    directory,
+    matching[0] as QuarantineRecord,
+  );
+  if (bound !== null) {
+    throw new Error(
+      `Atomic transaction record tail and binding both exist: ${name}`,
+    );
+  }
+  return true;
+};
 
 const snapshotTails = async (
   directory: PinnedDirectory,
@@ -33,9 +64,6 @@ const snapshotTails = async (
   const names = [
     ...new Set([...rawNames, ...retained.map(({ original }) => original)]),
   ];
-  if (new Set(names).size !== names.length) {
-    throw new Error('Atomic transaction record tail and binding both exist');
-  }
   const snapshots = await Promise.all(
     names.map(async (name) => {
       const generations = retained.filter((record) => record.original === name);
@@ -50,7 +78,11 @@ const snapshotTails = async (
         return null;
       }
       const identity = await regularAtomicRecordIdentity(directory, name);
-      if (generations.length > 0 && expected === undefined) {
+      if (
+        generations.length > 0 &&
+        expected === undefined &&
+        !(await retainedTailIsPending(directory, name, identity, generations))
+      ) {
         return null;
       }
       if (

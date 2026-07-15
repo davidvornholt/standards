@@ -24,6 +24,7 @@ export const publishAtomicTransactionRecord = async ({
   afterTemporaryOpen,
   afterFinalPublish,
   beforeFinalPublish,
+  beforeTemporaryBind,
   beforeTemporaryOpen,
   contents,
   directory,
@@ -37,6 +38,7 @@ export const publishAtomicTransactionRecord = async ({
   readonly afterTemporaryBind?: (name: string) => Promise<void>;
   readonly afterTemporaryOpen?: (identity: NodeIdentity) => Promise<void>;
   readonly beforeFinalPublish?: () => Promise<void>;
+  readonly beforeTemporaryBind?: () => Promise<void>;
   readonly beforeTemporaryOpen?: () => Promise<void>;
   readonly contents: string;
   readonly directory: PinnedDirectory;
@@ -126,6 +128,7 @@ export const publishAtomicTransactionRecord = async ({
     await afterFinalSync?.();
     await bindAndRemoveEntry({
       afterBind: () => afterTemporaryBind?.(temporaryName) ?? Promise.resolve(),
+      beforeBind: beforeTemporaryBind,
       directory,
       expected: temporaryIdentity,
       kind: 'file',

@@ -3,6 +3,7 @@ import { dlopen } from 'bun:ffi';
 import { readFileSync } from 'node:fs';
 
 const RENAME_NOREPLACE = 1;
+const RENAME_EXCHANGE = 2;
 const PROCESS_MAPS = '/proc/self/maps';
 const LIBC_BASENAME =
   /^(?:libc\.so(?:\.\d+)*|libc\.musl-[^/]+\.so\.1|ld-musl-[^/]+\.so\.1)$/u;
@@ -114,6 +115,26 @@ export const renameNoReplace = (
   if (result !== 0) {
     throw new Error(
       `Could not atomically publish reserved entry ${oldName} as ${newName}`,
+    );
+  }
+};
+
+export const exchangeNames = (
+  leftDirectory: number,
+  leftName: string,
+  rightDirectory: number,
+  rightName: string,
+): void => {
+  const result = loadRenameAt2()(
+    leftDirectory,
+    cString(leftName),
+    rightDirectory,
+    cString(rightName),
+    RENAME_EXCHANGE,
+  );
+  if (result !== 0) {
+    throw new Error(
+      `Could not atomically exchange reserved entries ${leftName} and ${rightName}`,
     );
   }
 };

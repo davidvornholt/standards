@@ -141,26 +141,15 @@ jobs:
             exit 1
           fi
 
-      - name: Authorize release SHA on the live default branch
+      - name: Authorize and publish package
         if: steps.npm.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PACKAGE_TARBALL: ${{ steps.package.outputs.artifact }}
           RELEASE_SHA: ${{ steps.npm.outputs.release_sha }}
         run: >-
           bun run --cwd packages/standards-release release:state --
-          github-authorize "$RELEASE_SHA"
-
-      - name: Publish package
-        if: steps.npm.outputs.publish == 'true'
-        env:
-          PACKAGE_TARBALL: ${{ steps.package.outputs.artifact }}
-        run: >-
-          npm publish "$PACKAGE_TARBALL"
-          --ignore-scripts
-          --provenance
-          --access public
-          --tag latest
-          --registry=https://registry.npmjs.org
+          npm-publish "$RELEASE_SHA" "$PACKAGE_TARBALL"
 
   release:
     needs: publish
@@ -186,14 +175,6 @@ jobs:
 
       - name: Install release tooling
         run: bun install --frozen-lockfile
-
-      - name: Authorize release SHA on the live default branch
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_SHA: ${{ needs.publish.outputs.release_sha }}
-        run: >-
-          bun run --cwd packages/standards-release release:state --
-          github-authorize "$RELEASE_SHA"
 
       - name: Reconcile verified GitHub tag and release
         env:

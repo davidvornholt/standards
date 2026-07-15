@@ -1,4 +1,5 @@
 import { GithubStateError } from './github-state-error';
+import { authorizeReleaseSha } from './release-authorization';
 import { effectVoid, fail, flatMap, gen } from './release-effect';
 import { loadGithubState, loadTagSha } from './release-github-api';
 import {
@@ -46,6 +47,7 @@ const createAndVerifyTag = (client: GithubClient, input: GithubInput) =>
     if (existing !== null) {
       return yield* requireExpectedTag(input, existing);
     }
+    yield* authorizeReleaseSha(input);
     const created = yield* post(client, `/repos/${client.repo}/git/refs`, {
       ref: `refs/tags/${input.tag}`,
       sha: input.expectedSha,
@@ -65,22 +67,26 @@ const createAndVerifyTag = (client: GithubClient, input: GithubInput) =>
   });
 
 const createRelease = (client: GithubClient, input: GithubInput) =>
-  post(client, `/repos/${client.repo}/releases`, {
-    [RELEASE_NOTES_FIELD]: true,
-    name: input.tag,
-    [TAG_NAME_FIELD]: input.tag,
-    [TARGET_COMMIT_FIELD]: input.expectedSha,
-  }).pipe(
-    flatMap((created) =>
-      created.status === HTTP_CREATED || created.status === HTTP_UNPROCESSABLE
-        ? effectVoid
-        : fail(
-            new GithubStateError({
-              message: `Creating GitHub release: HTTP ${created.status} ${apiMessage(created)}`,
-            }),
-          ),
-    ),
-  );
+  gen(function* () {
+    yield* authorizeReleaseSha(input);
+    const created = yield* post(client, `/repos/${client.repo}/releases`, {
+      [RELEASE_NOTES_FIELD]: true,
+      name: input.tag,
+      [TAG_NAME_FIELD]: input.tag,
+      [TARGET_COMMIT_FIELD]: input.expectedSha,
+    });
+    if (
+      created.status !== HTTP_CREATED &&
+      created.status !== HTTP_UNPROCESSABLE
+    ) {
+      return yield* fail(
+        new GithubStateError({
+          message: `Creating GitHub release: HTTP ${created.status} ${apiMessage(created)}`,
+        }),
+      );
+    }
+    return yield* effectVoid;
+  });
 
 export const reconcileGithubRelease = (input: GithubInput) =>
   gen(function* () {

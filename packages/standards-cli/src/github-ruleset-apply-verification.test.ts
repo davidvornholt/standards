@@ -108,6 +108,7 @@ describe('ruleset apply readback', () => {
       'GET /repos/owner/repo',
       'GET /repos/owner/repo/branches/trunk',
       'GET /repos/owner/repo/branches/trunk/protection',
+      'GET /repos/owner/repo',
       'GET /repos/owner/repo/rulesets/3',
       'DELETE /repos/owner/repo/rulesets/3',
       'GET /repos/owner/repo/rulesets',
