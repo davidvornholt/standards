@@ -8,6 +8,8 @@ Check an expensive or irreversible operation's cheap preconditions before starti
 
 Treat duplication as a design signal: when a change needs to copy configuration, environment, or logic that another component already owns, stop — the responsibility is probably misplaced. Fix the owner or move the need instead of pasting the copy; if the duplication seems forced by the architecture, surface that instead of proceeding.
 
+Do not build backwards compatibility by default: internal code has no external consumers, so migrate every call site and delete the old shape in the same change — no deprecated aliases, versioned copies, or compat-only optional parameters. Compatibility matters only at durable boundaries (persisted data, wire formats, deployed config/secret shapes, external consumers); when a change crosses one, surface the breakage and let the user decide.
+
 ## Research first
 
 - Check whether the request conflicts with repo architecture or standards.
