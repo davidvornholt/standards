@@ -1,9 +1,9 @@
 export const meta = {
   name: 'review-pass',
   description:
-    'One review-loop pass: lens reviewers over the full diff, adversarial verification of risky findings, one merged structured finding set',
+    'One bounded review pass: lens reviewers over the diff, adversarial verification of risky findings, one merged structured finding set',
   whenToUse:
-    'Invoked by the review-loop skill for each review pass. Args: { passNumber, baseRef, gateStatus, decisions, lenses: [{ key, charter, notes? }] }. Returns { findings, refuted, skippedLenses, coverage }.',
+    'Invoked by the review-fix skill for its review and verification passes. Args: { baseRef, gateStatus, decisions, lenses: [{ key, charter, notes? }] }. Returns { findings, refuted, skippedLenses, coverage }.',
   phases: [
     { title: 'Review', detail: 'one read-only lens reviewer per lens, full-diff scope' },
     { title: 'Verify', detail: 'refutation attempts for blocking or needs-verification findings' },
@@ -70,14 +70,14 @@ const severityRank = (severity) => {
 
 const reviewPrompt = (lens) =>
   [
-    'You are a read-only review subagent running one concern lens of a review-loop pass. The review skill in your context is your operating contract — its scope, lens, registry, confidence, and output rules apply; this prompt only parameterizes them.',
+    'You are a read-only review subagent running one concern lens of a bounded review pass. The review skill in your context is your operating contract — its scope, lens, registry, confidence, and output rules apply; this prompt only parameterizes them.',
     '',
-    `Review scope: the full current diff against ${input.baseRef}, per the review skill's scope contract. In a stacked PR train that base is the parent PR's branch: ancestor layers are settled code, and the loop's seam check owns cross-cluster surfaces.`,
+    `Review scope: the full current diff against ${input.baseRef}, per the review skill's scope contract. In a verification pass that base is the pre-fix head, so the diff under review is exactly the fix commits.`,
     '',
     `Concern lens "${lens.key}": ${lens.charter}`,
     ...(lens.notes ? [`Since this lens last ran: ${lens.notes}`] : []),
     '',
-    `Pass number: ${input.passNumber}. Deterministic gate status: ${input.gateStatus}. Do not re-run the full repo gate; run only focused checks relevant to this lens.`,
+    `Deterministic gate status: ${input.gateStatus}. Do not re-run the full repo gate; run only focused checks relevant to this lens.`,
     '',
     'Decisions registry content:',
     input.decisions,
@@ -239,9 +239,9 @@ for (const finding of merged) {
 merged.sort((a, b) => severityRank(a.severity) - severityRank(b.severity));
 
 if (skippedLenses.length > 0) {
-  log(`pass ${input.passNumber}: ${skippedLenses.length} lens(es) skipped: ${skippedLenses.join(', ')}`);
+  log(`${skippedLenses.length} lens(es) skipped: ${skippedLenses.join(', ')}`);
 }
-log(`pass ${input.passNumber} merged: ${merged.length} findings, ${refuted.length} refuted`);
+log(`merged: ${merged.length} findings, ${refuted.length} refuted`);
 
 return {
   findings: merged,
