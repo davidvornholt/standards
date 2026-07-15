@@ -6,7 +6,7 @@ import {
   REPOSITORY_OWNED_CONTROL_SEAMS,
   SYNC_LOCK_FILE,
 } from './sync-control-seams';
-import { RESERVED_TRANSACTION_NAMESPACE_PATTERNS } from './sync-transaction-artifact-names';
+import { RESERVED_TRANSACTION_ARTIFACT_GRAMMAR } from './sync-transaction-artifact-names';
 
 const ROOT = join(import.meta.dir, '../../..');
 const SYNC_SKILL = join(ROOT, '.agents/skills/standards-sync/SKILL.md');
@@ -38,20 +38,15 @@ const formatList = (
     : `${quoted.slice(0, -1).join(', ')}, ${conjunction} ${last}`;
 };
 const CONTROL_SEAM_SENTENCE = `${CONTROL_SEAM_PREFIX}${formatList(REPOSITORY_OWNED_CONTROL_SEAMS)}.`;
-const RESERVED_NAMESPACE_LIST = formatList(
-  RESERVED_TRANSACTION_NAMESPACE_PATTERNS,
-);
-const CLI_TARGET_SENTENCE = `Managed outputs and seed targets must not claim the CLI-owned \`${SYNC_LOCK_FILE}\` or exact reserved transaction artifacts in the ${RESERVED_NAMESPACE_LIST} namespaces.`;
-const TRANSACTION_CONTRACT_SENTENCE = `The ${formatList(RESERVED_TRANSACTION_NAMESPACE_PATTERNS, 'and')} artifact namespaces are exclusively CLI-owned; another process or user must not create or modify those artifacts while a transaction or recovery journal exists.`;
+const RESERVED_ARTIFACT_GRAMMAR = `fixed names ${formatList(RESERVED_TRANSACTION_ARTIFACT_GRAMMAR.fixedNames, 'and')}; prefix families ${formatList(RESERVED_TRANSACTION_ARTIFACT_GRAMMAR.prefixFamilies, 'and')}; and lowercase UUID-v4 atomic tails ${formatList(RESERVED_TRANSACTION_ARTIFACT_GRAMMAR.atomicTails, 'and')}`;
+const CLI_TARGET_SENTENCE = `Managed outputs and seed targets must not claim the CLI-owned \`${SYNC_LOCK_FILE}\` or this reserved transaction artifact grammar: ${RESERVED_ARTIFACT_GRAMMAR}.`;
+const VISIBLE_LOOKALIKE_SENTENCE =
+  '`.standards-transaction-user` does not match this grammar and remains consumer-visible and unreserved.';
+const TRANSACTION_CONTRACT_SENTENCE =
+  'Only those fixed names, prefix families, and lowercase UUID-v4 atomic tails are exclusively CLI-owned; another process or user must not create or modify them while a transaction or recovery journal exists.';
 
 describe('standards sync documentation', () => {
   it('documents the current policy and configured-ref recovery accurately', () => {
-    expect(RESERVED_TRANSACTION_NAMESPACE_PATTERNS).toEqual([
-      '.standards-transaction*',
-      '.standards-owner-publication-*',
-      '.standards-parent-*',
-      '.standards-removal-*',
-    ]);
     for (const path of CURRENT_POLICY_DOCS) {
       const documentation = readFileSync(path, 'utf8');
       expect(documentation).toContain('@davidvornholt/standards` >=0.5.0');
@@ -65,6 +60,8 @@ describe('standards sync documentation', () => {
       expect(documentation).toContain(CONTROL_SEAM_SENTENCE);
       expect(documentation.split(CONTROL_SEAM_PREFIX)).toHaveLength(2);
       expect(documentation).toContain(CLI_TARGET_SENTENCE);
+      expect(documentation).toContain(VISIBLE_LOOKALIKE_SENTENCE);
+      expect(documentation).not.toContain('`.standards-transaction*`');
       expect(documentation).toContain(
         'The lock persists every observed repository-owned seed path, and sync rejects implicit seed-to-managed or managed-to-seed ownership changes before mutation',
       );

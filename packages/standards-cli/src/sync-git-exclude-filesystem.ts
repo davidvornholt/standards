@@ -24,6 +24,7 @@ const DEFAULT_MODE = 0o644;
 
 export type GitExcludeUpdateHooks = {
   readonly beforeExchange?: () => Promise<void>;
+  readonly beforePublication?: () => Promise<void>;
   readonly beforeReplace?: () => Promise<void>;
   readonly beforeTemporaryWrite?: () => Promise<void>;
 };
@@ -119,6 +120,7 @@ export const updatePinnedGitExclude = async (
         throw new Error('Git recovery-artifact exclusion target changed');
       }
       if (initial === null) {
+        await hooks.beforePublication?.();
         renameNoReplace(
           info.handle.fd,
           temporaryName,
@@ -126,12 +128,10 @@ export const updatePinnedGitExclude = async (
           'exclude',
         );
       } else {
-        await exchangeExisting(
-          info,
-          temporaryName,
-          initial,
-          hooks.beforeExchange,
-        );
+        await exchangeExisting(info, temporaryName, initial, async () => {
+          await hooks.beforeExchange?.();
+          await hooks.beforePublication?.();
+        });
       }
       await syncPinnedDirectory(info);
       await assertInfoLinked(common, info.identity);

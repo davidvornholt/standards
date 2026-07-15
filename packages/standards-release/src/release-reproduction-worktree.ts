@@ -1,3 +1,4 @@
+import { gitChildEnvironment } from '@davidvornholt/standards/git-child-environment';
 import { isFailure } from 'effect/Exit';
 import {
   type Effect,
@@ -14,7 +15,13 @@ import {
 import type { packReleaseArtifact } from './release-package';
 import { readPackedArtifact } from './release-package-identity';
 import { ReleaseReproductionError } from './release-reproduction-error';
-import { nodeMkdir, nodeMkdtemp, nodeRm, spawnSync } from './release-runtime';
+import {
+  env,
+  nodeMkdir,
+  nodeMkdtemp,
+  nodeRm,
+  spawnSync,
+} from './release-runtime';
 import { isReleaseSourceSha } from './release-source-sha';
 
 const trailingSlash = /\/$/u;
@@ -42,7 +49,11 @@ const runGit = (
           repositoryPath,
           ...args,
         ],
-        { stderr: 'pipe', stdout: 'pipe' },
+        {
+          env: gitChildEnvironment(env),
+          stderr: 'pipe',
+          stdout: 'pipe',
+        },
       ),
     catch: (cause) => reproductionFailure(operation, String(cause)),
   }).pipe(

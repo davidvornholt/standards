@@ -28,7 +28,7 @@ export const runGithubCheck = async (
   const problems = [...declared.problems];
   try {
     if (declared.merged !== null) {
-      const repo = resolveGithubRepo(root.path);
+      const repo = await resolveGithubRepo(root);
       if (repo === null) {
         problems.push(
           'cannot determine the GitHub repository from the origin remote',
@@ -79,7 +79,7 @@ export const runGithubApply = async (
     reportProblems(declared.problems);
     return false;
   }
-  const repo = resolveGithubRepo(root.path);
+  const repo = await resolveGithubRepo(root);
   if (repo === null) {
     console.error(
       'standards github: cannot determine the GitHub repository from the origin remote',
@@ -98,8 +98,13 @@ export const runGithubApply = async (
     if (snapshot === null) {
       throw new Error('GitHub settings declaration snapshot is unavailable');
     }
-    const beforeMutation = (): Promise<void> =>
-      assertGithubDeclarationUnchanged(snapshot);
+    const beforeMutation = async (): Promise<void> => {
+      await assertGithubDeclarationUnchanged(snapshot);
+      const currentRepo = await resolveGithubRepo(root);
+      if (currentRepo !== repo) {
+        throw new Error('GitHub repository origin changed during apply');
+      }
+    };
     const live = await readGithubLiveState(token, repo, declared.merged, true);
     if (live.problems.length > 0) {
       throw new Error(live.problems.join('; '));

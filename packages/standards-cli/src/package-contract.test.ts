@@ -15,6 +15,9 @@ const packageRoot = join(import.meta.dir, '..');
 const rootPackage = join(packageRoot, '../../package.json');
 const templatePackage = join(packageRoot, '../../template/package.json');
 const directories: Array<string> = [];
+const PUBLIC_EXPORTS = {
+  './git-child-environment': './src/git-child-environment.ts',
+};
 type PackedManifest = {
   readonly dependencies?: unknown;
   readonly exports?: unknown;
@@ -74,7 +77,7 @@ describe('published package contract', () => {
     );
     expect(
       JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8')),
-    ).toHaveProperty('exports', {});
+    ).toHaveProperty('exports', PUBLIC_EXPORTS);
   });
 });
 
@@ -102,7 +105,7 @@ describe('packed package contract', () => {
     const packed = readPackedManifest(artifact);
     expect(packed.exitCode).toBe(0);
     expect(packed.manifest.dependencies).toBeUndefined();
-    expect(packed.manifest.exports).toEqual({});
+    expect(packed.manifest.exports).toEqual(PUBLIC_EXPORTS);
     expect(packed.manifest.files).toContain('SOURCE_COMMIT');
     expect(packed.manifest.os).toEqual(['linux']);
     expect(packed.manifest.scripts).not.toHaveProperty('release:state');

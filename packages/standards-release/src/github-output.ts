@@ -1,11 +1,8 @@
+import {
+  encodeGithubOutput,
+  type GithubOutputValues,
+} from './github-output-values';
 import { file, write } from './release-runtime';
-
-export type GithubOutputValues = Readonly<Record<string, string | boolean>>;
-
-export const encodeGithubOutput = (values: GithubOutputValues): string =>
-  Object.entries(values)
-    .map(([key, value]) => `${key}=${value}\n`)
-    .join('');
 
 export const appendGithubOutput = (
   output: string,

@@ -4,7 +4,10 @@
 
 import { execFileSync } from 'node:child_process';
 import process from 'node:process';
+import { gitChildEnvironment } from './git-child-environment';
 import { isRecord } from './github-settings';
+import type { RepositoryRoot } from './sync-filesystem';
+import { assertRepositoryRootUnchanged } from './sync-repository-root-generation';
 
 const API_ROOT = 'https://api.github.com';
 const SCP_GITHUB_REMOTE = /^git@github\.com:(?<path>[^:]+)$/u;
@@ -23,10 +26,12 @@ export const LOCAL_SETTINGS_FILE = '.github/settings.local.json';
 const quietExec = (
   file: string,
   args: ReadonlyArray<string>,
+  environment?: NodeJS.ProcessEnv,
 ): string | null => {
   try {
     const out = execFileSync(file, [...args], {
       encoding: 'utf8',
+      env: environment,
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
     return out.length > 0 ? out : null;
@@ -96,8 +101,16 @@ export const githubRepositoryFromRemote = (remote: string): string | null => {
   return repositoryFromPath(url.pathname.slice(1));
 };
 
-export const resolveGithubRepo = (consumer: string): string | null => {
-  const url = quietExec('git', ['-C', consumer, 'remote', 'get-url', 'origin']);
+export const resolveGithubRepo = async (
+  root: RepositoryRoot,
+): Promise<string | null> => {
+  await assertRepositoryRootUnchanged(root);
+  const url = quietExec(
+    'git',
+    ['-C', root.path, 'remote', 'get-url', 'origin'],
+    gitChildEnvironment(),
+  );
+  await assertRepositoryRootUnchanged(root);
   return url === null ? null : githubRepositoryFromRemote(url);
 };
 

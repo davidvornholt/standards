@@ -15,6 +15,7 @@ import {
   isAtomicRecordTemporaryName,
   isReservedAtomicRecordTemporaryName,
   isReservedTransactionPath,
+  RESERVED_TRANSACTION_ARTIFACT_GRAMMAR,
 } from './sync-transaction-artifact-names';
 import { buildJournal } from './sync-transaction-build';
 import { parseJournal } from './sync-transaction-journal-parser';
@@ -43,6 +44,43 @@ it('shares one exact UUID-v4 grammar for reserved atomic tails', () => {
   expect(isReservedAtomicRecordTemporaryName(LOOKALIKE)).toBe(false);
   expect(isReservedTransactionPath(`nested/${LOOKALIKE}`)).toBe(false);
   expect(isReservedAtomicRecordTemporaryName(`${EXACT}.extra`)).toBe(false);
+});
+
+it('reserves only the documented fixed, prefix, and atomic artifact grammar', () => {
+  expect(RESERVED_TRANSACTION_ARTIFACT_GRAMMAR).toEqual({
+    atomicTails: [
+      '.standards-transaction-reservation.<uuid-v4>.tmp',
+      'OWNER.<uuid-v4>.tmp',
+      '.standards-parent-binding-<transaction-uuid-v4>-<index>.<write-uuid-v4>.tmp',
+    ],
+    fixedNames: [
+      '.standards-transaction',
+      '.standards-transaction-cleanup',
+      '.standards-transaction-owner-reservation',
+      '.standards-transaction-reservation',
+    ],
+    prefixFamilies: [
+      '.standards-transaction-publication-*',
+      '.standards-owner-publication-*',
+      '.standards-parent-*',
+      '.standards-removal-*',
+    ],
+  });
+  expect(isReservedTransactionPath('.standards-transaction-user')).toBe(false);
+  expect(isReservedTransactionPath(EXACT)).toBe(true);
+  expect(isReservedTransactionPath(OWNER_EXACT)).toBe(true);
+  expect(isReservedTransactionPath(PARENT_EXACT)).toBe(true);
+  for (const fixed of RESERVED_TRANSACTION_ARTIFACT_GRAMMAR.fixedNames) {
+    expect(isReservedTransactionPath(fixed)).toBe(true);
+  }
+  for (const prefix of [
+    '.standards-transaction-publication-fixture',
+    '.standards-owner-publication-fixture',
+    '.standards-parent-fixture',
+    '.standards-removal-fixture',
+  ]) {
+    expect(isReservedTransactionPath(prefix)).toBe(true);
+  }
 });
 
 it('rejects exact tails from build and parsed write or delete operations', async () => {

@@ -18,6 +18,7 @@
     "typescript": "7.0.2"
   },
   "dependencies": {
+    "@davidvornholt/standards": "workspace:*",
     "effect": "3.22.0"
   }
 }

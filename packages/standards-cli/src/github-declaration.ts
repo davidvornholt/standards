@@ -9,6 +9,7 @@ import {
   inspectRepositoryFile,
   type RepositoryRoot,
 } from './sync-filesystem';
+import { assertRepositoryRootUnchanged } from './sync-repository-root-generation';
 
 export type GithubDeclarationSnapshot = {
   readonly canonical: FileState;
@@ -46,10 +47,12 @@ export const loadDeclared = async (
 export const assertGithubDeclarationUnchanged = async (
   snapshot: GithubDeclarationSnapshot,
 ): Promise<void> => {
+  await assertRepositoryRootUnchanged(snapshot.root);
   const [canonical, local] = await Promise.all([
     inspectRepositoryFile(snapshot.root, CANONICAL_SETTINGS_FILE),
     inspectRepositoryFile(snapshot.root, LOCAL_SETTINGS_FILE),
   ]);
+  await assertRepositoryRootUnchanged(snapshot.root);
   if (
     !(
       fileStatesMatch(canonical, snapshot.canonical) &&

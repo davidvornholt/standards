@@ -14,6 +14,8 @@ import {
 } from './release-github-test-fixture';
 
 const HTTP_FORBIDDEN = 403;
+const HTTP_CREATED = 201;
+const AUTHORIZATION_REQUESTS = 3;
 
 describe('GitHub release boundary', () => {
   it('preflights absent and exact existing remote states', async () => {
@@ -37,13 +39,19 @@ describe('GitHub release boundary', () => {
       'POST /repos/owner/repo/releases',
     );
     expect(createRelease).toBeGreaterThan(createTag);
-    expect(state.calls.slice(createTag - 2, createTag)).toEqual([
+    expect(
+      state.calls.slice(createTag - AUTHORIZATION_REQUESTS, createTag),
+    ).toEqual([
       'GET /repos/owner/repo',
       'GET /repos/owner/repo/compare/expected...main',
+      'GET /repos/owner/repo',
     ]);
-    expect(state.calls.slice(createRelease - 2, createRelease)).toEqual([
+    expect(
+      state.calls.slice(createRelease - AUTHORIZATION_REQUESTS, createRelease),
+    ).toEqual([
       'GET /repos/owner/repo',
       'GET /repos/owner/repo/compare/expected...main',
+      'GET /repos/owner/repo',
     ]);
     expect(state.calls.slice(createTag + 1, createRelease)).toContain(
       'GET /repos/owner/repo/git/ref/tags/v0.5.0',
@@ -72,7 +80,9 @@ describe('GitHub release boundary', () => {
       await runPromise(reconcileGithubRelease(input(releaseRace.fetcher))),
     ).toBe('exists');
   });
+});
 
+describe('GitHub release creation failures', () => {
   it('rejects unresolved or conflicting tag creation 422 responses', async () => {
     const results = await Promise.all(
       [null, 'other'].map((tagRaceSha) => {
@@ -91,6 +101,62 @@ describe('GitHub release boundary', () => {
     }
   });
 
+  it('fails closed on unexpected tag and release creation statuses', async () => {
+    const tagFailure = remote(
+      { release: 'absent', tagSha: null },
+      { tagCreateStatus: HTTP_FORBIDDEN },
+    );
+    expect(
+      await runPromise(flip(reconcileGithubRelease(input(tagFailure.fetcher)))),
+    ).toMatchObject({
+      _tag: 'GithubStateError',
+      message: 'Creating GitHub tag: HTTP 403 tag creation failed',
+    });
+    expect(tagFailure.calls).not.toContain('POST /repos/owner/repo/releases');
+
+    const releaseFailure = remote(
+      { release: 'absent', tagSha: 'expected' },
+      { releaseCreateStatus: HTTP_FORBIDDEN },
+    );
+    expect(
+      await runPromise(
+        flip(reconcileGithubRelease(input(releaseFailure.fetcher))),
+      ),
+    ).toMatchObject({
+      _tag: 'GithubStateError',
+      message: 'Creating GitHub release: HTTP 403 release creation failed',
+    });
+  });
+
+  it('rejects successful creation responses with absent final readback', async () => {
+    const absentTag = remote(
+      { release: 'absent', tagSha: null },
+      { tagCreateReadbackSha: null, tagCreateStatus: HTTP_CREATED },
+    );
+    expect(
+      await runPromise(flip(reconcileGithubRelease(input(absentTag.fetcher)))),
+    ).toMatchObject({
+      _tag: 'GithubStateError',
+      message: 'GitHub tag v0.5.0 is still absent after creation',
+    });
+    expect(absentTag.calls).not.toContain('POST /repos/owner/repo/releases');
+
+    const absentRelease = remote(
+      { release: 'absent', tagSha: 'expected' },
+      { releaseCreateReadback: false, releaseCreateStatus: HTTP_CREATED },
+    );
+    expect(
+      await runPromise(
+        flip(reconcileGithubRelease(input(absentRelease.fetcher))),
+      ),
+    ).toMatchObject({
+      _tag: 'GithubStateError',
+      message: 'GitHub release was not published after creation',
+    });
+  });
+});
+
+describe('GitHub release state failures', () => {
   it('rejects drafts, prereleases, missing published tags, and remote errors', async () => {
     const stateFailures = await Promise.all(
       [

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { spawnSync } from 'bun';
-import { appendGithubOutput, encodeGithubOutput } from './github-output';
+import { appendGithubOutput } from './github-output';
+import { encodeGithubOutput } from './github-output-values';
 import { file } from './release-runtime';
 
 const directories: Array<string> = [];

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import {
+  linkSync,
   mkdirSync,
   mkdtempSync,
   renameSync,
@@ -130,5 +131,38 @@ describe('GitHub declaration filesystem boundary', () => {
 
     expect(await runGithubApply(consumer)).toBe(false);
     expect(methods).toEqual(['GET', 'GET']);
+  });
+
+  it('makes no mutation when the root is replaced with hardlinked declarations', async () => {
+    const consumer = consumerRepository();
+    process.env.GH_TOKEN = 'test-token';
+    const original = `${consumer}-original`;
+    const methods: Array<string> = [];
+    globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
+      const method = init?.method ?? 'GET';
+      methods.push(method);
+      if (methods.length === 1) {
+        renameSync(consumer, original);
+        tmps.push(original);
+        mkdirSync(join(consumer, '.github'), { recursive: true });
+        linkSync(
+          join(original, '.github/settings.json'),
+          join(consumer, '.github/settings.json'),
+        );
+        linkSync(
+          join(original, '.github/settings.local.json'),
+          join(consumer, '.github/settings.local.json'),
+        );
+      }
+      return Promise.resolve(
+        String(input).includes('/rulesets')
+          ? Response.json([])
+          : Response.json({ [ALLOW_AUTO_MERGE]: false }),
+      );
+    }) as unknown as typeof fetch;
+
+    expect(await runGithubApply(consumer)).toBe(false);
+    expect(methods).toEqual(['GET', 'GET']);
+    expect(methods.every((method) => method === 'GET')).toBe(true);
   });
 });

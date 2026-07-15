@@ -18,12 +18,25 @@ const PARENT_BINDING_TAIL = new RegExp(
   'u',
 );
 
-export const RESERVED_TRANSACTION_NAMESPACE_PATTERNS = [
-  '.standards-transaction*',
-  '.standards-owner-publication-*',
-  '.standards-parent-*',
-  '.standards-removal-*',
-] as const;
+export const RESERVED_TRANSACTION_ARTIFACT_GRAMMAR = {
+  atomicTails: [
+    `${TRANSACTION_RESERVATION}.<uuid-v4>.tmp`,
+    `${TRANSACTION_OWNER}.<uuid-v4>.tmp`,
+    '.standards-parent-binding-<transaction-uuid-v4>-<index>.<write-uuid-v4>.tmp',
+  ],
+  fixedNames: [
+    TRANSACTION_DIRECTORY,
+    TRANSACTION_CLEANUP,
+    TRANSACTION_OWNER_RESERVATION,
+    TRANSACTION_RESERVATION,
+  ],
+  prefixFamilies: [
+    `${TRANSACTION_PUBLICATION_PREFIX}*`,
+    `${TRANSACTION_OWNER_PUBLICATION_PREFIX}*`,
+    '.standards-parent-*',
+    `${REMOVAL_BINDING_PREFIX}*`,
+  ],
+} as const;
 
 export const isUuidV4 = (value: string): boolean => UUID_V4.test(value);
 

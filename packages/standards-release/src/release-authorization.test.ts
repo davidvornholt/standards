@@ -12,15 +12,26 @@ const remote = (input: {
   readonly branch?: unknown;
   readonly mergeBaseSha?: string;
   readonly status?: string;
+  readonly trailingBranch?: unknown;
 }) => {
   const calls: Array<string> = [];
+  let repositoryReads = 0;
   const fetcher: ReleaseFetcher = (requestInput) => {
     const path = new URL(String(requestInput)).pathname;
     calls.push(path);
+    const repository = path === '/repos/owner/repo';
+    if (repository) {
+      repositoryReads += 1;
+    }
     return Promise.resolve(
       Response.json(
-        path === '/repos/owner/repo'
-          ? { [DEFAULT_BRANCH]: input.branch ?? 'trunk' }
+        repository
+          ? {
+              [DEFAULT_BRANCH]:
+                repositoryReads === 1
+                  ? (input.branch ?? 'trunk')
+                  : (input.trailingBranch ?? input.branch ?? 'trunk'),
+            }
           : {
               [MERGE_BASE_COMMIT]: {
                 sha: input.mergeBaseSha ?? RELEASE_SHA,
@@ -50,6 +61,7 @@ describe('release SHA authorization', () => {
     expect(github.calls).toEqual([
       '/repos/owner/repo',
       '/repos/owner/repo/compare/release-sha...trunk',
+      '/repos/owner/repo',
     ]);
   });
 
@@ -71,5 +83,25 @@ describe('release SHA authorization', () => {
     });
     expect(failures[1]).toMatchObject({ _tag: 'GithubStateError' });
     expect(failures[2]).toMatchObject({ _tag: 'GithubApiError' });
+  });
+
+  it('fails closed when the trailing default-branch identity changes or is malformed', async () => {
+    const failures = await Promise.all([
+      runPromise(
+        flip(authorize(remote({ trailingBranch: 'renamed' }).fetcher)),
+      ),
+      runPromise(flip(authorize(remote({ trailingBranch: 7 }).fetcher))),
+      runPromise(flip(authorize(remote({ trailingBranch: '' }).fetcher))),
+    ]);
+    expect(failures[0]).toMatchObject({
+      _tag: 'GithubStateError',
+      message:
+        'GitHub default branch changed from trunk to renamed during release authorization',
+    });
+    expect(failures[1]).toMatchObject({ _tag: 'GithubApiError' });
+    expect(failures[2]).toMatchObject({
+      _tag: 'GithubApiError',
+      message: 'GitHub repository returned an empty default branch',
+    });
   });
 });

@@ -14,7 +14,7 @@ import {
   type GithubConnectionInput,
   githubClientFrom,
 } from './release-github-client';
-import { apiMessage, get } from './release-github-request';
+import { apiMessage, type GithubClient, get } from './release-github-request';
 
 const HTTP_OK = 200;
 const DEFAULT_BRANCH = 'default_branch';
@@ -41,18 +41,15 @@ const requireOk = (
         }),
       );
 
-export const authorizeReleaseSha = (
-  input: GithubConnectionInput & { readonly expectedSha: string },
-) =>
+const readDefaultBranch = (client: GithubClient) =>
   gen(function* () {
-    const client = githubClientFrom(input);
-    const repositoryResponse = yield* get(client, `/repos/${client.repo}`).pipe(
-      flatMap((response) =>
-        requireOk('Reading repository default branch', response),
+    const response = yield* get(client, `/repos/${client.repo}`).pipe(
+      flatMap((repositoryResponse) =>
+        requireOk('Reading repository default branch', repositoryResponse),
       ),
     );
     const repository = yield* decodeUnknown(repositorySchema)(
-      repositoryResponse.body,
+      response.body,
     ).pipe(
       mapError(
         () =>
@@ -68,9 +65,18 @@ export const authorizeReleaseSha = (
         }),
       );
     }
+    return repository.default_branch;
+  });
+
+export const authorizeReleaseSha = (
+  input: GithubConnectionInput & { readonly expectedSha: string },
+) =>
+  gen(function* () {
+    const client = githubClientFrom(input);
+    const defaultBranch = yield* readDefaultBranch(client);
 
     const base = encodeURIComponent(input.expectedSha);
-    const head = encodeURIComponent(repository.default_branch);
+    const head = encodeURIComponent(defaultBranch);
     const comparisonResponse = yield* get(
       client,
       `/repos/${client.repo}/compare/${base}...${head}`,
@@ -95,9 +101,17 @@ export const authorizeReleaseSha = (
     if (!isAncestor) {
       return yield* fail(
         new GithubStateError({
-          message: `Release SHA ${input.expectedSha} is not an ancestor of live default branch ${repository.default_branch}`,
+          message: `Release SHA ${input.expectedSha} is not an ancestor of live default branch ${defaultBranch}`,
         }),
       );
     }
-    return repository.default_branch;
+    const confirmedDefaultBranch = yield* readDefaultBranch(client);
+    if (confirmedDefaultBranch !== defaultBranch) {
+      return yield* fail(
+        new GithubStateError({
+          message: `GitHub default branch changed from ${defaultBranch} to ${confirmedDefaultBranch} during release authorization`,
+        }),
+      );
+    }
+    return defaultBranch;
   });

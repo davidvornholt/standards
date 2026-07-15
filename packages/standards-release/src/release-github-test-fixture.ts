@@ -24,26 +24,50 @@ export const remote = (
   state: RemoteState,
   options: {
     readonly authorizationFailure?: 1 | 2;
+    readonly authorizationTrailingBranches?: ReadonlyArray<unknown>;
+    readonly releaseCreateReadback?: boolean;
+    readonly releaseCreateStatus?: number;
     readonly releaseRace?: boolean;
+    readonly tagCreateReadbackSha?: string | null;
+    readonly tagCreateStatus?: number;
     readonly tagRaceSha?: string | null;
   } = {},
 ) => {
   const calls: Array<string> = [];
   const bodies: Array<unknown> = [];
   let authorizationCount = 0;
-  const readResponse = (path: string): Response => {
-    if (path === '/repos/owner/repo') {
+  let awaitingTrailingIdentity = false;
+  const readRepository = (): Response => {
+    if (!awaitingTrailingIdentity) {
       return json({ [DEFAULT_BRANCH]: 'main' }, HTTP_OK);
     }
+    awaitingTrailingIdentity = false;
+    return json(
+      {
+        [DEFAULT_BRANCH]:
+          options.authorizationTrailingBranches?.[authorizationCount - 1] ??
+          'main',
+      },
+      HTTP_OK,
+    );
+  };
+  const readComparison = (): Response => {
+    authorizationCount += 1;
+    if (authorizationCount === options.authorizationFailure) {
+      return json({ message: 'default branch changed' }, HTTP_CONFLICT);
+    }
+    awaitingTrailingIdentity = true;
+    return json(
+      { [MERGE_BASE_COMMIT]: { sha: 'expected' }, status: 'ahead' },
+      HTTP_OK,
+    );
+  };
+  const readResponse = (path: string): Response => {
+    if (path === '/repos/owner/repo') {
+      return readRepository();
+    }
     if (path.endsWith('/compare/expected...main')) {
-      authorizationCount += 1;
-      if (authorizationCount === options.authorizationFailure) {
-        return json({ message: 'default branch changed' }, HTTP_CONFLICT);
-      }
-      return json(
-        { [MERGE_BASE_COMMIT]: { sha: 'expected' }, status: 'ahead' },
-        HTTP_OK,
-      );
+      return readComparison();
     }
     if (path.endsWith('/releases')) {
       return state.release === 'absent'
@@ -64,6 +88,14 @@ export const remote = (
       : json({ object: { sha: state.tagSha, type: 'commit' } }, HTTP_OK);
   };
   const createTag = (): Response => {
+    if (options.tagCreateStatus !== undefined) {
+      if (options.tagCreateReadbackSha !== undefined) {
+        state.tagSha = options.tagCreateReadbackSha;
+      }
+      return options.tagCreateStatus === HTTP_CREATED
+        ? json({ ref: 'refs/tags/v0.5.0' }, HTTP_CREATED)
+        : json({ message: 'tag creation failed' }, options.tagCreateStatus);
+    }
     if (options.tagRaceSha !== undefined) {
       state.tagSha = options.tagRaceSha;
       return json({ message: 'Reference was not created' }, HTTP_UNPROCESSABLE);
@@ -72,10 +104,26 @@ export const remote = (
     return json({ ref: 'refs/tags/v0.5.0' }, HTTP_CREATED);
   };
   const createRelease = (): Response => {
-    state.release = 'published';
-    return options.releaseRace === true
-      ? json({ message: 'already_exists' }, HTTP_UNPROCESSABLE)
-      : json({ [TAG_NAME_FIELD]: 'v0.5.0' }, HTTP_CREATED);
+    const status =
+      options.releaseCreateStatus ??
+      (options.releaseRace === true ? HTTP_UNPROCESSABLE : HTTP_CREATED);
+    if (
+      options.releaseCreateReadback !== false &&
+      (status === HTTP_CREATED || status === HTTP_UNPROCESSABLE)
+    ) {
+      state.release = 'published';
+    }
+    return status === HTTP_CREATED
+      ? json({ [TAG_NAME_FIELD]: 'v0.5.0' }, HTTP_CREATED)
+      : json(
+          {
+            message:
+              status === HTTP_UNPROCESSABLE
+                ? 'already_exists'
+                : 'release creation failed',
+          },
+          status,
+        );
   };
   const writeResponse = (path: string): Response => {
     if (path.endsWith('/git/refs')) {

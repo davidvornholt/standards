@@ -37,7 +37,7 @@ const isIgnored = (root: string, relative: string): boolean =>
   spawnSync('git', ['-C', root, 'check-ignore', '--quiet', relative]).status ===
   0;
 
-it('excludes only reserved recovery artifact namespaces', async () => {
+it('excludes only the reserved recovery artifact grammar', async () => {
   const rootPath = repository();
   const root = await openRepositoryRoot(rootPath, 'consumer');
 

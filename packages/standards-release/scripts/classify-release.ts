@@ -1,6 +1,10 @@
-import { appendGithubOutput } from '../src/github-output';
 import { parseStableVersion } from '../src/release-declaration';
-import { argv, runtimeProcess, stderr, write } from '../src/release-runtime';
+import {
+  appendClassifyReleaseOutput,
+  classifyReleaseArguments,
+  setClassifyReleaseExitCode,
+  writeClassifyReleaseError,
+} from './classify-release-runtime';
 
 const FAILURE_EXIT_CODE = 1;
 const SUCCESS_EXIT_CODE = 0;
@@ -11,12 +15,14 @@ const required = (value: string | undefined, name: string) =>
     : { ok: true as const, value };
 
 const reportError = (message: string): Promise<typeof FAILURE_EXIT_CODE> =>
-  write(stderr, `::error::${message}\n`).then(() => FAILURE_EXIT_CODE);
+  writeClassifyReleaseError(`::error::${message}\n`).then(
+    () => FAILURE_EXIT_CODE,
+  );
 
 const main = (): Promise<
   typeof FAILURE_EXIT_CODE | typeof SUCCESS_EXIT_CODE
 > => {
-  const [output, version] = argv.slice(2);
+  const [output, version] = classifyReleaseArguments;
   const outputPath = required(output, 'GitHub output path');
   if (!outputPath.ok) {
     return reportError(outputPath.message);
@@ -30,7 +36,7 @@ const main = (): Promise<
       `Version ${releaseVersion.value} must be a stable SemVer`,
     );
   }
-  return appendGithubOutput(outputPath.value, {
+  return appendClassifyReleaseOutput(outputPath.value, {
     tag: `v${releaseVersion.value}`,
     version: releaseVersion.value,
   })
@@ -40,4 +46,4 @@ const main = (): Promise<
     );
 };
 
-runtimeProcess.exitCode = await main();
+setClassifyReleaseExitCode(await main());

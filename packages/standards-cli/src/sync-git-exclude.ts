@@ -1,11 +1,12 @@
 import { spawnSync } from 'node:child_process';
 import { lstat, realpath } from 'node:fs/promises';
-import { env } from 'node:process';
+import { gitChildEnvironment } from './git-child-environment';
 import type { RepositoryRoot } from './sync-filesystem';
 import {
   type GitExcludeUpdateHooks,
   updatePinnedGitExclude,
 } from './sync-git-exclude-filesystem';
+import { assertRepositoryRootUnchanged } from './sync-repository-root-generation';
 
 const BLOCK_BEGIN = '# BEGIN @davidvornholt/standards recovery artifacts';
 const BLOCK_END = '# END @davidvornholt/standards recovery artifacts';
@@ -15,9 +16,6 @@ const FOUR_HEX = `${THREE_HEX}${HEX}`;
 const EIGHT_HEX = `${FOUR_HEX}${FOUR_HEX}`;
 const TWELVE_HEX = `${EIGHT_HEX}${FOUR_HEX}`;
 const UUID_V4_GITIGNORE = `${EIGHT_HEX}-${FOUR_HEX}-4${THREE_HEX}-[89ab]${THREE_HEX}-${TWELVE_HEX}`;
-const GIT_COMMON_DIRECTORY_VARIABLE = 'GIT_COMMON_DIR';
-const GIT_DIRECTORY_VARIABLE = 'GIT_DIR';
-const GIT_WORK_TREE_VARIABLE = 'GIT_WORK_TREE';
 
 export const GIT_RECOVERY_ARTIFACT_EXCLUDES = [
   '.standards-transaction',
@@ -66,13 +64,6 @@ const withExclusionBlock = (contents: string): string => {
   return `${prefix}${exclusionBlock}`;
 };
 
-const gitEnvironment = (): NodeJS.ProcessEnv => ({
-  ...env,
-  [GIT_COMMON_DIRECTORY_VARIABLE]: undefined,
-  [GIT_DIRECTORY_VARIABLE]: undefined,
-  [GIT_WORK_TREE_VARIABLE]: undefined,
-});
-
 const gitPath = (
   root: RepositoryRoot,
   arguments_: ReadonlyArray<string>,
@@ -80,7 +71,7 @@ const gitPath = (
   const result = spawnSync(
     'git',
     ['-C', root.path, 'rev-parse', '--path-format=absolute', ...arguments_],
-    { encoding: 'utf8', env: gitEnvironment() },
+    { encoding: 'utf8', env: gitChildEnvironment() },
   );
   if (result.error !== undefined || result.status !== 0) {
     throw new Error('Could not inspect Git recovery-artifact exclusions', {
@@ -94,6 +85,7 @@ export const ensureGitRecoveryArtifactsExcluded = async (
   root: RepositoryRoot,
   hooks: GitExcludeUpdateHooks = {},
 ): Promise<void> => {
+  await assertRepositoryRootUnchanged(root);
   try {
     const metadata = await lstat(`${root.path}/.git`);
     if (
@@ -104,14 +96,33 @@ export const ensureGitRecoveryArtifactsExcluded = async (
     }
   } catch (error) {
     if ((error as { readonly code?: unknown }).code === 'ENOENT') {
+      await assertRepositoryRootUnchanged(root);
       return;
     }
     throw error;
   }
+  await assertRepositoryRootUnchanged(root);
   const worktree = await realpath(gitPath(root, ['--show-toplevel']));
   if (worktree !== root.path) {
     throw new Error('Standards consumer must be the Git worktree root');
   }
   const commonPath = gitPath(root, ['--git-common-dir']);
-  await updatePinnedGitExclude(commonPath, withExclusionBlock, hooks);
+  await assertRepositoryRootUnchanged(root);
+  const guardedHooks: GitExcludeUpdateHooks = {
+    beforeExchange: hooks.beforeExchange,
+    beforePublication: async () => {
+      await hooks.beforePublication?.();
+      await assertRepositoryRootUnchanged(root);
+    },
+    beforeReplace: async () => {
+      await hooks.beforeReplace?.();
+      await assertRepositoryRootUnchanged(root);
+    },
+    beforeTemporaryWrite: async () => {
+      await hooks.beforeTemporaryWrite?.();
+      await assertRepositoryRootUnchanged(root);
+    },
+  };
+  await updatePinnedGitExclude(commonPath, withExclusionBlock, guardedHooks);
+  await assertRepositoryRootUnchanged(root);
 };

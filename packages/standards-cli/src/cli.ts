@@ -21,6 +21,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import process from 'node:process';
+import { gitChildEnvironment } from './git-child-environment';
 import { CANONICAL_SETTINGS_FILE, LOCAL_SETTINGS_FILE } from './github-api';
 import { runGithubApply, runGithubCheck } from './github-commands';
 import { loadGithubSettings } from './github-settings';
@@ -308,7 +309,10 @@ const assertSupportedRef = (ref: string): void => {
     return;
   }
   try {
-    execFileSync('git', ['check-ref-format', ref], { stdio: 'ignore' });
+    execFileSync('git', ['check-ref-format', ref], {
+      env: gitChildEnvironment(),
+      stdio: 'ignore',
+    });
   } catch (error) {
     throw new Error(`Invalid qualified Git ref: ${ref}`, { cause: error });
   }
@@ -445,12 +449,12 @@ const assertFetchedCommitObject = (
     fetchedObject = execFileSync(
       'git',
       ['-C', dir, 'rev-parse', '--verify', 'FETCH_HEAD'],
-      { encoding: 'utf8' },
+      { encoding: 'utf8', env: gitChildEnvironment() },
     ).trim();
     fetchedType = execFileSync(
       'git',
       ['-C', dir, 'cat-file', '-t', 'FETCH_HEAD'],
-      { encoding: 'utf8' },
+      { encoding: 'utf8', env: gitChildEnvironment() },
     ).trim();
   } catch (error) {
     cleanup();
@@ -505,6 +509,7 @@ const resolveLocalSource = (
   try {
     sha = execFileSync('git', ['-C', src, 'rev-parse', 'HEAD'], {
       encoding: 'utf8',
+      env: gitChildEnvironment(),
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
   } catch {
@@ -532,11 +537,14 @@ const resolveSource = (
   try {
     // init + fetch instead of `clone --branch` so a full commit sha works as a
     // ref, not only tags and branches (GitHub serves reachable sha fetches).
-    execFileSync('git', ['init', '--quiet', dir], { stdio: 'ignore' });
+    execFileSync('git', ['init', '--quiet', dir], {
+      env: gitChildEnvironment(),
+      stdio: 'ignore',
+    });
     execFileSync(
       'git',
       ['-C', dir, 'fetch', '--quiet', '--depth', '1', '--', url, target],
-      { stdio: 'ignore' },
+      { env: gitChildEnvironment(), stdio: 'ignore' },
     );
   } catch (error) {
     cleanup();
@@ -552,7 +560,7 @@ const resolveSource = (
     execFileSync(
       'git',
       ['-C', dir, 'checkout', '--quiet', '--detach', 'FETCH_HEAD'],
-      { stdio: 'ignore' },
+      { env: gitChildEnvironment(), stdio: 'ignore' },
     );
   } catch (error) {
     cleanup();
@@ -565,6 +573,7 @@ const resolveSource = (
   }
   const sha = execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], {
     encoding: 'utf8',
+    env: gitChildEnvironment(),
   }).trim();
   return { dir, sha, cleanup };
 };

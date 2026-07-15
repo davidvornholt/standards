@@ -16,12 +16,15 @@
   "bin": {
     "standards": "src/cli.ts"
   },
-  "exports": {},
+  "exports": {
+    "./git-child-environment": "./src/git-child-environment.ts"
+  },
   "files": [
     "LICENSE",
     "README.md",
     "SOURCE_COMMIT",
     "src/cli.ts",
+    "src/git-child-environment.ts",
     "src/github-api.ts",
     "src/github-apply.ts",
     "src/github-commands.ts",
@@ -67,6 +70,7 @@
     "src/sync-node-identity.ts",
     "src/sync-policy.ts",
     "src/sync-process-identity.ts",
+    "src/sync-repository-root-generation.ts",
     "src/sync-root-path.ts",
     "src/sync-source.ts",
     "src/sync-transaction-artifact-cleanup.ts",

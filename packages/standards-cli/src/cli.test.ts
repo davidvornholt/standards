@@ -517,6 +517,39 @@ describe('init', () => {
     expect(existsSync(join(consumer, 'packages/standards-cli'))).toBe(false);
   });
 
+  it('does not let an inherited GIT_DIR redirect remote-source Git commands', () => {
+    const upstream = buildGitUpstream();
+    const victim = mkTmp('sync-git-environment-victim-');
+    write(victim, 'victim.txt', 'victim unchanged\n');
+    git(victim, ['init', '--quiet', '-b', 'main']);
+    git(victim, ['add', 'victim.txt']);
+    git(victim, ['commit', '--quiet', '-m', 'victim']);
+    const victimGit = join(victim, '.git');
+    const before = {
+      config: readFileSync(join(victimGit, 'config')),
+      entries: readdirSync(victimGit).sort(),
+      head: readFileSync(join(victimGit, 'HEAD')),
+      index: readFileSync(join(victimGit, 'index')),
+      status: git(victim, ['status', '--porcelain']),
+    };
+    const consumer = mkTmp('sync-git-environment-consumer-');
+
+    const result = run(
+      consumer,
+      ['init', '--from', upstream.url, '--dir', consumer],
+      { env: { GIT_DIR: victimGit } },
+    );
+
+    expect(result.status).toBe(0);
+    expect(readLock(consumer).sha).toHaveLength(COMMIT_SHA_LENGTH);
+    expect(readFileSync(join(victimGit, 'config'))).toEqual(before.config);
+    expect(readFileSync(join(victimGit, 'HEAD'))).toEqual(before.head);
+    expect(readFileSync(join(victimGit, 'index'))).toEqual(before.index);
+    expect(readdirSync(victimGit).sort()).toEqual(before.entries);
+    expect(git(victim, ['status', '--porcelain'])).toBe(before.status);
+    expect(read(victim, 'victim.txt')).toBe('victim unchanged\n');
+  });
+
   it('never clobbers a pre-existing seed destination', () => {
     const up = buildUpstream();
     const consumer = mkTmp('sync-cons-');

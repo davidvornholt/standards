@@ -12,6 +12,7 @@ const MERGE_BASE_COMMIT = 'merge_base_commit';
 const ACTIONS_ID_TOKEN = 'ACTIONS_ID_TOKEN_REQUEST_TOKEN';
 const ACTIONS_ID_URL = 'ACTIONS_ID_TOKEN_REQUEST_URL';
 const PATH = 'PATH';
+const MALFORMED_BRANCH = 7;
 
 it('authorizes immediately inside the npm mutation owner', async () => {
   const calls: Array<string> = [];
@@ -50,6 +51,7 @@ it('authorizes immediately inside the npm mutation owner', async () => {
   expect(calls).toEqual([
     '/repos/owner/repo',
     '/repos/owner/repo/compare/expected...main',
+    '/repos/owner/repo',
     'publish package.tgz',
   ]);
 });
@@ -117,4 +119,59 @@ it('does not invoke npm when live default-branch authorization fails', async () 
     ),
   ).toMatchObject({ _tag: 'GithubApiError' });
   expect(published).toBeFalse();
+});
+
+it('does not invoke npm after a renamed or malformed trailing default branch', async () => {
+  const results = await Promise.all(
+    ['renamed', MALFORMED_BRANCH].map(async (trailingBranch) => {
+      let published = false;
+      let repositoryReads = 0;
+      const fetcher: ReleaseFetcher = (requestInput) => {
+        const path = new URL(String(requestInput)).pathname;
+        if (path === '/repos/owner/repo') {
+          repositoryReads += 1;
+          return Promise.resolve(
+            Response.json({
+              [DEFAULT_BRANCH]: repositoryReads === 1 ? 'main' : trailingBranch,
+            }),
+          );
+        }
+        return Promise.resolve(
+          Response.json({
+            [MERGE_BASE_COMMIT]: { sha: 'expected' },
+            status: 'ahead',
+          }),
+        );
+      };
+
+      const failure = await runPromise(
+        flip(
+          publishAuthorizedNpmArtifact(
+            {
+              apiUrl: 'https://github.test',
+              artifact: 'package.tgz',
+              expectedSha: 'expected',
+              fetcher,
+              repo: 'owner/repo',
+              token: 'token',
+            },
+            () => {
+              published = true;
+              return effectVoid;
+            },
+          ),
+        ),
+      );
+      return { failure, published, trailingBranch };
+    }),
+  );
+  for (const { failure, published, trailingBranch } of results) {
+    expect(failure).toMatchObject({
+      _tag:
+        typeof trailingBranch === 'string'
+          ? 'GithubStateError'
+          : 'GithubApiError',
+    });
+    expect(published).toBeFalse();
+  }
 });
