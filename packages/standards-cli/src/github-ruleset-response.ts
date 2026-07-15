@@ -1,5 +1,5 @@
 import { rulesetListProblems } from './github-ruleset-settings';
-import { isRecord } from './github-settings-value';
+import { isPositiveSafeInteger, isRecord } from './github-settings-value';
 
 type DecodeResult = {
   readonly problem: string | null;
@@ -41,16 +41,13 @@ const invalid = (detail: string): DecodeResult => ({
   value: null,
 });
 
-const positiveSafeInteger = (value: unknown): value is number =>
-  Number.isSafeInteger(value) && Number(value) > 0;
-
 const bypassActorIdIsValid = (type: string, id: unknown): boolean => {
   if (type === 'DeployKey') {
     return id === null;
   }
   return type === 'OrganizationAdmin'
-    ? id === null || positiveSafeInteger(id)
-    : positiveSafeInteger(id);
+    ? id === null || isPositiveSafeInteger(id)
+    : isPositiveSafeInteger(id);
 };
 
 export const isRepositoryRulesetIdentity = (
@@ -58,7 +55,7 @@ export const isRepositoryRulesetIdentity = (
   repo: string,
 ): value is Record<string, unknown> =>
   isRecord(value) &&
-  positiveSafeInteger(value.id) &&
+  isPositiveSafeInteger(value.id) &&
   typeof value.name === 'string' &&
   value.name.length > 0 &&
   value.source_type === 'Repository' &&

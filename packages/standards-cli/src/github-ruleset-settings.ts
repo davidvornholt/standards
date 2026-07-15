@@ -1,5 +1,5 @@
 import { rulesProblems } from './github-ruleset-rule-settings';
-import { isRecord } from './github-settings-value';
+import { isRecord, unknownKeyProblems } from './github-settings-value';
 
 export const RULESET_COMPARED_KEYS = [
   'target',
@@ -10,15 +10,6 @@ export const RULESET_COMPARED_KEYS = [
 const RULESET_KEYS = new Set(['name', ...RULESET_COMPARED_KEYS, 'rules']);
 const CONDITION_KEYS = new Set(['ref_name']);
 const REF_NAME_KEYS = new Set(['include', 'exclude']);
-
-const unknownKeyProblems = (
-  value: Readonly<Record<string, unknown>>,
-  allowed: ReadonlySet<string>,
-  prefix: string,
-): ReadonlyArray<string> =>
-  Object.keys(value).flatMap((key) =>
-    allowed.has(key) ? [] : [`${prefix} has unknown key "${key}"`],
-  );
 
 const stringArrayProblems = (
   value: unknown,

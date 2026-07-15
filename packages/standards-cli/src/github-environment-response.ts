@@ -1,9 +1,5 @@
-import {
-  isPositiveSafeInteger,
-  MAX_REVIEWERS,
-  MAX_WAIT_TIMER,
-} from './github-environment-settings';
-import { isRecord } from './github-settings-value';
+import { MAX_REVIEWERS, MAX_WAIT_TIMER } from './github-environment-settings';
+import { isPositiveSafeInteger, isRecord } from './github-settings-value';
 
 const WAIT_TIMER = 'wait_timer';
 const REQUIRED_REVIEWERS = 'required_reviewers';

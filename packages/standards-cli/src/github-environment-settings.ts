@@ -1,6 +1,10 @@
 // Structural validation for declarative GitHub Actions environments.
 
-import { isRecord } from './github-settings-value';
+import {
+  isPositiveSafeInteger,
+  isRecord,
+  unknownKeyProblems,
+} from './github-settings-value';
 
 const ENVIRONMENT_KEYS = new Set([
   'name',
@@ -17,19 +21,8 @@ const BRANCH_POLICY_MODE_KEYS = new Set([
 const MAX_ENVIRONMENT_NAME_LENGTH = 255;
 export const MAX_WAIT_TIMER = 43_200;
 export const MAX_REVIEWERS = 6;
-export const isPositiveSafeInteger = (value: unknown): value is number =>
-  Number.isSafeInteger(value) && Number(value) > 0;
 
 export const environmentIdentity = (name: string): string => name.toLowerCase();
-
-const unknownKeyProblems = (
-  record: Readonly<Record<string, unknown>>,
-  allowed: ReadonlySet<string>,
-  prefix: string,
-): ReadonlyArray<string> =>
-  Object.keys(record).flatMap((key) =>
-    allowed.has(key) ? [] : [`${prefix} has unknown key "${key}"`],
-  );
 
 const reviewerProblems = (
   reviewers: unknown,

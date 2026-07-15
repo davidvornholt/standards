@@ -1,4 +1,4 @@
-import { isRecord } from './github-settings-value';
+import { isRecord, unknownKeyProblems } from './github-settings-value';
 
 const RULE_KEYS = new Set(['type', 'parameters']);
 const PULL_REQUEST_PARAMETER_KEYS = new Set([
@@ -23,15 +23,6 @@ const PARAMETERLESS_RULES = new Set([
   'required_linear_history',
 ]);
 const MERGE_METHODS = new Set(['merge', 'squash', 'rebase']);
-
-const unknownKeyProblems = (
-  value: Readonly<Record<string, unknown>>,
-  allowed: ReadonlySet<string>,
-  prefix: string,
-): ReadonlyArray<string> =>
-  Object.keys(value).flatMap((key) =>
-    allowed.has(key) ? [] : [`${prefix} has unknown key "${key}"`],
-  );
 
 const pullRequestParameterProblems = (
   value: unknown,

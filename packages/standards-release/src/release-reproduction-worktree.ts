@@ -1,17 +1,14 @@
 import { gitChildEnvironment } from '@davidvornholt/standards/git-child-environment';
-import { isFailure } from 'effect/Exit';
 import {
   type Effect,
   effectTry,
-  exit,
   fail,
-  failCause,
   flatMap,
   gen,
   succeed,
   tryPromise,
-  uninterruptibleMask,
 } from './release-effect';
+import { bracketEffect } from './release-effect-resource';
 import type { packReleaseArtifact } from './release-package';
 import { readPackedArtifact } from './release-package-identity';
 import { ReleaseReproductionError } from './release-reproduction-error';
@@ -133,20 +130,11 @@ const bracketTemporaryRoot = <A, E>(input: {
   readonly temporaryDirectory: string;
   readonly use: (root: string) => Effect<A, E>;
 }) =>
-  uninterruptibleMask((restore) =>
-    gen(function* () {
-      const root = yield* temporaryRoot(input.temporaryDirectory);
-      const operationExit = yield* exit(restore(input.use(root)));
-      const cleanupExit = yield* exit(cleanup(input.repositoryPath, root));
-      if (isFailure(cleanupExit)) {
-        return yield* failCause(cleanupExit.cause);
-      }
-      if (isFailure(operationExit)) {
-        return yield* failCause(operationExit.cause);
-      }
-      return operationExit.value;
-    }),
-  );
+  bracketEffect({
+    acquire: temporaryRoot(input.temporaryDirectory),
+    release: (root) => cleanup(input.repositoryPath, root),
+    use: input.use,
+  });
 
 export const reproduceCandidateArtifact = (input: {
   readonly candidateSha: string;

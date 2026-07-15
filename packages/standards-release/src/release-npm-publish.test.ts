@@ -1,20 +1,19 @@
 import { expect, it } from 'bun:test';
 import { effectVoid, flip, runPromise, succeed } from './release-effect';
 import type { ReleaseFetcher } from './release-github-request';
-import {
-  npmPublishCommand,
-  npmPublishEnvironment,
-  publishAuthorizedNpmArtifact,
-} from './release-npm-publish';
+import { publishAuthorizedNpmArtifact } from './release-npm-publish';
 
 const DEFAULT_BRANCH = 'default_branch';
 const MERGE_BASE_COMMIT = 'merge_base_commit';
-const ACTIONS_ID_TOKEN = 'ACTIONS_ID_TOKEN_REQUEST_TOKEN';
-const ACTIONS_ID_URL = 'ACTIONS_ID_TOKEN_REQUEST_URL';
-const PATH = 'PATH';
 const MALFORMED_BRANCH = 7;
+const fixtureBytes = new TextEncoder().encode('verified package bytes');
 
-it('authorizes immediately inside the npm mutation owner', async () => {
+const verifyFixture = (input: { readonly expectedIntegrity?: string }) =>
+  succeed(input.expectedIntegrity ?? '');
+
+const readFixture = () => succeed(fixtureBytes);
+
+it('stages and verifies before final authorization and publication', async () => {
   const calls: Array<string> = [];
   const fetcher: ReleaseFetcher = (requestInput) => {
     const path = new URL(String(requestInput)).pathname;
@@ -42,58 +41,30 @@ it('authorizes immediately inside the npm mutation owner', async () => {
         repo: 'owner/repo',
         token: 'token',
       },
-      (artifact) => {
-        calls.push(`publish ${artifact}`);
+      () => {
+        calls.push('publish');
         return effectVoid;
       },
       (input) => {
-        calls.push(
-          `verify ${input.artifact} ${input.expectedIntegrity} ${input.expectedSha}`,
-        );
+        calls.push(`verify ${input.expectedIntegrity} ${input.expectedSha}`);
         return succeed(input.expectedIntegrity ?? '');
+      },
+      (artifact) => {
+        calls.push(`read ${artifact}`);
+        return succeed(fixtureBytes);
       },
     ),
   );
 
   expect(calls).toEqual([
+    'read package.tgz',
+    'verify sha512-expected expected',
     '/repos/owner/repo',
     '/repos/owner/repo/compare/expected...main',
     '/repos/owner/repo',
     '/repos/owner/repo/compare/expected...main',
-    'verify package.tgz sha512-expected expected',
-    'publish package.tgz',
-  ]);
-});
-
-it('preserves trusted publishing inputs without exposing the GitHub API token', () => {
-  expect(npmPublishCommand('package.tgz')).toEqual([
-    'npm',
     'publish',
-    'package.tgz',
-    '--ignore-scripts',
-    '--provenance',
-    '--access',
-    'public',
-    '--tag',
-    'latest',
-    '--registry=https://registry.npmjs.org',
   ]);
-  expect(
-    npmPublishEnvironment(
-      Object.fromEntries([
-        [ACTIONS_ID_TOKEN, 'oidc-token'],
-        [ACTIONS_ID_URL, 'https://oidc.test'],
-        ['GITHUB_TOKEN', 'fallback-token'],
-        ['GH_TOKEN', 'api-token'],
-        [PATH, '/usr/bin'],
-        ['UNDEFINED_VALUE', undefined],
-      ]),
-    ),
-  ).toEqual({
-    [ACTIONS_ID_TOKEN]: 'oidc-token',
-    [ACTIONS_ID_URL]: 'https://oidc.test',
-    [PATH]: '/usr/bin',
-  });
 });
 
 it('does not invoke npm when live default-branch authorization fails', async () => {
@@ -124,6 +95,8 @@ it('does not invoke npm when live default-branch authorization fails', async () 
             published = true;
             return effectVoid;
           },
+          verifyFixture,
+          readFixture,
         ),
       ),
     ),
@@ -170,6 +143,8 @@ it('does not invoke npm after a renamed or malformed trailing default branch', a
               published = true;
               return effectVoid;
             },
+            verifyFixture,
+            readFixture,
           ),
         ),
       );

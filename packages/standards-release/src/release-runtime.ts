@@ -3,13 +3,36 @@ type RuntimeProcess = {
 };
 
 type RuntimeFileSystem = {
+  readonly chmod: (path: string, mode: number) => Promise<void>;
   readonly lstat: (path: string) => Promise<unknown>;
   readonly mkdir: (path: string) => Promise<void>;
   readonly mkdtemp: (prefix: string) => Promise<string>;
+  readonly open: (
+    path: string,
+    flags: string,
+    mode?: number,
+  ) => Promise<RuntimeFileHandle>;
+  readonly rename: (oldPath: string, newPath: string) => Promise<void>;
   readonly rm: (
     path: string,
     options: { readonly force: boolean; readonly recursive: boolean },
   ) => Promise<void>;
+  readonly symlink: (target: string, path: string) => Promise<void>;
+  readonly unlink: (path: string) => Promise<void>;
+};
+
+export type RuntimeFileHandle = {
+  readonly fd: number;
+  readonly close: () => Promise<void>;
+  readonly read: (
+    buffer: Uint8Array,
+    offset: number,
+    length: number,
+    position: number,
+  ) => Promise<{ readonly bytesRead: number }>;
+  readonly stat: () => Promise<{ readonly size: number }>;
+  readonly sync: () => Promise<void>;
+  readonly writeFile: (data: Uint8Array) => Promise<void>;
 };
 
 type RuntimeCrypto = {
@@ -24,6 +47,10 @@ type RuntimeZlib = {
   readonly gunzipSync: (input: Uint8Array) => Uint8Array;
 };
 
+type RuntimeOs = {
+  readonly tmpdir: () => string;
+};
+
 // Dynamic loading avoids a Biome 2.5.3 resolver failure on Bun's static exports and isolates the Node-compatible process edge in this private runtime adapter.
 const runtime = await import('bun');
 const fileSystem = (await import(
@@ -35,6 +62,7 @@ const zlib = (await import(
 const crypto = (await import(
   ['node', 'crypto'].join(':')
 )) as unknown as RuntimeCrypto;
+const os = (await import(['node', 'os'].join(':'))) as unknown as RuntimeOs;
 const processModule = (await import(['node', 'process'].join(':'))) as {
   readonly default: RuntimeProcess;
 };
@@ -42,12 +70,18 @@ const processModule = (await import(['node', 'process'].join(':'))) as {
 export const { argv, env, file, spawn, spawnSync, stderr, version, write } =
   runtime;
 export const {
+  chmod: nodeChmod,
   lstat: nodeLstat,
   mkdir: nodeMkdir,
   mkdtemp: nodeMkdtemp,
+  open: nodeOpen,
+  rename: nodeRename,
   rm: nodeRm,
+  symlink: nodeSymlink,
+  unlink: nodeUnlink,
 } = fileSystem;
 export const { gzipSync: nodeGzipSync, gunzipSync: nodeGunzipSync } = zlib;
 export const { timingSafeEqual: nodeTimingSafeEqual } = crypto;
+export const { tmpdir: nodeTmpdir } = os;
 export const BunCryptoHasher = runtime.CryptoHasher;
 export const runtimeProcess = processModule.default;

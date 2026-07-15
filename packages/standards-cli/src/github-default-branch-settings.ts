@@ -1,4 +1,4 @@
-import { isRecord } from './github-settings-value';
+import { isRecord, unknownKeyProblems } from './github-settings-value';
 
 const BOOLEAN_KEYS = [
   'enforce_admins',
@@ -28,15 +28,6 @@ const REVIEW_KEYS = new Set([
 const ACTOR_KEYS = new Set(['users', 'teams', 'apps']);
 const MAX_APPROVING_REVIEWS = 6;
 
-const unknownKeys = (
-  value: Readonly<Record<string, unknown>>,
-  allowed: ReadonlySet<string>,
-  prefix: string,
-): ReadonlyArray<string> =>
-  Object.keys(value).flatMap((key) =>
-    allowed.has(key) ? [] : [`${prefix} has unknown key "${key}"`],
-  );
-
 const stringArrayProblems = (value: unknown, prefix: string) =>
   !Array.isArray(value) || value.some((entry) => typeof entry !== 'string')
     ? [`${prefix} must be an array of strings`]
@@ -47,7 +38,7 @@ const actorProblems = (value: unknown, prefix: string) => {
     return [`${prefix} must be an actor collection`];
   }
   return [
-    ...unknownKeys(value, ACTOR_KEYS, prefix),
+    ...unknownKeyProblems(value, ACTOR_KEYS, prefix),
     ...stringArrayProblems(value.users, `${prefix}.users`),
     ...stringArrayProblems(value.teams, `${prefix}.teams`),
     ...stringArrayProblems(value.apps, `${prefix}.apps`),
@@ -81,7 +72,7 @@ const statusProblems = (value: unknown, prefix: string) => {
       )
     : [];
   return [
-    ...unknownKeys(value, STATUS_KEYS, prefix),
+    ...unknownKeyProblems(value, STATUS_KEYS, prefix),
     ...(typeof value.strict === 'boolean'
       ? []
       : [`${prefix}.strict must be a boolean`]),
@@ -100,7 +91,7 @@ const reviewProblems = (value: unknown, prefix: string) => {
   if (!isRecord(value)) {
     return [`${prefix} must be an object`];
   }
-  const problems = [...unknownKeys(value, REVIEW_KEYS, prefix)];
+  const problems = [...unknownKeyProblems(value, REVIEW_KEYS, prefix)];
   for (const key of [
     'dismiss_stale_reviews',
     'require_code_owner_reviews',
@@ -135,7 +126,7 @@ export const defaultBranchProtectionProblems = (
   if (!isRecord(value)) {
     return [`${label} must be an object`];
   }
-  const problems = [...unknownKeys(value, TOP_LEVEL_KEYS, label)];
+  const problems = [...unknownKeyProblems(value, TOP_LEVEL_KEYS, label)];
   for (const key of BOOLEAN_KEYS) {
     if (typeof value[key] !== 'boolean') {
       problems.push(`${label}.${key} must be a boolean`);

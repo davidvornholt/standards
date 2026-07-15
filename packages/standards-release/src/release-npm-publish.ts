@@ -9,11 +9,17 @@ import {
   tryPromise,
 } from './release-effect';
 import type { GithubConnectionInput } from './release-github-client';
-import { verifyPackedArtifact } from './release-package-identity';
+import {
+  type ArtifactReader,
+  type ArtifactVerifier,
+  type StagedNpmArtifact,
+  withVerifiedNpmArtifact,
+} from './release-npm-publish-artifact';
 import { env, spawn } from './release-runtime';
 
-type Publisher = (artifact: string) => Effect<void, NpmRegistryError>;
-type ArtifactVerifier = typeof verifyPackedArtifact;
+type Publisher = (
+  artifact: StagedNpmArtifact,
+) => Effect<void, NpmRegistryError>;
 
 const GITHUB_TOKEN_VARIABLES = new Set(['GH_TOKEN', 'GITHUB_TOKEN']);
 
@@ -49,10 +55,9 @@ const publishWithNpm: Publisher = (artifact) =>
   gen(function* () {
     const subprocess = yield* effectTry({
       try: () =>
-        spawn([...npmPublishCommand(artifact)], {
+        spawn([...npmPublishCommand(artifact.adapterPath)], {
           env: npmPublishEnvironment(env),
-          stderr: 'pipe',
-          stdout: 'inherit',
+          stdio: ['ignore', 'inherit', 'pipe', artifact.descriptor],
         }),
       catch: (cause) => operationError('starting npm', cause),
     });
@@ -85,14 +90,16 @@ export const publishAuthorizedNpmArtifact = (
     readonly expectedSha: string;
   },
   publisher: Publisher = publishWithNpm,
-  verifyArtifact: ArtifactVerifier = verifyPackedArtifact,
+  verifyArtifact?: ArtifactVerifier,
+  readArtifact?: ArtifactReader,
 ) =>
-  gen(function* () {
-    yield* authorizeReleaseSha(input);
-    yield* verifyArtifact({
-      artifact: input.artifact,
-      expectedIntegrity: input.expectedIntegrity,
-      expectedSha: input.expectedSha,
-    });
-    yield* publisher(input.artifact);
-  });
+  withVerifiedNpmArtifact(
+    input,
+    (artifact) =>
+      gen(function* () {
+        yield* authorizeReleaseSha(input);
+        yield* publisher(artifact);
+      }),
+    verifyArtifact,
+    readArtifact,
+  );
