@@ -9,6 +9,17 @@ import { validateSourceSnapshot } from './sync-source-validation';
 
 export type { SourceFile } from './sync-source-types';
 
+// Build output, VCS metadata, and installed dependencies would pollute the lock
+// when syncing from a working tree that has them. Ordinary enumeration filters
+// these names, while explicit roots and output bases fail closed.
+export const IGNORED_SOURCE_DIRECTORY_NAMES: ReadonlySet<string> = new Set([
+  'node_modules',
+  '.git',
+  '.turbo',
+  'dist',
+  '.next',
+]);
+
 export type RepositoryTreeSet = {
   readonly outputBase: string | null;
   readonly roots: ReadonlyArray<string>;
@@ -17,13 +28,26 @@ export type RepositoryTreeSet = {
 const assertTreeSets = (
   root: RepositoryRoot,
   sets: ReadonlyArray<RepositoryTreeSet>,
+  ignoredNames: ReadonlySet<string>,
 ): void => {
+  const assertNoIgnoredComponent = (path: string, label: string): void => {
+    const ignored = path.split('/').find((part) => ignoredNames.has(part));
+    if (ignored !== undefined) {
+      throw new Error(
+        `${label} must not contain ignored path component "${ignored}": ${path}`,
+      );
+    }
+  };
   for (const { outputBase, roots } of sets) {
     if (outputBase !== null) {
-      assertRepositoryRelativePath(outputBase, `${root.label} snapshot base`);
+      const label = `${root.label} snapshot base`;
+      assertRepositoryRelativePath(outputBase, label);
+      assertNoIgnoredComponent(outputBase, label);
     }
     for (const rel of roots) {
-      assertRepositoryRelativePath(rel, `${root.label} snapshot root`);
+      const label = `${root.label} snapshot root`;
+      assertRepositoryRelativePath(rel, label);
+      assertNoIgnoredComponent(rel, label);
     }
   }
 };
@@ -42,7 +66,7 @@ export const snapshotRepositoryTreeSets = async (
   ignoredNames: ReadonlySet<string>,
   options: SourceSnapshotOptions = {},
 ): Promise<ReadonlyArray<ReadonlyMap<string, SourceFile>>> => {
-  assertTreeSets(root, sets);
+  assertTreeSets(root, sets, ignoredNames);
   const hooks = options.hooks ?? {};
   const rootDirectory = await openSourceRoot(root, ignoredNames, hooks);
   const traversal: SourceTraversal = {

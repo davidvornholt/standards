@@ -22,6 +22,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import process from 'node:process';
 import { declaredRuleset } from './github-ruleset-test-fixture';
+import { transactionArtifacts } from './sync-mutations-test-helpers';
 import { DEFAULT_SYNC_POLICY, SYNC_POLICY_FILE } from './sync-policy';
 import {
   TRANSACTION_DIRECTORY,
@@ -1198,6 +1199,76 @@ describe('sync policy integration', () => {
     setStandardsVersion(consumer, '0.5.0');
     expect(run(consumer, ['doctor', '--dir', consumer]).status).toBe(0);
   });
+});
+
+describe('ignored source roots', () => {
+  const ignoredSourceCases = [
+    {
+      expected:
+        'snapshot root must not contain ignored path component ".git": .git/config',
+      kind: 'managed root',
+      prepare: (up: string): void => {
+        const manifest = JSON.parse(read(up, 'sync-standards.json')) as {
+          paths: Array<string>;
+        };
+        manifest.paths.push('.git/config');
+        write(up, '.git/config', 'must not mirror\n');
+        write(up, 'sync-standards.json', JSON.stringify(manifest));
+      },
+    },
+    {
+      expected:
+        'snapshot base must not contain ignored path component ".git": template/.git/seed',
+      kind: 'seed output base',
+      prepare: (up: string): void => {
+        const manifest = JSON.parse(read(up, 'sync-standards.json')) as Record<
+          string,
+          unknown
+        >;
+        write(
+          up,
+          'sync-standards.json',
+          JSON.stringify({ ...manifest, seedDir: 'template/.git/seed' }),
+        );
+        write(up, 'template/.git/seed/seed.txt', 'must not seed\n');
+      },
+    },
+  ] as const;
+
+  for (const command of ['init', 'sync'] as const) {
+    it.each([
+      ...ignoredSourceCases,
+    ])(`rejects an explicit ignored source $kind during ${command} without consumer mutation`, ({
+      expected,
+      prepare,
+    }) => {
+      const up = buildUpstream();
+      const consumer =
+        command === 'init' ? mkTmp('sync-cons-') : initConsumer(up).consumer;
+      write(consumer, 'actor-owned.txt', 'keep me\n');
+      prepare(up);
+      const filesBefore = listRelativeFiles(consumer);
+      const contentsBefore = new Map(
+        filesBefore.map((rel) => [rel, read(consumer, rel)]),
+      );
+      const transactionArtifactsBefore = transactionArtifacts(consumer);
+
+      const result =
+        command === 'init'
+          ? run(consumer, ['init', '--from', up, '--dir', consumer])
+          : sync(up, consumer);
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(expected);
+      expect(listRelativeFiles(consumer)).toEqual(filesBefore);
+      expect(transactionArtifacts(consumer)).toEqual(
+        transactionArtifactsBefore,
+      );
+      for (const [rel, contents] of contentsBefore) {
+        expect(read(consumer, rel)).toBe(contents);
+      }
+    });
+  }
 });
 
 describe('sync source compatibility', () => {

@@ -56,7 +56,7 @@ import {
   type SyncPolicy,
   type SyncPolicyInspection,
 } from './sync-policy';
-import type { SourceFile } from './sync-source';
+import { IGNORED_SOURCE_DIRECTORY_NAMES, type SourceFile } from './sync-source';
 import {
   loadSourceManifest,
   type Manifest,
@@ -97,17 +97,6 @@ const FULL_COMMIT_SHA = /^[0-9a-fA-F]{40}$/u;
 const STORED_COMMIT_SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
 const LOCK_KEYS = new Set(['files', 'ref', 'seeds', 'sha', 'upstream']);
-
-// Never mirrored, even under a managed directory path: build output, VCS
-// metadata, and installed dependencies would otherwise pollute the lock when
-// syncing from a working tree that has them.
-const IGNORED_DIRS = new Set([
-  'node_modules',
-  '.git',
-  '.turbo',
-  'dist',
-  '.next',
-]);
 
 type Lock = {
   readonly upstream: string;
@@ -1594,7 +1583,7 @@ const runInitCommand = async (
     );
     const { managed, manifest, seeds } = await selectSourceTrees(
       sourceRoot,
-      IGNORED_DIRS,
+      IGNORED_SOURCE_DIRECTORY_NAMES,
     );
     assertCompatibleSyncSource(manifest, managed, seeds);
     await runInit({
@@ -1643,7 +1632,7 @@ const runSyncCommand = async (
     );
     const { managed, manifest, seeds } = await selectSourceTrees(
       sourceRoot,
-      IGNORED_DIRS,
+      IGNORED_SOURCE_DIRECTORY_NAMES,
     );
     assertCompatibleSyncSource(manifest, managed, seeds);
     await runSync({
