@@ -20,6 +20,7 @@ it('does not read back an already-converged ruleset set', async () => {
   const declared: GithubSettings = {
     defaultBranchProtection: null,
     environments: [],
+    immutableReleases: null,
     repository: {},
     rulesets: [],
   };

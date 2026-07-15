@@ -41,6 +41,19 @@ describe('detailed repository ruleset response', () => {
     ).toBe(hiddenBypass);
   });
 
+  it('accepts immutable tag ruleset state', () => {
+    const body = repositoryRulesetDetail({
+      conditions: {
+        [REF_NAME]: { exclude: [], include: ['refs/tags/v*'] },
+      },
+      rules: [{ type: 'update' }, { type: 'deletion' }],
+      target: 'tag',
+    });
+    expect(
+      decodeRepositoryRulesetDetail(body, RULESET_REPOSITORY, true),
+    ).toEqual({ problem: null, value: body });
+  });
+
   it.each([
     ['non-record rule', { rules: ['malformed'] }],
     ['missing rules', { rules: undefined }],

@@ -147,6 +147,9 @@ describe('ruleset response bypass actors', () => {
   ] as const)('accepts contextual actor %#', (bypassActor, target) => {
     const live = repositoryRulesetDetail({
       [BYPASS_ACTORS]: [bypassActor],
+      ...(target === 'tag'
+        ? { rules: [{ type: 'deletion' }, { type: 'update' }] }
+        : {}),
       target,
     });
     expect(

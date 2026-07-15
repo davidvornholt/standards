@@ -94,9 +94,9 @@ const rulesetProblems = (
   }
   return [
     ...unknownKeyProblems(ruleset, RULESET_KEYS, prefix),
-    ...(ruleset.target === 'branch'
+    ...(ruleset.target === 'branch' || ruleset.target === 'tag'
       ? []
-      : [`${prefix}.target must be "branch"`]),
+      : [`${prefix}.target must be "branch" or "tag"`]),
     ...(ruleset.enforcement === 'active'
       ? []
       : [`${prefix}.enforcement must be "active"`]),
@@ -105,6 +105,11 @@ const rulesetProblems = (
     ruleset.bypass_actors.length === 0
       ? []
       : [`${prefix}.bypass_actors must be an empty array`]),
-    ...rulesProblems(ruleset.rules, `${prefix}.rules`, integrationIdRequired),
+    ...rulesProblems(
+      ruleset.rules,
+      `${prefix}.rules`,
+      integrationIdRequired,
+      ruleset.target,
+    ),
   ];
 };

@@ -16,6 +16,7 @@ const PARAMETERLESS_RULES = new Set([
   'deletion',
   'non_fast_forward',
   'required_linear_history',
+  'update',
 ]);
 const REF_NAME = 'ref_name';
 const BYPASS_ACTORS = 'bypass_actors';
@@ -185,7 +186,7 @@ export const decodeRepositoryRulesetDetail = (
         enforcement: 'active',
         name: body.name,
         rules: managedRules(body.rules),
-        target: 'branch',
+        target: body.target === 'tag' ? 'tag' : 'branch',
       },
     ],
     'GitHub live state',

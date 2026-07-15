@@ -69,6 +69,8 @@ const createAndVerifyTag = (client: GithubClient, input: GithubInput) =>
 const createRelease = (client: GithubClient, input: GithubInput) =>
   gen(function* () {
     yield* authorizeReleaseSha(input);
+    const confirmedTag = yield* loadTagSha(client, input.tag);
+    yield* requireExpectedTag(input, confirmedTag);
     const created = yield* post(client, `/repos/${client.repo}/releases`, {
       [RELEASE_NOTES_FIELD]: true,
       name: input.tag,

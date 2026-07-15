@@ -90,10 +90,10 @@ describe('standards sync documentation', () => {
         'Any other repository key fails before any API request',
       );
       expect(documentation).toContain(
-        `canonical declaration currently owns all ${SUPPORTED_REPOSITORY_SETTING_KEYS.length} repository keys`,
+        `canonical declaration owns all ${SUPPORTED_REPOSITORY_SETTING_KEYS.length} repository keys and \`immutable_releases\``,
       );
       expect(documentation).toContain(
-        'currently extends only `rulesets` and `environments`',
+        'extends only `rulesets` and `environments`',
       );
       expect(documentation).toContain(
         'a collision that fails instead of overriding canonical state',

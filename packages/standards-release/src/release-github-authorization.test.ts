@@ -105,3 +105,19 @@ it('fails closed when either mutation sees same-name head divergence', async () 
   expect(beforeRelease.calls).toContain('POST /repos/owner/repo/git/refs');
   expect(beforeRelease.calls).not.toContain('POST /repos/owner/repo/releases');
 });
+
+it('rejects a replaced tag after release ancestry authorization', async () => {
+  const beforeRelease = remote(
+    { release: 'absent', tagSha: 'expected' },
+    { releaseAuthorizationTagSha: 'replacement' },
+  );
+  expect(
+    await runPromise(
+      flip(reconcileGithubRelease(input(beforeRelease.fetcher))),
+    ),
+  ).toMatchObject({
+    _tag: 'GithubStateError',
+    message: 'Release tag points to replacement, expected expected',
+  });
+  expect(beforeRelease.calls).not.toContain('POST /repos/owner/repo/releases');
+});

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { decodeDefaultBranchProtection } from './github-default-branch-response';
-import { diffGithubLiveState } from './github-live-state';
+import { diffGithubLiveState } from './github-live-state-diff';
 
 const DEFAULT_BRANCH_PROTECTION = 'default_branch_protection';
 const REQUIRED_REVIEWS = 'required_pull_request_reviews';
@@ -54,6 +54,7 @@ describe('optional classic protection sections', () => {
         {
           defaultBranchProtection: declared,
           environments: [],
+          immutableReleases: null,
           repository: {},
           rulesets: [],
         },
@@ -66,6 +67,7 @@ describe('optional classic protection sections', () => {
             unverifiable: false,
           },
           environments: [],
+          immutableReleases: null,
           problems: [],
           repository: {},
           repositoryInvalidKeys: new Set(),

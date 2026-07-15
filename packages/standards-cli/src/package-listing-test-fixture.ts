@@ -19,6 +19,8 @@ export const expectedPackedFiles = [
   'package/src/github-environment-response.ts',
   'package/src/github-environment-settings.ts',
   'package/src/github-environments.ts',
+  'package/src/github-immutable-releases.ts',
+  'package/src/github-live-state-diff.ts',
   'package/src/github-live-state.ts',
   'package/src/github-repository-apply.ts',
   'package/src/github-repository-settings.ts',

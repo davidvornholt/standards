@@ -29,6 +29,7 @@ const ruleset = (
 const settings = (): GithubSettings => ({
   defaultBranchProtection: declaredDefaultBranchProtection,
   environments: [],
+  immutableReleases: null,
   repository: {},
   rulesets: [declaredRuleset('Canonical')],
 });

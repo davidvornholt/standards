@@ -18,6 +18,7 @@ export type LoadedGithubSettings = {
 
 const SETTINGS_KEYS = new Set([
   'default_branch_protection',
+  'immutable_releases',
   'repository',
   'rulesets',
   'environments',
@@ -37,6 +38,19 @@ type ParseResult = {
   readonly settings: GithubSettings | null;
   readonly problems: ReadonlyArray<string>;
 };
+
+const listProblems = (
+  value: unknown,
+  label: string,
+  key: string,
+  validate: (
+    entries: ReadonlyArray<unknown>,
+    settingsLabel: string,
+  ) => ReadonlyArray<string>,
+): ReadonlyArray<string> =>
+  Array.isArray(value)
+    ? validate(value, label)
+    : [`${label} "${key}" must be an array`];
 
 const repositoryProblems = (
   repository: unknown,
@@ -77,6 +91,13 @@ const parseSettings = (raw: unknown, label: string): ParseResult => {
       ),
     );
   }
+  const immutableReleases = raw.immutable_releases;
+  if (
+    immutableReleases !== undefined &&
+    typeof immutableReleases !== 'boolean'
+  ) {
+    problems.push(`${label} "immutable_releases" must be a boolean`);
+  }
   for (const key of Object.keys(raw)) {
     if (!SETTINGS_KEYS.has(key)) {
       problems.push(`${label} has unknown key "${key}"`);
@@ -85,17 +106,18 @@ const parseSettings = (raw: unknown, label: string): ParseResult => {
   const repository = raw.repository ?? {};
   problems.push(...repositoryProblems(repository, label));
   const rulesets = raw.rulesets ?? [];
-  if (Array.isArray(rulesets)) {
-    problems.push(...rulesetListProblems(rulesets, label));
-  } else {
-    problems.push(`${label} "rulesets" must be an array`);
-  }
+  problems.push(
+    ...listProblems(rulesets, label, 'rulesets', rulesetListProblems),
+  );
   const environments = raw.environments ?? [];
-  if (Array.isArray(environments)) {
-    problems.push(...environmentListProblems(environments, label));
-  } else {
-    problems.push(`${label} "environments" must be an array`);
-  }
+  problems.push(
+    ...listProblems(
+      environments,
+      label,
+      'environments',
+      environmentListProblems,
+    ),
+  );
   if (problems.length > 0) {
     return { settings: null, problems };
   }
@@ -108,6 +130,8 @@ const parseSettings = (raw: unknown, label: string): ParseResult => {
       repository: repository as Record<string, unknown>,
       rulesets: rulesets as ReadonlyArray<Record<string, unknown>>,
       environments: environments as ReadonlyArray<Record<string, unknown>>,
+      immutableReleases:
+        typeof immutableReleases === 'boolean' ? immutableReleases : null,
     },
     problems: [],
   };

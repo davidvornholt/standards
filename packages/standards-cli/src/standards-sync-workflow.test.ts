@@ -30,6 +30,7 @@ const REPOSITORY_SETTING_KEYS = [
   'squash_merge_commit_title',
 ] as const;
 const RELATIVE_IMPORT = /\bfrom"[.]{1,2}\//u;
+const IMMUTABLE_RELEASES = 'immutable_releases';
 const workflowStep = (workflow: string, name: string): string => {
   const marker = `      - name: ${name}`;
   const start = workflow.indexOf(marker);
@@ -119,7 +120,12 @@ describe('canonical scheduled sync portability', () => {
     expect(
       Object.keys(settings.repository as Record<string, unknown>).sort(),
     ).toEqual([...REPOSITORY_SETTING_KEYS].sort());
-    expect(settings.rulesets as unknown).toEqual([]);
+    expect(settings.rulesets as unknown).toEqual(
+      JSON.parse(
+        '[{"bypass_actors":[],"conditions":{"ref_name":{"exclude":[],"include":["refs/tags/v*"]}},"enforcement":"active","name":"Protect release tags","rules":[{"type":"update"},{"type":"deletion"}],"target":"tag"}]',
+      ),
+    );
+    expect(settings[IMMUTABLE_RELEASES]).toBe(true);
     expect(settings.default_branch_protection).toBeObject();
     expect(environment?.deployment_branch_policy).toEqual(
       JSON.parse('{"protected_branches":true,"custom_branch_policies":false}'),

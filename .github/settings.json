@@ -34,7 +34,22 @@
     "lock_branch": false,
     "allow_fork_syncing": false
   },
-  "rulesets": [],
+  "immutable_releases": true,
+  "rulesets": [
+    {
+      "name": "Protect release tags",
+      "target": "tag",
+      "enforcement": "active",
+      "conditions": {
+        "ref_name": {
+          "include": ["refs/tags/v*"],
+          "exclude": []
+        }
+      },
+      "bypass_actors": [],
+      "rules": [{ "type": "update" }, { "type": "deletion" }]
+    }
+  ],
   "environments": [
     {
       "name": "standards-sync",

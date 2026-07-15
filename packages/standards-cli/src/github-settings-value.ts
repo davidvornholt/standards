@@ -1,6 +1,7 @@
 export type GithubSettings = {
   readonly defaultBranchProtection: Readonly<Record<string, unknown>> | null;
   readonly environments: ReadonlyArray<Readonly<Record<string, unknown>>>;
+  readonly immutableReleases: boolean | null;
   readonly repository: Readonly<Record<string, unknown>>;
   readonly rulesets: ReadonlyArray<Readonly<Record<string, unknown>>>;
 };

@@ -21,7 +21,16 @@ const PARAMETERLESS_RULES = new Set([
   'deletion',
   'non_fast_forward',
   'required_linear_history',
+  'update',
 ]);
+const BRANCH_RULES = new Set([
+  'deletion',
+  'non_fast_forward',
+  'pull_request',
+  'required_linear_history',
+  'required_status_checks',
+]);
+const TAG_RULES = new Set(['deletion', 'non_fast_forward', 'update']);
 const MERGE_METHODS = new Set(['merge', 'squash', 'rebase']);
 
 const pullRequestParameterProblems = (
@@ -129,6 +138,7 @@ const ruleProblems = (
   value: unknown,
   prefix: string,
   integrationIdRequired: boolean,
+  target: unknown,
 ): ReadonlyArray<string> => {
   if (
     !isRecord(value) ||
@@ -136,6 +146,12 @@ const ruleProblems = (
     value.type.length === 0
   ) {
     return [`${prefix} must be an object with a non-empty "type"`];
+  }
+  const supported = target === 'tag' ? TAG_RULES : BRANCH_RULES;
+  if (!supported.has(value.type)) {
+    return [
+      `${prefix}.type "${value.type}" is not supported for ${String(target)} rulesets`,
+    ];
   }
   if (PARAMETERLESS_RULES.has(value.type)) {
     return unknownKeyProblems(value, new Set(['type']), prefix);
@@ -163,6 +179,7 @@ export const rulesProblems = (
   value: unknown,
   prefix: string,
   integrationIdRequired = true,
+  target: unknown = 'branch',
 ): ReadonlyArray<string> => {
   if (!Array.isArray(value) || value.length === 0) {
     return [`${prefix} must be a non-empty array`];
@@ -172,7 +189,7 @@ export const rulesProblems = (
   );
   return [
     ...value.flatMap((rule, index) =>
-      ruleProblems(rule, `${prefix}[${index}]`, integrationIdRequired),
+      ruleProblems(rule, `${prefix}[${index}]`, integrationIdRequired, target),
     ),
     ...(types.length === new Set(types).size
       ? []

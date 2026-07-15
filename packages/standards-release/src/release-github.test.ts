@@ -48,13 +48,19 @@ describe('GitHub release boundary', () => {
       'GET /repos/owner/repo/compare/expected...main',
     ]);
     expect(
-      state.calls.slice(createRelease - AUTHORIZATION_REQUESTS, createRelease),
+      state.calls.slice(
+        createRelease - AUTHORIZATION_REQUESTS - 1,
+        createRelease - 1,
+      ),
     ).toEqual([
       'GET /repos/owner/repo',
       'GET /repos/owner/repo/compare/expected...main',
       'GET /repos/owner/repo',
       'GET /repos/owner/repo/compare/expected...main',
     ]);
+    expect(state.calls[createRelease - 1]).toBe(
+      'GET /repos/owner/repo/git/ref/tags/v0.5.0',
+    );
     expect(state.calls.slice(createTag + 1, createRelease)).toContain(
       'GET /repos/owner/repo/git/ref/tags/v0.5.0',
     );

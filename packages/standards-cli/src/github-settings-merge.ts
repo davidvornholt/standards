@@ -16,6 +16,11 @@ export const mergeGithubSettings = (
       '.github/settings.local.json default_branch_protection cannot override the canonical default-branch owner; add a local ruleset to tighten policy',
     );
   }
+  if (local.immutableReleases !== null) {
+    problems.push(
+      '.github/settings.local.json immutable_releases cannot override the canonical immutable-release policy',
+    );
+  }
   for (const key of Object.keys(local.repository)) {
     if (key in canonical.repository) {
       problems.push(
@@ -55,6 +60,7 @@ export const mergeGithubSettings = (
         merged: {
           defaultBranchProtection: canonical.defaultBranchProtection,
           environments: [...canonical.environments, ...local.environments],
+          immutableReleases: canonical.immutableReleases,
           repository: { ...canonical.repository, ...local.repository },
           rulesets: [...canonical.rulesets, ...local.rulesets],
         },

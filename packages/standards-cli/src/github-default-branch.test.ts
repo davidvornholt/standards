@@ -6,7 +6,7 @@ import {
   decodeBranchSummary,
   decodeDefaultBranchProtection,
 } from './github-default-branch-response';
-import { diffGithubLiveState } from './github-live-state';
+import { diffGithubLiveState } from './github-live-state-diff';
 
 const originalFetch = globalThis.fetch;
 const declared = JSON.parse(
@@ -106,6 +106,7 @@ describe('default branch protection responses', () => {
         {
           defaultBranchProtection: declared,
           environments: [],
+          immutableReleases: null,
           repository: {},
           rulesets: [],
         },
@@ -118,6 +119,7 @@ describe('default branch protection responses', () => {
             unverifiable: false,
           },
           environments: [],
+          immutableReleases: null,
           problems: [problem],
           repository: {},
           repositoryInvalidKeys: new Set(),

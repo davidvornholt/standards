@@ -6,6 +6,7 @@ const canonicalEnvironment = JSON.parse(
   '{"name":"standards-sync","wait_timer":0,"prevent_self_review":false,"reviewers":[],"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false}}',
 ) as Record<string, unknown>;
 const canonical = JSON.stringify({
+  immutable_releases: true,
   repository: { allow_auto_merge: true },
   rulesets: [declaredRuleset('Protect main')],
   environments: [canonicalEnvironment],
@@ -33,6 +34,7 @@ describe('loadGithubSettings', () => {
     expect(loaded.merged?.repository).toEqual({
       allow_auto_merge: true,
     });
+    expect(loaded.merged?.immutableReleases).toBe(true);
     expect(loaded.merged?.rulesets.map((r) => r.name)).toEqual([
       'Protect main',
       'Protect releases',
@@ -50,8 +52,9 @@ describe('loadGithubSettings', () => {
     ]);
   });
 
-  it('rejects overriding a canonical repository key and redefining a canonical ruleset together', () => {
+  it('rejects overriding canonical scalar and named owners together', () => {
     const local = JSON.stringify({
+      immutable_releases: false,
       repository: { allow_auto_merge: false },
       rulesets: [declaredRuleset('Protect main')],
       environments: [{ ...canonicalEnvironment, name: 'Standards-Sync' }],
@@ -59,9 +62,21 @@ describe('loadGithubSettings', () => {
     const loaded = loadGithubSettings(canonical, local);
     expect(loaded.merged).toBeNull();
     expect(loaded.problems).toEqual([
+      '.github/settings.local.json immutable_releases cannot override the canonical immutable-release policy',
       '.github/settings.local.json repository."allow_auto_merge" would override a canonical value; canonical settings are read-only',
       '.github/settings.local.json ruleset "Protect main" collides with a canonical ruleset; add a separately named ruleset to tighten further',
       '.github/settings.local.json environment "Standards-Sync" collides with a canonical environment; canonical settings are read-only',
+    ]);
+  });
+
+  it('rejects malformed immutable-release policy', () => {
+    const loaded = loadGithubSettings(
+      JSON.stringify({ immutable_releases: 'yes' }),
+      emptySeam,
+    );
+    expect(loaded.merged).toBeNull();
+    expect(loaded.problems).toEqual([
+      '.github/settings.json "immutable_releases" must be a boolean',
     ]);
   });
 

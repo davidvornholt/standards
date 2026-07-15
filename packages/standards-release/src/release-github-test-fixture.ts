@@ -1,17 +1,11 @@
 import type { ReleaseFetcher } from './release-github';
-
-type RemoteState = {
-  release: 'absent' | 'draft' | 'prerelease' | 'published';
-  tagSha: string | null;
-};
-
-type StubResponse = {
-  readonly body: unknown;
-  readonly status: number;
-};
+import {
+  type RemoteOptions,
+  type RemoteState,
+  readRemoteTag,
+} from './release-github-test-tag';
 
 const HTTP_CREATED = 201;
-const HTTP_NOT_FOUND = 404;
 const HTTP_OK = 200;
 const HTTP_UNPROCESSABLE = 422;
 const HTTP_UNEXPECTED = 500;
@@ -25,25 +19,37 @@ export const TARGET_COMMIT_FIELD = 'target_commitish';
 const json = (body: unknown, status: number): Response =>
   Response.json(body, { status });
 
-export const remote = (
+const createReleaseResponse = (
   state: RemoteState,
-  options: {
-    readonly authorizationFailure?: 1 | 2;
-    readonly authorizationTrailingBranches?: ReadonlyArray<unknown>;
-    readonly authorizationTrailingComparisons?: ReadonlyArray<
-      StubResponse | undefined
-    >;
-    readonly releaseCreateReadback?: boolean;
-    readonly releaseCreateStatus?: number;
-    readonly releaseRace?: boolean;
-    readonly tagCreateReadbackSha?: string | null;
-    readonly tagCreateStatus?: number;
-    readonly tagRaceSha?: string | null;
-  } = {},
-) => {
+  options: RemoteOptions,
+): Response => {
+  const status =
+    options.releaseCreateStatus ??
+    (options.releaseRace === true ? HTTP_UNPROCESSABLE : HTTP_CREATED);
+  if (
+    options.releaseCreateReadback !== false &&
+    (status === HTTP_CREATED || status === HTTP_UNPROCESSABLE)
+  ) {
+    state.release = 'published';
+  }
+  return status === HTTP_CREATED
+    ? json({ [TAG_NAME_FIELD]: 'v0.5.0' }, HTTP_CREATED)
+    : json(
+        {
+          message:
+            status === HTTP_UNPROCESSABLE
+              ? 'already_exists'
+              : 'release creation failed',
+        },
+        status,
+      );
+};
+
+export const remote = (state: RemoteState, options: RemoteOptions = {}) => {
   const calls: Array<string> = [];
   const bodies: Array<unknown> = [];
   let authorizationCount = 0;
+  let authorizationComplete = false;
   let awaitingFinalComparison = false;
   let awaitingTrailingIdentity = false;
   const readRepository = (): Response => {
@@ -64,6 +70,7 @@ export const remote = (
   const readComparison = (): Response => {
     if (awaitingFinalComparison) {
       awaitingFinalComparison = false;
+      authorizationComplete = true;
       const configured =
         options.authorizationTrailingComparisons?.[authorizationCount - 1];
       if (configured !== undefined) {
@@ -84,7 +91,10 @@ export const remote = (
       HTTP_OK,
     );
   };
-  const readResponse = (path: string): Response => {
+  const readResponse = (
+    path: string,
+    afterAuthorization: boolean,
+  ): Response => {
     if (path === '/repos/owner/repo') {
       return readRepository();
     }
@@ -105,9 +115,7 @@ export const remote = (
             HTTP_OK,
           );
     }
-    return state.tagSha === null
-      ? json({ message: 'Not Found' }, HTTP_NOT_FOUND)
-      : json({ object: { sha: state.tagSha, type: 'commit' } }, HTTP_OK);
+    return readRemoteTag(state, options, afterAuthorization);
   };
   const createTag = (): Response => {
     if (options.tagCreateStatus !== undefined) {
@@ -125,46 +133,26 @@ export const remote = (
     state.tagSha = 'expected';
     return json({ ref: 'refs/tags/v0.5.0' }, HTTP_CREATED);
   };
-  const createRelease = (): Response => {
-    const status =
-      options.releaseCreateStatus ??
-      (options.releaseRace === true ? HTTP_UNPROCESSABLE : HTTP_CREATED);
-    if (
-      options.releaseCreateReadback !== false &&
-      (status === HTTP_CREATED || status === HTTP_UNPROCESSABLE)
-    ) {
-      state.release = 'published';
-    }
-    return status === HTTP_CREATED
-      ? json({ [TAG_NAME_FIELD]: 'v0.5.0' }, HTTP_CREATED)
-      : json(
-          {
-            message:
-              status === HTTP_UNPROCESSABLE
-                ? 'already_exists'
-                : 'release creation failed',
-          },
-          status,
-        );
-  };
   const writeResponse = (path: string): Response => {
     if (path.endsWith('/git/refs')) {
       return createTag();
     }
     return path.endsWith('/releases')
-      ? createRelease()
+      ? createReleaseResponse(state, options)
       : json({ message: 'unexpected route' }, HTTP_UNEXPECTED);
   };
   const fetcher: ReleaseFetcher = (requestInput, init) => {
     const url = new URL(String(requestInput));
     const method = init?.method ?? 'GET';
+    const afterAuthorization = authorizationComplete;
+    authorizationComplete = false;
     calls.push(`${method} ${url.pathname}`);
     if (init?.body !== undefined) {
       bodies.push(JSON.parse(String(init.body)) as unknown);
     }
     return Promise.resolve(
       method === 'GET'
-        ? readResponse(url.pathname)
+        ? readResponse(url.pathname, afterAuthorization)
         : writeResponse(url.pathname),
     );
   };

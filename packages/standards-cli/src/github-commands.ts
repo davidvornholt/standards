@@ -6,7 +6,9 @@ import {
 } from './github-declaration';
 import { applyDefaultBranchProtection } from './github-default-branch-apply';
 import { applyPrefetchedEnvironment } from './github-environment-apply';
-import { diffGithubLiveState, readGithubLiveState } from './github-live-state';
+import { applyImmutableReleasePolicy } from './github-immutable-releases';
+import { readGithubLiveState } from './github-live-state';
+import { diffGithubLiveState } from './github-live-state-diff';
 import { applyRepositorySettings } from './github-repository-apply';
 import { openRepositoryRoot, type RepositoryRoot } from './sync-filesystem';
 
@@ -138,6 +140,14 @@ export const runGithubApply = async (
         token,
       });
     }
+    await applyImmutableReleasePolicy({
+      beforeMutation,
+      declared: declared.merged.immutableReleases,
+      live: live.immutableReleases,
+      reportAction,
+      repo,
+      token,
+    });
     for (const environment of live.environments) {
       // biome-ignore lint/performance/noAwaitInLoops: GitHub writes are intentionally serialized to preserve migration ordering and avoid secondary rate limits.
       await applyPrefetchedEnvironment({

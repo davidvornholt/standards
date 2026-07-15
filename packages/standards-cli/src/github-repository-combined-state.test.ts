@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { diffGithubLiveState } from './github-live-state';
+import { diffGithubLiveState } from './github-live-state-diff';
 import { decodeLiveRepositorySettings } from './github-repository-settings';
 import type { GithubSettings } from './github-settings-value';
 
@@ -12,6 +12,7 @@ describe('combined repository response state', () => {
     const declared: GithubSettings = {
       defaultBranchProtection: null,
       environments: [],
+      immutableReleases: null,
       repository: {
         [DRIFTED_KEY]: true,
         [HIDDEN_KEY]: true,
@@ -29,6 +30,7 @@ describe('combined repository response state', () => {
       diffGithubLiveState(declared, {
         defaultBranch: null,
         environments: [],
+        immutableReleases: null,
         problems: decoded.problems,
         repository: decoded.settings,
         repositoryInvalidKeys: decoded.invalidKeys,

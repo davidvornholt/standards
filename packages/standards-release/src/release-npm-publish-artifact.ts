@@ -1,5 +1,4 @@
 import { isFailure } from 'effect/Exit';
-import { ArtifactIdentityError } from './artifact-identity-error';
 import {
   type Effect,
   exit,
@@ -8,6 +7,7 @@ import {
   tryPromise,
 } from './release-effect';
 import { bracketEffect } from './release-effect-resource';
+import { stagedArtifactFailure } from './release-npm-publish-error';
 import { readStagedArtifact } from './release-npm-publish-read';
 import {
   readPackedArtifact,
@@ -39,18 +39,14 @@ const WRITABLE_ARTIFACT_MODE = 0o600;
 const WRITABLE_DIRECTORY_MODE = 0o700;
 const trailingSlash = /\/$/u;
 
-const artifactFailure = (operation: string, cause: unknown) =>
-  new ArtifactIdentityError({
-    message: `Preparing package artifact failed while ${operation}: ${String(cause)}`,
-  });
-
 const temporaryRoot = () =>
   tryPromise({
     try: () =>
       nodeMkdtemp(
         `${nodeTmpdir().replace(trailingSlash, '')}/standards-release-npm-`,
       ),
-    catch: (cause) => artifactFailure('creating a private directory', cause),
+    catch: (cause) =>
+      stagedArtifactFailure('creating a private directory', cause),
   });
 
 const cleanupRoot = (root: string) =>
@@ -59,14 +55,17 @@ const cleanupRoot = (root: string) =>
       tryPromise({
         try: () => nodeChmod(root, WRITABLE_DIRECTORY_MODE),
         catch: (cause) =>
-          artifactFailure('unlocking the private directory for cleanup', cause),
+          stagedArtifactFailure(
+            'unlocking the private directory for cleanup',
+            cause,
+          ),
       }),
     );
     const removalExit = yield* exit(
       tryPromise({
         try: () => nodeRm(root, { force: true, recursive: true }),
         catch: (cause) =>
-          artifactFailure('removing the private directory', cause),
+          stagedArtifactFailure('removing the private directory', cause),
       }),
     );
     if (isFailure(unlockExit)) {
@@ -80,24 +79,28 @@ const cleanupRoot = (root: string) =>
 const closeArtifact = (handle: RuntimeFileHandle) =>
   tryPromise({
     try: () => handle.close(),
-    catch: (cause) => artifactFailure('closing the staged artifact', cause),
+    catch: (cause) =>
+      stagedArtifactFailure('closing the staged artifact', cause),
   });
 
 const openArtifact = (path: string, flags: 'r' | 'wx') =>
   tryPromise({
     try: () => nodeOpen(path, flags, WRITABLE_ARTIFACT_MODE),
-    catch: (cause) => artifactFailure('opening the staged artifact', cause),
+    catch: (cause) =>
+      stagedArtifactFailure('opening the staged artifact', cause),
   });
 
 const writeArtifact = (handle: RuntimeFileHandle, bytes: Uint8Array) =>
   gen(function* () {
     yield* tryPromise({
       try: () => handle.writeFile(bytes),
-      catch: (cause) => artifactFailure('writing the staged artifact', cause),
+      catch: (cause) =>
+        stagedArtifactFailure('writing the staged artifact', cause),
     });
     yield* tryPromise({
       try: () => handle.sync(),
-      catch: (cause) => artifactFailure('syncing the staged artifact', cause),
+      catch: (cause) =>
+        stagedArtifactFailure('syncing the staged artifact', cause),
     });
   });
 
@@ -106,11 +109,13 @@ const prepareAdapter = (root: string, adapterPath: string) =>
     yield* tryPromise({
       try: () =>
         nodeSymlink(`/proc/self/fd/${NPM_ARTIFACT_DESCRIPTOR}`, adapterPath),
-      catch: (cause) => artifactFailure('creating the npm adapter', cause),
+      catch: (cause) =>
+        stagedArtifactFailure('creating the npm adapter', cause),
     });
     yield* tryPromise({
       try: () => nodeChmod(root, PRIVATE_DIRECTORY_MODE),
-      catch: (cause) => artifactFailure('locking the private directory', cause),
+      catch: (cause) =>
+        stagedArtifactFailure('locking the private directory', cause),
     });
   });
 
@@ -139,7 +144,7 @@ export const withVerifiedNpmArtifact = <A, E>(
         yield* tryPromise({
           try: () => nodeChmod(stagedPath, READ_ONLY_ARTIFACT_MODE),
           catch: (cause) =>
-            artifactFailure('locking the staged artifact', cause),
+            stagedArtifactFailure('locking the staged artifact', cause),
         });
         const adapterPath = `${root}/verified-package.tgz`;
         return yield* bracketEffect({
@@ -150,7 +155,7 @@ export const withVerifiedNpmArtifact = <A, E>(
               yield* tryPromise({
                 try: () => nodeUnlink(stagedPath),
                 catch: (cause) =>
-                  artifactFailure('unlinking the staged artifact', cause),
+                  stagedArtifactFailure('unlinking the staged artifact', cause),
               });
               const stagedBytes = yield* readStagedArtifact(handle);
               yield* verifyArtifact({

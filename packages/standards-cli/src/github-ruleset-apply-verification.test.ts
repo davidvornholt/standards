@@ -34,6 +34,7 @@ const ruleset = (
 const settings = (name: string): GithubSettings => ({
   defaultBranchProtection: declaredDefaultBranchProtection,
   environments: [],
+  immutableReleases: null,
   repository: {},
   rulesets: [declaredRuleset(name)],
 });
