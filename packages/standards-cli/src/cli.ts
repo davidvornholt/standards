@@ -30,12 +30,14 @@ import {
   SYNC_LOCK_FILE,
 } from './sync-control-seams';
 import {
+  inspectRepositoryFile,
+  inspectRepositoryFiles,
+} from './sync-file-inspection';
+import {
   assertRepositoryRelativePath,
   type FileState,
   fileStatesMatch,
   inspectRepositoryDirectories,
-  inspectRepositoryFile,
-  inspectRepositoryFiles,
   inspectRepositoryNode,
   openRepositoryRoot,
   type RepositoryRoot,
@@ -54,7 +56,12 @@ import {
   type SyncPolicy,
   type SyncPolicyInspection,
 } from './sync-policy';
-import { type SourceFile, snapshotRepositoryTrees } from './sync-source';
+import type { SourceFile } from './sync-source';
+import {
+  loadSourceManifest,
+  type Manifest,
+  selectSourceTrees,
+} from './sync-source-selection';
 import { recoverRepositoryTransactions } from './sync-transaction-recovery';
 
 const { YAML: BunYaml } = await import('bun');
@@ -101,13 +108,6 @@ const IGNORED_DIRS = new Set([
   'dist',
   '.next',
 ]);
-
-type Manifest = {
-  readonly upstream: string;
-  readonly seedDir: string;
-  readonly syncPolicyContractVersion: unknown;
-  readonly paths: ReadonlyArray<string>;
-};
 
 type Lock = {
   readonly upstream: string;
@@ -192,48 +192,6 @@ const assertNoCliOwnedSeedTargets = (
 };
 
 const assertSafeRelativePath = assertRepositoryRelativePath;
-
-const parseManifest = (raw: unknown): Manifest => {
-  if (typeof raw !== 'object' || raw === null) {
-    throw new Error('sync-standards.json must be a JSON object');
-  }
-  const o = raw as Record<string, unknown>;
-  if (
-    typeof o.upstream !== 'string' ||
-    o.upstream.length === 0 ||
-    typeof o.seedDir !== 'string'
-  ) {
-    throw new Error(
-      'sync-standards.json requires non-empty string "upstream" and string "seedDir"',
-    );
-  }
-  if (
-    !(Array.isArray(o.paths) && o.paths.every((p) => typeof p === 'string'))
-  ) {
-    throw new Error('sync-standards.json requires a string array "paths"');
-  }
-  assertSafeRelativePath(o.seedDir, 'sync-standards.json "seedDir"');
-  for (const path of o.paths as ReadonlyArray<string>) {
-    assertSafeRelativePath(path, 'sync-standards.json managed path');
-  }
-  if (new Set(o.paths).size !== o.paths.length) {
-    throw new Error('sync-standards.json managed paths must be unique');
-  }
-  return {
-    upstream: o.upstream,
-    seedDir: o.seedDir,
-    syncPolicyContractVersion: o.syncPolicyContractVersion,
-    paths: o.paths as ReadonlyArray<string>,
-  };
-};
-
-const loadManifest = async (root: RepositoryRoot): Promise<Manifest> => {
-  const state = await inspectRepositoryFile(root, 'sync-standards.json');
-  if (state.contents === null) {
-    throw new Error(`Manifest not found in ${root.label}`);
-  }
-  return parseManifest(JSON.parse(state.contents.toString('utf8')) as unknown);
-};
 
 const assertCompatibleSyncSource = (
   manifest: Manifest,
@@ -1634,16 +1592,10 @@ const runInitCommand = async (
       source.dir,
       'selected standards source',
     );
-    const manifest = await loadManifest(sourceRoot);
-    const [managed, seeds] = await Promise.all([
-      snapshotRepositoryTrees(sourceRoot, manifest.paths, null, IGNORED_DIRS),
-      snapshotRepositoryTrees(
-        sourceRoot,
-        [manifest.seedDir],
-        manifest.seedDir,
-        IGNORED_DIRS,
-      ),
-    ]);
+    const { managed, manifest, seeds } = await selectSourceTrees(
+      sourceRoot,
+      IGNORED_DIRS,
+    );
     assertCompatibleSyncSource(manifest, managed, seeds);
     await runInit({
       consumer: consumerRoot,
@@ -1668,7 +1620,7 @@ const runSyncCommand = async (
   const policySnapshot = await inspectEffectiveSyncPolicy(consumerRoot, ref);
   const legacyManifest =
     from === undefined && lockInspection.lock === null
-      ? await loadManifest(consumerRoot)
+      ? await loadSourceManifest(consumerRoot)
       : null;
   const sourceName =
     from ?? lockInspection.lock?.upstream ?? legacyManifest?.upstream;
@@ -1689,16 +1641,10 @@ const runSyncCommand = async (
       source.dir,
       'selected standards source',
     );
-    const manifest = await loadManifest(sourceRoot);
-    const [managed, seeds] = await Promise.all([
-      snapshotRepositoryTrees(sourceRoot, manifest.paths, null, IGNORED_DIRS),
-      snapshotRepositoryTrees(
-        sourceRoot,
-        [manifest.seedDir],
-        manifest.seedDir,
-        IGNORED_DIRS,
-      ),
-    ]);
+    const { managed, manifest, seeds } = await selectSourceTrees(
+      sourceRoot,
+      IGNORED_DIRS,
+    );
     assertCompatibleSyncSource(manifest, managed, seeds);
     await runSync({
       manifest,

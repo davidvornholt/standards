@@ -1,5 +1,6 @@
 import { afterEach, expect, it } from 'bun:test';
-import { inspectRepositoryFiles, openRepositoryRoot } from './sync-filesystem';
+import { inspectRepositoryFiles } from './sync-file-inspection';
+import { openRepositoryRoot } from './sync-filesystem';
 import { applyRepositoryMutations } from './sync-mutations';
 import {
   cleanupFixtures,

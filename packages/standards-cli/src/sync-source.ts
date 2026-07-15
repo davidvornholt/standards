@@ -1,72 +1,79 @@
-import { readdir } from 'node:fs/promises';
-import { join, relative, sep } from 'node:path';
 import {
   assertRepositoryRelativePath,
-  identitiesMatch,
-  inspectRepositoryFile,
-  inspectRepositoryNode,
   type RepositoryRoot,
 } from './sync-filesystem';
+import { closeSourceDirectory, openSourceRoot } from './sync-source-node';
+import { type SourceTraversal, walkSourceTree } from './sync-source-traversal';
+import type { SourceFile, SourceSnapshotOptions } from './sync-source-types';
+import { validateSourceSnapshot } from './sync-source-validation';
 
-export type SourceFile = {
-  readonly contents: Buffer;
-  readonly mode: number;
+export type { SourceFile } from './sync-source-types';
+
+export type RepositoryTreeSet = {
+  readonly outputBase: string | null;
+  readonly roots: ReadonlyArray<string>;
 };
 
-const requiredSourceFile = async (
+const assertTreeSets = (
   root: RepositoryRoot,
-  rel: string,
-): Promise<SourceFile> => {
-  const state = await inspectRepositoryFile(root, rel);
-  if (state.contents === null || state.mode === null) {
-    throw new Error(`${root.label} file disappeared during inspection: ${rel}`);
+  sets: ReadonlyArray<RepositoryTreeSet>,
+): void => {
+  for (const { outputBase, roots } of sets) {
+    if (outputBase !== null) {
+      assertRepositoryRelativePath(outputBase, `${root.label} snapshot base`);
+    }
+    for (const rel of roots) {
+      assertRepositoryRelativePath(rel, `${root.label} snapshot root`);
+    }
   }
-  return { contents: state.contents, mode: state.mode };
 };
 
-export const snapshotRepositoryTrees = async (
+const assertExpectedFilesCaptured = (traversal: SourceTraversal): void => {
+  for (const rel of traversal.expectedFiles.keys()) {
+    if (!traversal.files.has(rel)) {
+      throw new Error(`Selected source does not manage required file: ${rel}`);
+    }
+  }
+};
+
+export const snapshotRepositoryTreeSets = async (
   root: RepositoryRoot,
-  roots: ReadonlyArray<string>,
-  outputBase: string | null,
+  sets: ReadonlyArray<RepositoryTreeSet>,
   ignoredNames: ReadonlySet<string>,
-): Promise<ReadonlyMap<string, SourceFile>> => {
-  if (outputBase !== null) {
-    assertRepositoryRelativePath(outputBase, `${root.label} snapshot base`);
-  }
-  const output = new Map<string, SourceFile>();
-  const base = outputBase === null ? root.path : join(root.path, outputBase);
-  const walk = async (rel: string): Promise<void> => {
-    const node = await inspectRepositoryNode(root, rel);
-    if (node.info === null) {
-      return;
-    }
-    if (node.info.isFile()) {
-      const outputPath = relative(base, node.path).split(sep).join('/');
-      assertRepositoryRelativePath(outputPath, `${root.label} snapshot file`);
-      output.set(outputPath, await requiredSourceFile(root, rel));
-      return;
-    }
-    if (!node.info.isDirectory()) {
-      throw new Error(`${root.label} contains an unsupported node: ${rel}`);
-    }
-    const entries = (await readdir(node.path)).filter(
-      (entry) => !ignoredNames.has(entry),
-    );
-    await Promise.all(entries.map((entry) => walk(`${rel}/${entry}`)));
-    const after = await inspectRepositoryNode(root, rel);
-    if (
-      after.info === null ||
-      !after.info.isDirectory() ||
-      !identitiesMatch(
-        { dev: node.info.dev, ino: node.info.ino },
-        { dev: after.info.dev, ino: after.info.ino },
-      )
-    ) {
-      throw new Error(
-        `${root.label} directory changed during inspection: ${rel}`,
-      );
-    }
+  options: SourceSnapshotOptions = {},
+): Promise<ReadonlyArray<ReadonlyMap<string, SourceFile>>> => {
+  assertTreeSets(root, sets);
+  const hooks = options.hooks ?? {};
+  const rootDirectory = await openSourceRoot(root, ignoredNames, hooks);
+  const traversal: SourceTraversal = {
+    directories: new Map([['', rootDirectory.record]]),
+    expectedFiles: options.expectedFiles ?? new Map(),
+    files: new Map(),
+    hooks,
+    ignoredNames,
+    root,
+    rootDirectory,
   };
-  await Promise.all(roots.map(walk));
-  return output;
+  const outputs = sets.map(() => new Map<string, SourceFile>());
+  try {
+    for (const [index, { outputBase, roots }] of sets.entries()) {
+      const output = outputs[index] as Map<string, SourceFile>;
+      for (const rel of roots) {
+        // biome-ignore lint/performance/noAwaitInLoops: one global sequential capture bounds descriptors and prevents sibling cleanup races
+        await walkSourceTree(traversal, rel, outputBase, output);
+      }
+    }
+    assertExpectedFilesCaptured(traversal);
+    await traversal.hooks.beforeFinalValidation?.();
+    await validateSourceSnapshot({
+      directories: traversal.directories,
+      files: traversal.files,
+      hooks,
+      ignoredNames,
+      root,
+    });
+    return outputs;
+  } finally {
+    await closeSourceDirectory(rootDirectory, hooks);
+  }
 };

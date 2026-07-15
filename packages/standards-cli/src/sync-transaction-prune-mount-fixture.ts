@@ -2,9 +2,9 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
+import { inspectRepositoryFiles } from './sync-file-inspection';
 import {
   inspectRepositoryDirectories,
-  inspectRepositoryFiles,
   openRepositoryRoot,
 } from './sync-filesystem';
 import { applyRepositoryMutations } from './sync-mutations';

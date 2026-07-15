@@ -1787,6 +1787,28 @@ describe('sync mirror', () => {
   });
 });
 
+it('deletes a previously managed nested root when its source parent disappears', () => {
+  const nestedRoot = 'managed/future';
+  const paths = STD_PATHS.map((path) =>
+    path === 'managed' ? nestedRoot : path,
+  );
+  const up = buildUpstream(paths);
+  write(up, `${nestedRoot}/retired.txt`, 'retired\n');
+  const { consumer, result: init } = initConsumer(up);
+  expect(init.status).toBe(0);
+  expect(read(consumer, `${nestedRoot}/retired.txt`)).toBe('retired\n');
+
+  rmSync(join(up, 'managed'), { recursive: true });
+  const result = sync(up, consumer);
+
+  expect(result.status).toBe(0);
+  expect(result.stdout).toContain(
+    `deleted ${nestedRoot}/retired.txt (removed upstream)`,
+  );
+  expect(existsSync(join(consumer, nestedRoot))).toBe(false);
+  expect(readLock(consumer).files[`${nestedRoot}/retired.txt`]).toBeUndefined();
+});
+
 describe('Git exclusion filesystem boundary', () => {
   it('rejects a linked Git exclusion target before consumer mutation', () => {
     const up = buildUpstream();

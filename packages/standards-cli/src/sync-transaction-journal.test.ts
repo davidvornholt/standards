@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { inspectRepositoryFiles, openRepositoryRoot } from './sync-filesystem';
+import { inspectRepositoryFiles } from './sync-file-inspection';
+import { openRepositoryRoot } from './sync-filesystem';
 import {
   cleanupFixtures,
   requiredState,

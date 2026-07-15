@@ -1,5 +1,5 @@
-import { type BigIntStats, constants } from 'node:fs';
-import { lstat, open, realpath } from 'node:fs/promises';
+import type { BigIntStats } from 'node:fs';
+import { lstat, realpath } from 'node:fs/promises';
 import { isAbsolute, join, normalize, relative, sep } from 'node:path';
 import { isMissingFilesystemError } from './sync-filesystem-error';
 import {
@@ -32,8 +32,6 @@ export const fileStatesMatch = (left: FileState, right: FileState): boolean =>
     (left.contents !== null &&
       right.contents !== null &&
       left.contents.equals(right.contents)));
-
-const FILE_TYPE_MODE_BASE = 0o1000;
 
 export const identityOf = (info: {
   readonly dev: bigint;
@@ -125,53 +123,6 @@ export const inspectRepositoryNode = (
   };
   return inspectPart(0, root.path);
 };
-
-export const inspectRepositoryFile = async (
-  root: RepositoryRoot,
-  rel: string,
-): Promise<FileState> => {
-  const node = await inspectRepositoryNode(root, rel);
-  if (node.info === null) {
-    return { contents: null, identity: null, mode: null };
-  }
-  if (!node.info.isFile()) {
-    throw new Error(`${root.label} path must be a regular file: ${rel}`);
-  }
-  const handle = await open(
-    node.path,
-    constants.O_RDONLY + constants.O_NOFOLLOW + constants.O_NONBLOCK,
-  );
-  try {
-    const opened = await handle.stat({ bigint: true });
-    if (
-      !(
-        opened.isFile() &&
-        identitiesMatch(identityOf(node.info), identityOf(opened))
-      )
-    ) {
-      throw new Error(`${root.label} file changed during inspection: ${rel}`);
-    }
-    return {
-      contents: await handle.readFile(),
-      identity: identityOf(opened),
-      mode: Number(opened.mode) % FILE_TYPE_MODE_BASE,
-    };
-  } finally {
-    await handle.close();
-  }
-};
-
-export const inspectRepositoryFiles = async (
-  root: RepositoryRoot,
-  rels: ReadonlyArray<string>,
-): Promise<ReadonlyMap<string, FileState>> =>
-  new Map(
-    await Promise.all(
-      [...new Set(rels)].map(
-        async (rel) => [rel, await inspectRepositoryFile(root, rel)] as const,
-      ),
-    ),
-  );
 
 export const inspectRepositoryDirectories = async (
   root: RepositoryRoot,

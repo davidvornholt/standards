@@ -1,6 +1,6 @@
 import type { PinnedDirectory, PinnedTarget } from './sync-directory-handles';
-import type { RepositoryRoot } from './sync-filesystem';
-import { identitiesMatch, inspectRepositoryFile } from './sync-filesystem';
+import { inspectRepositoryFile } from './sync-file-inspection';
+import { identitiesMatch, type RepositoryRoot } from './sync-filesystem';
 import { rollbackBindingName } from './sync-transaction-bound-unlink';
 import {
   fileMatchesDesired,

@@ -2,7 +2,8 @@ import {
   closePinnedDirectories,
   openPinnedRoot,
 } from './sync-directory-handles';
-import { inspectRepositoryFile, type RepositoryRoot } from './sync-filesystem';
+import { inspectRepositoryFile } from './sync-file-inspection';
+import type { RepositoryRoot } from './sync-filesystem';
 import { fileMatchesDesired } from './sync-transaction-files';
 import type { TransactionJournal } from './sync-transaction-types';
 

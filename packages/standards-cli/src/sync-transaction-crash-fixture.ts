@@ -1,5 +1,6 @@
 import process from 'node:process';
-import { inspectRepositoryFiles, openRepositoryRoot } from './sync-filesystem';
+import { inspectRepositoryFiles } from './sync-file-inspection';
+import { openRepositoryRoot } from './sync-filesystem';
 import { applyRepositoryMutations } from './sync-mutations';
 import type { FileOperation } from './sync-transaction-types';
 

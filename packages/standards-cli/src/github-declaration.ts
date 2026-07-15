@@ -3,10 +3,10 @@ import {
   type LoadedGithubSettings,
   loadGithubSettings,
 } from './github-settings';
+import { inspectRepositoryFile } from './sync-file-inspection';
 import {
   type FileState,
   fileStatesMatch,
-  inspectRepositoryFile,
   type RepositoryRoot,
 } from './sync-filesystem';
 import { assertRepositoryRootUnchanged } from './sync-repository-root-generation';

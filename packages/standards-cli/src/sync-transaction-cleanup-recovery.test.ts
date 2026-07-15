@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { readdirSync, readFileSync, renameSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { openPinnedChild, openPinnedRoot } from './sync-directory-handles';
-import { inspectRepositoryFiles, openRepositoryRoot } from './sync-filesystem';
+import { inspectRepositoryFiles } from './sync-file-inspection';
+import { openRepositoryRoot } from './sync-filesystem';
 import { applyRepositoryMutations } from './sync-mutations';
 import {
   cleanupFixtures,
