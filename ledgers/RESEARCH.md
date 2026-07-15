@@ -22,9 +22,9 @@ Filenames are normalized to `<date>-<repo>-<slug>.md` by ledger content; the fes
 | 2026-07-11 mail-mcp mcp-contract | **GPT-5/Codex** | 4 | 6 → 2 → 0 → 0 | ~22 min | converged under the dry-counter rule (2 consecutive clean) |
 | *(2026-07-13 standards PR #28)* | **GPT-5.6 Sol high** | **39, force-stopped** | 9 → … → 1–3/pass, never 0 | **~46 h, non-terminating** | see `../POST-MORTEM.md` |
 
-## Finding 1: every pre-PR-28 loop converged, and the diffs never grew
+## Finding 1: every pre-PR-28 loop converged, because diff growth damped
 
-Twelve for twelve. Later passes consistently shrank toward documentation and config tails; fixes were small and targeted; no ledger shows material diff growth during a loop. Orchestrators dispositioned actively: discards and deferrals appear throughout ("churn without benefit", "speculative refinement", "out of loop scope", "needs product clarification"), and two loops escalated findings to the user rather than fixing them. PR #28's signature behaviors — 200x diff growth and 289/289 findings accepted with zero discards — do not appear anywhere in this corpus. They were new.
+Twelve for twelve. Every loop grows its own diff — fixes are commits, so a "clean pass" is only reachable if fix rounds shrink faster than they add reviewable surface. In every ledger they did: fix rounds decayed from double-digit findings to single digits to documentation tails within 2–5 passes, adding tens of lines per round against diffs of hundreds to thousands. Convergence was damped feedback, never absence of growth. PR #28 is the same loop with the feedback sign flipped: subsystem-scale fix rounds (up to +9.6k lines in a single round) added surface faster than passes could clear it. Later passes in the historical corpus consistently shrank toward documentation and config tails. Orchestrators dispositioned actively: discards and deferrals appear throughout ("churn without benefit", "speculative refinement", "out of loop scope", "needs product clarification"), and two loops escalated findings to the user rather than fixing them. PR #28's signature behaviors — 200x diff growth and 289/289 findings accepted with zero discards — do not appear anywhere in this corpus. They were new.
 
 ## Finding 2: the natural experiment of 2026-06-12
 
