@@ -81,6 +81,7 @@ type CliOptions = {
   readonly consumer: string;
   readonly dryRun: boolean;
   readonly from: string | undefined;
+  readonly ref: string | undefined;
   readonly apply: boolean;
 };
 
@@ -163,9 +164,15 @@ const writeLock = async (dir: string, lock: Lock): Promise<void> => {
 
 // Fetch the template into a working directory. Accepts a local path (used to
 // prove the engine before the public repo exists and in tests), a github:
-// shorthand, or any git URL.
-const resolveSource = (src: string): Source => {
+// shorthand, or any git URL. Remote sources default to `main`; `ref` pins a
+// tag, branch, or full commit sha instead (`git fetch` accepts all three).
+const resolveSource = (src: string, ref: string | undefined): Source => {
   if (existsSync(src)) {
+    if (ref !== undefined) {
+      throw new Error(
+        `--ref requires a git URL source; a local path is used as-is: ${src}`,
+      );
+    }
     let sha = 'local';
     try {
       sha = execFileSync('git', ['-C', src, 'rev-parse', 'HEAD'], {
@@ -180,18 +187,34 @@ const resolveSource = (src: string): Source => {
   const url = src.startsWith(GITHUB_PREFIX)
     ? `https://github.com/${src.slice(GITHUB_PREFIX.length)}.git`
     : src;
+  const target = ref ?? 'main';
   const dir = mkdtempSync(join(tmpdir(), 'standards-'));
-  execFileSync('git', ['clone', '--depth', '1', '--branch', 'main', url, dir], {
-    stdio: 'ignore',
-  });
+  const cleanup = (): void => rmSync(dir, { recursive: true, force: true });
+  try {
+    // init + fetch instead of `clone --branch` so a full commit sha works as a
+    // ref, not only tags and branches (GitHub serves reachable sha fetches).
+    execFileSync('git', ['init', '--quiet', dir], { stdio: 'ignore' });
+    execFileSync(
+      'git',
+      ['-C', dir, 'fetch', '--quiet', '--depth', '1', '--', url, target],
+      { stdio: 'ignore' },
+    );
+    execFileSync(
+      'git',
+      ['-C', dir, 'checkout', '--quiet', '--detach', 'FETCH_HEAD'],
+      { stdio: 'ignore' },
+    );
+  } catch (error) {
+    cleanup();
+    throw new Error(
+      `Cannot fetch "${target}" from ${url}; expected a tag, branch, or full commit sha reachable on the remote`,
+      { cause: error },
+    );
+  }
   const sha = execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], {
     encoding: 'utf8',
   }).trim();
-  return {
-    dir,
-    sha,
-    cleanup: () => rmSync(dir, { recursive: true, force: true }),
-  };
+  return { dir, sha, cleanup };
 };
 
 // Recursively collect files under `abs`, keyed by their POSIX path relative to
@@ -734,6 +757,7 @@ Commands:
 Options:
   --dir <path>   Consumer directory to operate on (default: current directory)
   --from <src>   Upstream override for init/sync (GitHub repo or local path)
+  --ref <ref>    Upstream tag, branch, or full commit sha for init/sync (remote Git/GitHub sources only; default: main)
   --dry-run      Preview a sync without writing anything
   --check        With github: compare live settings to the declaration (default)
   --apply        With github: converge the live repository (needs admin auth)`;
@@ -777,6 +801,7 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
   let consumer = process.cwd();
   let dryRun = false;
   let from: string | undefined;
+  let ref: string | undefined;
   let checkFlag = false;
   let apply = false;
 
@@ -800,6 +825,10 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
         from = nextOptionValue(argv, index);
         index += 1;
         break;
+      case '--ref':
+        ref = nextOptionValue(argv, index);
+        index += 1;
+        break;
       case '--help':
       case '-h':
         command = setCommand(command, 'help');
@@ -818,12 +847,16 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
   if (apply && checkFlag) {
     throw new Error('github accepts exactly one of --check or --apply');
   }
+  if (ref !== undefined && command !== 'init' && command !== 'sync') {
+    throw new Error('--ref is only valid with the init and sync commands');
+  }
 
   return {
     command,
     consumer: resolve(consumer),
     dryRun,
     from,
+    ref,
     apply,
   };
 };
@@ -843,6 +876,7 @@ const runCheckCommand = async (consumer: string): Promise<boolean> => {
 const runInitCommand = async (
   consumer: string,
   from: string | undefined,
+  ref: string | undefined,
 ): Promise<void> => {
   // Refuse before cloning upstream: re-initializing skips the lock, so it
   // would silently overwrite local canonical edits and orphan files that
@@ -854,7 +888,7 @@ const runInitCommand = async (
     process.exitCode = 1;
     return;
   }
-  const source = resolveSource(from ?? DEFAULT_UPSTREAM);
+  const source = resolveSource(from ?? DEFAULT_UPSTREAM, ref);
   try {
     const manifest = await loadManifest(
       join(source.dir, 'sync-standards.json'),
@@ -868,12 +902,13 @@ const runInitCommand = async (
 const runSyncCommand = async (
   consumer: string,
   from: string | undefined,
+  ref: string | undefined,
   dryRun: boolean,
 ): Promise<void> => {
   const consumerManifest = await loadManifest(
     join(consumer, 'sync-standards.json'),
   );
-  const source = resolveSource(from ?? consumerManifest.upstream);
+  const source = resolveSource(from ?? consumerManifest.upstream, ref);
   try {
     const manifest = await loadManifest(
       join(source.dir, 'sync-standards.json'),
@@ -885,7 +920,7 @@ const runSyncCommand = async (
 };
 
 const main = async (): Promise<void> => {
-  const { command, consumer, dryRun, from, apply } = parseArgs(
+  const { command, consumer, dryRun, from, ref, apply } = parseArgs(
     process.argv.slice(2),
   );
 
@@ -926,12 +961,12 @@ const main = async (): Promise<void> => {
   }
 
   if (command === 'init') {
-    await runInitCommand(consumer, from);
+    await runInitCommand(consumer, from, ref);
     return;
   }
 
   if (command === 'sync') {
-    await runSyncCommand(consumer, from, dryRun);
+    await runSyncCommand(consumer, from, ref, dryRun);
   }
 };
 
