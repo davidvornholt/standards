@@ -59,6 +59,8 @@ Every finding gets exactly one disposition, judged against the scope contract:
 - **discard**: refuted, speculative, or conflicting with a registry decision. Append discards with durable value (deliberate policy or architecture choices, accepted risks) to `.agents/review/decisions.md`; summarize the rest in the review body.
 - **needs-clarification**: pause and ask the user; apply the `needs-clarification` label (create it if missing) while paused.
 
+Disposition a finding that is one instance of a repeated pattern as its class: the thread names the pattern and enumerates every sibling site, so the fix and the verification pass cover the class. The verification pass is delta-scoped and cannot see sibling defects the fix left untouched in the base diff — class-wide threads are what close that gap.
+
 Escalation tripwires — each converts a fix-now into a user question, and a blanket pre-approval ("I approve all further decisions") does not lift them:
 
 - the fix would add a new module, subsystem, or dependency;
