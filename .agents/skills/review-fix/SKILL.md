@@ -81,7 +81,7 @@ Re-run the deterministic gate after the fix round.
 
 One fresh `review-pass` fan-out scoped to the fixes: set `baseRef` to the pre-fix head SHA so the reviewed diff is exactly the fix commits, with lenses answering two questions — does each fix resolve its thread's finding, and did the fixes introduce regressions.
 
-A regression introduced by a fix gets one repair round (worker, gate, evidence, thread reply). Everything else verification surfaces is dispositioned defer or discard — verification findings never start another review pass. Then stop, unconditionally.
+A fix that failed to resolve its thread's finding, or that introduced a regression, gets one repair round (worker, gate, evidence, thread reply). Everything else verification surfaces is dispositioned defer or discard — verification findings never start another review pass. Then stop, unconditionally.
 
 ## Report
 
