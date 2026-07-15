@@ -11,7 +11,6 @@ import {
   gen,
   runPromiseExit,
   succeed,
-  tryPromise,
 } from '../src/release-effect';
 import {
   inspectGithubRelease,
@@ -20,7 +19,7 @@ import {
 import { ReleaseInputError } from '../src/release-input-error';
 import { inspectNpmRelease } from '../src/release-npm';
 import { publishAuthorizedNpmArtifact } from '../src/release-npm-publish';
-import { ReleaseOutputError } from '../src/release-output-error';
+import type { ReleaseOutputError } from '../src/release-output-error';
 import { packReleaseArtifact } from '../src/release-package';
 import type { ReleasePackageError } from '../src/release-package-error';
 import type { ReleaseReproductionError } from '../src/release-reproduction-error';
@@ -60,14 +59,7 @@ const firstNonEmpty = (
 const writeOutput = (
   output: string,
   values: Readonly<Record<string, string | boolean>>,
-) =>
-  tryPromise({
-    try: () => appendGithubOutput(output, values),
-    catch: (cause) =>
-      new ReleaseOutputError({
-        message: `Writing GitHub outputs failed: ${String(cause)}`,
-      }),
-  });
+) => appendGithubOutput(output, values);
 
 const inspectNpm = (args: ReadonlyArray<string>) =>
   gen(function* () {

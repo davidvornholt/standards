@@ -80,6 +80,7 @@ describe('default branch apply final verification', () => {
     await applyWith(null, (action) => actions.push(action));
 
     expect(calls).toEqual([
+      { method: 'GET', path: '/repos/owner/repo' },
       {
         method: 'PUT',
         path: '/repos/owner/repo/branches/trunk/protection',
@@ -97,16 +98,14 @@ describe('default branch apply final verification', () => {
     ]);
   });
 
-  it('fails after a concurrent default-branch rename without further writes', async () => {
+  it('fails before a PUT after a concurrent default-branch rename', async () => {
     const calls: Array<RequestRecord> = [];
     globalThis.fetch = Object.assign(
       (input: URL | RequestInfo, init?: RequestInit) => {
         const method = init?.method ?? 'GET';
         calls.push({ method, path: new URL(String(input)).pathname });
         return Promise.resolve(
-          method === 'PUT'
-            ? response({})
-            : response(JSON.parse('{"default_branch":"renamed"}')),
+          response(JSON.parse('{"default_branch":"renamed"}')),
         );
       },
       { preconnect: originalFetch.preconnect },
@@ -116,29 +115,17 @@ describe('default branch apply final verification', () => {
     await expect(
       applyWith(null, (action) => actions.push(action)),
     ).rejects.toThrow('changed from "trunk" to "renamed"');
-    expect(calls).toEqual([
-      {
-        method: 'PUT',
-        path: '/repos/owner/repo/branches/trunk/protection',
-      },
-      { method: 'GET', path: '/repos/owner/repo' },
-    ]);
-    expect(actions).toEqual([
-      'updated classic protection for default branch "trunk"',
-    ]);
+    expect(calls).toEqual([{ method: 'GET', path: '/repos/owner/repo' }]);
+    expect(actions).toEqual([]);
   });
 
-  it('rejects malformed repository readback before protection reads', async () => {
+  it('rejects malformed repository identity before a PUT', async () => {
     const calls: Array<RequestRecord> = [];
     globalThis.fetch = Object.assign(
       (input: URL | RequestInfo, init?: RequestInit) => {
         const method = init?.method ?? 'GET';
         calls.push({ method, path: new URL(String(input)).pathname });
-        return Promise.resolve(
-          method === 'PUT'
-            ? response({})
-            : response(JSON.parse('{"default_branch":7}')),
-        );
+        return Promise.resolve(response(JSON.parse('{"default_branch":7}')));
       },
       { preconnect: originalFetch.preconnect },
     );
@@ -146,13 +133,7 @@ describe('default branch apply final verification', () => {
     await expect(applyWith(null, () => undefined)).rejects.toThrow(
       'invalid repository default branch',
     );
-    expect(calls).toEqual([
-      {
-        method: 'PUT',
-        path: '/repos/owner/repo/branches/trunk/protection',
-      },
-      { method: 'GET', path: '/repos/owner/repo' },
-    ]);
+    expect(calls).toEqual([{ method: 'GET', path: '/repos/owner/repo' }]);
   });
 
   it('performs no requests when the prefetched protection already converged', async () => {

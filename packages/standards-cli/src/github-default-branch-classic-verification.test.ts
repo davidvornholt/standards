@@ -58,6 +58,7 @@ it('fails when the branch summary reports classic protection disabled', async ()
     }),
   ).rejects.toThrow('did not match declared protection after update');
   expect(calls).toEqual([
+    { method: 'GET', path: '/repos/owner/repo' },
     { method: 'PUT', path: '/repos/owner/repo/branches/trunk/protection' },
     { method: 'GET', path: '/repos/owner/repo' },
     { method: 'GET', path: '/repos/owner/repo/branches/trunk' },

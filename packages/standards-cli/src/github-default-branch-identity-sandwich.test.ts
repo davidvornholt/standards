@@ -46,7 +46,10 @@ const runFlow = (flow: Flow): Promise<unknown> => {
 
 const expectedRequests = (flow: Flow): Array<string> => [
   ...(flow === 'protection update'
-    ? ['PUT /repos/owner/repo/branches/trunk/protection']
+    ? [
+        'GET /repos/owner/repo',
+        'PUT /repos/owner/repo/branches/trunk/protection',
+      ]
     : []),
   'GET /repos/owner/repo',
   'GET /repos/owner/repo/branches/trunk',
@@ -57,8 +60,10 @@ const expectedRequests = (flow: Flow): Array<string> => [
 const repositoryBody = (
   read: number,
   trailing: TrailingState,
+  flow: Flow,
 ): Readonly<Record<string, unknown>> => {
-  if (read === 1) {
+  const stableReads = flow === 'protection update' ? 2 : 1;
+  if (read <= stableReads) {
     return { [DEFAULT_BRANCH]: 'trunk' };
   }
   return {
@@ -70,6 +75,7 @@ const repositoryBody = (
 const fetchFor = (
   requests: Array<string>,
   trailing: TrailingState,
+  flow: Flow,
 ): typeof fetch => {
   let repositoryReads = 0;
   return Object.assign(
@@ -86,7 +92,7 @@ const fetchFor = (
       if (path === '/repos/owner/repo') {
         repositoryReads += 1;
         return Promise.resolve(
-          response(HTTP_OK, repositoryBody(repositoryReads, trailing)),
+          response(HTTP_OK, repositoryBody(repositoryReads, trailing, flow)),
         );
       }
       return Promise.resolve(
@@ -115,7 +121,7 @@ describe('default branch protection identity sandwich', () => {
     ),
   )('fails %s when trailing repository identity is %s', async (flow, trailing) => {
     const requests: Array<string> = [];
-    globalThis.fetch = fetchFor(requests, trailing);
+    globalThis.fetch = fetchFor(requests, trailing, flow);
 
     const expected =
       trailing === 'renamed'

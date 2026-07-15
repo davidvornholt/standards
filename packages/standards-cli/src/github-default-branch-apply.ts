@@ -138,9 +138,18 @@ export const applyDefaultBranchProtection = async (
   const protectionDrift =
     live.protection === null || !subsetMatches(declared, live.protection);
   const path = `${defaultBranchPath(repo, live.branch)}/protection`;
+  const beforeProtectionMutation: BeforeGithubMutation = async () => {
+    await beforeMutation();
+    const current = await readRepositoryDefaultBranch(input);
+    if (current.value !== live.branch) {
+      throw new Error(
+        `Repository default branch changed from "${live.branch}" to "${current.value}" before protection mutation`,
+      );
+    }
+  };
   if (protectionDrift) {
     const updated = await mutate({
-      beforeMutation,
+      beforeMutation: beforeProtectionMutation,
       body: updateBody(declared),
       method: 'PUT',
       path,
@@ -160,7 +169,7 @@ export const applyDefaultBranchProtection = async (
   }
   if (signatureDrift && declared.required_signatures === false) {
     const removed = await mutate({
-      beforeMutation,
+      beforeMutation: beforeProtectionMutation,
       method: 'DELETE',
       path: `${path}/required_signatures`,
       token,

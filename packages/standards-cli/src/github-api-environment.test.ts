@@ -1,6 +1,12 @@
 import { afterEach, expect, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import {
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
@@ -8,9 +14,15 @@ import { resolveGithubRepo } from './github-api';
 import { openRepositoryRoot } from './sync-filesystem';
 
 const roots: Array<string> = [];
+const originalGitConfigGlobal = process.env.GIT_CONFIG_GLOBAL;
 const originalGitDirectory = process.env.GIT_DIR;
 
 afterEach(() => {
+  if (originalGitConfigGlobal === undefined) {
+    delete process.env.GIT_CONFIG_GLOBAL;
+  } else {
+    process.env.GIT_CONFIG_GLOBAL = originalGitConfigGlobal;
+  }
   if (originalGitDirectory === undefined) {
     delete process.env.GIT_DIR;
   } else {
@@ -47,4 +59,28 @@ it('resolves the opened root origin despite an inherited GIT_DIR', async () => {
   expect(readFileSync(join(victimGit, 'config'))).toEqual(before.config);
   expect(readFileSync(join(victimGit, 'HEAD'))).toEqual(before.head);
   expect(readdirSync(victimGit).sort()).toEqual(before.entries);
+});
+
+it('uses the raw local origin despite hostile global config and URL rewrites', async () => {
+  const consumer = repository('https://github.com/example/consumer.git');
+  const configRoot = mkdtempSync(join(tmpdir(), 'github-api-global-config-'));
+  roots.push(configRoot);
+  const globalConfig = join(configRoot, 'config');
+  writeFileSync(
+    globalConfig,
+    '[remote "origin"]\n\turl = https://github.com/example/victim.git\n[url "https://github.com/rewritten/"]\n\tinsteadOf = https://github.com/example/\n',
+  );
+  execFileSync('git', [
+    '-C',
+    consumer,
+    'config',
+    '--local',
+    'url.https://github.com/local-rewrite/.insteadOf',
+    'https://github.com/example/',
+  ]);
+  process.env.GIT_CONFIG_GLOBAL = globalConfig;
+
+  expect(
+    await resolveGithubRepo(await openRepositoryRoot(consumer, 'consumer')),
+  ).toBe('example/consumer');
 });

@@ -105,6 +105,9 @@ describe('standards sync documentation', () => {
     expect(readFileSync(PACKAGE_README, 'utf8')).toContain(
       TRANSACTION_CONTRACT_SENTENCE,
     );
+    expect(readFileSync(PACKAGE_README, 'utf8')).toContain(
+      'single raw repository-local `remote.origin.url`; higher Git config scopes and `url.*.insteadOf` transport rewrites do not select the GitHub repository',
+    );
   });
 
   it('keeps migration guidance out of the seed and routes the skill to it', () => {

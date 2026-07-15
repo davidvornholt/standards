@@ -105,9 +105,12 @@ export const resolveGithubRepo = async (
   root: RepositoryRoot,
 ): Promise<string | null> => {
   await assertRepositoryRootUnchanged(root);
+  // Repository identity comes from the one raw local fetch URL. `git remote
+  // get-url` also reads higher config scopes and applies url.*.insteadOf;
+  // those transport conveniences must not redirect declarative GitHub writes.
   const url = quietExec(
     'git',
-    ['-C', root.path, 'remote', 'get-url', 'origin'],
+    ['-C', root.path, 'config', '--local', '--get-all', 'remote.origin.url'],
     gitChildEnvironment(),
   );
   await assertRepositoryRootUnchanged(root);
