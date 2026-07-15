@@ -145,6 +145,21 @@ describe('standards sync documentation', () => {
   });
 });
 
+describe('root GitHub and release documentation', () => {
+  it('documents immutable release policy and final tag authorization', () => {
+    const documentation = readFileSync(ROOT_README, 'utf8');
+    expect(documentation).toContain(
+      'classic default-branch protection, immutable releases, and exact repository-wide ruleset set',
+    );
+    expect(documentation).toContain(
+      'reads and peels the exact tag as the final awaited authorization',
+    );
+    expect(documentation).toContain(
+      'the canonical `v*` ruleset permits tag creation but prohibits later update or deletion',
+    );
+  });
+});
+
 describe('generated standards sync preflight documentation', () => {
   it('documents the generated preflight runtime environment', () => {
     const documentation = readFileSync(PACKAGE_README, 'utf8');
