@@ -1,6 +1,7 @@
 import { type BigIntStats, constants } from 'node:fs';
 import { lstat, open, realpath } from 'node:fs/promises';
 import { isAbsolute, join, normalize, relative, sep } from 'node:path';
+import { isMissingFilesystemError } from './sync-filesystem-error';
 import { assertFilesystemIdentityComponent } from './sync-node-identity';
 import { inspectRealDirectoryPath } from './sync-root-path';
 export type NodeIdentity = {
@@ -34,9 +35,6 @@ export const fileStatesMatch = (left: FileState, right: FileState): boolean =>
       left.contents.equals(right.contents)));
 
 const FILE_TYPE_MODE_BASE = 0o1000;
-
-const missing = (error: unknown): boolean =>
-  (error as { readonly code?: unknown }).code === 'ENOENT';
 
 export const identityOf = (info: {
   readonly dev: bigint;
@@ -106,7 +104,7 @@ export const inspectRepositoryNode = (
     try {
       info = await lstat(current, { bigint: true });
     } catch (error) {
-      if (missing(error)) {
+      if (isMissingFilesystemError(error)) {
         return { path: join(root.path, ...parts), info: null };
       }
       throw error;

@@ -5,6 +5,11 @@ type RemoteState = {
   tagSha: string | null;
 };
 
+type StubResponse = {
+  readonly body: unknown;
+  readonly status: number;
+};
+
 const HTTP_CREATED = 201;
 const HTTP_NOT_FOUND = 404;
 const HTTP_OK = 200;
@@ -25,6 +30,9 @@ export const remote = (
   options: {
     readonly authorizationFailure?: 1 | 2;
     readonly authorizationTrailingBranches?: ReadonlyArray<unknown>;
+    readonly authorizationTrailingComparisons?: ReadonlyArray<
+      StubResponse | undefined
+    >;
     readonly releaseCreateReadback?: boolean;
     readonly releaseCreateStatus?: number;
     readonly releaseRace?: boolean;
@@ -36,12 +44,14 @@ export const remote = (
   const calls: Array<string> = [];
   const bodies: Array<unknown> = [];
   let authorizationCount = 0;
+  let awaitingFinalComparison = false;
   let awaitingTrailingIdentity = false;
   const readRepository = (): Response => {
     if (!awaitingTrailingIdentity) {
       return json({ [DEFAULT_BRANCH]: 'main' }, HTTP_OK);
     }
     awaitingTrailingIdentity = false;
+    awaitingFinalComparison = true;
     return json(
       {
         [DEFAULT_BRANCH]:
@@ -52,10 +62,22 @@ export const remote = (
     );
   };
   const readComparison = (): Response => {
-    authorizationCount += 1;
-    if (authorizationCount === options.authorizationFailure) {
-      return json({ message: 'default branch changed' }, HTTP_CONFLICT);
+    if (awaitingFinalComparison) {
+      awaitingFinalComparison = false;
+      const configured =
+        options.authorizationTrailingComparisons?.[authorizationCount - 1];
+      if (configured !== undefined) {
+        return json(configured.body, configured.status);
+      }
+      if (authorizationCount === options.authorizationFailure) {
+        return json({ message: 'default branch changed' }, HTTP_CONFLICT);
+      }
+      return json(
+        { [MERGE_BASE_COMMIT]: { sha: 'expected' }, status: 'ahead' },
+        HTTP_OK,
+      );
     }
+    authorizationCount += 1;
     awaitingTrailingIdentity = true;
     return json(
       { [MERGE_BASE_COMMIT]: { sha: 'expected' }, status: 'ahead' },

@@ -6,6 +6,7 @@ import {
   syncPinnedDirectory,
 } from './sync-directory-handles';
 import { identitiesMatch, type NodeIdentity } from './sync-filesystem';
+import { isMissingFilesystemError } from './sync-filesystem-error';
 import { publishAtomicTransactionRecord } from './sync-transaction-atomic-record';
 import { bindAndRemoveEntry } from './sync-transaction-bound-remove';
 import { hasRemovedTransactionReservation } from './sync-transaction-reservation-quarantine';
@@ -170,7 +171,7 @@ export const removeTransactionReservation = async (
   try {
     before = await readTransactionReservationEntry(root);
   } catch (error) {
-    if (!reservationMissing(error)) {
+    if (!isMissingFilesystemError(error)) {
       throw error;
     }
     if (await hasRemovedTransactionReservation(root, expectedId)) {
@@ -194,6 +195,3 @@ export const removeTransactionReservation = async (
   await syncPinnedDirectory(root);
   await hooks.afterSync?.();
 };
-
-export const reservationMissing = (error: unknown): boolean =>
-  (error as { readonly code?: unknown }).code === 'ENOENT';

@@ -13,8 +13,11 @@ const remote = (input: {
   readonly mergeBaseSha?: string;
   readonly status?: string;
   readonly trailingBranch?: unknown;
+  readonly trailingComparisonBody?: unknown;
+  readonly trailingComparisonStatus?: number;
 }) => {
   const calls: Array<string> = [];
+  let comparisonReads = 0;
   let repositoryReads = 0;
   const fetcher: ReleaseFetcher = (requestInput) => {
     const path = new URL(String(requestInput)).pathname;
@@ -22,24 +25,35 @@ const remote = (input: {
     const repository = path === '/repos/owner/repo';
     if (repository) {
       repositoryReads += 1;
+    } else {
+      comparisonReads += 1;
+    }
+    const initialComparison = {
+      [MERGE_BASE_COMMIT]: {
+        sha: input.mergeBaseSha ?? RELEASE_SHA,
+      },
+      status: input.status ?? 'ahead',
+    };
+    let body: unknown;
+    if (repository) {
+      body = {
+        [DEFAULT_BRANCH]:
+          repositoryReads === 1
+            ? (input.branch ?? 'trunk')
+            : (input.trailingBranch ?? input.branch ?? 'trunk'),
+      };
+    } else if (comparisonReads === 1) {
+      body = initialComparison;
+    } else {
+      body = input.trailingComparisonBody ?? initialComparison;
     }
     return Promise.resolve(
-      Response.json(
-        repository
-          ? {
-              [DEFAULT_BRANCH]:
-                repositoryReads === 1
-                  ? (input.branch ?? 'trunk')
-                  : (input.trailingBranch ?? input.branch ?? 'trunk'),
-            }
-          : {
-              [MERGE_BASE_COMMIT]: {
-                sha: input.mergeBaseSha ?? RELEASE_SHA,
-              },
-              status: input.status ?? 'ahead',
-            },
-        { status: HTTP_OK },
-      ),
+      Response.json(body, {
+        status:
+          comparisonReads > 1
+            ? (input.trailingComparisonStatus ?? HTTP_OK)
+            : HTTP_OK,
+      }),
     );
   };
   return { calls, fetcher };
@@ -62,6 +76,7 @@ describe('release SHA authorization', () => {
       '/repos/owner/repo',
       '/repos/owner/repo/compare/release-sha...trunk',
       '/repos/owner/repo',
+      '/repos/owner/repo/compare/release-sha...trunk',
     ]);
   });
 
@@ -102,6 +117,65 @@ describe('release SHA authorization', () => {
     expect(failures[2]).toMatchObject({
       _tag: 'GithubApiError',
       message: 'GitHub repository returned an empty default branch',
+    });
+  });
+
+  it('rejects same-name head divergence at the trailing ancestry proof', async () => {
+    const github = remote({
+      trailingComparisonBody: {
+        [MERGE_BASE_COMMIT]: { sha: 'other' },
+        status: 'diverged',
+      },
+    });
+
+    expect(await runPromise(flip(authorize(github.fetcher)))).toMatchObject({
+      _tag: 'GithubStateError',
+      message:
+        'Release SHA release-sha is not an ancestor of live default branch trunk',
+    });
+    expect(github.calls).toEqual([
+      '/repos/owner/repo',
+      '/repos/owner/repo/compare/release-sha...trunk',
+      '/repos/owner/repo',
+      '/repos/owner/repo/compare/release-sha...trunk',
+    ]);
+  });
+
+  it('fails closed on malformed and erroring trailing ancestry proofs', async () => {
+    const failures = await Promise.all([
+      runPromise(
+        flip(
+          authorize(
+            remote({
+              trailingComparisonBody: {
+                [MERGE_BASE_COMMIT]: { sha: 7 },
+                status: 'ahead',
+              },
+            }).fetcher,
+          ),
+        ),
+      ),
+      runPromise(
+        flip(
+          authorize(
+            remote({
+              trailingComparisonBody: { message: 'branch moved' },
+              trailingComparisonStatus: 409,
+            }).fetcher,
+          ),
+        ),
+      ),
+    ]);
+
+    expect(failures[0]).toMatchObject({
+      _tag: 'GithubApiError',
+      message:
+        'Reconfirming release SHA ancestry on default branch returned invalid ancestry state',
+    });
+    expect(failures[1]).toMatchObject({
+      _tag: 'GithubApiError',
+      message:
+        'Reconfirming release SHA ancestry on default branch: HTTP 409 branch moved',
     });
   });
 });

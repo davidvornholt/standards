@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import process from 'node:process';
+import { isMissingFilesystemError } from './sync-filesystem-error';
 
 const BOOT_ID_PATH = '/proc/sys/kernel/random/boot_id';
 const BOOT_ID =
@@ -108,7 +109,7 @@ export const inspectLinuxProcessIdentity = (
   try {
     startTime = parseLinuxProcStatStartTime(read(`/proc/${pid}/stat`), pid);
   } catch (error) {
-    return errorCode(error) === 'ENOENT' || errorCode(error) === 'ESRCH'
+    return isMissingFilesystemError(error) || errorCode(error) === 'ESRCH'
       ? 'dead'
       : 'indeterminate';
   }

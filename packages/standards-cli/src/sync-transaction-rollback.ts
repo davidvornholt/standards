@@ -42,6 +42,3 @@ export const rollbackJournal = async ({
   }
   return errors;
 };
-
-export const isMissingFilesystemError = (error: unknown): boolean =>
-  (error as { readonly code?: unknown }).code === 'ENOENT';

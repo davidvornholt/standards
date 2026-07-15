@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { lstat, realpath } from 'node:fs/promises';
 import { gitChildEnvironment } from './git-child-environment';
 import type { RepositoryRoot } from './sync-filesystem';
+import { isMissingFilesystemError } from './sync-filesystem-error';
 import {
   type GitExcludeUpdateHooks,
   updatePinnedGitExclude,
@@ -95,7 +96,7 @@ export const ensureGitRecoveryArtifactsExcluded = async (
       throw new Error('Git metadata entry must be a file or directory');
     }
   } catch (error) {
-    if ((error as { readonly code?: unknown }).code === 'ENOENT') {
+    if (isMissingFilesystemError(error)) {
       await assertRepositoryRootUnchanged(root);
       return;
     }

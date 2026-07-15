@@ -5,6 +5,7 @@ import {
   type PinnedDirectory,
 } from './sync-directory-handles';
 import { identitiesMatch } from './sync-filesystem';
+import { isMissingFilesystemError } from './sync-filesystem-error';
 import { bindAndRemoveEntry } from './sync-transaction-bound-remove';
 import { findRemovalBinding } from './sync-transaction-quarantine-read';
 import {
@@ -26,7 +27,7 @@ const assertReservedIdentity = async (
       ({ identity } = current);
       await current.handle.close();
     } catch (error) {
-      if ((error as { readonly code?: unknown }).code !== 'ENOENT') {
+      if (!isMissingFilesystemError(error)) {
         throw error;
       }
     }

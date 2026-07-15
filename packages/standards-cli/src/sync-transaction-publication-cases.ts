@@ -1,4 +1,5 @@
 import type { PinnedDirectory } from './sync-directory-handles';
+import { isMissingFilesystemError } from './sync-filesystem-error';
 import {
   assertTransactionDirectoryEmpty,
   removeOwnedTransaction,
@@ -33,16 +34,13 @@ import {
   TRANSACTION_OWNER,
 } from './sync-transaction-types';
 
-const missing = (error: unknown): boolean =>
-  (error as { readonly code?: unknown }).code === 'ENOENT';
-
 const optionalOwner = async (
   transaction: PinnedDirectory,
 ): Promise<TransactionOwner | null> => {
   try {
     return await readTransactionOwner(transaction);
   } catch (error) {
-    if (missing(error)) {
+    if (isMissingFilesystemError(error)) {
       return null;
     }
     throw error;

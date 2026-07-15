@@ -12,6 +12,7 @@ import {
   identityOf,
   type NodeIdentity,
 } from './sync-filesystem';
+import { isMissingFilesystemError } from './sync-filesystem-error';
 import {
   type ExpectedFile,
   effectiveMode,
@@ -36,9 +37,6 @@ export type StagedWrite = {
 
 const FILE_TYPE_MODE_BASE = 0o1000;
 
-const isMissing = (error: unknown): boolean =>
-  (error as { readonly code?: unknown }).code === 'ENOENT';
-
 const statesMatch = (left: FileState, right: FileState): boolean =>
   identitiesMatch(left.identity, right.identity) &&
   left.mode === right.mode &&
@@ -57,7 +55,7 @@ export const inspectPinnedFile = async (
       constants.O_RDONLY + constants.O_NOFOLLOW + constants.O_NONBLOCK,
     );
   } catch (error) {
-    if (isMissing(error)) {
+    if (isMissingFilesystemError(error)) {
       return { contents: null, identity: null, mode: null };
     }
     throw error;

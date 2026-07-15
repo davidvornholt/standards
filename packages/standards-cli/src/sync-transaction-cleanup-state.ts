@@ -3,14 +3,12 @@ import {
   type PinnedDirectory,
 } from './sync-directory-handles';
 import type { RepositoryRoot } from './sync-filesystem';
+import { isMissingFilesystemError } from './sync-filesystem-error';
 import { scavengeDurableCleanup } from './sync-transaction-cleanup';
 import { openRemovalBindingDirectory } from './sync-transaction-quarantine-read';
 import type { TransactionReservation } from './sync-transaction-reservation';
 import { reservationIdentity } from './sync-transaction-reservation-record';
 import { TRANSACTION_CLEANUP } from './sync-transaction-types';
-
-const missing = (error: unknown): boolean =>
-  (error as { readonly code?: unknown }).code === 'ENOENT';
 
 export const hasCompletedCleanup = async (
   root: PinnedDirectory,
@@ -20,7 +18,7 @@ export const hasCompletedCleanup = async (
     await cleanup.handle.close();
     return true;
   } catch (error) {
-    if (missing(error)) {
+    if (isMissingFilesystemError(error)) {
       return false;
     }
     throw error;
@@ -36,7 +34,7 @@ export const scavengeCompletedCleanup = async (
   try {
     cleanup = await openPinnedChild(rootDirectory, TRANSACTION_CLEANUP);
   } catch (error) {
-    if (!missing(error)) {
+    if (!isMissingFilesystemError(error)) {
       throw error;
     }
     const bound = await openRemovalBindingDirectory(

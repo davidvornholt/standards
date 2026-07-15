@@ -5,10 +5,8 @@ import {
 } from './sync-directory-handles';
 import { pinTarget } from './sync-directory-traversal';
 import type { NodeIdentity, RepositoryRoot } from './sync-filesystem';
+import { isMissingFilesystemError } from './sync-filesystem-error';
 import { openRemovalBindingDirectory } from './sync-transaction-quarantine-read';
-
-const missing = (error: unknown): boolean =>
-  (error as { readonly code?: unknown }).code === 'ENOENT';
 
 export const openCreatedParent = async (
   root: RepositoryRoot,
@@ -29,7 +27,7 @@ export const openCreatedParent = async (
       root,
     });
   } catch (error) {
-    if (missing(error)) {
+    if (isMissingFilesystemError(error)) {
       return { directory: null, target: null };
     }
     throw error;
@@ -39,7 +37,7 @@ export const openCreatedParent = async (
     opened.push(directory);
     return { directory, target };
   } catch (error) {
-    if (missing(error)) {
+    if (isMissingFilesystemError(error)) {
       if (expected === undefined) {
         return { directory: null, target };
       }

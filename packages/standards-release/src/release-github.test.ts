@@ -15,7 +15,7 @@ import {
 
 const HTTP_FORBIDDEN = 403;
 const HTTP_CREATED = 201;
-const AUTHORIZATION_REQUESTS = 3;
+const AUTHORIZATION_REQUESTS = 4;
 
 describe('GitHub release boundary', () => {
   it('preflights absent and exact existing remote states', async () => {
@@ -45,6 +45,7 @@ describe('GitHub release boundary', () => {
       'GET /repos/owner/repo',
       'GET /repos/owner/repo/compare/expected...main',
       'GET /repos/owner/repo',
+      'GET /repos/owner/repo/compare/expected...main',
     ]);
     expect(
       state.calls.slice(createRelease - AUTHORIZATION_REQUESTS, createRelease),
@@ -52,6 +53,7 @@ describe('GitHub release boundary', () => {
       'GET /repos/owner/repo',
       'GET /repos/owner/repo/compare/expected...main',
       'GET /repos/owner/repo',
+      'GET /repos/owner/repo/compare/expected...main',
     ]);
     expect(state.calls.slice(createTag + 1, createRelease)).toContain(
       'GET /repos/owner/repo/git/ref/tags/v0.5.0',

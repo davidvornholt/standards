@@ -3,6 +3,7 @@ import {
   type PinnedDirectory,
 } from './sync-directory-handles';
 import type { RepositoryRoot } from './sync-filesystem';
+import { isMissingFilesystemError } from './sync-filesystem-error';
 import { removeOwnedTransaction } from './sync-transaction-artifact-cleanup';
 import { transactionPublicationId } from './sync-transaction-artifact-names';
 import { unpublishedArtifactNames } from './sync-transaction-artifact-policy';
@@ -16,7 +17,6 @@ import {
   assertTransactionReservation,
   readTransactionReservation,
   removeTransactionReservation,
-  reservationMissing,
   type TransactionReservation,
 } from './sync-transaction-reservation';
 import { TRANSACTION_RESERVATION } from './sync-transaction-types';
@@ -84,7 +84,7 @@ export const optionalTransactionReservation = async (
   try {
     return await readTransactionReservation(root);
   } catch (error) {
-    if (reservationMissing(error)) {
+    if (isMissingFilesystemError(error)) {
       return null;
     }
     throw error;

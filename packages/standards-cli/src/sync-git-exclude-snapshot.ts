@@ -9,11 +9,10 @@ import {
   identityOf,
   type NodeIdentity,
 } from './sync-filesystem';
+import { isMissingFilesystemError } from './sync-filesystem-error';
 
 const FILE_TYPE_MODE_BASE = 0o1000;
 const DECIMAL_RADIX = 10;
-const missing = (error: unknown): boolean =>
-  (error as { readonly code?: unknown }).code === 'ENOENT';
 
 export type GitExcludeSnapshot = {
   readonly contents: string;
@@ -32,7 +31,7 @@ export const readGitExclude = async (
       constants.O_RDONLY + constants.O_NOFOLLOW + constants.O_NONBLOCK,
     );
   } catch (error) {
-    if (missing(error)) {
+    if (isMissingFilesystemError(error)) {
       return null;
     }
     throw new Error('Git recovery-artifact exclusion target must be real', {

@@ -68,30 +68,26 @@ const readDefaultBranch = (client: GithubClient) =>
     return repository.default_branch;
   });
 
-export const authorizeReleaseSha = (
-  input: GithubConnectionInput & { readonly expectedSha: string },
-) =>
+const assertReleaseShaAncestor = (input: {
+  readonly client: GithubClient;
+  readonly defaultBranch: string;
+  readonly expectedSha: string;
+  readonly operation: string;
+}) =>
   gen(function* () {
-    const client = githubClientFrom(input);
-    const defaultBranch = yield* readDefaultBranch(client);
-
     const base = encodeURIComponent(input.expectedSha);
-    const head = encodeURIComponent(defaultBranch);
+    const head = encodeURIComponent(input.defaultBranch);
     const comparisonResponse = yield* get(
-      client,
-      `/repos/${client.repo}/compare/${base}...${head}`,
-    ).pipe(
-      flatMap((response) =>
-        requireOk('Comparing release SHA to default branch', response),
-      ),
-    );
+      input.client,
+      `/repos/${input.client.repo}/compare/${base}...${head}`,
+    ).pipe(flatMap((response) => requireOk(input.operation, response)));
     const comparison = yield* decodeUnknown(comparisonSchema)(
       comparisonResponse.body,
     ).pipe(
       mapError(
         () =>
           new GithubApiError({
-            message: 'GitHub comparison returned invalid ancestry state',
+            message: `${input.operation} returned invalid ancestry state`,
           }),
       ),
     );
@@ -101,10 +97,24 @@ export const authorizeReleaseSha = (
     if (!isAncestor) {
       return yield* fail(
         new GithubStateError({
-          message: `Release SHA ${input.expectedSha} is not an ancestor of live default branch ${defaultBranch}`,
+          message: `Release SHA ${input.expectedSha} is not an ancestor of live default branch ${input.defaultBranch}`,
         }),
       );
     }
+  });
+
+export const authorizeReleaseSha = (
+  input: GithubConnectionInput & { readonly expectedSha: string },
+) =>
+  gen(function* () {
+    const client = githubClientFrom(input);
+    const defaultBranch = yield* readDefaultBranch(client);
+    yield* assertReleaseShaAncestor({
+      client,
+      defaultBranch,
+      expectedSha: input.expectedSha,
+      operation: 'Comparing release SHA to default branch',
+    });
     const confirmedDefaultBranch = yield* readDefaultBranch(client);
     if (confirmedDefaultBranch !== defaultBranch) {
       return yield* fail(
@@ -113,5 +123,11 @@ export const authorizeReleaseSha = (
         }),
       );
     }
+    yield* assertReleaseShaAncestor({
+      client,
+      defaultBranch: confirmedDefaultBranch,
+      expectedSha: input.expectedSha,
+      operation: 'Reconfirming release SHA ancestry on default branch',
+    });
     return defaultBranch;
   });

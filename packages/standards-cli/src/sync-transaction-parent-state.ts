@@ -5,18 +5,15 @@ import {
   type PinnedDirectory,
 } from './sync-directory-handles';
 import { identityOf, type NodeIdentity } from './sync-filesystem';
+import { isMissingFilesystemError } from './sync-filesystem-error';
 import { resolveRemovalEntryName } from './sync-transaction-quarantine-read';
 import {
   assertTransactionReservation,
   type ParentCleanupReservation,
   readTransactionReservation,
-  reservationMissing,
   type TransactionReservation,
 } from './sync-transaction-reservation';
 import type { TransactionJournal } from './sync-transaction-types';
-
-const missing = (error: unknown): boolean =>
-  (error as { readonly code?: unknown }).code === 'ENOENT';
 
 export const createdParentMarkerName = (id: string): string =>
   `.standards-parent-${id}`;
@@ -36,7 +33,7 @@ export const createdParentMarkerIdentity = async (
       constants.O_RDONLY + constants.O_NOFOLLOW + constants.O_NONBLOCK,
     );
   } catch (error) {
-    if (missing(error)) {
+    if (isMissingFilesystemError(error)) {
       return null;
     }
     throw error;
@@ -70,7 +67,7 @@ export const readParentCleanupReservation = async (
   try {
     reservation = await readTransactionReservation(root);
   } catch (error) {
-    if (reservationMissing(error)) {
+    if (isMissingFilesystemError(error)) {
       return null;
     }
     throw error;

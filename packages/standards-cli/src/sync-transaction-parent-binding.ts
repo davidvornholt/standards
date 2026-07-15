@@ -5,6 +5,7 @@ import {
   type PinnedDirectory,
 } from './sync-directory-handles';
 import { identitiesMatch, type NodeIdentity } from './sync-filesystem';
+import { isMissingFilesystemError } from './sync-filesystem-error';
 import { publishAtomicTransactionRecord } from './sync-transaction-atomic-record';
 import { removeBoundAtomicPartialTails } from './sync-transaction-atomic-recovery';
 import { resolveRemovalEntryName } from './sync-transaction-quarantine-read';
@@ -19,8 +20,6 @@ import {
 
 const MAX_BYTES = 8192;
 const VERSION = 1;
-const missing = (error: unknown): boolean =>
-  (error as { readonly code?: unknown }).code === 'ENOENT';
 
 export type CreatedParentBinding = {
   readonly file: NodeIdentity;
@@ -92,7 +91,7 @@ const readBinding = async (
       constants.O_RDONLY + constants.O_NOFOLLOW + constants.O_NONBLOCK,
     );
   } catch (error) {
-    if (missing(error)) {
+    if (isMissingFilesystemError(error)) {
       return null;
     }
     throw error;

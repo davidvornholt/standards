@@ -4,6 +4,14 @@ import { reconcileGithubRelease } from './release-github';
 import { input, remote } from './release-github-test-fixture';
 
 const MALFORMED_BRANCH = 7;
+const MERGE_BASE_COMMIT = 'merge_base_commit';
+const DIVERGED_COMPARISON = {
+  body: {
+    [MERGE_BASE_COMMIT]: { sha: 'other' },
+    status: 'diverged',
+  },
+  status: 200,
+} as const;
 
 it('fails closed when either GitHub mutation loses fresh authorization', async () => {
   const beforeTag = remote(
@@ -71,4 +79,29 @@ it('fails closed when either mutation sees a renamed or malformed trailing ident
       'POST /repos/owner/repo/releases',
     );
   }
+});
+
+it('fails closed when either mutation sees same-name head divergence', async () => {
+  const beforeTag = remote(
+    { release: 'absent', tagSha: null },
+    { authorizationTrailingComparisons: [DIVERGED_COMPARISON] },
+  );
+  expect(
+    await runPromise(flip(reconcileGithubRelease(input(beforeTag.fetcher)))),
+  ).toMatchObject({ _tag: 'GithubStateError' });
+  expect(beforeTag.calls).not.toContain('POST /repos/owner/repo/git/refs');
+
+  const beforeRelease = remote(
+    { release: 'absent', tagSha: null },
+    {
+      authorizationTrailingComparisons: [undefined, DIVERGED_COMPARISON],
+    },
+  );
+  expect(
+    await runPromise(
+      flip(reconcileGithubRelease(input(beforeRelease.fetcher))),
+    ),
+  ).toMatchObject({ _tag: 'GithubStateError' });
+  expect(beforeRelease.calls).toContain('POST /repos/owner/repo/git/refs');
+  expect(beforeRelease.calls).not.toContain('POST /repos/owner/repo/releases');
 });

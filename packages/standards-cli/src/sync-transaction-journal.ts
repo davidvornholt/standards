@@ -4,6 +4,7 @@ import {
   directoryEntryPath,
   type PinnedDirectory,
 } from './sync-directory-handles';
+import { isMissingFilesystemError } from './sync-filesystem-error';
 import { publishAtomicTransactionRecord } from './sync-transaction-atomic-record';
 import { parseJournal } from './sync-transaction-journal-parser';
 import { resolveRemovalEntryName } from './sync-transaction-quarantine-read';
@@ -15,8 +16,6 @@ import {
 } from './sync-transaction-types';
 
 const MAX_JOURNAL_BYTES = 1_048_576;
-const missing = (error: unknown): boolean =>
-  (error as { readonly code?: unknown }).code === 'ENOENT';
 
 const readRegularEntry = async (
   directory: PinnedDirectory,
@@ -101,7 +100,7 @@ export const hasCommittedMarker = async (
   readRegularEntry(transaction, TRANSACTION_COMMITTED, 0)
     .then(() => true)
     .catch((error: unknown) => {
-      if (missing(error)) {
+      if (isMissingFilesystemError(error)) {
         return false;
       }
       throw error;

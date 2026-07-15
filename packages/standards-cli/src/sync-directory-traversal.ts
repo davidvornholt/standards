@@ -10,10 +10,9 @@ import {
   syncPinnedDirectory,
 } from './sync-directory-handles';
 import type { RepositoryRoot } from './sync-filesystem';
+import { isMissingFilesystemError } from './sync-filesystem-error';
 import type { MutationFault } from './sync-transaction-types';
 
-const isMissing = (error: unknown): boolean =>
-  (error as { readonly code?: unknown }).code === 'ENOENT';
 const alreadyExists = (error: unknown): boolean =>
   (error as { readonly code?: unknown }).code === 'EEXIST';
 const noFault: MutationFault = () => Promise.resolve();
@@ -37,7 +36,7 @@ const openOrCreateChild = async ({
   try {
     return { child: await openPinnedChild(parent, name), created: false };
   } catch (openError) {
-    if (!(create && isMissing(openError))) {
+    if (!(create && isMissingFilesystemError(openError))) {
       throw openError;
     }
     let child: PinnedDirectory | undefined;

@@ -55,6 +55,7 @@
     "src/sync-directory-handles.ts",
     "src/sync-directory-traversal.ts",
     "src/sync-descriptor-write.ts",
+    "src/sync-filesystem-error.ts",
     "src/sync-filesystem.ts",
     "src/sync-git-exclude-filesystem.ts",
     "src/sync-git-exclude-snapshot.ts",

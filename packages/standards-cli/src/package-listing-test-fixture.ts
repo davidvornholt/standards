@@ -34,6 +34,7 @@ export const expectedPackedFiles = [
   'package/src/sync-descriptor-write.ts',
   'package/src/sync-directory-handles.ts',
   'package/src/sync-directory-traversal.ts',
+  'package/src/sync-filesystem-error.ts',
   'package/src/sync-filesystem.ts',
   'package/src/sync-git-exclude-filesystem.ts',
   'package/src/sync-git-exclude-snapshot.ts',

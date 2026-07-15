@@ -9,13 +9,12 @@ import {
 } from './sync-directory-handles';
 import type { NodeIdentity } from './sync-filesystem';
 import { identitiesMatch, identityOf } from './sync-filesystem';
+import { isMissingFilesystemError } from './sync-filesystem-error';
 import { linkDescriptorNoReplace } from './sync-linux-link';
 import { atomicRecordTemporaryName } from './sync-transaction-artifact-names';
 import { bindAndRemoveEntry } from './sync-transaction-bound-remove';
 
 const PRIVATE_MODE = 0o600;
-const missing = (error: unknown): boolean =>
-  (error as { readonly code?: unknown }).code === 'ENOENT';
 
 export const publishAtomicTransactionRecord = async ({
   afterFinalSync,
@@ -169,7 +168,7 @@ const cleanupTemporary = async (
   try {
     await bindAndRemoveEntry({ directory, expected, kind: 'file', name });
   } catch (error) {
-    if (missing(error)) {
+    if (isMissingFilesystemError(error)) {
       return;
     }
     throw error;

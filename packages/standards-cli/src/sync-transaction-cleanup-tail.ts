@@ -4,6 +4,7 @@ import {
   type PinnedDirectory,
 } from './sync-directory-handles';
 import type { RepositoryRoot } from './sync-filesystem';
+import { isMissingFilesystemError } from './sync-filesystem-error';
 import { removeOwnedTransactionDurably } from './sync-transaction-durable-cleanup';
 import {
   assertTransactionOwner,
@@ -17,9 +18,6 @@ import {
 import type { CleanupReservation } from './sync-transaction-reservation';
 import { TRANSACTION_OWNER } from './sync-transaction-types';
 
-const missing = (error: unknown): boolean =>
-  (error as { readonly code?: unknown }).code === 'ENOENT';
-
 const optionalOwner = async (
   root: RepositoryRoot,
   transaction: PinnedDirectory,
@@ -32,7 +30,7 @@ const optionalOwner = async (
       throw new Error('Transaction owner does not match cleanup reservation');
     }
   } catch (error) {
-    if (!missing(error)) {
+    if (!isMissingFilesystemError(error)) {
       throw error;
     }
   }

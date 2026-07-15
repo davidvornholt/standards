@@ -10,14 +10,12 @@ import {
   identityOf,
   type NodeIdentity,
 } from './sync-filesystem';
+import { isMissingFilesystemError } from './sync-filesystem-error';
 import { readQuarantineRecords } from './sync-transaction-quarantine-record';
 import {
   type QuarantineRecord,
   quarantineEntryName,
 } from './sync-transaction-quarantine-schema';
-
-const missing = (error: unknown): boolean =>
-  (error as { readonly code?: unknown }).code === 'ENOENT';
 
 const inspectNamedEntry = async (
   directory: PinnedDirectory,
@@ -35,7 +33,7 @@ const inspectNamedEntry = async (
         (record.kind === 'directory' ? constants.O_DIRECTORY : 0),
     );
   } catch (error) {
-    if (missing(error)) {
+    if (isMissingFilesystemError(error)) {
       return null;
     }
     throw error;
@@ -119,7 +117,7 @@ export const resolveRemovalEntryName = async (
       return name;
     }
   } catch (error) {
-    if (!missing(error)) {
+    if (!isMissingFilesystemError(error)) {
       throw error;
     }
   }

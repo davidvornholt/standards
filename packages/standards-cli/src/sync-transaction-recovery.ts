@@ -8,6 +8,7 @@ import {
 } from './sync-directory-handles';
 import { pinTarget } from './sync-directory-traversal';
 import { identitiesMatch, type RepositoryRoot } from './sync-filesystem';
+import { isMissingFilesystemError } from './sync-filesystem-error';
 import { parseStoredNodeIdentity } from './sync-node-identity';
 import {
   inspectLegacyProcess,
@@ -30,8 +31,6 @@ import {
 } from './sync-transaction-types';
 
 const noFault = () => Promise.resolve();
-const missing = (error: unknown): boolean =>
-  (error as { readonly code?: unknown }).code === 'ENOENT';
 
 const targetsForJournal = async (
   root: RepositoryRoot,
@@ -52,7 +51,9 @@ const targetsForJournal = async (
       });
       targets.set(operation.rel, target);
     } catch (error) {
-      if (!(missing(error) && operation.before.hash === null)) {
+      if (
+        !(isMissingFilesystemError(error) && operation.before.hash === null)
+      ) {
         throw error;
       }
     }

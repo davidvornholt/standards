@@ -6,6 +6,7 @@ import {
   syncPinnedDirectory,
 } from './sync-directory-handles';
 import { identitiesMatch } from './sync-filesystem';
+import { isMissingFilesystemError } from './sync-filesystem-error';
 import { renameDirectoryNoReplace } from './sync-linux-rename';
 import { removeOwnedTransaction } from './sync-transaction-artifact-cleanup';
 import { transactionPublicationName } from './sync-transaction-artifact-names';
@@ -27,9 +28,6 @@ import {
   TRANSACTION_OWNER,
 } from './sync-transaction-types';
 
-const missing = (error: unknown): boolean =>
-  (error as { readonly code?: unknown }).code === 'ENOENT';
-
 const assertTransactionAbsent = async (
   root: PinnedDirectory,
 ): Promise<void> => {
@@ -37,7 +35,7 @@ const assertTransactionAbsent = async (
     const existing = await openPinnedChild(root, TRANSACTION_DIRECTORY);
     await existing.handle.close();
   } catch (error) {
-    if (missing(error)) {
+    if (isMissingFilesystemError(error)) {
       return;
     }
     throw error;

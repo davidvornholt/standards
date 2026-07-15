@@ -3,6 +3,7 @@ import {
   type PinnedDirectory,
 } from './sync-directory-handles';
 import type { RepositoryRoot } from './sync-filesystem';
+import { isMissingFilesystemError } from './sync-filesystem-error';
 import { scavengeDurableCleanup } from './sync-transaction-cleanup';
 import {
   hasCompletedCleanup,
@@ -17,16 +18,13 @@ import {
 import type { TransactionReservation } from './sync-transaction-reservation';
 import { TRANSACTION_DIRECTORY } from './sync-transaction-types';
 
-const missing = (error: unknown): boolean =>
-  (error as { readonly code?: unknown }).code === 'ENOENT';
-
 const openTransaction = async (
   root: PinnedDirectory,
 ): Promise<PinnedDirectory | null> => {
   try {
     return await openPinnedChild(root, TRANSACTION_DIRECTORY);
   } catch (error) {
-    if (missing(error)) {
+    if (isMissingFilesystemError(error)) {
       return null;
     }
     throw error;

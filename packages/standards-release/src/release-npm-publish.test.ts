@@ -52,6 +52,7 @@ it('authorizes immediately inside the npm mutation owner', async () => {
     '/repos/owner/repo',
     '/repos/owner/repo/compare/expected...main',
     '/repos/owner/repo',
+    '/repos/owner/repo/compare/expected...main',
     'publish package.tgz',
   ]);
 });

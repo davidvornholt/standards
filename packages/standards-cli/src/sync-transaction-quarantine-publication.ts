@@ -8,6 +8,7 @@ import {
   syncPinnedDirectory,
 } from './sync-directory-handles';
 import type { NodeIdentity } from './sync-filesystem';
+import { isMissingFilesystemError } from './sync-filesystem-error';
 import { linkDescriptorNoReplace } from './sync-linux-link';
 import {
   readQuarantineRecordFile,
@@ -24,8 +25,6 @@ import {
 } from './sync-transaction-quarantine-schema';
 
 const PRIVATE_MODE = 0o600;
-const missing = (error: unknown): boolean =>
-  (error as { readonly code?: unknown }).code === 'ENOENT';
 
 const openExistingTail = async (
   directory: PinnedDirectory,
@@ -37,7 +36,7 @@ const openExistingTail = async (
       constants.O_RDONLY + constants.O_NOFOLLOW + constants.O_NONBLOCK,
     );
   } catch (error) {
-    if (missing(error)) {
+    if (isMissingFilesystemError(error)) {
       return null;
     }
     throw error;
