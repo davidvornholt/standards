@@ -5,8 +5,9 @@ import {
   parseStoredNodeIdentity,
   storedNodeIdentity,
 } from './sync-node-identity';
+import { REMOVAL_BINDING_PREFIX as TRANSACTION_REMOVAL_BINDING_PREFIX } from './sync-transaction-namespace';
 
-export const REMOVAL_BINDING_PREFIX = '.standards-removal-';
+export const REMOVAL_BINDING_PREFIX = TRANSACTION_REMOVAL_BINDING_PREFIX;
 const VERSION = 1;
 const TOKEN_LENGTH = 64;
 const NAME_MAX = 255;

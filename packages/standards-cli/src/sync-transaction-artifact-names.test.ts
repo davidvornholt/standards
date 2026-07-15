@@ -20,6 +20,7 @@ import {
 } from './sync-transaction-artifact-names';
 import { buildJournal } from './sync-transaction-build';
 import { parseJournal } from './sync-transaction-journal-parser';
+import { SYNC_LOCK_FILE } from './sync-transaction-namespace';
 import { recoverRepositoryTransactions } from './sync-transaction-recovery';
 import { TRANSACTION_RESERVATION } from './sync-transaction-types';
 
@@ -87,17 +88,14 @@ it('reserves only the documented fixed, prefix, and atomic artifact grammar', ()
 it('rejects exact tails from build and parsed write or delete operations', async () => {
   const rootPath = temporaryRoot();
   writeFixture(rootPath, EXACT, 'actor\n');
-  writeFixture(rootPath, 'sync-standards.lock', 'old lock\n');
+  writeFixture(rootPath, SYNC_LOCK_FILE, 'old lock\n');
   const root = await openRepositoryRoot(rootPath, 'consumer');
-  const states = await inspectRepositoryFiles(root, [
-    EXACT,
-    'sync-standards.lock',
-  ]);
+  const states = await inspectRepositoryFiles(root, [EXACT, SYNC_LOCK_FILE]);
   const lockWrite = {
-    before: requiredState(states, 'sync-standards.lock'),
+    before: requiredState(states, SYNC_LOCK_FILE),
     contents: Buffer.from('new lock\n'),
-    mode: requiredState(states, 'sync-standards.lock').mode,
-    rel: 'sync-standards.lock',
+    mode: requiredState(states, SYNC_LOCK_FILE).mode,
+    rel: SYNC_LOCK_FILE,
   };
   expect(() =>
     buildJournal({
@@ -115,6 +113,7 @@ it('rejects exact tails from build and parsed write or delete operations', async
     root,
     writes: [lockWrite],
   });
+  expect(parseJournal(JSON.stringify(journal)).lockRel).toBe(SYNC_LOCK_FILE);
   const [lock] = journal.operations;
   expect(() =>
     parseJournal(
@@ -125,12 +124,12 @@ it('rejects exact tails from build and parsed write or delete operations', async
 
 it('blocks an exact managed write and preserves a lookalike after recovery', async () => {
   const rootPath = temporaryRoot();
-  writeFixture(rootPath, 'sync-standards.lock', 'old lock\n');
+  writeFixture(rootPath, SYNC_LOCK_FILE, 'old lock\n');
   const root = await openRepositoryRoot(rootPath, 'consumer');
   const states = await inspectRepositoryFiles(root, [
     EXACT,
     LOOKALIKE,
-    'sync-standards.lock',
+    SYNC_LOCK_FILE,
   ]);
   const plan = (rel: string) => ({
     deletes: [],
@@ -144,10 +143,10 @@ it('blocks an exact managed write and preserves a lookalike after recovery', asy
         rel,
       },
       {
-        before: requiredState(states, 'sync-standards.lock'),
+        before: requiredState(states, SYNC_LOCK_FILE),
         contents: Buffer.from('new lock\n'),
-        mode: requiredState(states, 'sync-standards.lock').mode,
-        rel: 'sync-standards.lock',
+        mode: requiredState(states, SYNC_LOCK_FILE).mode,
+        rel: SYNC_LOCK_FILE,
       },
     ],
   });
@@ -158,5 +157,5 @@ it('blocks an exact managed write and preserves a lookalike after recovery', asy
   await applyRepositoryMutations(plan(LOOKALIKE));
   await recoverRepositoryTransactions(root);
   expect(readFixture(rootPath, LOOKALIKE)).toBe('managed\n');
-  expect(readFixture(rootPath, 'sync-standards.lock')).toBe('new lock\n');
+  expect(readFixture(rootPath, SYNC_LOCK_FILE)).toBe('new lock\n');
 });

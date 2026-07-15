@@ -10,6 +10,7 @@ import {
   journalRecord as record,
   journalString as stringValue,
 } from './sync-transaction-journal-operation';
+import { SYNC_LOCK_FILE } from './sync-transaction-namespace';
 import {
   assertJournalSemantics,
   JOURNAL_VERSION,
@@ -45,7 +46,7 @@ export const parseJournal = (contents: string): TransactionJournal => {
   const operations = value.operations.map((operation, index) =>
     journalOperation(operation, index, allowLegacyIdentity),
   );
-  if (value.lockRel !== 'sync-standards.lock') {
+  if (value.lockRel !== SYNC_LOCK_FILE) {
     throw new Error('transaction journal lockRel is invalid');
   }
   const rels = operations.map(({ rel }) => rel);
@@ -75,7 +76,7 @@ export const parseJournal = (contents: string): TransactionJournal => {
   const base = {
     createdParents,
     id,
-    lockRel: 'sync-standards.lock' as const,
+    lockRel: SYNC_LOCK_FILE as typeof SYNC_LOCK_FILE,
     operations,
     ownerPid: Number(ownerPid),
     root: { dev, ino },
@@ -89,7 +90,7 @@ export const parseJournal = (contents: string): TransactionJournal => {
   return {
     createdParents,
     id,
-    lockRel: 'sync-standards.lock',
+    lockRel: SYNC_LOCK_FILE,
     operations,
     ownerPid: Number(ownerPid),
     ownerProcess: parseStoredLinuxProcessIdentity(value.ownerProcess),

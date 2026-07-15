@@ -11,12 +11,12 @@ import {
   assertFilesystemIdentityComponent,
   type NodeIdentity,
 } from './sync-node-identity';
+import { TRANSACTION_OWNER_PUBLICATION_PREFIX } from './sync-transaction-namespace';
 import { resolveRemovalEntryName } from './sync-transaction-quarantine-read';
-import { TRANSACTION_OWNER_PUBLICATION_PREFIX } from './sync-transaction-types';
 
 const PRIVATE_MODE = 0o600;
-const TOKEN =
-  /^\.standards-owner-publication-(?<id>[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})-(?<dev>\d+)-(?<ino>\d+)(?:-(?<ownerDev>\d+)-(?<ownerIno>\d+))?$/u;
+const TOKEN_TAIL =
+  /^(?<id>[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})-(?<dev>\d+)-(?<ino>\d+)(?:-(?<ownerDev>\d+)-(?<ownerIno>\d+))?$/u;
 
 const tokenIdentity = (dev: string, ino: string): NodeIdentity => ({
   dev: assertFilesystemIdentityComponent(
@@ -120,8 +120,9 @@ export const findOwnerPublicationTokenEntry = async (
     throw new Error('Repository has multiple owner publication tokens');
   }
   const name = candidates[0] as string;
-  const match = TOKEN.exec(name);
-  const groups = match?.groups;
+  const groups = TOKEN_TAIL.exec(
+    name.slice(TRANSACTION_OWNER_PUBLICATION_PREFIX.length),
+  )?.groups;
   if (groups === undefined) {
     throw new Error('Owner publication token is invalid');
   }

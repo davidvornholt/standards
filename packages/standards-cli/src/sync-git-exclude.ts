@@ -8,28 +8,11 @@ import {
   updatePinnedGitExclude,
 } from './sync-git-exclude-filesystem';
 import { assertRepositoryRootUnchanged } from './sync-repository-root-generation';
+import { GIT_RECOVERY_ARTIFACT_EXCLUDES as TRANSACTION_ARTIFACT_EXCLUDES } from './sync-transaction-namespace';
 
 const BLOCK_BEGIN = '# BEGIN @davidvornholt/standards recovery artifacts';
 const BLOCK_END = '# END @davidvornholt/standards recovery artifacts';
-const HEX = '[0-9a-f]';
-const THREE_HEX = `${HEX}${HEX}${HEX}`;
-const FOUR_HEX = `${THREE_HEX}${HEX}`;
-const EIGHT_HEX = `${FOUR_HEX}${FOUR_HEX}`;
-const TWELVE_HEX = `${EIGHT_HEX}${FOUR_HEX}`;
-const UUID_V4_GITIGNORE = `${EIGHT_HEX}-${FOUR_HEX}-4${THREE_HEX}-[89ab]${THREE_HEX}-${TWELVE_HEX}`;
-
-export const GIT_RECOVERY_ARTIFACT_EXCLUDES = [
-  '.standards-transaction',
-  '.standards-transaction-cleanup',
-  '.standards-transaction-owner-reservation',
-  '.standards-transaction-reservation',
-  `.standards-transaction-reservation.${UUID_V4_GITIGNORE}.tmp`,
-  `OWNER.${UUID_V4_GITIGNORE}.tmp`,
-  '.standards-transaction-publication-*',
-  '.standards-owner-publication-*',
-  '.standards-parent-*',
-  '.standards-removal-*',
-] as const;
+export const GIT_RECOVERY_ARTIFACT_EXCLUDES = TRANSACTION_ARTIFACT_EXCLUDES;
 
 const exclusionBlock = [
   BLOCK_BEGIN,

@@ -12,6 +12,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FileState } from './sync-filesystem';
+import { REMOVAL_BINDING_PREFIX } from './sync-transaction-namespace';
 import { TRANSACTION_OWNER } from './sync-transaction-types';
 
 const roots: Array<string> = [];
@@ -40,7 +41,7 @@ export const transactionArtifacts = (root: string): ReadonlyArray<string> =>
     .filter(
       (name) =>
         name.startsWith('.standards-') &&
-        !name.startsWith('.standards-removal-'),
+        !name.startsWith(REMOVAL_BINDING_PREFIX),
     )
     .sort();
 

@@ -1,6 +1,7 @@
 import { LOCAL_SETTINGS_FILE } from './github-api';
 import { SYNC_POLICY_FILE } from './sync-policy';
 import { isReservedTransactionPath } from './sync-transaction-artifact-names';
+import { SYNC_LOCK_FILE as TRANSACTION_SYNC_LOCK_FILE } from './sync-transaction-namespace';
 
 export const REPOSITORY_OWNED_CONTROL_SEAMS = [
   LOCAL_SETTINGS_FILE,
@@ -9,7 +10,7 @@ export const REPOSITORY_OWNED_CONTROL_SEAMS = [
   SYNC_POLICY_FILE,
 ] as const;
 
-export const SYNC_LOCK_FILE = 'sync-standards.lock';
+export const SYNC_LOCK_FILE = TRANSACTION_SYNC_LOCK_FILE;
 
 export type ReservedSyncTarget = {
   readonly kind:

@@ -1,42 +1,29 @@
-import { REMOVAL_BINDING_PREFIX } from './sync-transaction-quarantine-schema';
 import {
+  REMOVAL_BINDING_PREFIX,
+  RESERVED_TRANSACTION_ARTIFACT_GRAMMAR as TRANSACTION_ARTIFACT_GRAMMAR,
   TRANSACTION_CLEANUP,
   TRANSACTION_DIRECTORY,
   TRANSACTION_OWNER,
   TRANSACTION_OWNER_PUBLICATION_PREFIX,
   TRANSACTION_OWNER_RESERVATION,
   TRANSACTION_PARENT_BINDING_PREFIX,
+  TRANSACTION_PARENT_PREFIX,
   TRANSACTION_PUBLICATION_PREFIX,
   TRANSACTION_RESERVATION,
-} from './sync-transaction-types';
+} from './sync-transaction-namespace';
+
+export const RESERVED_TRANSACTION_ARTIFACT_GRAMMAR =
+  TRANSACTION_ARTIFACT_GRAMMAR;
 
 const UUID_V4_SOURCE =
   '[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
 const UUID_V4 = new RegExp(`^${UUID_V4_SOURCE}$`, 'u');
+const regexEscape = (value: string): string =>
+  value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
 const PARENT_BINDING_TAIL = new RegExp(
-  `^\\.standards-parent-binding-${UUID_V4_SOURCE}-(?:0|[1-9]\\d*)\\.${UUID_V4_SOURCE}\\.tmp$`,
+  `^${regexEscape(TRANSACTION_PARENT_BINDING_PREFIX)}${UUID_V4_SOURCE}-(?:0|[1-9]\\d*)\\.${UUID_V4_SOURCE}\\.tmp$`,
   'u',
 );
-
-export const RESERVED_TRANSACTION_ARTIFACT_GRAMMAR = {
-  atomicTails: [
-    `${TRANSACTION_RESERVATION}.<uuid-v4>.tmp`,
-    `${TRANSACTION_OWNER}.<uuid-v4>.tmp`,
-    '.standards-parent-binding-<transaction-uuid-v4>-<index>.<write-uuid-v4>.tmp',
-  ],
-  fixedNames: [
-    TRANSACTION_DIRECTORY,
-    TRANSACTION_CLEANUP,
-    TRANSACTION_OWNER_RESERVATION,
-    TRANSACTION_RESERVATION,
-  ],
-  prefixFamilies: [
-    `${TRANSACTION_PUBLICATION_PREFIX}*`,
-    `${TRANSACTION_OWNER_PUBLICATION_PREFIX}*`,
-    '.standards-parent-*',
-    `${REMOVAL_BINDING_PREFIX}*`,
-  ],
-} as const;
 
 export const isUuidV4 = (value: string): boolean => UUID_V4.test(value);
 
@@ -100,5 +87,5 @@ export const isReservedTransactionPath = (rel: string): boolean =>
         part.startsWith(TRANSACTION_PARENT_BINDING_PREFIX) ||
         part.startsWith(TRANSACTION_PUBLICATION_PREFIX) ||
         part.startsWith(REMOVAL_BINDING_PREFIX) ||
-        part.startsWith('.standards-parent-'),
+        part.startsWith(TRANSACTION_PARENT_PREFIX),
     );

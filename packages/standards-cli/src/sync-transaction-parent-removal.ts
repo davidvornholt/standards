@@ -4,6 +4,7 @@ import {
   syncPinnedDirectory,
 } from './sync-directory-handles';
 import { bindAndRemoveEntry } from './sync-transaction-bound-remove';
+import { TRANSACTION_PARENT_PREFIX } from './sync-transaction-namespace';
 import type { CreatedParentBinding } from './sync-transaction-parent-binding';
 import { removeParentBinding } from './sync-transaction-parent-binding-cleanup';
 import {
@@ -46,7 +47,7 @@ export const removeCreatedParent = async ({
       directory: rootDirectory,
       expected: markerIdentity,
       kind: 'file',
-      name: `.standards-parent-marker-${journal.id}-${index}`,
+      name: `${TRANSACTION_PARENT_PREFIX}marker-${journal.id}-${index}`,
       sourceDirectory: directory,
       sourceName: marker,
     });

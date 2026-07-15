@@ -7,21 +7,36 @@ import {
   type NodeIdentity,
 } from './sync-node-identity';
 import type { LinuxProcessIdentity } from './sync-process-identity';
+import {
+  TRANSACTION_CLEANUP as NAMESPACE_TRANSACTION_CLEANUP,
+  TRANSACTION_COMMITTED as NAMESPACE_TRANSACTION_COMMITTED,
+  TRANSACTION_DIRECTORY as NAMESPACE_TRANSACTION_DIRECTORY,
+  TRANSACTION_JOURNAL as NAMESPACE_TRANSACTION_JOURNAL,
+  TRANSACTION_JOURNAL_TEMP as NAMESPACE_TRANSACTION_JOURNAL_TEMP,
+  TRANSACTION_OWNER as NAMESPACE_TRANSACTION_OWNER,
+  TRANSACTION_OWNER_PUBLICATION_PREFIX as NAMESPACE_TRANSACTION_OWNER_PUBLICATION_PREFIX,
+  TRANSACTION_OWNER_RESERVATION as NAMESPACE_TRANSACTION_OWNER_RESERVATION,
+  TRANSACTION_PARENT_BINDING_PREFIX as NAMESPACE_TRANSACTION_PARENT_BINDING_PREFIX,
+  TRANSACTION_PUBLICATION_PREFIX as NAMESPACE_TRANSACTION_PUBLICATION_PREFIX,
+  TRANSACTION_RESERVATION as NAMESPACE_TRANSACTION_RESERVATION,
+  SYNC_LOCK_FILE,
+} from './sync-transaction-namespace';
 
-export const TRANSACTION_DIRECTORY = '.standards-transaction';
-export const TRANSACTION_CLEANUP = '.standards-transaction-cleanup';
-export const TRANSACTION_JOURNAL = 'journal.json';
-export const TRANSACTION_JOURNAL_TEMP = 'journal.json.tmp';
-export const TRANSACTION_OWNER = 'OWNER';
-export const TRANSACTION_OWNER_RESERVATION =
-  '.standards-transaction-owner-reservation';
+export const TRANSACTION_CLEANUP = NAMESPACE_TRANSACTION_CLEANUP;
+export const TRANSACTION_COMMITTED = NAMESPACE_TRANSACTION_COMMITTED;
+export const TRANSACTION_DIRECTORY = NAMESPACE_TRANSACTION_DIRECTORY;
+export const TRANSACTION_JOURNAL = NAMESPACE_TRANSACTION_JOURNAL;
+export const TRANSACTION_JOURNAL_TEMP = NAMESPACE_TRANSACTION_JOURNAL_TEMP;
+export const TRANSACTION_OWNER = NAMESPACE_TRANSACTION_OWNER;
 export const TRANSACTION_OWNER_PUBLICATION_PREFIX =
-  '.standards-owner-publication-';
-export const TRANSACTION_PARENT_BINDING_PREFIX = '.standards-parent-binding-';
+  NAMESPACE_TRANSACTION_OWNER_PUBLICATION_PREFIX;
+export const TRANSACTION_OWNER_RESERVATION =
+  NAMESPACE_TRANSACTION_OWNER_RESERVATION;
+export const TRANSACTION_PARENT_BINDING_PREFIX =
+  NAMESPACE_TRANSACTION_PARENT_BINDING_PREFIX;
 export const TRANSACTION_PUBLICATION_PREFIX =
-  '.standards-transaction-publication-';
-export const TRANSACTION_RESERVATION = '.standards-transaction-reservation';
-export const TRANSACTION_COMMITTED = 'COMMITTED';
+  NAMESPACE_TRANSACTION_PUBLICATION_PREFIX;
+export const TRANSACTION_RESERVATION = NAMESPACE_TRANSACTION_RESERVATION;
 export const LEGACY_JOURNAL_VERSION = 1;
 export const JOURNAL_VERSION = 2;
 
@@ -49,7 +64,7 @@ export type JournalOperation = {
 type TransactionJournalBase = {
   readonly createdParents: ReadonlyArray<string>;
   readonly id: string;
-  readonly lockRel: 'sync-standards.lock';
+  readonly lockRel: typeof SYNC_LOCK_FILE;
   readonly operations: ReadonlyArray<JournalOperation>;
   readonly ownerPid: number;
   readonly root: { readonly dev: string; readonly ino: string };
@@ -148,7 +163,7 @@ export const assertJournalSemantics = (
   operations: ReadonlyArray<JournalOperation>,
   createdParents: ReadonlyArray<string>,
 ): void => {
-  const lockOps = operations.filter(({ rel }) => rel === 'sync-standards.lock');
+  const lockOps = operations.filter(({ rel }) => rel === SYNC_LOCK_FILE);
   const finalOperation = operations.at(-1);
   if (
     lockOps.length !== 1 ||

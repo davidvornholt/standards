@@ -3,6 +3,7 @@ import { inspectRepositoryNode, type RepositoryRoot } from './sync-filesystem';
 import { captureLinuxProcessIdentity } from './sync-process-identity';
 import { isReservedTransactionPath } from './sync-transaction-artifact-names';
 import type { TransactionWrite } from './sync-transaction-files';
+import { SYNC_LOCK_FILE } from './sync-transaction-namespace';
 import type { TransactionDelete } from './sync-transaction-plan';
 import {
   effectiveMode,
@@ -45,10 +46,8 @@ export const buildJournal = ({
   readonly root: RepositoryRoot;
   readonly writes: ReadonlyArray<TransactionWrite>;
 }): TransactionJournal => {
-  const nonLockWrites = writes.filter(
-    ({ rel }) => rel !== 'sync-standards.lock',
-  );
-  const lockWrites = writes.filter(({ rel }) => rel === 'sync-standards.lock');
+  const nonLockWrites = writes.filter(({ rel }) => rel !== SYNC_LOCK_FILE);
+  const lockWrites = writes.filter(({ rel }) => rel === SYNC_LOCK_FILE);
   if (lockWrites.length !== 1) {
     throw new Error('Standards filesystem transaction requires one lock write');
   }
@@ -85,7 +84,7 @@ export const buildJournal = ({
   return {
     createdParents,
     id,
-    lockRel: 'sync-standards.lock',
+    lockRel: SYNC_LOCK_FILE,
     operations,
     ownerPid: process.pid,
     ownerProcess: captureLinuxProcessIdentity(),

@@ -86,6 +86,7 @@ export const expectedPackedFiles = [
   'package/src/sync-transaction-journal-operation.ts',
   'package/src/sync-transaction-journal-parser.ts',
   'package/src/sync-transaction-journal.ts',
+  'package/src/sync-transaction-namespace.ts',
   'package/src/sync-transaction-operation-artifact.ts',
   'package/src/sync-transaction-owner-reservation.ts',
   'package/src/sync-transaction-owner-token-cleanup.ts',

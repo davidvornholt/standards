@@ -349,7 +349,7 @@ const lockSeeds = (parsed: Record<string, unknown>): ReadonlySet<string> => {
 };
 
 const inspectLock = async (root: RepositoryRoot): Promise<LockInspection> => {
-  const state = await inspectRepositoryFile(root, 'sync-standards.lock');
+  const state = await inspectRepositoryFile(root, SYNC_LOCK_FILE);
   if (state.contents === null) {
     return { lock: null, state };
   }

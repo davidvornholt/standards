@@ -7,6 +7,7 @@ import {
 import { identityOf } from './sync-filesystem';
 import { isMissingFilesystemError } from './sync-filesystem-error';
 import type { NodeIdentity } from './sync-node-identity';
+import { TRANSACTION_PARENT_PREFIX } from './sync-transaction-namespace';
 import { resolveRemovalEntryName } from './sync-transaction-quarantine-read';
 import {
   assertTransactionReservation,
@@ -17,7 +18,7 @@ import {
 import type { TransactionJournal } from './sync-transaction-types';
 
 export const createdParentMarkerName = (id: string): string =>
-  `.standards-parent-${id}`;
+  `${TRANSACTION_PARENT_PREFIX}${id}`;
 
 export const createdParentMarkerIdentity = async (
   directory: PinnedDirectory,

@@ -1,4 +1,9 @@
 import { expect, it } from 'bun:test';
+import {
+  forbiddenClassifierSpecifiers,
+  readClassifierModuleClosure,
+} from './release-classifier-closure-test-fixture';
+import { inspectClassifierSource } from './release-classifier-closure-test-parser';
 import { file } from './release-runtime';
 
 const classifier = await file(
@@ -7,51 +12,99 @@ const classifier = await file(
 const classifierRuntime = await file(
   `${import.meta.dir}/../scripts/classify-release-runtime.ts`,
 ).text();
+const readModule = (module: URL): Promise<string> => file(module).text();
 
-const importSpecifiers = (source: string): ReadonlyArray<string> =>
-  [...source.matchAll(/from ['"](?<specifier>[^'"]+)['"]/gu)]
-    .map((match) => match.groups?.specifier)
-    .filter((specifier): specifier is string => specifier !== undefined);
+it('discovers every supported runtime and type-only module form', () => {
+  expect(
+    inspectClassifierSource(`
+      import type { Type } from 'type-package';
+      import 'side-effect-package';
+      export type { Reexport } from 'reexport-package';
+      type Imported = import('import-type-package').Imported;
+      await import('dynamic-package');
+      require('require-package');
+      require.resolve('resolved-package');
+    `).specifiers.toSorted(),
+  ).toEqual([
+    'dynamic-package',
+    'import-type-package',
+    'reexport-package',
+    'require-package',
+    'resolved-package',
+    'side-effect-package',
+    'type-package',
+  ]);
+});
 
-const readModuleClosure = async (
-  module: URL,
-  visited: Set<string>,
-): Promise<ReadonlyArray<string>> => {
-  if (visited.has(module.href)) {
-    return [];
+it('allows explicit built-ins and rejects third-party mutation forms', () => {
+  expect(
+    forbiddenClassifierSpecifiers([
+      "import 'node:fs/promises'; require('node:process');",
+    ]),
+  ).toEqual([]);
+  for (const [mutation, expected] of [
+    ["await import('bun');", 'bun'],
+    ["require('bun:ffi');", 'bun:ffi'],
+    ["import 'effect';", 'effect'],
+    ["await import('effect');", 'effect'],
+    ["require('effect');", 'effect'],
+    ["import type { Effect } from 'effect';", 'effect'],
+    ["type Effect = import('effect').Effect;", 'effect'],
+    ["await import(['eff', 'ect'].join(''));", 'effect'],
+  ] as const) {
+    expect(forbiddenClassifierSpecifiers([mutation])).toEqual([expected]);
   }
-  visited.add(module.href);
-  const source = await file(module).text();
-  const dependencies = importSpecifiers(source)
-    .filter((specifier) => specifier.startsWith('.'))
-    .map(
-      (specifier) =>
-        new URL(
-          specifier.endsWith('.ts') ? specifier : `${specifier}.ts`,
-          module,
-        ),
-    );
-  const descendants = await Promise.all(
-    dependencies.map((dependency) => readModuleClosure(dependency, visited)),
+});
+
+it('rejects opaque loaders without matching comments or strings', () => {
+  expect(
+    [
+      'await import(packageName);',
+      'require(packageName);',
+      'require.resolve(packageName);',
+      "require?.('effect');",
+    ].flatMap((source) => inspectClassifierSource(source).problems),
+  ).toEqual([
+    'import requires a statically known specifier',
+    'require requires a statically known specifier',
+    'require.resolve requires a statically known specifier',
+    'require uses unsupported syntax',
+  ]);
+  expect(
+    inspectClassifierSource(`
+      const example = "import('./ghost')";
+      // require('effect');
+    `),
+  ).toEqual({ problems: [], specifiers: [] });
+});
+
+it('traverses dynamic and relative type-only helpers', async () => {
+  const entry = new URL('file:///classifier.ts');
+  const sources = new Map([
+    [entry.href, "await import('./helper'); type T = import('./types').T;"],
+    ['file:///helper.ts', "import 'effect';"],
+    ['file:///types.ts', "import type { Effect } from 'effect';"],
+  ]);
+  const closure = await readClassifierModuleClosure(
+    entry,
+    new Set(),
+    (module) => Promise.resolve(sources.get(module.href) ?? ''),
   );
-  return [source, ...descendants.flat()];
-};
+  expect(forbiddenClassifierSpecifiers(closure)).toEqual(['effect', 'effect']);
+});
 
 it('keeps the eager classifier closure narrow and built-in-only', async () => {
-  const classifierClosure = await readModuleClosure(
+  const closure = await readClassifierModuleClosure(
     new URL('../scripts/classify-release.ts', import.meta.url),
     new Set(),
+    readModule,
   );
-  const closure = classifierClosure.join('\n');
-  const moduleSpecifiers = classifierClosure
-    .flatMap(importSpecifiers)
-    .filter((specifier) => !specifier.startsWith('.'));
-  expect(moduleSpecifiers).toEqual([]);
-  expect(classifierRuntime).toContain("['node', 'fs/promises'].join(':')");
-  expect(classifierRuntime).toContain("['node', 'process'].join(':')");
+  expect(forbiddenClassifierSpecifiers(closure)).toEqual([]);
+  expect(inspectClassifierSource(classifierRuntime)).toMatchObject({
+    problems: [],
+    specifiers: expect.arrayContaining(['node:fs/promises', 'node:process']),
+  });
   expect(classifier).toContain("from './classify-release-runtime'");
   expect(classifier).toContain("from '../src/release-declaration'");
-  expect(closure).not.toContain("from '../src/release-runtime'");
-  expect(closure).not.toContain("from 'bun'");
-  expect(closure).not.toContain("from 'effect");
+  expect(closure.join('\n')).not.toContain("from '../src/release-runtime'");
 });
