@@ -4,13 +4,14 @@ This file is the root operating contract for agents in this repository. Keep roo
 
 Quality gates (lint, types, tests, a11y) are deliberately strict so agents can verify changes mechanically instead of declaring them done. Strengthen gates when you can; never weaken one to make a change pass. CI gating jobs must fail closed — a gate that errors or cannot find the run it depends on fails, never passes by default — and a deploy job must not run unless the quality gate passed for the exact commit being deployed.
 
-Check an expensive or irreversible operation's cheap preconditions before starting it, so work already certain to fail does so before paying its setup cost. This is distinct from validation, which must still gather and report all errors together.
+Check an expensive or irreversible operation's cheap preconditions before starting it — unlike validation, which must still gather and report all errors together.
 
 Treat duplication as a design signal: when a change needs to copy configuration, environment, or logic that another component already owns, stop — the responsibility is probably misplaced. Fix the owner or move the need instead of pasting the copy; if the duplication seems forced by the architecture, surface that instead of proceeding.
 
+Do not build backwards compatibility by default: internal code has no external consumers, so migrate every call site and delete the old shape in the same change — no deprecated aliases, versioned copies, or compat-only optional parameters. Compatibility matters only at durable boundaries (persisted data, wire formats, deployed config/secret shapes, external consumers); when a change crosses one, surface the breakage and let the user decide.
+
 ## Research first
 
-- Check whether the request conflicts with repo architecture or standards.
 - Ask before broad product, UX, architectural, naming, workflow, scope, or business-logic decisions.
 - Propose before changing CI workflows, quality gates, or canonical synced files, even to unblock a failure. The file class is the trigger, not whether the change feels architectural.
 - Prefer cleaner architecture when justified. Do not preserve messy code only to avoid churn.
@@ -32,7 +33,7 @@ Before generating code, inspect the `description` frontmatter for every local sk
 - Use Bun only.
 - Add dependencies with `bun add`; do not manually edit dependency versions into `package.json`.
 - A workspace must declare every package it imports directly. Do not rely on hoisted, transitive, or sibling-workspace dependencies.
-- Workspaces that rely on Bun runtime or `bun:test` types must declare `@types/bun`. Do not add custom Bun ambient declaration shims when `@types/bun` is sufficient.
+- Workspaces that rely on Bun runtime or `bun:test` types must declare `@types/bun`, not custom ambient declaration shims.
 
 ## Monorepo structure
 
@@ -54,8 +55,7 @@ Before generating code, inspect the `description` frontmatter for every local sk
 - Features may depend on `src/shared/*` and packages, but not sibling features.
 - `src/shared/*` must not import from `src/features/*`; `packages/*` must not import from `apps/*`.
 - Prefer colocated tests next to the files they protect.
-- Code files should ideally not exceed 200 lines; split larger files into focused modules.
-- If a file genuinely needs to exceed the line limit because it is static data, generated-style schema/config, broad test/config coverage, or otherwise clearer as a single boundary file, keep the exception explicit in `docs/quality/no-excessive-lines-per-file-exceptions.md`.
+- A file genuinely clearer as a single boundary file — static data, generated-style schema/config, broad test/config coverage — may exceed the 200-line lint limit via a scoped `biome.jsonc` override plus an entry in `docs/quality/no-excessive-lines-per-file-exceptions.md`.
 
 ## Default shapes
 
@@ -74,10 +74,8 @@ Before generating code, inspect the `description` frontmatter for every local sk
 
 ## Linting
 
-- Lint with Biome. `biome.jsonc` must be maximally strict: enable every applicable rule domain, the recommended set, and applicable opt-in nursery and security rules, all at `error`.
 - Fix lint findings in the code. Never resolve them by downgrading or disabling rules globally, and never suppress with `biome-ignore` without a stated reason.
 - Per-file overrides are the escape hatch of last resort: scope them to the narrowest paths and the specific rule that genuinely cannot apply.
-- When upgrading Biome or when new rules become available, adopt them at `error` and opt out deliberately rather than opting in.
 
 ## Configuration and secrets
 
@@ -87,12 +85,10 @@ Before generating code, inspect the `description` frontmatter for every local sk
 
 ## TypeScript standards
 
-- No `any`; use `unknown` plus Schema decoding where validation is needed.
-- Use named exports and prefer inline exports, such as `export const value = ...`.
-- Default exports are allowed only where framework conventions require them, such as Next.js `page.tsx`, `layout.tsx`, `loading.tsx`, `error.tsx`, and `route.ts`.
-- Use `import type` for type-only imports.
-- Use `kebab-case` files/folders, `camelCase` variables/functions, and `PascalCase` types/classes.
-- Prefer `const`, `readonly`, `ReadonlyArray<T>`, and arrow functions assigned to `const`. `function*` is allowed for Effect generators.
+- Type untrusted input as `unknown` and validate with Schema decoding.
+- Prefer inline exports, such as `export const value = ...`. Default exports are allowed only where framework conventions require them (Next.js `page.tsx`, `layout.tsx`, `loading.tsx`, `error.tsx`, `route.ts`), via a scoped lint override.
+- Use `kebab-case` file and folder names.
+- Prefer `readonly`, `ReadonlyArray<T>`, and arrow functions assigned to `const`. `function*` is allowed for Effect generators.
 - Mark a property or parameter optional (`?`) only when a real call site omits it or its default is actually exercised. Do not add `?` defensively or for backwards compatibility.
 
 ## Effect standards
@@ -106,10 +102,11 @@ Before generating code, inspect the `description` frontmatter for every local sk
 ## Writing style
 
 - Use sentence case where sensible for reader-facing text, including UI text, button labels, command-style actions, and Markdown headings, while preserving proper nouns, acronyms, filenames, package names, and domain terms.
+- Prefer self-documenting code; comment only non-obvious intent.
+- Do not hard-wrap Markdown prose; keep each paragraph or list item on one logical line.
 
 ## Testing
 
-- Add or update tests for behavior you changed.
 - UI/page wiring should have a small, meaningful test surface when logic, state, error, or empty-state behavior changes.
 - Prefer tests that protect behavior, state transitions, data contracts, accessibility-relevant states, and regression-prone cases.
 - Do not add tests that only pin trivial copy, labels, static literals, or states the type system already makes unrepresentable.
@@ -123,12 +120,6 @@ Use this as a feedback loop.
 3. Run `bun run check:fix` from the repo root for code changes. If it fails, read the full error, fix the root cause, and run it again.
 
 For documentation-only changes, run a narrower verification when the full check would not add useful signal.
-
-## Comments
-
-- Prefer self-documenting code.
-- Add comments only for non-obvious intent.
-- Do not hard-wrap Markdown prose; keep each paragraph or list item on one logical line.
 
 ## Project-specific rules
 
