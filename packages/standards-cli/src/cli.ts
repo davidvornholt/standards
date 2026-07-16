@@ -755,6 +755,8 @@ const runDoctor = async (consumer: string): Promise<boolean> => {
     );
   }
 
+  problems.push(...(await inspectPolicy(consumer)));
+
   if (problems.length > 0) {
     console.error(
       `standards doctor: ${problems.length} integration problem(s):`,
@@ -929,6 +931,27 @@ type Policy = {
   readonly ref?: string;
 };
 
+const parsePolicy = (parsed: unknown): Policy => {
+  if (!isRecord(parsed)) {
+    throw new Error(`${POLICY_FILE} must be a JSON object`);
+  }
+  const unsupportedFields = Object.keys(parsed).filter(
+    (field) => field !== 'autoSync' && field !== 'ref',
+  );
+  if (unsupportedFields.length > 0) {
+    throw new Error(
+      `${POLICY_FILE} contains unsupported field(s): ${unsupportedFields.join(', ')}`,
+    );
+  }
+  if (parsed.autoSync !== undefined && typeof parsed.autoSync !== 'boolean') {
+    throw new Error(`${POLICY_FILE} "autoSync" must be a boolean`);
+  }
+  if (parsed.ref !== undefined && !isNonEmptyString(parsed.ref)) {
+    throw new Error(`${POLICY_FILE} "ref" must be a non-empty string`);
+  }
+  return { autoSync: parsed.autoSync, ref: parsed.ref };
+};
+
 const readPolicy = async (consumer: string): Promise<Policy> => {
   const raw = await readTextIfPresent(join(consumer, POLICY_FILE));
   if (raw === null) {
@@ -940,27 +963,29 @@ const readPolicy = async (consumer: string): Promise<Policy> => {
   } catch (error) {
     throw new Error(`${POLICY_FILE} must contain valid JSON`, { cause: error });
   }
-  if (!isRecord(parsed)) {
-    throw new Error(`${POLICY_FILE} must be a JSON object`);
-  }
-  if (parsed.autoSync !== undefined && typeof parsed.autoSync !== 'boolean') {
-    throw new Error(`${POLICY_FILE} "autoSync" must be a boolean`);
-  }
-  if (parsed.ref !== undefined && !isNonEmptyString(parsed.ref)) {
-    throw new Error(`${POLICY_FILE} "ref" must be a non-empty string`);
-  }
-  return { autoSync: parsed.autoSync, ref: parsed.ref };
+  return parsePolicy(parsed);
 };
 
-// A policy pin applies only to remote sources: a local path is used as-is
-// (see resolveSource), so a checked-in ref is not applicable to it. An
-// explicit --ref against a local path still errors — that contradiction was
-// typed deliberately.
-const policyRef = async (
+const inspectPolicy = async (
   consumer: string,
+): Promise<ReadonlyArray<string>> => {
+  try {
+    await readPolicy(consumer);
+    return [];
+  } catch (error) {
+    return [error instanceof Error ? error.message : String(error)];
+  }
+};
+
+// Policy validation is unconditional once the file exists. Selection happens
+// afterward: explicit refs win for remote sources, while local paths are used
+// as-is and ignore only the already-validated policy ref.
+const selectedRef = (
   src: string,
-): Promise<string | undefined> =>
-  existsSync(src) ? undefined : (await readPolicy(consumer)).ref;
+  explicitRef: string | undefined,
+  policy: Policy,
+): string | undefined =>
+  existsSync(src) ? explicitRef : (explicitRef ?? policy.ref);
 
 const runInitCommand = async (
   consumer: string,
@@ -978,7 +1003,8 @@ const runInitCommand = async (
     return;
   }
   const src = from ?? DEFAULT_UPSTREAM;
-  const source = resolveSource(src, ref ?? (await policyRef(consumer, src)));
+  const policy = await readPolicy(consumer);
+  const source = resolveSource(src, selectedRef(src, ref, policy));
   try {
     const manifest = await loadManifest(
       join(source.dir, 'sync-standards.json'),
@@ -999,7 +1025,8 @@ const runSyncCommand = async (
     join(consumer, 'sync-standards.json'),
   );
   const src = from ?? consumerManifest.upstream;
-  const source = resolveSource(src, ref ?? (await policyRef(consumer, src)));
+  const policy = await readPolicy(consumer);
+  const source = resolveSource(src, selectedRef(src, ref, policy));
   try {
     const manifest = await loadManifest(
       join(source.dir, 'sync-standards.json'),

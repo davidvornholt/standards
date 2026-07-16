@@ -64,7 +64,7 @@ Once `sync-standards.json` and the CLI dependency are present:
 
 ```sh
 bun standards sync            # pull latest canonical files (mirror + deletions)
-bun standards sync --ref v0.6.0  # pull a pinned tag, branch, or full commit sha
+bun standards sync --ref v0.7.0  # pull a pinned tag, branch, or full commit sha
 bun standards sync --dry-run  # preview a sync, writing nothing
 bun standards check           # verify canonical files, seams, structure, and GitHub settings
 bun standards doctor          # validate extension seams without drift checks
@@ -81,9 +81,15 @@ The `Standards sync` workflow also runs `sync` weekly and opens a PR when upstre
 Tracking `main` weekly is the default and the recommended mode for repos whose owner also follows this template. Consumers that want to control *when* standards change instead — typical for repos you adopt these standards into but don't co-evolve with this one — get both levers in a small checked-in policy file, `sync-standards.local.json`, owned by the consumer repo (the canonical workflow file is read-only, but the policy next to it is versioned and reviewable like any other configuration). Both fields are optional:
 
 - **`"autoSync": false`** — skip the weekly scheduled run. Manual `workflow_dispatch` (and `bun standards sync` locally) still works and becomes the deliberate way to pull updates.
-- **`"ref": "v0.6.0"`** — a tag, branch, or full commit sha to sync from instead of `main`. The workflow and the CLI (`init`/`sync` without an explicit `--ref`) both honor it, so scheduled and local syncs share one policy source.
+- **`"ref": "v0.7.0"`** — a tag, branch, or full commit sha to sync from instead of `main`. The workflow and the CLI (`init`/`sync` without an explicit `--ref`) both honor it, so scheduled and local syncs share one policy source.
 
 Every CLI release already creates a `vX.Y.Z` tag and GitHub Release, so released versions are natural pin points — no separate content-release process exists or is needed. A pinned repo updates by moving the pin (or running `sync --ref <newer>`) and reviewing the resulting PR like a dependency upgrade. The lock always records the exact upstream commit synced, so `check` works identically in both modes.
+
+### Breaking migration to 0.7.0
+
+Version 0.7.0 is an intentional hard cutover: `sync-standards.local.json` is the only cadence and ref policy source. The canonical workflow and CLI no longer read `STANDARDS_AUTO_SYNC` or `STANDARDS_SYNC_REF`; leaving those Actions variables configured has no effect.
+
+Upgrade `@davidvornholt/standards` and `bun.lock` to 0.7.0 or newer, create `sync-standards.local.json` with any required opt-out or pin, and accept the canonical workflow update in the same consumer PR. When the policy file is present, the workflow fails before syncing with an actionable error if the installed CLI is older than 0.7.0. This prevents a canonical workflow update from silently running a CLI that does not understand the checked-in policy.
 
 ## Release the CLI
 
