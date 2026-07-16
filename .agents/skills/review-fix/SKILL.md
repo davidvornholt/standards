@@ -17,7 +17,7 @@ This skill orchestrates the `review` skill. The PR is the only durable state: re
 - **`reviewer` subagents**: read-only finding and verification passes under the `review` skill contract.
 - **Worker subagents**: consume unresolved review threads and push fix commits. A worker's inputs are the thread, the repository, and `.agents/review/decisions.md` — never the reviewer's reasoning. Threads must therefore be self-contained.
 
-If subagent tooling is unavailable, stop and report that blocker; do not substitute a local-only review.
+If subagent tooling is unavailable, stop and report that blocker.
 
 ## Setup
 
