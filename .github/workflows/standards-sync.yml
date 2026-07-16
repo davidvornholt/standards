@@ -7,12 +7,14 @@ name: Standards sync
 # repo itself it is a harmless no-op (nothing upstream of the source).
 #
 # Cadence and pinning are repo policy, not canonical content, so they live in
-# repository Actions variables rather than in this (read-only) file:
-#   STANDARDS_AUTO_SYNC  set to "false" to skip the weekly run; manual
-#                        workflow_dispatch still works and stays the sanctioned
-#                        way to sync deliberately.
-#   STANDARDS_SYNC_REF   tag, branch, or full commit sha to sync from instead
-#                        of main, for consumers pinned to a released version.
+# the consumer-owned sync-standards.local.json next to this (read-only) file,
+# versioned and reviewable like any other configuration. All fields optional:
+#   { "autoSync": false }  skip the weekly scheduled run; manual
+#                          workflow_dispatch still works and stays the
+#                          sanctioned way to sync deliberately.
+#   { "ref": "v0.6.0" }    tag, branch, or full commit sha to sync from
+#                          instead of main. The CLI reads the same file, so a
+#                          local `bun standards sync` obeys the same pin.
 
 on:
   schedule:
@@ -28,10 +30,36 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Cheap preflight: job-level `if:` expressions cannot read repository files,
+  # so this job surfaces the checked-in policy for the gate below. A missing
+  # file means the defaults (auto-sync on); an unparseable one fails this job
+  # loudly — and with it the gated sync — rather than guessing a default.
+  policy:
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    outputs:
+      auto-sync: ${{ steps.read.outputs.auto-sync }}
+    steps:
+      - name: Checkout policy file
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: sync-standards.local.json
+          sparse-checkout-cone-mode: false
+
+      - name: Read sync policy
+        id: read
+        run: |
+          if [ -f sync-standards.local.json ]; then
+            auto_sync=$(jq -r 'if .autoSync == false then "false" else "true" end' sync-standards.local.json)
+          else
+            auto_sync=true
+          fi
+          echo "auto-sync=$auto_sync" >> "$GITHUB_OUTPUT"
+
   sync:
+    needs: policy
     # Manual dispatch always runs — it is a deliberate act; only the scheduled
-    # cadence is gated on the opt-out variable.
-    if: github.event_name == 'workflow_dispatch' || vars.STANDARDS_AUTO_SYNC != 'false'
+    # cadence is gated on the checked-in opt-out.
+    if: github.event_name == 'workflow_dispatch' || needs.policy.outputs.auto-sync != 'false'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - name: Checkout
@@ -45,15 +73,10 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # The CLI itself reads any pinned ref from sync-standards.local.json,
+      # so the workflow needs no ref plumbing of its own.
       - name: Sync canonical files from upstream
-        env:
-          STANDARDS_SYNC_REF: ${{ vars.STANDARDS_SYNC_REF }}
-        run: |
-          if [ -n "$STANDARDS_SYNC_REF" ]; then
-            bun standards sync --ref "$STANDARDS_SYNC_REF"
-          else
-            bun standards sync
-          fi
+        run: bun standards sync
 
       # This workflow deliberately runs no inline `bun run check`: the synced
       # result is validated by the required Standards gate on the PR it opens,

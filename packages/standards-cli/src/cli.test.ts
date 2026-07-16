@@ -664,6 +664,58 @@ describe('ref pinning', () => {
   });
 });
 
+describe('sync policy file', () => {
+  it('sync honors a checked-in pin and an explicit --ref overrides it', () => {
+    const { up, url, taggedSha } = buildGitUpstream();
+    const { consumer } = initConsumer(up);
+    write(consumer, 'sync-standards.local.json', '{ "ref": "v1" }\n');
+
+    const pinned = sync(url, consumer);
+    expect(pinned.status).toBe(0);
+    expect(read(consumer, 'managed/a.txt')).toBe('alpha\n');
+    expect(readLock(consumer).sha).toBe(taggedSha);
+
+    const overridden = sync(url, consumer, ['--ref', 'main']);
+    expect(overridden.status).toBe(0);
+    expect(read(consumer, 'managed/a.txt')).toBe('alpha v2\n');
+  });
+
+  it('init honors a checked-in pin for the first mirror', () => {
+    const { url, taggedSha } = buildGitUpstream();
+    const consumer = mkTmp('sync-cons-');
+    write(consumer, 'sync-standards.local.json', '{ "ref": "v1" }\n');
+    const result = run(consumer, ['init', '--from', url, '--dir', consumer]);
+    expect(result.status).toBe(0);
+    expect(read(consumer, 'managed/a.txt')).toBe('alpha\n');
+    expect(readLock(consumer).sha).toBe(taggedSha);
+  });
+
+  it('ignores the pin for a local-path source, which is used as-is', () => {
+    const { up } = buildGitUpstream();
+    const { consumer } = initConsumer(up);
+    write(consumer, 'sync-standards.local.json', '{ "ref": "v1" }\n');
+    const result = sync(up, consumer);
+    expect(result.status).toBe(0);
+    expect(read(consumer, 'managed/a.txt')).toBe('alpha v2\n');
+  });
+
+  it('fails with an actionable error on an invalid policy file', () => {
+    const { up, url } = buildGitUpstream();
+    const { consumer } = initConsumer(up);
+    write(consumer, 'sync-standards.local.json', 'not json');
+    const invalid = sync(url, consumer);
+    expect(invalid.status).toBe(1);
+    expect(invalid.stderr).toContain(
+      'sync-standards.local.json must contain valid JSON',
+    );
+
+    write(consumer, 'sync-standards.local.json', '{ "ref": 1 }\n');
+    const wrongType = sync(url, consumer);
+    expect(wrongType.status).toBe(1);
+    expect(wrongType.stderr).toContain('"ref" must be a non-empty string');
+  });
+});
+
 describe('github', () => {
   const EmptySeam = JSON.stringify({ repository: {}, rulesets: [] });
   const Canonical = JSON.stringify({

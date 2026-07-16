@@ -915,6 +915,53 @@ const runCheckCommand = async (consumer: string): Promise<boolean> => {
   );
 };
 
+// Consumer-owned sync policy, checked in next to the canonical (read-only)
+// standards-sync workflow it configures — versioned and reviewable, unlike
+// repository Actions variables. All fields are optional; a missing file means
+// the defaults (track main, weekly auto-sync on).
+//   autoSync  false skips the scheduled workflow run; manual dispatch and
+//             local CLI runs are deliberate acts and always proceed.
+//   ref       tag, branch, or full commit sha to sync from instead of main.
+const POLICY_FILE = 'sync-standards.local.json';
+
+type Policy = {
+  readonly autoSync?: boolean;
+  readonly ref?: string;
+};
+
+const readPolicy = async (consumer: string): Promise<Policy> => {
+  const raw = await readTextIfPresent(join(consumer, POLICY_FILE));
+  if (raw === null) {
+    return {};
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(`${POLICY_FILE} must contain valid JSON`, { cause: error });
+  }
+  if (!isRecord(parsed)) {
+    throw new Error(`${POLICY_FILE} must be a JSON object`);
+  }
+  if (parsed.autoSync !== undefined && typeof parsed.autoSync !== 'boolean') {
+    throw new Error(`${POLICY_FILE} "autoSync" must be a boolean`);
+  }
+  if (parsed.ref !== undefined && !isNonEmptyString(parsed.ref)) {
+    throw new Error(`${POLICY_FILE} "ref" must be a non-empty string`);
+  }
+  return { autoSync: parsed.autoSync, ref: parsed.ref };
+};
+
+// A policy pin applies only to remote sources: a local path is used as-is
+// (see resolveSource), so a checked-in ref is not applicable to it. An
+// explicit --ref against a local path still errors — that contradiction was
+// typed deliberately.
+const policyRef = async (
+  consumer: string,
+  src: string,
+): Promise<string | undefined> =>
+  existsSync(src) ? undefined : (await readPolicy(consumer)).ref;
+
 const runInitCommand = async (
   consumer: string,
   from: string | undefined,
@@ -930,7 +977,8 @@ const runInitCommand = async (
     process.exitCode = 1;
     return;
   }
-  const source = resolveSource(from ?? DEFAULT_UPSTREAM, ref);
+  const src = from ?? DEFAULT_UPSTREAM;
+  const source = resolveSource(src, ref ?? (await policyRef(consumer, src)));
   try {
     const manifest = await loadManifest(
       join(source.dir, 'sync-standards.json'),
@@ -950,7 +998,8 @@ const runSyncCommand = async (
   const consumerManifest = await loadManifest(
     join(consumer, 'sync-standards.json'),
   );
-  const source = resolveSource(from ?? consumerManifest.upstream, ref);
+  const src = from ?? consumerManifest.upstream;
+  const source = resolveSource(src, ref ?? (await policyRef(consumer, src)));
   try {
     const manifest = await loadManifest(
       join(source.dir, 'sync-standards.json'),
