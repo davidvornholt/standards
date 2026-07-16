@@ -59,6 +59,8 @@ Every finding gets exactly one disposition, judged against the scope contract:
 - **discard**: refuted, speculative, or conflicting with a registry decision. Append discards with durable value (deliberate policy or architecture choices, accepted risks) to `.agents/review/decisions.md`; summarize the rest in the review body.
 - **needs-clarification**: pause and ask the user, with a decision brief per question: what the diff currently does, each option's concrete consequences (who breaks, what it costs), and a recommendation with reasoning. Apply the `needs-clarification` label (create it if missing) while paused.
 
+Every pause for user input — needs-clarification and tripwires alike — is also posted as a PR comment carrying the decision brief. The PR is the durable state: the user answers asynchronously from anywhere, and any session resumes the cycle from the answer.
+
 Disposition a finding that is one instance of a repeated pattern as its class: the thread names the pattern and enumerates every sibling site, so the fix and the verification pass cover the class. The verification pass is delta-scoped and cannot see sibling defects the fix left untouched in the base diff — class-wide threads are what close that gap.
 
 Escalation tripwires — each converts a fix-now into a user question, and a blanket pre-approval ("I approve all further decisions") does not lift them:
