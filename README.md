@@ -64,6 +64,7 @@ Once `sync-standards.json` and the CLI dependency are present:
 
 ```sh
 bun standards sync            # pull latest canonical files (mirror + deletions)
+bun standards sync --ref v0.5.0  # pull a pinned tag, branch, or full commit sha
 bun standards sync --dry-run  # preview a sync, writing nothing
 bun standards check           # verify canonical files, seams, structure, and GitHub settings
 bun standards doctor          # validate extension seams without drift checks
@@ -75,19 +76,28 @@ bun standards help            # list commands and options
 
 The `Standards sync` workflow also runs `sync` weekly and opens a PR when upstream has moved, so you never have to remember to pull. The PR is validated by the required `Standards` gate like any other change; configure a `STANDARDS_SYNC_TOKEN` Actions secret (fine-grained PAT with contents and pull-requests write) so the opened PR triggers that gate automatically — with the default `GITHUB_TOKEN` it needs a manual nudge.
 
+### Track main or pin a version
+
+Tracking `main` weekly is the default and the recommended mode for repos whose owner also follows this template. Consumers that want to control *when* standards change instead — typical for repos you adopt these standards into but don't co-evolve with this one — get both levers as repository Actions variables, deliberately outside the canonical (read-only) workflow file:
+
+- **`STANDARDS_AUTO_SYNC`** — set to `false` to skip the weekly scheduled run. Manual `workflow_dispatch` (and `bun standards sync` locally) still works and becomes the deliberate way to pull updates.
+- **`STANDARDS_SYNC_REF`** — a tag, branch, or full commit sha the workflow syncs from instead of `main`.
+
+Every CLI release already creates a `vX.Y.Z` tag and GitHub Release, so released versions are natural pin points — no separate content-release process exists or is needed. A pinned repo updates by moving the pin (or running `sync --ref <newer>`) and reviewing the resulting PR like a dependency upgrade. The lock always records the exact upstream commit synced, so `check` works identically in both modes.
+
 ## Release the CLI
 
 The version in `packages/standards-cli/package.json` is the release declaration. Change it to a new stable SemVer in a pull request and update the version seeded by `template/package.json` at the same time. After the exact merge commit passes the `Standards` workflow on `main`, `Publish standards CLI` packs and publishes that version through npm trusted publishing, then creates the matching `vX.Y.Z` Git tag and GitHub Release. An unchanged version is a no-op; a version behind npm or a conflicting tag fails closed.
 
 ## How sync works
 
-- **Canonical content tracks `main`.** The CLI is a normal package dependency, but synced content is not versioned or pinned. Updates arrive the next time a repo runs `sync`; the resulting diff is still reviewed in a pull request.
+- **Canonical content tracks `main` by default.** The CLI is a normal package dependency; synced content follows upstream `main` unless a consumer pins a ref (`--ref`, or `STANDARDS_SYNC_REF` for the workflow). Updates arrive the next time a repo runs `sync`; the resulting diff is still reviewed in a pull request.
 - **Mirror, including deletions.** `sync` reconciles managed paths against the lock three ways: files removed upstream are removed locally, so "canonical" never drifts into a pile of stale copies. `--dry-run` previews the plan (create / update / delete) and writes nothing.
 - **`check` is the CI gate.** It confirms every synced file still matches what `sync` last wrote (offline, hash-based), fails closed when the lock is absent, runs `doctor` to verify the repo-owned extension seams, and runs `structure` to enforce the monorepo layout contract (workspace and root script shapes, internal versioning, package `exports`, tsconfig inheritance, a11y wiring). Once `.github/settings.json` is synced it also compares the live GitHub repository against the declaration via the API and fails on drift — repo merge settings that the CI token cannot see are reported as unverifiable instead of failing, since only admin tokens can read them. It runs first inside `bun run check`.
 
 ### Known limitation
 
-`check` detects **local tampering** with canonical files, not that **upstream has moved on**. Without a pin, nothing local encodes "the template changed"; a repo only learns of upstream changes by running `sync`. The `Standards sync` workflow closes this: it runs `sync` weekly (and on demand) and opens a PR when the mirror changes, so upstream updates surface as reviewable PRs instead of silent drift.
+`check` detects **local tampering** with canonical files, not that **upstream has moved on**. Nothing local encodes "the template changed"; a repo only learns of upstream changes by running `sync`. The `Standards sync` workflow closes this for repos tracking `main`: it runs `sync` weekly (and on demand) and opens a PR when the mirror changes, so upstream updates surface as reviewable PRs instead of silent drift. A repo pinned to a ref has opted out of that signal by design — staying current becomes its own responsibility, like any pinned dependency.
 
 ## Non-goals
 

@@ -38,7 +38,7 @@ A PR that changes the declaration fails its own gate until the change is applied
 
 ## Testing a canonical change before publishing
 
-github/URL sources always clone `main`, so the only way to try an unpushed change is a **local-path `--from`**: point a consumer at your local standards clone with uncommitted edits.
+github/URL sources clone `main` unless `--ref` pins a tag, branch, or full commit sha — but any ref must exist on the remote, so the only way to try an *unpushed* change is a **local-path `--from`**: point a consumer at your local standards clone with uncommitted edits.
 
 ```sh
 # In the CONSUMER, sourcing from a local standards clone with uncommitted edits:
