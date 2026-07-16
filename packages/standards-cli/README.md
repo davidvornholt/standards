@@ -14,7 +14,7 @@ standards github --apply
 
 `github --check` compares the live GitHub repository (merge settings and rulesets) against the merged declaration in `.github/settings.json` + `.github/settings.local.json`; `github --apply` converges the live repository to exactly the declared state. `check` runs the same comparison whenever `.github/settings.json` is present.
 
-`structure` validates the monorepo layout against the AGENTS.md contract — canonical workspace scripts (`check-types`, `lint`, `lint:fix`, `test`), the root gate scripts, filtered Turbo convenience aliases, internal `0.0.0`/`workspace:*` versioning, package `exports`, shared tsconfig inheritance, and browser a11y wiring (`test:a11y` plus direct `@axe-core/playwright` and `@playwright/test` dependencies wherever a Playwright/Axe suite exists). `check` includes it, so the structure rules gate every consumer PR.
+`structure` enforces the canonical monorepo structure contract: workspace scripts (`check-types`, `lint`, `lint:fix`, `test`), root gate scripts, filtered Turbo convenience aliases, internal `0.0.0`/`workspace:*` versioning, package `exports`, shared tsconfig inheritance, and browser a11y wiring. Only a workspace containing an explicit `*.a11y.ts` suite must provide a `test:a11y` script and direct `@axe-core/playwright` and `@playwright/test` dependencies. `check` includes `structure`, so these rules gate every consumer PR.
 
 ## Configuration
 

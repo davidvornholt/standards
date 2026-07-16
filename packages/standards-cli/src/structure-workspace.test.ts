@@ -144,13 +144,13 @@ describe('inspectWorkspace tsconfig and a11y wiring', () => {
     const result = await inspectWorkspace(ws, new Set());
     expect(result.hasA11ySuite).toBe(true);
     expect(result.problems).toEqual([
-      'apps/web: a browser a11y suite requires a "test:a11y" script',
-      'apps/web: a browser a11y suite requires a direct dependency on @axe-core/playwright',
-      'apps/web: a browser a11y suite requires a direct dependency on @playwright/test',
+      'apps/web: a *.a11y.ts suite requires a "test:a11y" script',
+      'apps/web: a *.a11y.ts suite requires a direct dependency on @axe-core/playwright',
+      'apps/web: a *.a11y.ts suite requires a direct dependency on @playwright/test',
     ]);
   });
 
-  it('accepts a fully wired a11y suite found via playwright config', async () => {
+  it('accepts a fully wired explicit a11y suite', async () => {
     const ws = makeWorkspace(
       {
         ...baseManifest(),
@@ -160,17 +160,31 @@ describe('inspectWorkspace tsconfig and a11y wiring', () => {
           '@playwright/test': '^1.0.0',
         },
       },
-      { 'tsconfig.json': TSCONFIG, 'playwright.config.ts': 'export {};\n' },
+      {
+        'tsconfig.json': TSCONFIG,
+        'playwright.config.ts': 'export {};\n',
+        'a11y/home.a11y.ts': 'export {};\n',
+      },
     );
     const result = await inspectWorkspace(ws, new Set());
     expect(result.hasA11ySuite).toBe(true);
     expect(result.problems).toEqual([]);
   });
 
+  it('does not activate a11y wiring for a plain Playwright config', async () => {
+    const ws = makeWorkspace(baseManifest(), {
+      'tsconfig.json': TSCONFIG,
+      'playwright.config.ts': 'export {};\n',
+    });
+    const result = await inspectWorkspace(ws, new Set());
+    expect(result.hasA11ySuite).toBe(false);
+    expect(result.problems).toEqual([]);
+  });
+
   it('ignores a11y-looking files inside node_modules', async () => {
     const ws = makeWorkspace(baseManifest(), {
       'tsconfig.json': TSCONFIG,
-      'node_modules/pkg/playwright.config.ts': 'export {};\n',
+      'node_modules/pkg/home.a11y.ts': 'export {};\n',
     });
     expect((await inspectWorkspace(ws, new Set())).hasA11ySuite).toBe(false);
   });

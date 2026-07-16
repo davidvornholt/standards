@@ -873,8 +873,8 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
   };
 };
 
-// Monorepo structure gate: workspace and root script shapes, internal
-// versioning, `exports`, tsconfig inheritance, and a11y wiring, per AGENTS.md.
+// Canonical monorepo structure gate: workspace and root script shapes,
+// internal versioning, `exports`, tsconfig inheritance, and a11y wiring.
 const runStructure = async (consumer: string): Promise<boolean> => {
   const problems = await collectStructureProblems(consumer);
   if (problems.length > 0) {

@@ -1,7 +1,7 @@
-// Per-workspace monorepo structure rules, mechanized from the AGENTS.md
-// contract: canonical script shapes, internal versioning, workspace:* internal
-// dependencies, public `exports`, shared tsconfig inheritance, and browser
-// a11y wiring. Pure data in, problems out; printing stays in cli.ts.
+// Per-workspace rules in the canonical monorepo structure contract: script
+// shapes, internal versioning, workspace:* internal dependencies, public
+// `exports`, shared tsconfig inheritance, and browser a11y wiring. Pure data
+// in, problems out; printing stays in cli.ts.
 
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -19,7 +19,7 @@ export type WorkspaceInspection = {
 };
 
 // Script name -> command fragment the script must contain. `test:a11y` is
-// checked separately because its presence is conditional on a browser suite.
+// checked separately because it is conditional on an explicit *.a11y.ts suite.
 const WORKSPACE_SCRIPTS: ReadonlyArray<readonly [string, string]> = [
   ['check-types', 'tsc --noEmit'],
   ['lint', 'biome check --error-on-warnings'],
@@ -67,8 +67,7 @@ const scriptOf = (
   return typeof script === 'string' ? script : null;
 };
 
-const isA11ySuiteFile = (name: string): boolean =>
-  name.startsWith('playwright.config.') || name.endsWith('.a11y.ts');
+const isA11ySuiteFile = (name: string): boolean => name.endsWith('.a11y.ts');
 
 const containsA11ySuite = async (dir: string): Promise<boolean> => {
   const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
@@ -138,11 +137,11 @@ const inspectA11y = async (
   );
   const problems = [
     ...(scriptOf(ws.manifest, 'test:a11y') === null
-      ? [`${ws.rel}: a browser a11y suite requires a "test:a11y" script`]
+      ? [`${ws.rel}: a *.a11y.ts suite requires a "test:a11y" script`]
       : []),
     ...A11Y_DEPENDENCIES.filter((dep) => !declared.has(dep)).map(
       (dep) =>
-        `${ws.rel}: a browser a11y suite requires a direct dependency on ${dep}`,
+        `${ws.rel}: a *.a11y.ts suite requires a direct dependency on ${dep}`,
     ),
   ];
   return { problems, hasSuite };
