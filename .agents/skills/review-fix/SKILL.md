@@ -5,7 +5,7 @@ description: Use when the user asks for a review with fixes, a fix-what-review-f
 
 # Review and fix
 
-One bounded cycle over a pull request in a repo you control: one full review fan-out, dispositioned fixes, one verification pass over the fixes, then an unconditional stop and a residual-risk report. The review's output is a risk report for the human merge decision, not a gate the code must pass in silence.
+One bounded cycle over a pull request in a repo you control: one full review fan-out, dispositioned fixes, one verification pass over the fixes, then an unconditional stop and a residual-risk report.
 
 There is deliberately no convergence condition. A capable reviewer instructed to find problems essentially never returns silence, so "review until clean" diverges: every fix enlarges the diff the next pass must clear, and the loop ends up reviewing its own output forever. Never add review passes beyond the two defined here.
 
