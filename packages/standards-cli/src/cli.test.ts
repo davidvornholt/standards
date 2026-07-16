@@ -42,7 +42,21 @@ const INVALID_POLICY_CASES = [
     '{ "autoSync": "false" }',
     '"autoSync" must be a boolean',
   ],
-  ['a wrong ref type', '{ "ref": 1 }', '"ref" must be a non-empty string'],
+  [
+    'a wrong ref type',
+    '{ "ref": 1 }',
+    '"ref" must be a non-empty single-line string',
+  ],
+  [
+    'a newline in ref',
+    '{ "ref": "main\\npresent=false" }',
+    '"ref" must be a non-empty single-line string',
+  ],
+  [
+    'a carriage return in ref',
+    '{ "ref": "main\\rpresent=false" }',
+    '"ref" must be a non-empty single-line string',
+  ],
   [
     'an unsupported field',
     '{ "branch": "stable" }',
@@ -947,6 +961,8 @@ describe('standards sync workflow policy', () => {
     ['a numeric autoSync', '{ "autoSync": 0 }'],
     ['a wrong ref type', '{ "ref": 1 }'],
     ['an empty ref', '{ "ref": "" }'],
+    ['a newline in ref', '{ "ref": "main\\npresent=false" }'],
+    ['a carriage return in ref', '{ "ref": "main\\rpresent=false" }'],
     ['an unsupported field', '{ "branch": "stable" }'],
   ])('fails closed for %s', (_label, policy) => {
     const { result, output } = runPolicyPreflight(policy);

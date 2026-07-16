@@ -925,6 +925,7 @@ const runCheckCommand = async (consumer: string): Promise<boolean> => {
 //             local CLI runs are deliberate acts and always proceed.
 //   ref       tag, branch, or full commit sha to sync from instead of main.
 const POLICY_FILE = 'sync-standards.local.json';
+const LINE_BREAK = /[\r\n]/u;
 
 type Policy = {
   readonly autoSync?: boolean;
@@ -946,8 +947,13 @@ const parsePolicy = (parsed: unknown): Policy => {
   if (parsed.autoSync !== undefined && typeof parsed.autoSync !== 'boolean') {
     throw new Error(`${POLICY_FILE} "autoSync" must be a boolean`);
   }
-  if (parsed.ref !== undefined && !isNonEmptyString(parsed.ref)) {
-    throw new Error(`${POLICY_FILE} "ref" must be a non-empty string`);
+  if (
+    parsed.ref !== undefined &&
+    (!isNonEmptyString(parsed.ref) || LINE_BREAK.test(parsed.ref))
+  ) {
+    throw new Error(
+      `${POLICY_FILE} "ref" must be a non-empty single-line string`,
+    );
   }
   return { autoSync: parsed.autoSync, ref: parsed.ref };
 };

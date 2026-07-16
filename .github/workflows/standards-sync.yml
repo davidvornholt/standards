@@ -57,10 +57,15 @@ jobs:
               and ((has("autoSync") | not) or (.autoSync | type == "boolean"))
               and (
                 (has("ref") | not)
-                or ((.ref | type == "string") and (.ref | length > 0))
+                or (
+                  (.ref | type == "string")
+                  and (.ref | length > 0)
+                  and (.ref | contains("\n") | not)
+                  and (.ref | contains("\r") | not)
+                )
               )
             ' sync-standards.local.json > /dev/null; then
-              echo "::error::sync-standards.local.json must be an object with only an optional boolean autoSync and optional non-empty string ref"
+              echo "::error::sync-standards.local.json must be an object with only an optional boolean autoSync and optional non-empty single-line string ref"
               exit 1
             fi
             auto_sync=$(jq -r 'if has("autoSync") then .autoSync else true end' sync-standards.local.json)
@@ -71,9 +76,11 @@ jobs:
             ref=
             present=false
           fi
-          echo "auto-sync=$auto_sync" >> "$GITHUB_OUTPUT"
-          echo "present=$present" >> "$GITHUB_OUTPUT"
-          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          {
+            echo "auto-sync=$auto_sync"
+            echo "present=$present"
+            echo "ref=$ref"
+          } >> "$GITHUB_OUTPUT"
 
   sync:
     needs: policy
