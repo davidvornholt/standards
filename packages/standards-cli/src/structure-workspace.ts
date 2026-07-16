@@ -1,6 +1,10 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isRecord } from './github-settings';
+import {
+  inspectVersionAndExports,
+  type StructureProfile,
+} from './structure-profile';
 export type Workspace = {
   readonly rel: string;
   readonly dir: string;
@@ -179,6 +183,7 @@ const inspectA11y = async (
 export const inspectWorkspace = async (
   ws: Workspace,
   workspaceNames: ReadonlySet<string>,
+  profile: StructureProfile,
 ) => {
   const [tsconfigProblems, a11y] = await Promise.all([
     inspectTsconfig(ws),
@@ -186,13 +191,8 @@ export const inspectWorkspace = async (
   ]);
   const problems = [
     ...inspectScripts(ws),
-    ...(ws.manifest.version === '0.0.0'
-      ? []
-      : [`${ws.rel}: internal workspace version must be "0.0.0"`]),
+    ...inspectVersionAndExports(profile, ws.rel, ws.manifest),
     ...inspectInternalDeps(ws, workspaceNames),
-    ...(ws.rel.startsWith('packages/') && ws.manifest.exports === undefined
-      ? [`${ws.rel}: package must define its public API with "exports"`]
-      : []),
     ...tsconfigProblems,
     ...a11y.problems,
   ];

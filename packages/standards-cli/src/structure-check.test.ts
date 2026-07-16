@@ -22,6 +22,7 @@ const CANONICAL_SCRIPTS = {
 };
 
 const TSCONFIG = '{ "extends": "@davidvornholt/typescript-config/base" }\n';
+const collect = (dir: string) => collectStructureProblems(dir, 'consumer');
 const WORKSPACES_REQUIREMENT =
   'package.json: "workspaces" must be a non-empty array of literal paths or one-level "<dir>/*" patterns';
 const aliasProblem = (name: string): string =>
@@ -76,13 +77,13 @@ const buildConsumer = (
 
 describe('collectStructureProblems basics and scripts', () => {
   it('accepts a canonical consumer', async () => {
-    expect(await collectStructureProblems(buildConsumer())).toEqual([]);
+    expect(await collect(buildConsumer())).toEqual([]);
   });
 
   it('fails when package.json is missing', async () => {
     const consumer = mkdtempSync(join(tmpdir(), 'structure-'));
     tmps.push(consumer);
-    expect(await collectStructureProblems(consumer)).toEqual([
+    expect(await collect(consumer)).toEqual([
       'package.json must exist and contain a JSON object',
     ]);
   });
@@ -97,9 +98,9 @@ describe('collectStructureProblems basics and scripts', () => {
       'echo "turbo run lint check-types test build test:a11y" || true';
     scripts['check:fix'] =
       'turbo run lint:fix check-types test build test:a11y # disabled';
-    expect(
-      await collectStructureProblems(buildConsumer(rootManifest({ scripts }))),
-    ).toEqual(expected);
+    expect(await collect(buildConsumer(rootManifest({ scripts })))).toEqual(
+      expected,
+    );
   });
 
   it('requires safe filtered Turbo convenience aliases', async () => {
@@ -112,9 +113,7 @@ describe('collectStructureProblems basics and scripts', () => {
       help: 'turbo run --help --filter @repo/web',
       unfiltered: 'turbo run dev --filter',
     };
-    const problems = await collectStructureProblems(
-      buildConsumer(rootManifest({ scripts })),
-    );
+    const problems = await collect(buildConsumer(rootManifest({ scripts })));
     expect(problems).toEqual(
       ['db', 'quoted', 'help', 'unfiltered'].map(aliasProblem),
     );
@@ -127,7 +126,7 @@ describe('collectStructureProblems basics and scripts', () => {
     };
     const consumer = buildConsumer(rootManifest({ scripts }));
     write(consumer, 'apps/web/a11y/home.a11y.ts', 'export {};\n');
-    const problems = await collectStructureProblems(consumer);
+    const problems = await collect(consumer);
     expect(problems).toContain(
       'package.json: root script "test:a11y" must run turbo run test:a11y',
     );
@@ -146,24 +145,24 @@ describe('collectStructureProblems workspace declarations', () => {
     ],
   ])('rejects malformed workspace declarations %#', async (workspaces, expected) => {
     const consumer = buildConsumer(rootManifest({ workspaces }));
-    expect(await collectStructureProblems(consumer)).toContain(expected);
+    expect(await collect(consumer)).toContain(expected);
   });
 
   it('treats a missing glob root as an empty match', async () => {
     const consumer = buildConsumer(rootManifest({ workspaces: ['empty/*'] }));
-    expect(await collectStructureProblems(consumer)).toEqual([]);
+    expect(await collect(consumer)).toEqual([]);
   });
 
   it('rejects a glob root that is not a directory', async () => {
     const consumer = buildConsumer(rootManifest({ workspaces: ['blocked/*'] }));
     write(consumer, 'blocked', 'not a directory');
-    expect(await collectStructureProblems(consumer)).toContain(
+    expect(await collect(consumer)).toContain(
       'package.json: cannot read workspace directory "blocked" declared by "blocked/*"',
     );
   });
 
   it('rejects unsupported workspace glob patterns', async () => {
-    const problems = await collectStructureProblems(
+    const problems = await collect(
       buildConsumer(rootManifest({ workspaces: ['apps/**'] })),
     );
     expect(problems).toContain(
@@ -174,7 +173,7 @@ describe('collectStructureProblems workspace declarations', () => {
   it('reports a workspace whose package.json is malformed', async () => {
     const consumer = buildConsumer();
     write(consumer, 'packages/broken/package.json', '{ not json');
-    const problems = await collectStructureProblems(consumer);
+    const problems = await collect(consumer);
     expect(problems).toContain(
       'packages/broken: package.json must contain a JSON object',
     );
@@ -192,7 +191,7 @@ describe('collectStructureProblems workspace declarations', () => {
         scripts: CANONICAL_SCRIPTS,
       }),
     );
-    const problems = await collectStructureProblems(consumer);
+    const problems = await collect(consumer);
     expect(problems).toEqual([
       'packages/ui: internal workspace version must be "0.0.0"',
     ]);

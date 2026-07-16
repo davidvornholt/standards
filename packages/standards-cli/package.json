@@ -26,6 +26,7 @@
     "src/github-diff.ts",
     "src/github-settings.ts",
     "src/structure-check.ts",
+    "src/structure-profile.ts",
     "src/structure-workspace.ts"
   ],
   "scripts": {

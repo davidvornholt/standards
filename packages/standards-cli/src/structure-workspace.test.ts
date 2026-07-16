@@ -35,6 +35,9 @@ const makeWorkspace = (
   return { rel, dir, manifest };
 };
 
+const inspect = (ws: Workspace, names: ReadonlySet<string> = new Set()) =>
+  inspectWorkspace(ws, names, 'consumer');
+
 const baseManifest = (): Record<string, unknown> => ({
   name: '@repo/web',
   version: '0.0.0',
@@ -43,10 +46,7 @@ const baseManifest = (): Record<string, unknown> => ({
 
 describe('inspectWorkspace manifest rules', () => {
   it('accepts a canonical workspace without an a11y suite', async () => {
-    const result = await inspectWorkspace(
-      makeWorkspace(baseManifest()),
-      new Set(),
-    );
+    const result = await inspect(makeWorkspace(baseManifest()));
     expect(result).toEqual({ problems: [], hasA11ySuite: false });
   });
 
@@ -60,7 +60,7 @@ describe('inspectWorkspace manifest rules', () => {
         test: 'bun test --help',
       },
     });
-    const { problems } = await inspectWorkspace(ws, new Set());
+    const { problems } = await inspect(ws);
     expect(problems).toContain(
       'apps/web: script "check-types" must run tsc --noEmit',
     );
@@ -75,7 +75,7 @@ describe('inspectWorkspace manifest rules', () => {
 
   it('requires internal workspace version 0.0.0', async () => {
     const ws = makeWorkspace({ ...baseManifest(), version: '1.2.3' });
-    const { problems } = await inspectWorkspace(ws, new Set());
+    const { problems } = await inspect(ws);
     expect(problems).toContain(
       'apps/web: internal workspace version must be "0.0.0"',
     );
@@ -87,7 +87,7 @@ describe('inspectWorkspace manifest rules', () => {
       dependencies: { '@repo/ui': '0.0.0', 'left-pad': '^1.0.0' },
       devDependencies: { '@repo/config': 'workspace:*' },
     });
-    const { problems } = await inspectWorkspace(
+    const { problems } = await inspect(
       ws,
       new Set(['@repo/ui', '@repo/config']),
     );
@@ -103,10 +103,10 @@ describe('inspectWorkspace manifest rules', () => {
       'packages/ui',
     );
     const app = makeWorkspace(baseManifest());
-    expect((await inspectWorkspace(pkg, new Set())).problems).toEqual([
+    expect((await inspect(pkg)).problems).toEqual([
       'packages/ui: package must define its public API with "exports"',
     ]);
-    expect((await inspectWorkspace(app, new Set())).problems).toEqual([]);
+    expect((await inspect(app)).problems).toEqual([]);
   });
 
   it('exempts the shared config package from the inheritance rule', async () => {
@@ -119,7 +119,7 @@ describe('inspectWorkspace manifest rules', () => {
       { 'tsconfig.json': '{ "extends": "./base.json" }\n' },
       'packages/typescript-config',
     );
-    expect((await inspectWorkspace(ws, new Set())).problems).toEqual([]);
+    expect((await inspect(ws)).problems).toEqual([]);
   });
 });
 
@@ -131,12 +131,8 @@ describe('inspectWorkspace tsconfig and a11y wiring', () => {
     });
     const expected =
       'apps/web: tsconfig.json must extend @davidvornholt/typescript-config';
-    expect((await inspectWorkspace(missing, new Set())).problems).toEqual([
-      expected,
-    ]);
-    expect((await inspectWorkspace(standalone, new Set())).problems).toEqual([
-      expected,
-    ]);
+    expect((await inspect(missing)).problems).toEqual([expected]);
+    expect((await inspect(standalone)).problems).toEqual([expected]);
   });
 
   it.each([
@@ -153,7 +149,7 @@ describe('inspectWorkspace tsconfig and a11y wiring', () => {
         'a11y/home.a11y.ts': 'export {};\n',
       },
     );
-    const result = await inspectWorkspace(ws, new Set());
+    const result = await inspect(ws);
     expect(result.hasA11ySuite).toBe(true);
     expect(result.problems).toEqual([
       'apps/web: a *.a11y.ts suite requires a non-empty "test:a11y" script that runs playwright test',
@@ -182,7 +178,7 @@ describe('inspectWorkspace tsconfig and a11y wiring', () => {
         'a11y/home.a11y.ts': 'export {};\n',
       },
     );
-    const result = await inspectWorkspace(ws, new Set());
+    const result = await inspect(ws);
     expect(result).toEqual({ problems: [], hasA11ySuite: true });
   });
 
@@ -192,7 +188,7 @@ describe('inspectWorkspace tsconfig and a11y wiring', () => {
       'playwright.config.ts': 'export {};\n',
       'node_modules/pkg/home.a11y.ts': 'export {};\n',
     });
-    expect(await inspectWorkspace(ws, new Set())).toEqual({
+    expect(await inspect(ws)).toEqual({
       problems: [],
       hasA11ySuite: false,
     });
