@@ -34,7 +34,6 @@ Before the review pass, post a PR comment that freezes the disposition yardstick
 
 - **Intent**: one paragraph — the problem this diff solves.
 - **Threat model**: who runs the artifact, whose inputs it processes, and what breaking or leaking actually costs. Findings are judged for materiality against this, not against what is theoretically possible.
-- **Fix budget**: the cumulative fix-commit size before the tripwire escalates — default roughly half the original diff. The orchestrator may raise it when the growth is clearly justified (failure-mode tests, ratchets), noting the new budget and reason on the PR.
 - **Lenses**: invented per diff with one-line charters (see the `review` skill's lens contract); include `catch-all` unless an unscoped reviewer runs, and always consider `premise` — a locally flawless change built on a wrong premise is the flaw diff-scoped lenses cannot see. A diff with database mutations and no data-integrity lens, or auth surfaces and no security lens, is a selection error.
 
 **Split check**: several unrelated themes in one diff dilute every lens. Propose separate PRs and wait for explicit user approval before restructuring anything. An oversized coherent diff gets more, narrower lenses — not sharding, which hides cross-file findings.
@@ -67,7 +66,6 @@ Disposition a finding that is one instance of a repeated pattern as its class: t
 Escalation tripwires — each converts a fix-now into a user question, and a blanket pre-approval ("I approve all further decisions") does not lift them:
 
 - the fix would add a new module, subsystem, or dependency;
-- cumulative fix commits would exceed the scope contract's fix budget;
 - the fix hardens beyond the stated threat model.
 
 ## Fix
