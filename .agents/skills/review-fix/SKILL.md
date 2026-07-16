@@ -57,14 +57,15 @@ Every finding gets exactly one disposition, judged against the scope contract:
 - **fix-now**: material under the threat model AND inside the intent. The bar: a maintainer would block the merge over it.
 - **defer**: real but outside the intent or below materiality. File a self-contained GitHub issue — evidence, concrete failure scenario, suggested verification, link to the PR. Deferral is the default for real-but-adjacent findings; "reproducible" is not "material".
 - **discard**: refuted, speculative, or conflicting with a registry decision. Append discards with durable value (deliberate policy or architecture choices, accepted risks) to `.agents/review/decisions.md`; summarize the rest in the review body.
-- **needs-clarification**: pause and ask the user; apply the `needs-clarification` label (create it if missing) while paused.
+- **needs-clarification**: pause and ask the user, with a decision brief per question: what the diff currently does, each option's concrete consequences (who breaks, what it costs), and a recommendation with reasoning. Apply the `needs-clarification` label (create it if missing) while paused.
+
+Every pause for user input — needs-clarification and tripwires alike — is also posted as a PR comment carrying the decision brief. The PR is the durable state: the user answers asynchronously from anywhere, and any session resumes the cycle from the answer. Self-authored activity triggers no GitHub notifications: when posting with the user's own account, also ping through an out-of-band channel if one is available (e.g. a push-notification tool); with a bot-account token, an @mention of the user is the ping. Pauses are the only events that ping — routine threads, commits, and the report stay silent.
 
 Disposition a finding that is one instance of a repeated pattern as its class: the thread names the pattern and enumerates every sibling site, so the fix and the verification pass cover the class. The verification pass is delta-scoped and cannot see sibling defects the fix left untouched in the base diff — class-wide threads are what close that gap.
 
 Escalation tripwires — each converts a fix-now into a user question, and a blanket pre-approval ("I approve all further decisions") does not lift them:
 
 - the fix would add a new module, subsystem, or dependency;
-- cumulative fix commits would exceed roughly half the original diff;
 - the fix hardens beyond the stated threat model.
 
 ## Fix
