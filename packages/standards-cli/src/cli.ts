@@ -36,7 +36,8 @@ import { CANONICAL_SETTINGS_FILE, LOCAL_SETTINGS_FILE } from './github-api';
 import { runGithubApply, runGithubCheck } from './github-commands';
 import { loadGithubSettings } from './github-settings';
 import { collectStructureProblems } from './structure-check';
-import { hasSafeCommand } from './structure-workspace';
+import type { StructureProfile } from './structure-profile';
+import { hasSafeCommand } from './structure-script';
 
 const { YAML: BunYaml } = await import('bun');
 
@@ -92,6 +93,7 @@ type CliOptions = {
   readonly from: string | undefined;
   readonly ref: string | undefined;
   readonly apply: boolean;
+  readonly profile: StructureProfile;
 };
 
 const sha256 = (buf: Buffer): string =>
@@ -781,6 +783,7 @@ Commands:
 
 Options:
   --dir <path>   Consumer directory to operate on (default: current directory)
+  --profile <p>  With structure: validate as a "consumer" (default) or as the standards "source" repository itself
   --from <src>   Upstream override for init/sync (GitHub repo or local path)
   --ref <ref>    Upstream tag, branch, or full commit sha for init/sync (remote Git/GitHub sources only; default: main)
   --dry-run      Preview a sync without writing anything
@@ -811,6 +814,13 @@ const setCommand = (current: Command | undefined, next: Command): Command => {
   return next;
 };
 
+const structureProfileOf = (value: string): StructureProfile => {
+  if (value === 'consumer' || value === 'source') {
+    return value;
+  }
+  throw new Error(`--profile must be "consumer" or "source": ${value}`);
+};
+
 const nextOptionValue = (
   argv: ReadonlyArray<string>,
   index: number,
@@ -830,6 +840,7 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
   let ref: string | undefined;
   let checkFlag = false;
   let apply = false;
+  let profile: StructureProfile | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -849,6 +860,10 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
         break;
       case '--from':
         from = nextOptionValue(argv, index);
+        index += 1;
+        break;
+      case '--profile':
+        profile = structureProfileOf(nextOptionValue(argv, index));
         index += 1;
         break;
       case '--ref':
@@ -876,6 +891,9 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
   if (ref !== undefined && command !== 'init' && command !== 'sync') {
     throw new Error('--ref is only valid with the init and sync commands');
   }
+  if (profile !== undefined && command !== 'structure') {
+    throw new Error('--profile is only valid with the structure command');
+  }
 
   return {
     command,
@@ -884,13 +902,19 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
     from,
     ref,
     apply,
+    profile: profile ?? 'consumer',
   };
 };
 
 // Canonical monorepo structure gate: workspace and root script shapes,
 // internal versioning, `exports`, tsconfig inheritance, and a11y wiring.
-const runStructure = async (consumer: string): Promise<boolean> => {
-  const problems = await collectStructureProblems(consumer);
+// The `source` profile instead pins the standards template repository's own
+// deliberate exceptions to the consumer contract.
+const runStructure = async (
+  consumer: string,
+  profile: StructureProfile,
+): Promise<boolean> => {
+  const problems = await collectStructureProblems(consumer, profile);
   if (problems.length > 0) {
     console.error(
       `standards structure: ${problems.length} monorepo structure problem(s):`,
@@ -905,7 +929,7 @@ const runStructure = async (consumer: string): Promise<boolean> => {
 const runCheckCommand = async (consumer: string): Promise<boolean> => {
   const driftIsClean = await runCheck(consumer);
   const integrationIsValid = await runDoctor(consumer);
-  const structureIsValid = await runStructure(consumer);
+  const structureIsValid = await runStructure(consumer, 'consumer');
   // The GitHub gate activates with the synced declaration and then fails
   // closed: once .github/settings.json exists, an unreachable API or an
   // unreadable origin is a failure, not a skip.
@@ -1048,6 +1072,7 @@ const runGateCommand = (
   command: 'check' | 'doctor' | 'github' | 'structure',
   consumer: string,
   apply: boolean,
+  profile: StructureProfile,
 ): Promise<boolean> => {
   if (command === 'check') {
     return runCheckCommand(consumer);
@@ -1056,13 +1081,13 @@ const runGateCommand = (
     return runDoctor(consumer);
   }
   if (command === 'structure') {
-    return runStructure(consumer);
+    return runStructure(consumer, profile);
   }
   return apply ? runGithubApply(consumer) : runGithubCheck(consumer);
 };
 
 const main = async (): Promise<void> => {
-  const { command, consumer, dryRun, from, ref, apply } = parseArgs(
+  const { command, consumer, dryRun, from, ref, apply, profile } = parseArgs(
     process.argv.slice(2),
   );
 
@@ -1088,7 +1113,7 @@ const main = async (): Promise<void> => {
     return;
   }
 
-  if (!(await runGateCommand(command, consumer, apply))) {
+  if (!(await runGateCommand(command, consumer, apply, profile))) {
     process.exitCode = 1;
   }
 };

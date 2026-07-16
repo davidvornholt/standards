@@ -529,6 +529,34 @@ describe('structure', () => {
     expect(ok.stdout).toContain('workspace layout matches the standards');
   });
 
+  it('the source checkout passes its own source profile', () => {
+    const result = run(ACTUAL_UPSTREAM, [
+      'structure',
+      '--profile',
+      'source',
+      '--dir',
+      ACTUAL_UPSTREAM,
+    ]);
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
+  });
+
+  it('rejects an unknown structure profile', () => {
+    const consumer = mkTmp('sync-cons-');
+    const result = run(consumer, ['structure', '--profile', 'strict']);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('--profile must be "consumer" or "source"');
+  });
+
+  it('rejects --profile outside the structure command', () => {
+    const consumer = mkTmp('sync-cons-');
+    const result = run(consumer, ['doctor', '--profile', 'source']);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      '--profile is only valid with the structure command',
+    );
+  });
+
   it.each([
     [
       'commented-out',
@@ -871,6 +899,16 @@ describe('sync policy distribution', () => {
     expect(
       runExecutable('bun', consumer, ['install', '--ignore-scripts']).status,
     ).toBe(0);
+    const installedSourceProfile = runExecutable('bun', consumer, [
+      'standards',
+      'structure',
+      '--profile',
+      'source',
+      '--dir',
+      ACTUAL_UPSTREAM,
+    ]);
+    expect(installedSourceProfile.stderr).toBe('');
+    expect(installedSourceProfile.status).toBe(0);
 
     const { up, url } = buildGitUpstream();
     expect(

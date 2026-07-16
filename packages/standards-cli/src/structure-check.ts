@@ -3,22 +3,16 @@ import { readdir, readFile } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { isRecord } from './github-settings';
 import {
-  hasSafeCommand,
-  inspectWorkspace,
-  isSafeFilteredTurboAlias,
-  type Workspace,
-} from './structure-workspace';
+  missingPublishedCliProblems,
+  rootScriptExpectations,
+  type StructureProfile,
+} from './structure-profile';
+import { hasSafeCommands, isSafeFilteredTurboAlias } from './structure-script';
+import { inspectWorkspace, type Workspace } from './structure-workspace';
 
-const ROOT_CHECK = 'turbo run lint check-types test build test:a11y';
-const ROOT_CHECK_FIX = 'turbo run lint:fix check-types test build test:a11y';
-const ROOT_A11Y = 'turbo run test:a11y';
-
-const ROOT_FIXED_SCRIPTS = new Set([
-  'standards',
-  'check',
-  'check:fix',
-  'test:a11y',
-]);
+const ROOT_FIXED_SCRIPTS = new Set(
+  'standards,check,check:fix,test:a11y'.split(','),
+);
 const GLOB_SUFFIX = '/*';
 const WORKSPACES_REQUIREMENT =
   'package.json: "workspaces" must be a non-empty array of literal paths or one-level "<dir>/*" patterns';
@@ -136,19 +130,20 @@ const loadWorkspace = async (
 };
 const inspectRootScripts = (
   root: Record<string, unknown>,
+  profile: StructureProfile,
   requireA11y: boolean,
 ): ReadonlyArray<string> => {
   const scripts = isRecord(root.scripts) ? root.scripts : {};
-  const expectations: ReadonlyArray<readonly [string, string]> = [
-    ['check', ROOT_CHECK],
-    ['check:fix', ROOT_CHECK_FIX],
-    ...(requireA11y ? [['test:a11y', ROOT_A11Y] as const] : []),
-  ];
-  const gateProblems = expectations.flatMap(([name, fragment]) => {
+  const expectations = rootScriptExpectations(profile, requireA11y);
+  const gateProblems = expectations.flatMap(({ name, commands, exact }) => {
     const { [name]: script } = scripts;
-    return typeof script === 'string' && hasSafeCommand(script, fragment)
+    const requirement = commands.join(' && ');
+    return typeof script === 'string' &&
+      hasSafeCommands(script, commands, exact)
       ? []
-      : [`package.json: root script "${name}" must run ${fragment}`];
+      : [
+          `package.json: root script "${name}" must run ${exact ? 'exactly ' : ''}${requirement}`,
+        ];
   });
   const aliasProblems = Object.entries(scripts).flatMap(([name, script]) =>
     ROOT_FIXED_SCRIPTS.has(name) ||
@@ -163,6 +158,7 @@ const inspectRootScripts = (
 };
 export const collectStructureProblems = async (
   consumer: string,
+  profile: StructureProfile,
 ): Promise<ReadonlyArray<string>> => {
   const root = await readJson(join(consumer, 'package.json'));
   if (root === null) {
@@ -185,14 +181,15 @@ export const collectStructureProblems = async (
       .filter((name): name is string => typeof name === 'string'),
   );
   const inspections = await Promise.all(
-    workspaces.map((ws) => inspectWorkspace(ws, workspaceNames)),
+    workspaces.map((ws) => inspectWorkspace(ws, workspaceNames, profile)),
   );
   const requireA11y = inspections.some((i) => i.hasA11ySuite);
   return [
     ...declaration.problems,
     ...resolved.flatMap((r) => (r.problem === null ? [] : [r.problem])),
     ...loaded.flatMap((l) => (l.problem === null ? [] : [l.problem])),
-    ...inspectRootScripts(root, requireA11y),
+    ...missingPublishedCliProblems(profile, workspaces),
+    ...inspectRootScripts(root, profile, requireA11y),
     ...inspections.flatMap((i) => [...i.problems]),
   ];
 };

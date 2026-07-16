@@ -1,6 +1,6 @@
 {
   "name": "@davidvornholt/standards",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Bootstrap, synchronize, and validate davidvornholt/standards consumers",
   "license": "MIT",
   "repository": {
@@ -26,6 +26,8 @@
     "src/github-diff.ts",
     "src/github-settings.ts",
     "src/structure-check.ts",
+    "src/structure-profile.ts",
+    "src/structure-script.ts",
     "src/structure-workspace.ts"
   ],
   "scripts": {
