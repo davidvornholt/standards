@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: Read-only reviewer for local workspace diffs. Use for review-loop review and verification passes and focused code, docs, workflow, or configuration reviews.
+description: Read-only reviewer for local workspace diffs. Use for review-fix review and verification passes and focused code, docs, workflow, or configuration reviews.
 tools: Read, Glob, Grep, Bash
 skills:
   - review
