@@ -54,10 +54,10 @@ describe('inspectWorkspace manifest rules', () => {
     const ws = makeWorkspace({
       ...baseManifest(),
       scripts: {
-        'check-types': 'echo "tsc --noEmit"',
-        lint: 'biome check --error-on-warnings . || true',
-        'lint:fix': 'biome check --write --error-on-warnings . # disabled',
-        test: '',
+        'check-types': 'tsc --noEmit --help',
+        lint: 'biome check --error-on-warnings . --help',
+        'lint:fix': 'biome check --write --error-on-warnings . --version',
+        test: 'bun test --help',
       },
     });
     const { problems } = await inspectWorkspace(ws, new Set());
@@ -65,10 +65,10 @@ describe('inspectWorkspace manifest rules', () => {
       'apps/web: script "check-types" must run tsc --noEmit',
     );
     expect(problems).toContain(
-      'apps/web: script "lint" must run biome check --error-on-warnings',
+      'apps/web: script "lint" must run biome check --error-on-warnings .',
     );
     expect(problems).toContain(
-      'apps/web: script "lint:fix" must run biome check --write --error-on-warnings',
+      'apps/web: script "lint:fix" must run biome check --write --error-on-warnings .',
     );
     expect(problems).toContain('apps/web: script "test" must run bun test');
   });
@@ -139,11 +139,14 @@ describe('inspectWorkspace tsconfig and a11y wiring', () => {
     ]);
   });
 
-  it('detects a nested a11y suite and requires its wiring', async () => {
+  it.each([
+    '',
+    'playwright test --list',
+  ])('rejects a non-executing a11y gate %#', async (testA11y) => {
     const ws = makeWorkspace(
       {
         ...baseManifest(),
-        scripts: { ...CANONICAL_SCRIPTS, 'test:a11y': '' },
+        scripts: { ...CANONICAL_SCRIPTS, 'test:a11y': testA11y },
       },
       {
         'tsconfig.json': TSCONFIG,

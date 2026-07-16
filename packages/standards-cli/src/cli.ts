@@ -36,6 +36,7 @@ import { CANONICAL_SETTINGS_FILE, LOCAL_SETTINGS_FILE } from './github-api';
 import { runGithubApply, runGithubCheck } from './github-commands';
 import { loadGithubSettings } from './github-settings';
 import { collectStructureProblems } from './structure-check';
+import { hasSafeCommand } from './structure-workspace';
 
 const { YAML: BunYaml } = await import('bun');
 
@@ -702,7 +703,10 @@ const inspectPackageJson = (packageRaw: string): ReadonlyArray<string> => {
   }
   for (const name of ['check', 'check:fix']) {
     const script = scripts?.[name];
-    if (typeof script !== 'string' || !script.includes('standards check')) {
+    if (
+      typeof script !== 'string' ||
+      !hasSafeCommand(script, 'standards check')
+    ) {
       problems.push(`package.json script "${name}" must run standards check`);
     }
   }

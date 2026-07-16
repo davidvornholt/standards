@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 const ENGINE = join(import.meta.dir, 'cli.ts');
+const ACTUAL_UPSTREAM = join(import.meta.dir, '../../..');
 const STD_PATHS: ReadonlyArray<string> = ['sync-standards.json', 'managed'];
 
 type RunResult = { stdout: string; stderr: string; status: number };
@@ -219,6 +220,20 @@ describe('init', () => {
     expect(result.stderr).toContain('overlaps seed path');
     expect(existsSync(join(consumer, 'sync-standards.lock'))).toBe(false);
   });
+
+  it('seeds the actual template with empty workspace roots', () => {
+    const { consumer, result } = initConsumer(ACTUAL_UPSTREAM);
+    expect(result.status).toBe(0);
+    expect(run(consumer, ['structure', '--dir', consumer]).status).toBe(0);
+    git(consumer, ['init', '--quiet']);
+    git(consumer, [
+      'remote',
+      'add',
+      'origin',
+      'https://github.com/davidvornholt/standards.git',
+    ]);
+    expect(run(consumer, ['check', '--dir', consumer]).status).toBe(0);
+  });
 });
 
 describe('check', () => {
@@ -298,6 +313,24 @@ describe('doctor', () => {
     expect(doctor.stderr).toContain('script "check:fix"');
   });
 
+  it('rejects non-executing standards check scripts', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    const manifest = JSON.parse(read(consumer, 'package.json')) as {
+      scripts: Record<string, string>;
+    };
+    manifest.scripts.check = 'echo standards check';
+    manifest.scripts['check:fix'] = 'standards check --help';
+    write(consumer, 'package.json', JSON.stringify(manifest));
+    const doctor = run(consumer, ['doctor', '--dir', consumer]);
+    expect(doctor.status).toBe(1);
+    expect(doctor.stderr).toContain('script "check" must run standards check');
+    expect(doctor.stderr).toContain(
+      'script "check:fix" must run standards check',
+    );
+  });
+});
+
+describe('doctor Dependabot validation', () => {
   it('reports invalid Dependabot structure and missing baseline ecosystems', () => {
     const { consumer } = initConsumer(buildUpstream());
     write(
@@ -394,14 +427,19 @@ describe('structure', () => {
   const tsconfigProblem =
     'apps/web: tsconfig.json must extend @davidvornholt/typescript-config';
 
-  it('check fails when a root gate script loses its canonical command', () => {
+  it('check rejects non-executing root gate modes', () => {
     const { consumer } = initConsumer(buildUpstream());
     write(
       consumer,
       'package.json',
       JSON.stringify({
         workspaces: ['apps/*'],
-        scripts: { check: 'standards check', 'check:fix': 'standards check' },
+        scripts: {
+          check:
+            'standards check && turbo run lint check-types test build test:a11y --dry',
+          'check:fix':
+            'standards check && turbo run lint:fix check-types test build test:a11y --version',
+        },
         devDependencies: { '@davidvornholt/standards': '0.1.0' },
       }),
     );
@@ -409,6 +447,7 @@ describe('structure', () => {
     expect(check.status).toBe(1);
     expect(check.stderr).toContain('monorepo structure problem(s)');
     expect(check.stderr).toContain('root script "check" must run');
+    expect(check.stderr).toContain('root script "check:fix" must run');
   });
 
   it('the structure command validates structure in isolation', () => {
@@ -431,6 +470,11 @@ describe('structure', () => {
     [
       'lookalike name',
       '{"extends":"@davidvornholt/typescript-config-copy/base"}',
+    ],
+    ['empty export', '{"extends":"@davidvornholt/typescript-config/"}'],
+    [
+      'traversal export',
+      '{"extends":"@davidvornholt/typescript-config/../evil"}',
     ],
     ['malformed', '{"extends":"@davidvornholt/typescript-config/base"'],
   ])('rejects %s tsconfig inheritance', (_label, tsconfig) => {

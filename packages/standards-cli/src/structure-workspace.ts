@@ -1,29 +1,30 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isRecord } from './github-settings';
-
 export type Workspace = {
   readonly rel: string;
   readonly dir: string;
   readonly manifest: Record<string, unknown>;
 };
-
 const WORKSPACE_SCRIPTS: ReadonlyArray<readonly [string, string]> = [
   ['check-types', 'tsc --noEmit'],
-  ['lint', 'biome check --error-on-warnings'],
-  ['lint:fix', 'biome check --write --error-on-warnings'],
+  ['lint', 'biome check --error-on-warnings .'],
+  ['lint:fix', 'biome check --write --error-on-warnings .'],
   ['test', 'bun test'],
 ];
 const A11Y_DEPENDENCIES = ['@axe-core/playwright', '@playwright/test'] as const;
-const DEPENDENCY_FIELDS = [
-  'dependencies',
-  'devDependencies',
-  'peerDependencies',
-  'optionalDependencies',
-] as const;
+const DEPENDENCY_FIELDS =
+  'dependencies devDependencies peerDependencies optionalDependencies'.split(
+    ' ',
+  );
 const SHARED_TSCONFIG_PACKAGE = '@davidvornholt/typescript-config';
+const SHARED_TSCONFIG_PATH =
+  /^@davidvornholt\/typescript-config\/(?:base|next|react-library)$/u;
 const UNSAFE_SCRIPT_SYNTAX = /[|;#"'`\r\n]/u;
 const SCRIPT_WHITESPACE = /\s+/u;
+const NON_EXECUTING_A11Y_OPTION =
+  /^(?:-h|-V|--(?:debug|help|last-failed|list|only-changed|ui|version))(?:=|$)/u;
+const NON_EXECUTING_TURBO_OPTION = /^(?:-h|-v|--(?:dry|help|version))(?:=|$)/u;
 const IGNORED_DIRS = new Set('.git,.next,.turbo,dist,node_modules'.split(','));
 const scriptOf = (
   manifest: Record<string, unknown>,
@@ -52,15 +53,16 @@ const safeCommands = (
 export const hasSafeCommand = (
   script: string | null,
   expected: string,
-): boolean => {
-  const commands = safeCommands(script);
-  const expectedTokens = expected.split(' ');
-  return (
-    commands?.some((tokens) =>
-      expectedTokens.every((token, index) => tokens[index] === token),
-    ) ?? false
-  );
-};
+): boolean =>
+  safeCommands(script)?.some((tokens) => tokens.join(' ') === expected) ??
+  false;
+const hasSafeA11yCommand = (script: string | null): boolean =>
+  safeCommands(script)?.some(
+    (tokens) =>
+      tokens[0] === 'playwright' &&
+      tokens[1] === 'test' &&
+      tokens.slice(2).every((token) => !NON_EXECUTING_A11Y_OPTION.test(token)),
+  ) ?? false;
 export const isSafeFilteredTurboAlias = (script: string): boolean => {
   const commands = safeCommands(script);
   if (commands?.length !== 1) {
@@ -70,14 +72,18 @@ export const isSafeFilteredTurboAlias = (script: string): boolean => {
   const filterAt = tokens.findIndex(
     (token) => token === '--filter' || token.startsWith('--filter='),
   );
-  if (tokens[0] !== 'turbo' || tokens[1] !== 'run' || filterAt <= 2) {
-    return false;
-  }
   const filter = tokens[filterAt];
-  return filter === '--filter'
-    ? tokens[filterAt + 1] !== undefined &&
-        !tokens[filterAt + 1].startsWith('-')
-    : filter.length > '--filter='.length;
+  const filterValue =
+    filter === '--filter'
+      ? tokens[filterAt + 1]
+      : filter?.slice('--filter='.length);
+  return tokens[0] !== 'turbo' || tokens[1] !== 'run'
+    ? false
+    : tokens[2]?.startsWith('-') === false &&
+        !tokens.some((token) => NON_EXECUTING_TURBO_OPTION.test(token)) &&
+        filterValue !== undefined &&
+        filterValue !== '' &&
+        !filterValue.startsWith('-');
 };
 const containsA11ySuite = async (dir: string): Promise<boolean> => {
   const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
@@ -114,9 +120,7 @@ const inspectInternalDeps = (
       : [],
   );
 const isSharedTsconfigPath = (value: unknown): value is string =>
-  typeof value === 'string' &&
-  (value === SHARED_TSCONFIG_PACKAGE ||
-    value.startsWith(`${SHARED_TSCONFIG_PACKAGE}/`));
+  typeof value === 'string' && SHARED_TSCONFIG_PATH.test(value);
 const extendsSharedTsconfig = (raw: string): boolean => {
   let parsed: unknown;
   try {
@@ -127,14 +131,12 @@ const extendsSharedTsconfig = (raw: string): boolean => {
   if (!isRecord(parsed)) {
     return false;
   }
-  const extension = parsed.extends;
-  if (typeof extension === 'string') {
-    return isSharedTsconfigPath(extension);
-  }
+  const extensions = Array.isArray(parsed.extends)
+    ? parsed.extends
+    : [parsed.extends];
   return (
-    Array.isArray(extension) &&
-    extension.every((value) => typeof value === 'string') &&
-    extension.some(isSharedTsconfigPath)
+    extensions.every((value) => typeof value === 'string') &&
+    extensions.some(isSharedTsconfigPath)
   );
 };
 const inspectTsconfig = async (
@@ -162,7 +164,7 @@ const inspectA11y = async (
     declaredDependencies(ws.manifest).map(([name]) => name),
   );
   const problems = [
-    ...(hasSafeCommand(scriptOf(ws.manifest, 'test:a11y'), 'playwright test')
+    ...(hasSafeA11yCommand(scriptOf(ws.manifest, 'test:a11y'))
       ? []
       : [
           `${ws.rel}: a *.a11y.ts suite requires a non-empty "test:a11y" script that runs playwright test`,

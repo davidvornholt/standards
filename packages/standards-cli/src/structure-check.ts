@@ -86,7 +86,9 @@ const resolvePattern = async (
     const base = pattern.slice(0, -GLOB_SUFFIX.length);
     const entries = await readdir(join(consumer, base), {
       withFileTypes: true,
-    }).catch(() => null);
+    }).catch((error: unknown) =>
+      isRecord(error) && error.code === 'ENOENT' ? [] : null,
+    );
     if (entries === null) {
       return {
         dirs: [],

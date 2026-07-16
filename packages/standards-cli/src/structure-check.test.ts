@@ -5,21 +5,15 @@ import { dirname, join } from 'node:path';
 import { collectStructureProblems } from './structure-check';
 
 const tmps: Array<string> = [];
-
 afterEach(() => {
-  while (tmps.length > 0) {
-    const dir = tmps.pop();
-    if (dir !== undefined) {
-      rmSync(dir, { recursive: true, force: true });
-    }
+  for (const dir of tmps.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
-
 const write = (root: string, rel: string, content: string): void => {
   mkdirSync(dirname(join(root, rel)), { recursive: true });
   writeFileSync(join(root, rel), content);
 };
-
 const CANONICAL_SCRIPTS = {
   'check-types': 'tsc --noEmit',
   lint: 'biome check --error-on-warnings .',
@@ -115,12 +109,15 @@ describe('collectStructureProblems basics and scripts', () => {
       start: 'turbo run dev --filter=@repo/web',
       db: 'bun run scripts/db.ts',
       quoted: 'echo "turbo run dev --filter @repo/web"',
+      help: 'turbo run --help --filter @repo/web',
       unfiltered: 'turbo run dev --filter',
     };
     const problems = await collectStructureProblems(
       buildConsumer(rootManifest({ scripts })),
     );
-    expect(problems).toEqual(['db', 'quoted', 'unfiltered'].map(aliasProblem));
+    expect(problems).toEqual(
+      ['db', 'quoted', 'help', 'unfiltered'].map(aliasProblem),
+    );
   });
 
   it('requires a safe root test:a11y script once a workspace has a suite', async () => {
@@ -147,13 +144,22 @@ describe('collectStructureProblems workspace declarations', () => {
       ['../outside'],
       'package.json: unsafe workspaces pattern "../outside"; use a relative path without "." or ".." segments',
     ],
-    [
-      ['missing/*'],
-      'package.json: cannot read workspace directory "missing" declared by "missing/*"',
-    ],
   ])('rejects malformed workspace declarations %#', async (workspaces, expected) => {
     const consumer = buildConsumer(rootManifest({ workspaces }));
     expect(await collectStructureProblems(consumer)).toContain(expected);
+  });
+
+  it('treats a missing glob root as an empty match', async () => {
+    const consumer = buildConsumer(rootManifest({ workspaces: ['empty/*'] }));
+    expect(await collectStructureProblems(consumer)).toEqual([]);
+  });
+
+  it('rejects a glob root that is not a directory', async () => {
+    const consumer = buildConsumer(rootManifest({ workspaces: ['blocked/*'] }));
+    write(consumer, 'blocked', 'not a directory');
+    expect(await collectStructureProblems(consumer)).toContain(
+      'package.json: cannot read workspace directory "blocked" declared by "blocked/*"',
+    );
   });
 
   it('rejects unsupported workspace glob patterns', async () => {
