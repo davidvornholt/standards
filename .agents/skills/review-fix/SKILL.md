@@ -34,6 +34,7 @@ Before the review pass, post a PR comment that freezes the disposition yardstick
 
 - **Intent**: one paragraph — the problem this diff solves.
 - **Threat model**: who runs the artifact, whose inputs it processes, and what breaking or leaking actually costs. Findings are judged for materiality against this, not against what is theoretically possible.
+- **Fix budget**: the cumulative fix-commit size this cycle may reach before escalating, as a share of the original diff — default roughly half. Declare a larger budget upfront when the intent predicts test-heavy fixes (failure-mode tests and ratchets are legitimate growth). The budget is frozen with the contract, never raised mid-cycle to accommodate findings.
 - **Lenses**: invented per diff with one-line charters (see the `review` skill's lens contract); include `catch-all` unless an unscoped reviewer runs, and always consider `premise` — a locally flawless change built on a wrong premise is the flaw diff-scoped lenses cannot see. A diff with database mutations and no data-integrity lens, or auth surfaces and no security lens, is a selection error.
 
 **Split check**: several unrelated themes in one diff dilute every lens. Propose separate PRs and wait for explicit user approval before restructuring anything. An oversized coherent diff gets more, narrower lenses — not sharding, which hides cross-file findings.
@@ -59,14 +60,14 @@ Every finding gets exactly one disposition, judged against the scope contract:
 - **discard**: refuted, speculative, or conflicting with a registry decision. Append discards with durable value (deliberate policy or architecture choices, accepted risks) to `.agents/review/decisions.md`; summarize the rest in the review body.
 - **needs-clarification**: pause and ask the user, with a decision brief per question: what the diff currently does, each option's concrete consequences (who breaks, what it costs), and a recommendation with reasoning. Apply the `needs-clarification` label (create it if missing) while paused.
 
-Every pause for user input — needs-clarification and tripwires alike — is also posted as a PR comment carrying the decision brief. The PR is the durable state: the user answers asynchronously from anywhere, and any session resumes the cycle from the answer.
+Every pause for user input — needs-clarification and tripwires alike — is also posted as a PR comment carrying the decision brief. The PR is the durable state: the user answers asynchronously from anywhere, and any session resumes the cycle from the answer. Self-authored activity triggers no GitHub notifications: when posting with the user's own account, also ping through an out-of-band channel if one is available (e.g. a push-notification tool); with a bot-account token, an @mention of the user is the ping. Pauses are the only events that ping — routine threads, commits, and the report stay silent.
 
 Disposition a finding that is one instance of a repeated pattern as its class: the thread names the pattern and enumerates every sibling site, so the fix and the verification pass cover the class. The verification pass is delta-scoped and cannot see sibling defects the fix left untouched in the base diff — class-wide threads are what close that gap.
 
 Escalation tripwires — each converts a fix-now into a user question, and a blanket pre-approval ("I approve all further decisions") does not lift them:
 
 - the fix would add a new module, subsystem, or dependency;
-- cumulative fix commits would exceed roughly half the original diff;
+- cumulative fix commits would exceed the scope contract's fix budget;
 - the fix hardens beyond the stated threat model.
 
 ## Fix
