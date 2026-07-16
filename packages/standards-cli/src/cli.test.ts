@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 const ENGINE = join(import.meta.dir, 'cli.ts');
+const ACTUAL_UPSTREAM = join(import.meta.dir, '../../..');
 const STD_PATHS: ReadonlyArray<string> = ['sync-standards.json', 'managed'];
 
 type RunResult = { stdout: string; stderr: string; status: number };
@@ -86,12 +87,35 @@ const buildUpstream = (paths: ReadonlyArray<string> = STD_PATHS): string => {
     up,
     'template/package.json',
     JSON.stringify({
+      workspaces: ['apps/*'],
       scripts: {
-        check: 'standards check',
-        'check:fix': 'standards check',
+        standards: 'standards',
+        check:
+          'standards check && turbo run lint check-types test build test:a11y',
+        'check:fix':
+          'standards check && turbo run lint:fix check-types test build test:a11y',
       },
       devDependencies: { '@davidvornholt/standards': '0.1.0' },
     }),
+  );
+  write(
+    up,
+    'template/apps/web/package.json',
+    JSON.stringify({
+      name: '@repo/web',
+      version: '0.0.0',
+      scripts: {
+        'check-types': 'tsc --noEmit',
+        lint: 'biome check --error-on-warnings .',
+        'lint:fix': 'biome check --write --error-on-warnings .',
+        test: 'bun test',
+      },
+    }),
+  );
+  write(
+    up,
+    'template/apps/web/tsconfig.json',
+    '{ "extends": "@davidvornholt/typescript-config/base" }\n',
   );
   write(up, 'managed/a.txt', 'alpha\n');
   write(up, 'managed/b.txt', 'beta\n');
@@ -196,6 +220,20 @@ describe('init', () => {
     expect(result.stderr).toContain('overlaps seed path');
     expect(existsSync(join(consumer, 'sync-standards.lock'))).toBe(false);
   });
+
+  it('seeds the actual template with empty workspace roots', () => {
+    const { consumer, result } = initConsumer(ACTUAL_UPSTREAM);
+    expect(result.status).toBe(0);
+    expect(run(consumer, ['structure', '--dir', consumer]).status).toBe(0);
+    git(consumer, ['init', '--quiet']);
+    git(consumer, [
+      'remote',
+      'add',
+      'origin',
+      'https://github.com/davidvornholt/standards.git',
+    ]);
+    expect(run(consumer, ['check', '--dir', consumer]).status).toBe(0);
+  });
 });
 
 describe('check', () => {
@@ -229,6 +267,36 @@ describe('check', () => {
     expect(check.status).toBe(1);
     expect(check.stderr).toContain('no non-empty sync-standards.lock found');
   });
+
+  it('aggregates malformed root JSON with independent gate problems', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    write(consumer, 'managed/a.txt', 'tampered\n');
+    write(consumer, 'biome.jsonc', '{}\n');
+    write(consumer, '.github/settings.json', '{"repository":{},"rulesets":[]}');
+    write(
+      consumer,
+      '.github/settings.local.json',
+      '{"repository":{},"rulesets":[]}',
+    );
+    write(consumer, 'package.json', '{ malformed');
+
+    const check = run(import.meta.dir, ['check', '--dir', consumer]);
+
+    expect(check.status).toBe(1);
+    expect(check.stderr).toContain('modified: managed/a.txt');
+    expect(check.stderr).toContain('biome.jsonc must extend');
+    expect(check.stderr).toContain('package.json must contain valid JSON');
+    expect(check.stderr).toContain(
+      'package.json must exist and contain a JSON object',
+    );
+    expect(check.stderr).toContain(
+      'cannot determine the GitHub repository from the origin remote',
+    );
+    expect(
+      check.stderr.split('package.json must contain valid JSON'),
+    ).toHaveLength(2);
+    expect(check.stderr).not.toContain('JSON Parse error');
+  });
 });
 
 describe('doctor', () => {
@@ -245,6 +313,24 @@ describe('doctor', () => {
     expect(doctor.stderr).toContain('script "check:fix"');
   });
 
+  it('rejects non-executing standards check scripts', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    const manifest = JSON.parse(read(consumer, 'package.json')) as {
+      scripts: Record<string, string>;
+    };
+    manifest.scripts.check = 'echo standards check';
+    manifest.scripts['check:fix'] = 'standards check --help';
+    write(consumer, 'package.json', JSON.stringify(manifest));
+    const doctor = run(consumer, ['doctor', '--dir', consumer]);
+    expect(doctor.status).toBe(1);
+    expect(doctor.stderr).toContain('script "check" must run standards check');
+    expect(doctor.stderr).toContain(
+      'script "check:fix" must run standards check',
+    );
+  });
+});
+
+describe('doctor Dependabot validation', () => {
   it('reports invalid Dependabot structure and missing baseline ecosystems', () => {
     const { consumer } = initConsumer(buildUpstream());
     write(
@@ -334,6 +420,84 @@ describe('doctor', () => {
 
     expect(doctor.status).toBe(0);
     expect(doctor.stdout).toContain('consumer integration seams are wired');
+  });
+});
+
+describe('structure', () => {
+  const tsconfigProblem =
+    'apps/web: tsconfig.json must extend @davidvornholt/typescript-config';
+
+  it('check rejects non-executing root gate modes', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    write(
+      consumer,
+      'package.json',
+      JSON.stringify({
+        workspaces: ['apps/*'],
+        scripts: {
+          check:
+            'standards check && turbo run lint check-types test build test:a11y --dry',
+          'check:fix':
+            'standards check && turbo run lint:fix check-types test build test:a11y --version',
+        },
+        devDependencies: { '@davidvornholt/standards': '0.1.0' },
+      }),
+    );
+    const check = run(consumer, ['check', '--dir', consumer]);
+    expect(check.status).toBe(1);
+    expect(check.stderr).toContain('monorepo structure problem(s)');
+    expect(check.stderr).toContain('root script "check" must run');
+    expect(check.stderr).toContain('root script "check:fix" must run');
+  });
+
+  it('the structure command validates structure in isolation', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    const ok = run(consumer, ['structure', '--dir', consumer]);
+    expect(ok.status).toBe(0);
+    expect(ok.stdout).toContain('workspace layout matches the standards');
+  });
+
+  it.each([
+    [
+      'commented-out',
+      '{ // "extends": "@davidvornholt/typescript-config/base"\n}',
+    ],
+    [
+      'nested',
+      '{"compilerOptions":{"extends":"@davidvornholt/typescript-config/base"}}',
+    ],
+    ['lookalike scope', '{"extends":"@other/typescript-config/base"}'],
+    [
+      'lookalike name',
+      '{"extends":"@davidvornholt/typescript-config-copy/base"}',
+    ],
+    ['empty export', '{"extends":"@davidvornholt/typescript-config/"}'],
+    [
+      'traversal export',
+      '{"extends":"@davidvornholt/typescript-config/../evil"}',
+    ],
+    ['malformed', '{"extends":"@davidvornholt/typescript-config/base"'],
+  ])('rejects %s tsconfig inheritance', (_label, tsconfig) => {
+    const { consumer } = initConsumer(buildUpstream());
+    write(consumer, 'apps/web/tsconfig.json', tsconfig);
+    const result = run(consumer, ['structure', '--dir', consumer]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(tsconfigProblem);
+  });
+
+  it.each([
+    [
+      'JSONC string',
+      '{ // shared strict defaults\n"extends":"@davidvornholt/typescript-config/base",\n}',
+    ],
+    [
+      'extends array',
+      '{"extends":["./generated.json","@davidvornholt/typescript-config/next"]}',
+    ],
+  ])('accepts canonical inheritance through a %s', (_label, tsconfig) => {
+    const { consumer } = initConsumer(buildUpstream());
+    write(consumer, 'apps/web/tsconfig.json', tsconfig);
+    expect(run(consumer, ['structure', '--dir', consumer]).status).toBe(0);
   });
 });
 

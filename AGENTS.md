@@ -32,7 +32,6 @@ Before generating code, inspect the `description` frontmatter for every local sk
 
 - Use Bun only.
 - Add dependencies with `bun add`; do not manually edit dependency versions into `package.json`.
-- A workspace must declare every package it imports directly. Do not rely on hoisted, transitive, or sibling-workspace dependencies.
 - Workspaces that rely on Bun runtime or `bun:test` types must declare `@types/bun`, not custom ambient declaration shims.
 
 ## Monorepo structure
@@ -40,10 +39,7 @@ Before generating code, inspect the `description` frontmatter for every local sk
 - App-local code lives in `apps/*`; shared/foundational code lives in `packages/*`.
 - Put code where ownership is clearest. Keep single-app code in the owning app unless there is an intentional shared contract.
 - Package names must use the real project alias: `@<actual-project-name>/<package-name>`. Canonical packages synced from the template repo use the `@davidvornholt` scope instead; do not edit them locally — changes go to the template.
-- Internal packages use version `"0.0.0"` and internal dependencies use `workspace:*`.
 - Use package aliases for workspace imports. Never import another package through relative paths.
-- Extend shared TypeScript config from `packages/typescript-config`; do not create standalone `tsconfig.json` files.
-- Packages must define public APIs with `exports`.
 - Do not add `index.ts` barrel files in apps, features, shared folders, or packages.
 
 ## Architecture boundaries
@@ -64,13 +60,7 @@ Before generating code, inspect the `description` frontmatter for every local sk
 
 ## Workspace scripts
 
-- Workspace packages must expose `check-types`, `lint`, `lint:fix`, and `test` with `tsc --noEmit`, `biome check --error-on-warnings`, `biome check --write --error-on-warnings`, and `bun test`.
-- Browser-rendered app workspaces with Playwright/Axe coverage must expose `test:a11y` as the browser a11y gate and declare `@axe-core/playwright` and `@playwright/test` directly. The script may wrap `playwright test` when it needs local service orchestration.
-- Root scripts must include `test:a11y` delegating through Turbo to every workspace that defines a Playwright/Axe `test:a11y` task.
-- Root scripts must include `check: turbo run lint check-types test build test:a11y` and `check:fix: turbo run lint:fix check-types test build test:a11y`.
-- Operational scripts belong to the owning workspace. Put the real command in that workspace's `package.json`.
-- Root convenience scripts must delegate through Turbo with an explicit package filter, such as `turbo run dev --filter @my-repository/admin`.
-- Keep root `package.json` scripts minimal: cross-workspace quality gates plus narrowly useful filtered convenience aliases only.
+- Operational scripts belong to the owning workspace. Put the real command in that workspace's `package.json`, and keep root scripts minimal: the quality gates plus narrowly useful filtered Turbo convenience aliases.
 
 ## Linting
 

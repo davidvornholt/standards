@@ -26,7 +26,7 @@ import {
   dirname,
   isAbsolute,
   join,
-  normalize,
+  posix,
   relative,
   resolve,
   sep,
@@ -35,6 +35,8 @@ import process from 'node:process';
 import { CANONICAL_SETTINGS_FILE, LOCAL_SETTINGS_FILE } from './github-api';
 import { runGithubApply, runGithubCheck } from './github-commands';
 import { loadGithubSettings } from './github-settings';
+import { collectStructureProblems } from './structure-check';
+import { hasSafeCommand } from './structure-workspace';
 
 const { YAML: BunYaml } = await import('bun');
 
@@ -74,7 +76,14 @@ type Source = {
   readonly cleanup: () => void;
 };
 
-type Command = 'check' | 'doctor' | 'github' | 'help' | 'init' | 'sync';
+type Command =
+  | 'check'
+  | 'doctor'
+  | 'github'
+  | 'help'
+  | 'init'
+  | 'structure'
+  | 'sync';
 
 type CliOptions = {
   readonly command: Command | undefined;
@@ -91,7 +100,9 @@ const sha256 = (buf: Buffer): string =>
 const toPosix = (p: string): string => p.split(sep).join('/');
 
 const assertSafeRelativePath = (path: string, label: string): void => {
-  const normalized = normalize(path);
+  // POSIX semantics on every platform: managed paths are repository-relative
+  // POSIX paths, and win32 normalize would rewrite `/` to `\` and reject them.
+  const normalized = posix.normalize(path);
   if (
     path.length === 0 ||
     path === '.' ||
@@ -672,11 +683,19 @@ const inspectDependabot = (raw: string): ReadonlyArray<string> => {
 
 const inspectPackageJson = (packageRaw: string): ReadonlyArray<string> => {
   const problems: Array<string> = [];
-  const packageJson = JSON.parse(packageRaw) as Record<string, unknown>;
-  const scripts = packageJson.scripts as Record<string, unknown> | undefined;
-  const devDependencies = packageJson.devDependencies as
-    | Record<string, unknown>
-    | undefined;
+  let packageJson: unknown;
+  try {
+    packageJson = JSON.parse(packageRaw);
+  } catch {
+    return ['package.json must contain valid JSON'];
+  }
+  if (!isRecord(packageJson)) {
+    return ['package.json must contain a JSON object'];
+  }
+  const scripts = isRecord(packageJson.scripts) ? packageJson.scripts : {};
+  const devDependencies = isRecord(packageJson.devDependencies)
+    ? packageJson.devDependencies
+    : {};
   if (typeof devDependencies?.['@davidvornholt/standards'] !== 'string') {
     problems.push(
       'package.json must declare @davidvornholt/standards directly',
@@ -684,7 +703,10 @@ const inspectPackageJson = (packageRaw: string): ReadonlyArray<string> => {
   }
   for (const name of ['check', 'check:fix']) {
     const script = scripts?.[name];
-    if (typeof script !== 'string' || !script.includes('standards check')) {
+    if (
+      typeof script !== 'string' ||
+      !hasSafeCommand(script, 'standards check')
+    ) {
       problems.push(`package.json script "${name}" must run standards check`);
     }
   }
@@ -747,12 +769,13 @@ const runDoctor = async (consumer: string): Promise<boolean> => {
 const USAGE = `Usage: standards <command> [options]
 
 Commands:
-  init    Bootstrap a consumer repo: seed repo-owned files, mirror canonical files, write the lock
-  sync    Mirror canonical files from upstream and rewrite the lock
-  check   Verify canonical files, extension seams, and GitHub settings
-  doctor  Validate extension seams only
-  github  Compare (--check) or converge (--apply) live GitHub settings
-  help    Show this help
+  init       Bootstrap a consumer repo: seed repo-owned files, mirror canonical files, write the lock
+  sync       Mirror canonical files from upstream and rewrite the lock
+  check      Verify canonical files, extension seams, monorepo structure, and GitHub settings
+  doctor     Validate extension seams only
+  structure  Validate monorepo structure rules only
+  github     Compare (--check) or converge (--apply) live GitHub settings
+  help       Show this help
 
 Options:
   --dir <path>   Consumer directory to operate on (default: current directory)
@@ -769,6 +792,7 @@ const commandFromArg = (arg: string): Command => {
     arg === 'github' ||
     arg === 'help' ||
     arg === 'init' ||
+    arg === 'structure' ||
     arg === 'sync'
   ) {
     return arg;
@@ -861,16 +885,34 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
   };
 };
 
+// Canonical monorepo structure gate: workspace and root script shapes,
+// internal versioning, `exports`, tsconfig inheritance, and a11y wiring.
+const runStructure = async (consumer: string): Promise<boolean> => {
+  const problems = await collectStructureProblems(consumer);
+  if (problems.length > 0) {
+    console.error(
+      `standards structure: ${problems.length} monorepo structure problem(s):`,
+    );
+    console.error(problems.map((problem) => `  - ${problem}`).join('\n'));
+    return false;
+  }
+  console.log('standards structure: workspace layout matches the standards');
+  return true;
+};
+
 const runCheckCommand = async (consumer: string): Promise<boolean> => {
   const driftIsClean = await runCheck(consumer);
   const integrationIsValid = await runDoctor(consumer);
+  const structureIsValid = await runStructure(consumer);
   // The GitHub gate activates with the synced declaration and then fails
   // closed: once .github/settings.json exists, an unreachable API or an
   // unreadable origin is a failure, not a skip.
   const githubIsConverged = existsSync(join(consumer, CANONICAL_SETTINGS_FILE))
     ? await runGithubCheck(consumer)
     : true;
-  return driftIsClean && integrationIsValid && githubIsConverged;
+  return (
+    driftIsClean && integrationIsValid && structureIsValid && githubIsConverged
+  );
 };
 
 const runInitCommand = async (
@@ -919,6 +961,24 @@ const runSyncCommand = async (
   }
 };
 
+// Commands whose success is reported through the exit code.
+const runGateCommand = (
+  command: 'check' | 'doctor' | 'github' | 'structure',
+  consumer: string,
+  apply: boolean,
+): Promise<boolean> => {
+  if (command === 'check') {
+    return runCheckCommand(consumer);
+  }
+  if (command === 'doctor') {
+    return runDoctor(consumer);
+  }
+  if (command === 'structure') {
+    return runStructure(consumer);
+  }
+  return apply ? runGithubApply(consumer) : runGithubCheck(consumer);
+};
+
 const main = async (): Promise<void> => {
   const { command, consumer, dryRun, from, ref, apply } = parseArgs(
     process.argv.slice(2),
@@ -936,30 +996,6 @@ const main = async (): Promise<void> => {
     return;
   }
 
-  if (command === 'check') {
-    if (!(await runCheckCommand(consumer))) {
-      process.exitCode = 1;
-    }
-    return;
-  }
-
-  if (command === 'github') {
-    const converged = apply
-      ? await runGithubApply(consumer)
-      : await runGithubCheck(consumer);
-    if (!converged) {
-      process.exitCode = 1;
-    }
-    return;
-  }
-
-  if (command === 'doctor') {
-    if (!(await runDoctor(consumer))) {
-      process.exitCode = 1;
-    }
-    return;
-  }
-
   if (command === 'init') {
     await runInitCommand(consumer, from, ref);
     return;
@@ -967,6 +1003,11 @@ const main = async (): Promise<void> => {
 
   if (command === 'sync') {
     await runSyncCommand(consumer, from, ref, dryRun);
+    return;
+  }
+
+  if (!(await runGateCommand(command, consumer, apply))) {
+    process.exitCode = 1;
   }
 };
 
