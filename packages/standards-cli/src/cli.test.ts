@@ -13,13 +13,56 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import process from 'node:process';
 
 const ENGINE = join(import.meta.dir, 'cli.ts');
 const ACTUAL_UPSTREAM = join(import.meta.dir, '../../..');
+const SYNC_WORKFLOW = join(
+  ACTUAL_UPSTREAM,
+  '.github/workflows/standards-sync.yml',
+);
 const STD_PATHS: ReadonlyArray<string> = ['sync-standards.json', 'managed'];
 
 type RunResult = { stdout: string; stderr: string; status: number };
 type Lock = { upstream: string; sha: string; files: Record<string, string> };
+
+const INVALID_POLICY_CASES = [
+  [
+    'malformed JSON',
+    'not json',
+    'sync-standards.local.json must contain valid JSON',
+  ],
+  [
+    'a non-object root',
+    'null',
+    'sync-standards.local.json must be a JSON object',
+  ],
+  [
+    'a wrong autoSync type',
+    '{ "autoSync": "false" }',
+    '"autoSync" must be a boolean',
+  ],
+  [
+    'a wrong ref type',
+    '{ "ref": 1 }',
+    '"ref" must be a non-empty single-line string',
+  ],
+  [
+    'a newline in ref',
+    '{ "ref": "main\\npresent=false" }',
+    '"ref" must be a non-empty single-line string',
+  ],
+  [
+    'a carriage return in ref',
+    '{ "ref": "main\\rpresent=false" }',
+    '"ref" must be a non-empty single-line string',
+  ],
+  [
+    'an unsupported field',
+    '{ "branch": "stable" }',
+    'contains unsupported field(s): branch',
+  ],
+] as const;
 
 const tmps: Array<string> = [];
 
@@ -38,11 +81,17 @@ const read = (root: string, rel: string): string =>
 const readLock = (root: string): Lock =>
   JSON.parse(read(root, 'sync-standards.lock')) as Lock;
 
-const run = (cwd: string, args: ReadonlyArray<string>): RunResult => {
+const runExecutable = (
+  executable: string,
+  cwd: string,
+  args: ReadonlyArray<string>,
+  env: Readonly<Record<string, string>> = {},
+): RunResult => {
   try {
-    const stdout = execFileSync('bun', [ENGINE, ...args], {
+    const stdout = execFileSync(executable, args, {
       cwd,
       encoding: 'utf8',
+      env: { ...process.env, ...env },
     });
     return { stdout, stderr: '', status: 0 };
   } catch (error) {
@@ -53,6 +102,29 @@ const run = (cwd: string, args: ReadonlyArray<string>): RunResult => {
       status: e.status ?? 1,
     };
   }
+};
+const run = (cwd: string, args: ReadonlyArray<string>): RunResult =>
+  runExecutable('bun', cwd, [ENGINE, ...args]);
+
+const workflowRunScript = (stepName: string): string => {
+  const lines = readFileSync(SYNC_WORKFLOW, 'utf8').split('\n');
+  const stepIndex = lines.indexOf(`      - name: ${stepName}`);
+  if (stepIndex === -1) {
+    throw new Error(`Workflow step not found: ${stepName}`);
+  }
+  const runIndex = lines.indexOf('        run: |', stepIndex);
+  if (runIndex === -1) {
+    throw new Error(`Workflow run script not found: ${stepName}`);
+  }
+  const scriptLines: Array<string> = [];
+  for (let index = runIndex + 1; index < lines.length; index += 1) {
+    const line = lines[index] ?? '';
+    if (line.length > 0 && !line.startsWith('          ')) {
+      break;
+    }
+    scriptLines.push(line.startsWith('          ') ? line.slice(10) : line);
+  }
+  return scriptLines.join('\n').trimEnd();
 };
 
 // A fake upstream: its own manifest, a `template/` seed dir, two managed files.
@@ -661,6 +733,278 @@ describe('ref pinning', () => {
     expect(result.stderr).toContain(
       '--ref is only valid with the init and sync commands',
     );
+  });
+});
+
+describe('sync policy file', () => {
+  it('sync honors a checked-in pin and an explicit --ref overrides it', () => {
+    const { up, url, taggedSha } = buildGitUpstream();
+    const { consumer } = initConsumer(up);
+    write(consumer, 'sync-standards.local.json', '{ "ref": "v1" }\n');
+
+    const pinned = sync(url, consumer);
+    expect(pinned.status).toBe(0);
+    expect(read(consumer, 'managed/a.txt')).toBe('alpha\n');
+    expect(readLock(consumer).sha).toBe(taggedSha);
+
+    const overridden = sync(url, consumer, ['--ref', 'main']);
+    expect(overridden.status).toBe(0);
+    expect(read(consumer, 'managed/a.txt')).toBe('alpha v2\n');
+  });
+
+  it('init honors a checked-in pin for the first mirror', () => {
+    const { url, taggedSha } = buildGitUpstream();
+    const consumer = mkTmp('sync-cons-');
+    write(consumer, 'sync-standards.local.json', '{ "ref": "v1" }\n');
+    const result = run(consumer, ['init', '--from', url, '--dir', consumer]);
+    expect(result.status).toBe(0);
+    expect(read(consumer, 'managed/a.txt')).toBe('alpha\n');
+    expect(readLock(consumer).sha).toBe(taggedSha);
+  });
+
+  it('ignores the pin for a local-path source, which is used as-is', () => {
+    const { up } = buildGitUpstream();
+    const { consumer } = initConsumer(up);
+    write(consumer, 'sync-standards.local.json', '{ "ref": "v1" }\n');
+    const result = sync(up, consumer);
+    expect(result.status).toBe(0);
+    expect(read(consumer, 'managed/a.txt')).toBe('alpha v2\n');
+  });
+});
+
+describe('sync policy validation', () => {
+  it.each(
+    INVALID_POLICY_CASES,
+  )('validates %s before explicit refs and local sources', (_label, policy, expectedError) => {
+    const { up, url } = buildGitUpstream();
+    const { consumer } = initConsumer(up);
+    write(consumer, 'sync-standards.local.json', policy);
+
+    for (const extra of [
+      ['--ref', 'main'],
+      ['--ref', 'main', '--dry-run'],
+    ]) {
+      const result = sync(url, consumer, extra);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(expectedError);
+    }
+
+    const localSync = sync(up, consumer);
+    expect(localSync.status).toBe(1);
+    expect(localSync.stderr).toContain(expectedError);
+
+    for (const source of [url, up]) {
+      const initTarget = mkTmp('sync-cons-');
+      write(initTarget, 'sync-standards.local.json', policy);
+      const args =
+        source === url
+          ? ['init', '--from', source, '--ref', 'main', '--dir', initTarget]
+          : ['init', '--from', source, '--dir', initTarget];
+      const result = run(initTarget, args);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(expectedError);
+    }
+  });
+
+  it.each(
+    INVALID_POLICY_CASES,
+  )('doctor and check reject %s', (_label, policy, expectedError) => {
+    const { consumer } = initConsumer(buildUpstream());
+    write(consumer, 'sync-standards.local.json', policy);
+
+    for (const command of ['doctor', 'check']) {
+      const result = run(consumer, [command, '--dir', consumer]);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(expectedError);
+    }
+  });
+
+  it('doctor and check accept a valid policy', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    write(
+      consumer,
+      'sync-standards.local.json',
+      '{ "autoSync": false, "ref": "v1" }\n',
+    );
+
+    expect(run(consumer, ['doctor', '--dir', consumer]).status).toBe(0);
+    expect(run(consumer, ['check', '--dir', consumer]).status).toBe(0);
+  });
+});
+
+describe('sync policy distribution', () => {
+  it('the packed declared consumer version honors the workflow sync pin', () => {
+    const packageManifest = JSON.parse(
+      readFileSync(join(import.meta.dir, '../package.json'), 'utf8'),
+    ) as { version: string };
+    const templateManifest = JSON.parse(
+      readFileSync(join(ACTUAL_UPSTREAM, 'template/package.json'), 'utf8'),
+    ) as {
+      devDependencies: Record<string, string>;
+    };
+    expect(templateManifest.devDependencies['@davidvornholt/standards']).toBe(
+      packageManifest.version,
+    );
+
+    const packed = mkTmp('standards-pack-');
+    const pack = runExecutable('bun', join(import.meta.dir, '..'), [
+      'pm',
+      'pack',
+      '--destination',
+      packed,
+      '--quiet',
+    ]);
+    expect(pack.status).toBe(0);
+    const tarball = pack.stdout.trim();
+    const consumer = mkTmp('sync-cons-');
+    write(
+      consumer,
+      'package.json',
+      JSON.stringify({
+        private: true,
+        scripts: { standards: 'standards' },
+        devDependencies: {
+          '@davidvornholt/standards': `file:${tarball}`,
+        },
+      }),
+    );
+    expect(
+      runExecutable('bun', consumer, ['install', '--ignore-scripts']).status,
+    ).toBe(0);
+
+    const { up, url } = buildGitUpstream();
+    expect(
+      runExecutable('bun', consumer, [
+        'standards',
+        'init',
+        '--from',
+        up,
+        '--dir',
+        consumer,
+      ]).status,
+    ).toBe(0);
+    write(consumer, 'sync-standards.local.json', '{ "ref": "v1" }\n');
+
+    const result = runExecutable('bun', consumer, [
+      'standards',
+      'sync',
+      '--from',
+      url,
+      '--dir',
+      consumer,
+    ]);
+
+    expect(result.status).toBe(0);
+    expect(read(consumer, 'managed/a.txt')).toBe('alpha\n');
+  });
+});
+
+describe('standards sync workflow policy', () => {
+  const runPolicyPreflight = (
+    policy: string | undefined,
+    legacy: Readonly<Record<string, string>> = {},
+  ): { result: RunResult; output: string } => {
+    const fixture = mkTmp('sync-policy-');
+    if (policy !== undefined) {
+      write(fixture, 'sync-standards.local.json', policy);
+    }
+    const outputPath = join(fixture, 'github-output');
+    const result = runExecutable(
+      'bash',
+      fixture,
+      ['-euo', 'pipefail', '-c', workflowRunScript('Read sync policy')],
+      { GITHUB_OUTPUT: outputPath, ...legacy },
+    );
+    return {
+      result,
+      output: existsSync(outputPath) ? readFileSync(outputPath, 'utf8') : '',
+    };
+  };
+
+  it('uses defaults when the policy is absent and ignores legacy variables', () => {
+    const { result, output } = runPolicyPreflight(undefined, {
+      STANDARDS_AUTO_SYNC: 'false',
+      STANDARDS_SYNC_REF: 'v0.6.0',
+    });
+
+    expect(result.status).toBe(0);
+    expect(output).toContain('auto-sync=true');
+    expect(output).toContain('present=false');
+    expect(output).toContain('ref=\n');
+    expect(readFileSync(SYNC_WORKFLOW, 'utf8')).not.toContain(
+      'STANDARDS_AUTO_SYNC',
+    );
+    expect(readFileSync(SYNC_WORKFLOW, 'utf8')).not.toContain(
+      'STANDARDS_SYNC_REF',
+    );
+  });
+
+  it('emits a validated opt-out and pin while manual dispatch stays enabled', () => {
+    const { result, output } = runPolicyPreflight(
+      '{ "autoSync": false, "ref": "v0.7.0" }\n',
+    );
+
+    expect(result.status).toBe(0);
+    expect(output).toContain('auto-sync=false');
+    expect(output).toContain('present=true');
+    expect(output).toContain('ref=v0.7.0');
+    expect(readFileSync(SYNC_WORKFLOW, 'utf8')).toContain(
+      "if: github.event_name == 'workflow_dispatch' || needs.policy.outputs.auto-sync != 'false'",
+    );
+  });
+
+  it.each([
+    ['malformed JSON', 'not json'],
+    ['a null root', 'null'],
+    ['an array root', '[]'],
+    ['a wrong autoSync type', '{ "autoSync": "false" }'],
+    ['a numeric autoSync', '{ "autoSync": 0 }'],
+    ['a wrong ref type', '{ "ref": 1 }'],
+    ['an empty ref', '{ "ref": "" }'],
+    ['a newline in ref', '{ "ref": "main\\npresent=false" }'],
+    ['a carriage return in ref', '{ "ref": "main\\rpresent=false" }'],
+    ['an unsupported field', '{ "branch": "stable" }'],
+  ])('fails closed for %s', (_label, policy) => {
+    const { result, output } = runPolicyPreflight(policy);
+    expect(result.status).toBe(1);
+    expect(`${result.stdout}${result.stderr}`).toContain(
+      'sync-standards.local.json must be an object',
+    );
+    expect(output).toBe('');
+  });
+
+  const runVersionGuard = (version: string): RunResult => {
+    const fixture = mkTmp('sync-version-');
+    write(
+      fixture,
+      'node_modules/@davidvornholt/standards/package.json',
+      JSON.stringify({ version }),
+    );
+
+    return runExecutable(
+      'bash',
+      fixture,
+      [
+        '-euo',
+        'pipefail',
+        '-c',
+        workflowRunScript('Require policy-aware standards CLI'),
+      ],
+      { MINIMUM_STANDARDS_VERSION: '0.7.0' },
+    );
+  };
+
+  it.each([
+    '0.6.0',
+    '0.7.0-beta.1',
+  ])('rejects installed CLI version %s', (version) => {
+    const result = runVersionGuard(version);
+    expect(result.status).toBe(1);
+    expect(`${result.stdout}${result.stderr}`).toContain('::error::');
+  });
+
+  it.each(['0.7.0', '0.8.0'])('accepts installed CLI version %s', (version) => {
+    expect(runVersionGuard(version).status).toBe(0);
   });
 });
 

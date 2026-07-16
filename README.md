@@ -64,7 +64,7 @@ Once `sync-standards.json` and the CLI dependency are present:
 
 ```sh
 bun standards sync            # pull latest canonical files (mirror + deletions)
-bun standards sync --ref v0.6.0  # pull a pinned tag, branch, or full commit sha
+bun standards sync --ref v0.7.0  # pull a pinned tag, branch, or full commit sha
 bun standards sync --dry-run  # preview a sync, writing nothing
 bun standards check           # verify canonical files, seams, structure, and GitHub settings
 bun standards doctor          # validate extension seams without drift checks
@@ -78,12 +78,18 @@ The `Standards sync` workflow also runs `sync` weekly and opens a PR when upstre
 
 ### Track main or pin a version
 
-Tracking `main` weekly is the default and the recommended mode for repos whose owner also follows this template. Consumers that want to control *when* standards change instead — typical for repos you adopt these standards into but don't co-evolve with this one — get both levers as repository Actions variables, deliberately outside the canonical (read-only) workflow file:
+Tracking `main` weekly is the default and the recommended mode for repos whose owner also follows this template. Consumers that want to control *when* standards change instead — typical for repos you adopt these standards into but don't co-evolve with this one — get both levers in a small checked-in policy file, `sync-standards.local.json`, owned by the consumer repo (the canonical workflow file is read-only, but the policy next to it is versioned and reviewable like any other configuration). Both fields are optional:
 
-- **`STANDARDS_AUTO_SYNC`** — set to `false` to skip the weekly scheduled run. Manual `workflow_dispatch` (and `bun standards sync` locally) still works and becomes the deliberate way to pull updates.
-- **`STANDARDS_SYNC_REF`** — a tag, branch, or full commit sha the workflow syncs from instead of `main`.
+- **`"autoSync": false`** — skip the weekly scheduled run. Manual `workflow_dispatch` (and `bun standards sync` locally) still works and becomes the deliberate way to pull updates.
+- **`"ref": "v0.7.0"`** — a non-empty single-line tag, branch, or full commit sha to sync from instead of `main`. The workflow and the CLI (`init`/`sync` without an explicit `--ref`) both honor it, so scheduled and local syncs share one policy source.
 
 Every CLI release already creates a `vX.Y.Z` tag and GitHub Release, so released versions are natural pin points — no separate content-release process exists or is needed. A pinned repo updates by moving the pin (or running `sync --ref <newer>`) and reviewing the resulting PR like a dependency upgrade. The lock always records the exact upstream commit synced, so `check` works identically in both modes.
+
+### Breaking migration to 0.7.0
+
+Version 0.7.0 is an intentional hard cutover: `sync-standards.local.json` is the only cadence and ref policy source. The canonical workflow and CLI no longer read `STANDARDS_AUTO_SYNC` or `STANDARDS_SYNC_REF`; leaving those Actions variables configured has no effect.
+
+Upgrade `@davidvornholt/standards` and `bun.lock` to 0.7.0 or newer, create `sync-standards.local.json` with any required opt-out or pin, and accept the canonical workflow update in the same consumer PR. When the policy file is present, the workflow fails before syncing with an actionable error if the installed CLI is older than 0.7.0. This prevents a canonical workflow update from silently running a CLI that does not understand the checked-in policy.
 
 ## Release the CLI
 
@@ -91,7 +97,7 @@ The version in `packages/standards-cli/package.json` is the release declaration.
 
 ## How sync works
 
-- **Canonical content tracks `main` by default.** The CLI is a normal package dependency; synced content follows upstream `main` unless a consumer pins a ref (`--ref`, or `STANDARDS_SYNC_REF` for the workflow). Updates arrive the next time a repo runs `sync`; the resulting diff is still reviewed in a pull request.
+- **Canonical content tracks `main` by default.** The CLI is a normal package dependency; synced content follows upstream `main` unless a consumer pins a ref (`--ref`, or `"ref"` in `sync-standards.local.json`). Updates arrive the next time a repo runs `sync`; the resulting diff is still reviewed in a pull request.
 - **Mirror, including deletions.** `sync` reconciles managed paths against the lock three ways: files removed upstream are removed locally, so "canonical" never drifts into a pile of stale copies. `--dry-run` previews the plan (create / update / delete) and writes nothing.
 - **`check` is the CI gate.** It confirms every synced file still matches what `sync` last wrote (offline, hash-based), fails closed when the lock is absent, runs `doctor` to verify the repo-owned extension seams, and runs `structure` to enforce the monorepo layout contract (workspace and root script shapes, internal versioning, package `exports`, tsconfig inheritance, and a11y wiring for explicit `*.a11y.ts` suites). Once `.github/settings.json` is synced it also compares the live GitHub repository against the declaration via the API and fails on drift — repo merge settings that the CI token cannot see are reported as unverifiable instead of failing, since only admin tokens can read them. It runs first inside `bun run check`.
 
