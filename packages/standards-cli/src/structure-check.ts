@@ -1,27 +1,27 @@
-// Monorepo structure gate: enumerates workspaces from the root package.json
-// `workspaces` globs and enforces the root script contract plus the
-// per-workspace rules in structure-workspace.ts.
-
 import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { isRecord } from './github-settings';
-import { inspectWorkspace, type Workspace } from './structure-workspace';
+import {
+  hasSafeCommand,
+  inspectWorkspace,
+  isSafeFilteredTurboAlias,
+  type Workspace,
+} from './structure-workspace';
 
 const ROOT_CHECK = 'turbo run lint check-types test build test:a11y';
 const ROOT_CHECK_FIX = 'turbo run lint:fix check-types test build test:a11y';
 const ROOT_A11Y = 'turbo run test:a11y';
 
-// Root scripts with their own fixed contract; every other root script must be
-// a filtered Turbo convenience alias.
 const ROOT_FIXED_SCRIPTS = new Set([
   'standards',
   'check',
   'check:fix',
   'test:a11y',
 ]);
-
 const GLOB_SUFFIX = '/*';
+const WORKSPACES_REQUIREMENT =
+  'package.json: "workspaces" must be a non-empty array of literal paths or one-level "<dir>/*" patterns';
 
 const readJson = async (
   path: string,
@@ -37,14 +37,44 @@ const readJson = async (
     return null;
   }
 };
-
 type ResolvedPattern = {
   readonly dirs: ReadonlyArray<string>;
   readonly problem: string | null;
 };
-
-// Workspace globs in this system are directory-level: a literal path or one
-// trailing `/*`. Anything more exotic is itself a structure problem.
+type WorkspacePatterns = {
+  readonly patterns: ReadonlyArray<string>;
+  readonly problems: ReadonlyArray<string>;
+};
+const isSafeWorkspacePath = (pattern: string): boolean =>
+  pattern.trim() !== '' &&
+  pattern === pattern.trim() &&
+  !isAbsolute(pattern) &&
+  !pattern.includes('\\') &&
+  pattern
+    .split('/')
+    .every((part) => part !== '' && part !== '.' && part !== '..');
+const workspacePatternsOf = (
+  root: Record<string, unknown>,
+): WorkspacePatterns => {
+  const { workspaces } = root;
+  if (!Array.isArray(workspaces) || workspaces.length === 0) {
+    return { patterns: [], problems: [WORKSPACES_REQUIREMENT] };
+  }
+  const patterns: Array<string> = [];
+  const problems: Array<string> = [];
+  workspaces.forEach((pattern, index) => {
+    if (typeof pattern !== 'string') {
+      problems.push(`package.json: workspaces[${index}] must be a string`);
+    } else if (isSafeWorkspacePath(pattern)) {
+      patterns.push(pattern);
+    } else {
+      problems.push(
+        `package.json: unsafe workspaces pattern "${pattern}"; use a relative path without "." or ".." segments`,
+      );
+    }
+  });
+  return { patterns, problems };
+};
 const resolvePattern = async (
   consumer: string,
   pattern: string,
@@ -56,7 +86,13 @@ const resolvePattern = async (
     const base = pattern.slice(0, -GLOB_SUFFIX.length);
     const entries = await readdir(join(consumer, base), {
       withFileTypes: true,
-    }).catch(() => []);
+    }).catch(() => null);
+    if (entries === null) {
+      return {
+        dirs: [],
+        problem: `package.json: cannot read workspace directory "${base}" declared by "${pattern}"`,
+      };
+    }
     return {
       dirs: entries
         .filter((entry) => entry.isDirectory())
@@ -72,14 +108,10 @@ const resolvePattern = async (
   }
   return { dirs: [pattern], problem: null };
 };
-
 type LoadedWorkspace = {
   readonly workspace: Workspace | null;
   readonly problem: string | null;
 };
-
-// Directories without a package.json are not workspaces (Bun ignores them);
-// a present but unparsable manifest is a problem, not a silent skip.
 const loadWorkspace = async (
   consumer: string,
   rel: string,
@@ -100,7 +132,6 @@ const loadWorkspace = async (
     problem: null,
   };
 };
-
 const inspectRootScripts = (
   root: Record<string, unknown>,
   requireA11y: boolean,
@@ -113,14 +144,14 @@ const inspectRootScripts = (
   ];
   const gateProblems = expectations.flatMap(([name, fragment]) => {
     const { [name]: script } = scripts;
-    return typeof script === 'string' && script.includes(fragment)
+    return typeof script === 'string' && hasSafeCommand(script, fragment)
       ? []
       : [`package.json: root script "${name}" must run ${fragment}`];
   });
   const aliasProblems = Object.entries(scripts).flatMap(([name, script]) =>
     ROOT_FIXED_SCRIPTS.has(name) ||
     typeof script !== 'string' ||
-    (script.includes('turbo run') && script.includes('--filter'))
+    isSafeFilteredTurboAlias(script)
       ? []
       : [
           `package.json: root script "${name}" must delegate through Turbo with an explicit --filter`,
@@ -128,7 +159,6 @@ const inspectRootScripts = (
   );
   return [...gateProblems, ...aliasProblems];
 };
-
 export const collectStructureProblems = async (
   consumer: string,
 ): Promise<ReadonlyArray<string>> => {
@@ -136,13 +166,9 @@ export const collectStructureProblems = async (
   if (root === null) {
     return ['package.json must exist and contain a JSON object'];
   }
-  const patterns = Array.isArray(root.workspaces)
-    ? root.workspaces.filter(
-        (pattern): pattern is string => typeof pattern === 'string',
-      )
-    : [];
+  const declaration = workspacePatternsOf(root);
   const resolved = await Promise.all(
-    patterns.map((pattern) => resolvePattern(consumer, pattern)),
+    declaration.patterns.map((pattern) => resolvePattern(consumer, pattern)),
   );
   const rels = [...new Set(resolved.flatMap((r) => r.dirs))].sort();
   const loaded = await Promise.all(
@@ -161,6 +187,7 @@ export const collectStructureProblems = async (
   );
   const requireA11y = inspections.some((i) => i.hasA11ySuite);
   return [
+    ...declaration.problems,
     ...resolved.flatMap((r) => (r.problem === null ? [] : [r.problem])),
     ...loaded.flatMap((l) => (l.problem === null ? [] : [l.problem])),
     ...inspectRootScripts(root, requireA11y),

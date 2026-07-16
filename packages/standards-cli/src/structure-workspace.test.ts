@@ -7,11 +7,8 @@ import { inspectWorkspace, type Workspace } from './structure-workspace';
 const tmps: Array<string> = [];
 
 afterEach(() => {
-  while (tmps.length > 0) {
-    const dir = tmps.pop();
-    if (dir !== undefined) {
-      rmSync(dir, { recursive: true, force: true });
-    }
+  for (const dir of tmps.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
@@ -46,16 +43,22 @@ const baseManifest = (): Record<string, unknown> => ({
 
 describe('inspectWorkspace manifest rules', () => {
   it('accepts a canonical workspace without an a11y suite', async () => {
-    const ws = makeWorkspace(baseManifest());
-    const result = await inspectWorkspace(ws, new Set());
-    expect(result.problems).toEqual([]);
-    expect(result.hasA11ySuite).toBe(false);
+    const result = await inspectWorkspace(
+      makeWorkspace(baseManifest()),
+      new Set(),
+    );
+    expect(result).toEqual({ problems: [], hasA11ySuite: false });
   });
 
   it('reports every missing or divergent canonical script', async () => {
     const ws = makeWorkspace({
       ...baseManifest(),
-      scripts: { lint: 'eslint .' },
+      scripts: {
+        'check-types': 'echo "tsc --noEmit"',
+        lint: 'biome check --error-on-warnings . || true',
+        'lint:fix': 'biome check --write --error-on-warnings . # disabled',
+        test: '',
+      },
     });
     const { problems } = await inspectWorkspace(ws, new Set());
     expect(problems).toContain(
@@ -137,14 +140,20 @@ describe('inspectWorkspace tsconfig and a11y wiring', () => {
   });
 
   it('detects a nested a11y suite and requires its wiring', async () => {
-    const ws = makeWorkspace(baseManifest(), {
-      'tsconfig.json': TSCONFIG,
-      'a11y/home.a11y.ts': 'export {};\n',
-    });
+    const ws = makeWorkspace(
+      {
+        ...baseManifest(),
+        scripts: { ...CANONICAL_SCRIPTS, 'test:a11y': '' },
+      },
+      {
+        'tsconfig.json': TSCONFIG,
+        'a11y/home.a11y.ts': 'export {};\n',
+      },
+    );
     const result = await inspectWorkspace(ws, new Set());
     expect(result.hasA11ySuite).toBe(true);
     expect(result.problems).toEqual([
-      'apps/web: a *.a11y.ts suite requires a "test:a11y" script',
+      'apps/web: a *.a11y.ts suite requires a non-empty "test:a11y" script that runs playwright test',
       'apps/web: a *.a11y.ts suite requires a direct dependency on @axe-core/playwright',
       'apps/web: a *.a11y.ts suite requires a direct dependency on @playwright/test',
     ]);
@@ -154,7 +163,11 @@ describe('inspectWorkspace tsconfig and a11y wiring', () => {
     const ws = makeWorkspace(
       {
         ...baseManifest(),
-        scripts: { ...CANONICAL_SCRIPTS, 'test:a11y': 'playwright test' },
+        scripts: {
+          ...CANONICAL_SCRIPTS,
+          'test:a11y':
+            'bun run prepare-a11y && playwright test --config playwright.config.ts',
+        },
         devDependencies: {
           '@axe-core/playwright': '^4.0.0',
           '@playwright/test': '^1.0.0',
@@ -167,25 +180,18 @@ describe('inspectWorkspace tsconfig and a11y wiring', () => {
       },
     );
     const result = await inspectWorkspace(ws, new Set());
-    expect(result.hasA11ySuite).toBe(true);
-    expect(result.problems).toEqual([]);
+    expect(result).toEqual({ problems: [], hasA11ySuite: true });
   });
 
-  it('does not activate a11y wiring for a plain Playwright config', async () => {
+  it('only activates a11y wiring for explicit suites in source', async () => {
     const ws = makeWorkspace(baseManifest(), {
       'tsconfig.json': TSCONFIG,
       'playwright.config.ts': 'export {};\n',
-    });
-    const result = await inspectWorkspace(ws, new Set());
-    expect(result.hasA11ySuite).toBe(false);
-    expect(result.problems).toEqual([]);
-  });
-
-  it('ignores a11y-looking files inside node_modules', async () => {
-    const ws = makeWorkspace(baseManifest(), {
-      'tsconfig.json': TSCONFIG,
       'node_modules/pkg/home.a11y.ts': 'export {};\n',
     });
-    expect((await inspectWorkspace(ws, new Set())).hasA11ySuite).toBe(false);
+    expect(await inspectWorkspace(ws, new Set())).toEqual({
+      problems: [],
+      hasA11ySuite: false,
+    });
   });
 });

@@ -28,6 +28,10 @@ const CANONICAL_SCRIPTS = {
 };
 
 const TSCONFIG = '{ "extends": "@davidvornholt/typescript-config/base" }\n';
+const WORKSPACES_REQUIREMENT =
+  'package.json: "workspaces" must be a non-empty array of literal paths or one-level "<dir>/*" patterns';
+const aliasProblem = (name: string): string =>
+  `package.json: root script "${name}" must delegate through Turbo with an explicit --filter`;
 
 const rootManifest = (
   overrides: Record<string, unknown> = {},
@@ -76,7 +80,7 @@ const buildConsumer = (
   return consumer;
 };
 
-describe('collectStructureProblems', () => {
+describe('collectStructureProblems basics and scripts', () => {
   it('accepts a canonical consumer', async () => {
     expect(await collectStructureProblems(buildConsumer())).toEqual([]);
   });
@@ -89,42 +93,67 @@ describe('collectStructureProblems', () => {
     ]);
   });
 
-  it('requires the canonical root gate scripts', async () => {
-    const consumer = buildConsumer(
-      rootManifest({
-        scripts: { check: 'standards check', 'check:fix': 'standards check' },
-      }),
-    );
-    const problems = await collectStructureProblems(consumer);
-    expect(problems).toContain(
+  it('rejects fail-open root gate scripts', async () => {
+    const expected = [
       'package.json: root script "check" must run turbo run lint check-types test build test:a11y',
-    );
-    expect(problems).toContain(
       'package.json: root script "check:fix" must run turbo run lint:fix check-types test build test:a11y',
-    );
+    ];
+    const scripts = rootManifest().scripts as Record<string, string>;
+    scripts.check =
+      'echo "turbo run lint check-types test build test:a11y" || true';
+    scripts['check:fix'] =
+      'turbo run lint:fix check-types test build test:a11y # disabled';
+    expect(
+      await collectStructureProblems(buildConsumer(rootManifest({ scripts }))),
+    ).toEqual(expected);
   });
 
-  it('requires convenience root scripts to be filtered Turbo aliases', async () => {
+  it('requires safe filtered Turbo convenience aliases', async () => {
     const scripts = {
       ...(rootManifest().scripts as Record<string, string>),
       dev: 'turbo run dev --filter @repo/web',
+      start: 'turbo run dev --filter=@repo/web',
       db: 'bun run scripts/db.ts',
+      quoted: 'echo "turbo run dev --filter @repo/web"',
+      unfiltered: 'turbo run dev --filter',
     };
     const problems = await collectStructureProblems(
       buildConsumer(rootManifest({ scripts })),
     );
-    expect(problems).toEqual([
-      'package.json: root script "db" must delegate through Turbo with an explicit --filter',
-    ]);
+    expect(problems).toEqual(['db', 'quoted', 'unfiltered'].map(aliasProblem));
   });
 
-  it('requires a root test:a11y script once any workspace has a suite', async () => {
-    const consumer = buildConsumer();
+  it('requires a safe root test:a11y script once a workspace has a suite', async () => {
+    const scripts = {
+      ...(rootManifest().scripts as Record<string, string>),
+      'test:a11y': '',
+    };
+    const consumer = buildConsumer(rootManifest({ scripts }));
     write(consumer, 'apps/web/a11y/home.a11y.ts', 'export {};\n');
     const problems = await collectStructureProblems(consumer);
     expect(problems).toContain(
       'package.json: root script "test:a11y" must run turbo run test:a11y',
     );
+  });
+});
+
+describe('collectStructureProblems workspace declarations', () => {
+  it.each([
+    [undefined, WORKSPACES_REQUIREMENT],
+    [{ packages: ['apps/*'] }, WORKSPACES_REQUIREMENT],
+    [[], WORKSPACES_REQUIREMENT],
+    [['apps/*', null], 'package.json: workspaces[1] must be a string'],
+    [
+      ['../outside'],
+      'package.json: unsafe workspaces pattern "../outside"; use a relative path without "." or ".." segments',
+    ],
+    [
+      ['missing/*'],
+      'package.json: cannot read workspace directory "missing" declared by "missing/*"',
+    ],
+  ])('rejects malformed workspace declarations %#', async (workspaces, expected) => {
+    const consumer = buildConsumer(rootManifest({ workspaces }));
+    expect(await collectStructureProblems(consumer)).toContain(expected);
   });
 
   it('rejects unsupported workspace glob patterns', async () => {

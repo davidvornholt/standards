@@ -86,6 +86,7 @@ const buildUpstream = (paths: ReadonlyArray<string> = STD_PATHS): string => {
     up,
     'template/package.json',
     JSON.stringify({
+      workspaces: ['apps/*'],
       scripts: {
         standards: 'standards',
         check:
@@ -95,6 +96,25 @@ const buildUpstream = (paths: ReadonlyArray<string> = STD_PATHS): string => {
       },
       devDependencies: { '@davidvornholt/standards': '0.1.0' },
     }),
+  );
+  write(
+    up,
+    'template/apps/web/package.json',
+    JSON.stringify({
+      name: '@repo/web',
+      version: '0.0.0',
+      scripts: {
+        'check-types': 'tsc --noEmit',
+        lint: 'biome check --error-on-warnings .',
+        'lint:fix': 'biome check --write --error-on-warnings .',
+        test: 'bun test',
+      },
+    }),
+  );
+  write(
+    up,
+    'template/apps/web/tsconfig.json',
+    '{ "extends": "@davidvornholt/typescript-config/base" }\n',
   );
   write(up, 'managed/a.txt', 'alpha\n');
   write(up, 'managed/b.txt', 'beta\n');
@@ -347,6 +367,7 @@ describe('structure', () => {
       consumer,
       'package.json',
       JSON.stringify({
+        workspaces: ['apps/*'],
         scripts: { check: 'standards check', 'check:fix': 'standards check' },
         devDependencies: { '@davidvornholt/standards': '0.1.0' },
       }),

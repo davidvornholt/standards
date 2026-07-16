@@ -1,8 +1,3 @@
-// Per-workspace rules in the canonical monorepo structure contract: script
-// shapes, internal versioning, workspace:* internal dependencies, public
-// `exports`, shared tsconfig inheritance, and browser a11y wiring. Pure data
-// in, problems out; printing stays in cli.ts.
-
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isRecord } from './github-settings';
@@ -17,36 +12,23 @@ export type WorkspaceInspection = {
   readonly problems: ReadonlyArray<string>;
   readonly hasA11ySuite: boolean;
 };
-
-// Script name -> command fragment the script must contain. `test:a11y` is
-// checked separately because it is conditional on an explicit *.a11y.ts suite.
 const WORKSPACE_SCRIPTS: ReadonlyArray<readonly [string, string]> = [
   ['check-types', 'tsc --noEmit'],
   ['lint', 'biome check --error-on-warnings'],
   ['lint:fix', 'biome check --write --error-on-warnings'],
   ['test', 'bun test'],
 ];
-
-const A11Y_DEPENDENCIES: ReadonlyArray<string> = [
-  '@axe-core/playwright',
-  '@playwright/test',
-];
-
+const A11Y_DEPENDENCIES = ['@axe-core/playwright', '@playwright/test'] as const;
 const DEPENDENCY_FIELDS: ReadonlyArray<string> = [
   'dependencies',
   'devDependencies',
   'peerDependencies',
   'optionalDependencies',
 ];
-
-// The shared config package is the definition point the inheritance rule
-// protects; it cannot extend itself.
 const SHARED_TSCONFIG_PACKAGE = '@davidvornholt/typescript-config';
-
-// Raw-text match instead of JSON.parse: tsconfig.json is JSONC and only the
-// `extends` target matters here.
 const TSCONFIG_EXTENDS = /"extends"\s*:\s*"[^"]*typescript-config/u;
-
+const UNSAFE_SCRIPT_SYNTAX = /[|;#"'`\r\n]/u;
+const SCRIPT_WHITESPACE = /\s+/u;
 const SCAN_IGNORED_DIRS = new Set([
   'node_modules',
   '.git',
@@ -54,7 +36,6 @@ const SCAN_IGNORED_DIRS = new Set([
   'dist',
   '.next',
 ]);
-
 const scriptOf = (
   manifest: Record<string, unknown>,
   name: string,
@@ -66,9 +47,53 @@ const scriptOf = (
   const { [name]: script } = scripts;
   return typeof script === 'string' ? script : null;
 };
-
+const safeCommands = (
+  script: string | null,
+): ReadonlyArray<ReadonlyArray<string>> | null => {
+  if (
+    script === null ||
+    script.trim() === '' ||
+    UNSAFE_SCRIPT_SYNTAX.test(script) ||
+    script.includes('$(')
+  ) {
+    return null;
+  }
+  const commands = script.split('&&').map((command) => command.trim());
+  return commands.some((command) => command === '' || command.includes('&'))
+    ? null
+    : commands.map((command) => command.split(SCRIPT_WHITESPACE));
+};
+export const hasSafeCommand = (
+  script: string | null,
+  expected: string,
+): boolean => {
+  const commands = safeCommands(script);
+  const expectedTokens = expected.split(' ');
+  return (
+    commands?.some((tokens) =>
+      expectedTokens.every((token, index) => tokens[index] === token),
+    ) === true
+  );
+};
+export const isSafeFilteredTurboAlias = (script: string): boolean => {
+  const commands = safeCommands(script);
+  if (commands?.length !== 1) {
+    return false;
+  }
+  const [tokens] = commands;
+  const filterAt = tokens.findIndex(
+    (token) => token === '--filter' || token.startsWith('--filter='),
+  );
+  if (tokens[0] !== 'turbo' || tokens[1] !== 'run' || filterAt <= 2) {
+    return false;
+  }
+  const filter = tokens[filterAt];
+  return filter === '--filter'
+    ? tokens[filterAt + 1] !== undefined &&
+        !tokens[filterAt + 1].startsWith('-')
+    : filter.length > '--filter='.length;
+};
 const isA11ySuiteFile = (name: string): boolean => name.endsWith('.a11y.ts');
-
 const containsA11ySuite = async (dir: string): Promise<boolean> => {
   const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
   if (entries.some((entry) => entry.isFile() && isA11ySuiteFile(entry.name))) {
@@ -83,15 +108,13 @@ const containsA11ySuite = async (dir: string): Promise<boolean> => {
   );
   return nested.includes(true);
 };
-
 const inspectScripts = (ws: Workspace): ReadonlyArray<string> =>
-  WORKSPACE_SCRIPTS.flatMap(([name, fragment]) => {
+  WORKSPACE_SCRIPTS.flatMap(([name, command]) => {
     const script = scriptOf(ws.manifest, name);
-    return script?.includes(fragment) === true
+    return hasSafeCommand(script, command)
       ? []
-      : [`${ws.rel}: script "${name}" must run ${fragment}`];
+      : [`${ws.rel}: script "${name}" must run ${command}`];
   });
-
 const declaredDependencies = (
   manifest: Record<string, unknown>,
 ): ReadonlyArray<readonly [string, unknown]> =>
@@ -99,7 +122,6 @@ const declaredDependencies = (
     const deps = manifest[field];
     return isRecord(deps) ? Object.entries(deps) : [];
   });
-
 const inspectInternalDeps = (
   ws: Workspace,
   workspaceNames: ReadonlySet<string>,
@@ -109,7 +131,6 @@ const inspectInternalDeps = (
       ? [`${ws.rel}: internal dependency "${name}" must use "workspace:*"`]
       : [],
   );
-
 const inspectTsconfig = async (
   ws: Workspace,
 ): Promise<ReadonlyArray<string>> => {
@@ -124,7 +145,6 @@ const inspectTsconfig = async (
   }
   return [];
 };
-
 const inspectA11y = async (
   ws: Workspace,
 ): Promise<{ problems: ReadonlyArray<string>; hasSuite: boolean }> => {
@@ -136,9 +156,11 @@ const inspectA11y = async (
     declaredDependencies(ws.manifest).map(([name]) => name),
   );
   const problems = [
-    ...(scriptOf(ws.manifest, 'test:a11y') === null
-      ? [`${ws.rel}: a *.a11y.ts suite requires a "test:a11y" script`]
-      : []),
+    ...(hasSafeCommand(scriptOf(ws.manifest, 'test:a11y'), 'playwright test')
+      ? []
+      : [
+          `${ws.rel}: a *.a11y.ts suite requires a non-empty "test:a11y" script that runs playwright test`,
+        ]),
     ...A11Y_DEPENDENCIES.filter((dep) => !declared.has(dep)).map(
       (dep) =>
         `${ws.rel}: a *.a11y.ts suite requires a direct dependency on ${dep}`,
@@ -146,7 +168,6 @@ const inspectA11y = async (
   ];
   return { problems, hasSuite };
 };
-
 export const inspectWorkspace = async (
   ws: Workspace,
   workspaceNames: ReadonlySet<string>,
