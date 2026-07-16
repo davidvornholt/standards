@@ -65,7 +65,7 @@ Disposition a finding that is one instance of a repeated pattern as its class: t
 
 Escalation tripwires — each converts a fix-now into a user question, and a blanket pre-approval ("I approve all further decisions") does not lift them:
 
-- the fix would add a new module, subsystem, or dependency;
+- the fix would add a new subsystem or dependency;
 - the fix hardens beyond the stated threat model.
 
 ## Fix
