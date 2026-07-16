@@ -16,7 +16,7 @@ standards github --apply
 
 `structure` enforces the canonical monorepo structure contract: workspace scripts (`check-types`, `lint`, `lint:fix`, `test`), root gate scripts, filtered Turbo convenience aliases, internal `0.0.0`/`workspace:*` versioning, package `exports`, shared tsconfig inheritance, and browser a11y wiring. Only a workspace containing an explicit `*.a11y.ts` suite must provide a `test:a11y` script and direct `@axe-core/playwright` and `@playwright/test` dependencies. `check` includes `structure`, so these rules gate every consumer PR.
 
-`structure --profile source` validates the standards source repository itself, which is deliberately not a consumer. The profile pins its intentional exceptions so they cannot drift silently: root gate scripts that run this CLI from the local checkout (`structure --profile source`, `github --check`, and the Turbo gate) instead of a recursive `standards check`, and a published bin-only CLI workspace that carries a stable release SemVer and a `standards` bin instead of the internal `0.0.0` version and `exports`. Every other consumer rule still applies.
+`structure --profile source` validates the standards source repository itself, which is deliberately not a consumer. The profile pins its intentional exceptions so they cannot drift silently: exact, ordered root gate scripts that run this CLI from the local checkout (`structure --profile source`, `github --check`, and the Turbo gate) instead of a recursive `standards check`, and a non-private published bin-only CLI workspace that carries a stable release SemVer and exactly maps the `standards` bin to `src/cli.ts` without `exports`. Every other consumer rule still applies.
 
 ## Configuration
 

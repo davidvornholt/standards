@@ -7,19 +7,12 @@ import {
   rootScriptExpectations,
   type StructureProfile,
 } from './structure-profile';
-import {
-  hasSafeCommand,
-  inspectWorkspace,
-  isSafeFilteredTurboAlias,
-  type Workspace,
-} from './structure-workspace';
+import { hasSafeCommands, isSafeFilteredTurboAlias } from './structure-script';
+import { inspectWorkspace, type Workspace } from './structure-workspace';
 
-const ROOT_FIXED_SCRIPTS = new Set([
-  'standards',
-  'check',
-  'check:fix',
-  'test:a11y',
-]);
+const ROOT_FIXED_SCRIPTS = new Set(
+  'standards,check,check:fix,test:a11y'.split(','),
+);
 const GLOB_SUFFIX = '/*';
 const WORKSPACES_REQUIREMENT =
   'package.json: "workspaces" must be a non-empty array of literal paths or one-level "<dir>/*" patterns';
@@ -142,11 +135,15 @@ const inspectRootScripts = (
 ): ReadonlyArray<string> => {
   const scripts = isRecord(root.scripts) ? root.scripts : {};
   const expectations = rootScriptExpectations(profile, requireA11y);
-  const gateProblems = expectations.flatMap(([name, fragment]) => {
+  const gateProblems = expectations.flatMap(({ name, commands, exact }) => {
     const { [name]: script } = scripts;
-    return typeof script === 'string' && hasSafeCommand(script, fragment)
+    const requirement = commands.join(' && ');
+    return typeof script === 'string' &&
+      hasSafeCommands(script, commands, exact)
       ? []
-      : [`package.json: root script "${name}" must run ${fragment}`];
+      : [
+          `package.json: root script "${name}" must run ${exact ? 'exactly ' : ''}${requirement}`,
+        ];
   });
   const aliasProblems = Object.entries(scripts).flatMap(([name, script]) =>
     ROOT_FIXED_SCRIPTS.has(name) ||

@@ -899,6 +899,16 @@ describe('sync policy distribution', () => {
     expect(
       runExecutable('bun', consumer, ['install', '--ignore-scripts']).status,
     ).toBe(0);
+    const installedSourceProfile = runExecutable('bun', consumer, [
+      'standards',
+      'structure',
+      '--profile',
+      'source',
+      '--dir',
+      ACTUAL_UPSTREAM,
+    ]);
+    expect(installedSourceProfile.stderr).toBe('');
+    expect(installedSourceProfile.status).toBe(0);
 
     const { up, url } = buildGitUpstream();
     expect(

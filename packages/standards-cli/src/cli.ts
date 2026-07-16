@@ -37,7 +37,7 @@ import { runGithubApply, runGithubCheck } from './github-commands';
 import { loadGithubSettings } from './github-settings';
 import { collectStructureProblems } from './structure-check';
 import type { StructureProfile } from './structure-profile';
-import { hasSafeCommand } from './structure-workspace';
+import { hasSafeCommand } from './structure-script';
 
 const { YAML: BunYaml } = await import('bun');
 

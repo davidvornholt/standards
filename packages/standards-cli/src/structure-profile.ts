@@ -18,27 +18,47 @@ const PUBLISHED_CLI_PACKAGE = '@davidvornholt/standards';
 const SOURCE_CLI = `bun ${PUBLISHED_CLI_WORKSPACE}/src/cli.ts`;
 const RELEASE_SEMVER = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u;
 
-const SOURCE_ROOT_EXPECTATIONS: ReadonlyArray<readonly [string, string]> = [
-  ['standards', SOURCE_CLI],
-  ['check', `${SOURCE_CLI} structure --profile source`],
-  ['check', `${SOURCE_CLI} github --check`],
-  ['check', 'turbo run lint check-types test'],
-  ['check:fix', `${SOURCE_CLI} structure --profile source`],
-  ['check:fix', `${SOURCE_CLI} github --check`],
-  ['check:fix', 'turbo run lint:fix check-types test'],
+export type RootScriptExpectation = {
+  readonly name: string;
+  readonly commands: ReadonlyArray<string>;
+  readonly exact: boolean;
+};
+
+const SOURCE_ROOT_EXPECTATIONS: ReadonlyArray<RootScriptExpectation> = [
+  { name: 'standards', commands: [SOURCE_CLI], exact: true },
+  {
+    name: 'check',
+    commands: [
+      `${SOURCE_CLI} structure --profile source`,
+      `${SOURCE_CLI} github --check`,
+      'turbo run lint check-types test',
+    ],
+    exact: true,
+  },
+  {
+    name: 'check:fix',
+    commands: [
+      `${SOURCE_CLI} structure --profile source`,
+      `${SOURCE_CLI} github --check`,
+      'turbo run lint:fix check-types test',
+    ],
+    exact: true,
+  },
 ];
 
 export const rootScriptExpectations = (
   profile: StructureProfile,
   requireA11y: boolean,
-): ReadonlyArray<readonly [string, string]> => [
+): ReadonlyArray<RootScriptExpectation> => [
   ...(profile === 'source'
     ? SOURCE_ROOT_EXPECTATIONS
     : [
-        ['check', CONSUMER_CHECK] as const,
-        ['check:fix', CONSUMER_CHECK_FIX] as const,
+        { name: 'check', commands: [CONSUMER_CHECK], exact: false },
+        { name: 'check:fix', commands: [CONSUMER_CHECK_FIX], exact: false },
       ]),
-  ...(requireA11y ? [['test:a11y', ROOT_A11Y] as const] : []),
+  ...(requireA11y
+    ? [{ name: 'test:a11y', commands: [ROOT_A11Y], exact: false }]
+    : []),
 ];
 
 // The published CLI ships as a released bin-only package: it carries a release
@@ -59,10 +79,20 @@ const inspectPublishedCli = (
     : [
         `${PUBLISHED_CLI_WORKSPACE}: published CLI version must be a stable release SemVer, not "0.0.0"`,
       ]),
-  ...(isRecord(manifest.bin) && typeof manifest.bin.standards === 'string'
+  ...(isRecord(manifest.bin) &&
+  Object.keys(manifest.bin).length === 1 &&
+  manifest.bin.standards === 'src/cli.ts'
     ? []
     : [
-        `${PUBLISHED_CLI_WORKSPACE}: published CLI must expose the "standards" bin`,
+        `${PUBLISHED_CLI_WORKSPACE}: published CLI bin must be exactly { "standards": "src/cli.ts" }`,
+      ]),
+  ...(manifest.private === true
+    ? [`${PUBLISHED_CLI_WORKSPACE}: published CLI must not be private`]
+    : []),
+  ...(manifest.exports === undefined
+    ? []
+    : [
+        `${PUBLISHED_CLI_WORKSPACE}: published CLI must be bin-only and must not define "exports"`,
       ]),
 ];
 

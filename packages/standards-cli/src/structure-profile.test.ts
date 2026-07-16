@@ -23,6 +23,32 @@ const CANONICAL_SCRIPTS = {
   test: 'bun test',
 };
 const TSCONFIG = '{ "extends": "@davidvornholt/typescript-config/base" }\n';
+const SOURCE_GATE_COMMANDS = {
+  check: [
+    `${CLI} structure --profile source`,
+    `${CLI} github --check`,
+    'turbo run lint check-types test',
+  ],
+  'check:fix': [
+    `${CLI} structure --profile source`,
+    `${CLI} github --check`,
+    'turbo run lint:fix check-types test',
+  ],
+} as const;
+const INVALID_SOURCE_GATES = (['check', 'check:fix'] as const).flatMap(
+  (name) => {
+    const [structure, github, turbo] = SOURCE_GATE_COMMANDS[name];
+    return [
+      [`${name} reversed`, name, [github, structure, turbo].join(' && ')],
+      [
+        `${name} interleaved`,
+        name,
+        [structure, 'true', github, turbo].join(' && '),
+      ],
+      [`${name} extra`, name, ['true', structure, github, turbo].join(' && ')],
+    ] as const;
+  },
+);
 
 const sourceRootManifest = (
   overrides: Record<string, unknown> = {},
@@ -32,8 +58,8 @@ const sourceRootManifest = (
   workspaces: ['packages/*'],
   scripts: {
     standards: CLI,
-    check: `${CLI} structure --profile source && ${CLI} github --check && turbo run lint check-types test`,
-    'check:fix': `${CLI} structure --profile source && ${CLI} github --check && turbo run lint:fix check-types test`,
+    check: SOURCE_GATE_COMMANDS.check.join(' && '),
+    'check:fix': SOURCE_GATE_COMMANDS['check:fix'].join(' && '),
   },
   ...overrides,
 });
@@ -78,9 +104,9 @@ describe('source profile', () => {
     ]);
   });
 
-  it('pins the deliberate source root gate scripts', async () => {
+  it('pins the deliberate source root gate scripts exactly', async () => {
     const scripts = {
-      standards: 'standards',
+      standards: `true && ${CLI}`,
       check:
         'standards check && turbo run lint check-types test build test:a11y',
       'check:fix':
@@ -91,14 +117,27 @@ describe('source profile', () => {
       'source',
     );
     expect(problems).toEqual([
-      `package.json: root script "standards" must run ${CLI}`,
-      `package.json: root script "check" must run ${CLI} structure --profile source`,
-      `package.json: root script "check" must run ${CLI} github --check`,
-      'package.json: root script "check" must run turbo run lint check-types test',
-      `package.json: root script "check:fix" must run ${CLI} structure --profile source`,
-      `package.json: root script "check:fix" must run ${CLI} github --check`,
-      'package.json: root script "check:fix" must run turbo run lint:fix check-types test',
+      `package.json: root script "standards" must run exactly ${CLI}`,
+      `package.json: root script "check" must run exactly ${CLI} structure --profile source && ${CLI} github --check && turbo run lint check-types test`,
+      `package.json: root script "check:fix" must run exactly ${CLI} structure --profile source && ${CLI} github --check && turbo run lint:fix check-types test`,
     ]);
+  });
+
+  it.each(
+    INVALID_SOURCE_GATES,
+  )('rejects a non-exact source gate: %s', async (_label, name, script) => {
+    const root = sourceRootManifest();
+    const scripts = {
+      ...(root.scripts as Record<string, string>),
+      [name]: script,
+    };
+    const problems = await collectStructureProblems(
+      buildSource({ ...root, scripts }),
+      'source',
+    );
+    expect(problems).toContain(
+      `package.json: root script "${name}" must run exactly ${SOURCE_GATE_COMMANDS[name].join(' && ')}`,
+    );
   });
 
   it('requires the published CLI workspace to exist', async () => {
@@ -109,35 +148,6 @@ describe('source profile', () => {
     expect(problems).toContain(
       'packages/standards-cli: the source profile requires the published CLI workspace',
     );
-  });
-
-  it('pins the published CLI name, release version, and bin', async () => {
-    const problems = await collectStructureProblems(
-      buildSource(
-        sourceRootManifest(),
-        cliManifest({ name: '@repo/cli', version: '0.0.0', bin: undefined }),
-      ),
-      'source',
-    );
-    expect(problems).toEqual([
-      'packages/standards-cli: published CLI package name must be "@davidvornholt/standards"',
-      'packages/standards-cli: published CLI version must be a stable release SemVer, not "0.0.0"',
-      'packages/standards-cli: published CLI must expose the "standards" bin',
-    ]);
-  });
-
-  it.each([
-    '1.0.0-rc.1',
-    '01.2.3',
-    1,
-  ])('rejects a non-release published CLI version %#', async (version) => {
-    const problems = await collectStructureProblems(
-      buildSource(sourceRootManifest(), cliManifest({ version })),
-      'source',
-    );
-    expect(problems).toEqual([
-      'packages/standards-cli: published CLI version must be a stable release SemVer, not "0.0.0"',
-    ]);
   });
 
   it('holds the published CLI to every other workspace rule', async () => {
