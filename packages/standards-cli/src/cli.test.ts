@@ -252,6 +252,36 @@ describe('check', () => {
     expect(check.status).toBe(1);
     expect(check.stderr).toContain('no non-empty sync-standards.lock found');
   });
+
+  it('aggregates malformed root JSON with independent gate problems', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    write(consumer, 'managed/a.txt', 'tampered\n');
+    write(consumer, 'biome.jsonc', '{}\n');
+    write(consumer, '.github/settings.json', '{"repository":{},"rulesets":[]}');
+    write(
+      consumer,
+      '.github/settings.local.json',
+      '{"repository":{},"rulesets":[]}',
+    );
+    write(consumer, 'package.json', '{ malformed');
+
+    const check = run(import.meta.dir, ['check', '--dir', consumer]);
+
+    expect(check.status).toBe(1);
+    expect(check.stderr).toContain('modified: managed/a.txt');
+    expect(check.stderr).toContain('biome.jsonc must extend');
+    expect(check.stderr).toContain('package.json must contain valid JSON');
+    expect(check.stderr).toContain(
+      'package.json must exist and contain a JSON object',
+    );
+    expect(check.stderr).toContain(
+      'cannot determine the GitHub repository from the origin remote',
+    );
+    expect(
+      check.stderr.split('package.json must contain valid JSON'),
+    ).toHaveLength(2);
+    expect(check.stderr).not.toContain('JSON Parse error');
+  });
 });
 
 describe('doctor', () => {
@@ -361,6 +391,9 @@ describe('doctor', () => {
 });
 
 describe('structure', () => {
+  const tsconfigProblem =
+    'apps/web: tsconfig.json must extend @davidvornholt/typescript-config';
+
   it('check fails when a root gate script loses its canonical command', () => {
     const { consumer } = initConsumer(buildUpstream());
     write(
@@ -383,6 +416,44 @@ describe('structure', () => {
     const ok = run(consumer, ['structure', '--dir', consumer]);
     expect(ok.status).toBe(0);
     expect(ok.stdout).toContain('workspace layout matches the standards');
+  });
+
+  it.each([
+    [
+      'commented-out',
+      '{ // "extends": "@davidvornholt/typescript-config/base"\n}',
+    ],
+    [
+      'nested',
+      '{"compilerOptions":{"extends":"@davidvornholt/typescript-config/base"}}',
+    ],
+    ['lookalike scope', '{"extends":"@other/typescript-config/base"}'],
+    [
+      'lookalike name',
+      '{"extends":"@davidvornholt/typescript-config-copy/base"}',
+    ],
+    ['malformed', '{"extends":"@davidvornholt/typescript-config/base"'],
+  ])('rejects %s tsconfig inheritance', (_label, tsconfig) => {
+    const { consumer } = initConsumer(buildUpstream());
+    write(consumer, 'apps/web/tsconfig.json', tsconfig);
+    const result = run(consumer, ['structure', '--dir', consumer]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(tsconfigProblem);
+  });
+
+  it.each([
+    [
+      'JSONC string',
+      '{ // shared strict defaults\n"extends":"@davidvornholt/typescript-config/base",\n}',
+    ],
+    [
+      'extends array',
+      '{"extends":["./generated.json","@davidvornholt/typescript-config/next"]}',
+    ],
+  ])('accepts canonical inheritance through a %s', (_label, tsconfig) => {
+    const { consumer } = initConsumer(buildUpstream());
+    write(consumer, 'apps/web/tsconfig.json', tsconfig);
+    expect(run(consumer, ['structure', '--dir', consumer]).status).toBe(0);
   });
 });
 

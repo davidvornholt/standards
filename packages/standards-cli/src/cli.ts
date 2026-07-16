@@ -682,11 +682,19 @@ const inspectDependabot = (raw: string): ReadonlyArray<string> => {
 
 const inspectPackageJson = (packageRaw: string): ReadonlyArray<string> => {
   const problems: Array<string> = [];
-  const packageJson = JSON.parse(packageRaw) as Record<string, unknown>;
-  const scripts = packageJson.scripts as Record<string, unknown> | undefined;
-  const devDependencies = packageJson.devDependencies as
-    | Record<string, unknown>
-    | undefined;
+  let packageJson: unknown;
+  try {
+    packageJson = JSON.parse(packageRaw);
+  } catch {
+    return ['package.json must contain valid JSON'];
+  }
+  if (!isRecord(packageJson)) {
+    return ['package.json must contain a JSON object'];
+  }
+  const scripts = isRecord(packageJson.scripts) ? packageJson.scripts : {};
+  const devDependencies = isRecord(packageJson.devDependencies)
+    ? packageJson.devDependencies
+    : {};
   if (typeof devDependencies?.['@davidvornholt/standards'] !== 'string') {
     problems.push(
       'package.json must declare @davidvornholt/standards directly',

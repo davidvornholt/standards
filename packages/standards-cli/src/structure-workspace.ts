@@ -8,10 +8,6 @@ export type Workspace = {
   readonly manifest: Record<string, unknown>;
 };
 
-export type WorkspaceInspection = {
-  readonly problems: ReadonlyArray<string>;
-  readonly hasA11ySuite: boolean;
-};
 const WORKSPACE_SCRIPTS: ReadonlyArray<readonly [string, string]> = [
   ['check-types', 'tsc --noEmit'],
   ['lint', 'biome check --error-on-warnings'],
@@ -19,32 +15,22 @@ const WORKSPACE_SCRIPTS: ReadonlyArray<readonly [string, string]> = [
   ['test', 'bun test'],
 ];
 const A11Y_DEPENDENCIES = ['@axe-core/playwright', '@playwright/test'] as const;
-const DEPENDENCY_FIELDS: ReadonlyArray<string> = [
+const DEPENDENCY_FIELDS = [
   'dependencies',
   'devDependencies',
   'peerDependencies',
   'optionalDependencies',
-];
+] as const;
 const SHARED_TSCONFIG_PACKAGE = '@davidvornholt/typescript-config';
-const TSCONFIG_EXTENDS = /"extends"\s*:\s*"[^"]*typescript-config/u;
 const UNSAFE_SCRIPT_SYNTAX = /[|;#"'`\r\n]/u;
 const SCRIPT_WHITESPACE = /\s+/u;
-const SCAN_IGNORED_DIRS = new Set([
-  'node_modules',
-  '.git',
-  '.turbo',
-  'dist',
-  '.next',
-]);
+const IGNORED_DIRS = new Set('.git,.next,.turbo,dist,node_modules'.split(','));
 const scriptOf = (
   manifest: Record<string, unknown>,
   name: string,
 ): string | null => {
-  const { scripts } = manifest;
-  if (!isRecord(scripts)) {
-    return null;
-  }
-  const { [name]: script } = scripts;
+  const scripts = isRecord(manifest.scripts) ? manifest.scripts : {};
+  const script = scripts[name];
   return typeof script === 'string' ? script : null;
 };
 const safeCommands = (
@@ -72,7 +58,7 @@ export const hasSafeCommand = (
   return (
     commands?.some((tokens) =>
       expectedTokens.every((token, index) => tokens[index] === token),
-    ) === true
+    ) ?? false
   );
 };
 export const isSafeFilteredTurboAlias = (script: string): boolean => {
@@ -93,31 +79,27 @@ export const isSafeFilteredTurboAlias = (script: string): boolean => {
         !tokens[filterAt + 1].startsWith('-')
     : filter.length > '--filter='.length;
 };
-const isA11ySuiteFile = (name: string): boolean => name.endsWith('.a11y.ts');
 const containsA11ySuite = async (dir: string): Promise<boolean> => {
   const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
-  if (entries.some((entry) => entry.isFile() && isA11ySuiteFile(entry.name))) {
+  if (
+    entries.some((entry) => entry.isFile() && entry.name.endsWith('.a11y.ts'))
+  ) {
     return true;
   }
   const nested = await Promise.all(
     entries
-      .filter(
-        (entry) => entry.isDirectory() && !SCAN_IGNORED_DIRS.has(entry.name),
-      )
+      .filter((entry) => entry.isDirectory() && !IGNORED_DIRS.has(entry.name))
       .map((entry) => containsA11ySuite(join(dir, entry.name))),
   );
   return nested.includes(true);
 };
 const inspectScripts = (ws: Workspace): ReadonlyArray<string> =>
-  WORKSPACE_SCRIPTS.flatMap(([name, command]) => {
-    const script = scriptOf(ws.manifest, name);
-    return hasSafeCommand(script, command)
+  WORKSPACE_SCRIPTS.flatMap(([name, command]) =>
+    hasSafeCommand(scriptOf(ws.manifest, name), command)
       ? []
-      : [`${ws.rel}: script "${name}" must run ${command}`];
-  });
-const declaredDependencies = (
-  manifest: Record<string, unknown>,
-): ReadonlyArray<readonly [string, unknown]> =>
+      : [`${ws.rel}: script "${name}" must run ${command}`],
+  );
+const declaredDependencies = (manifest: Record<string, unknown>) =>
   DEPENDENCY_FIELDS.flatMap((field) => {
     const deps = manifest[field];
     return isRecord(deps) ? Object.entries(deps) : [];
@@ -131,6 +113,30 @@ const inspectInternalDeps = (
       ? [`${ws.rel}: internal dependency "${name}" must use "workspace:*"`]
       : [],
   );
+const isSharedTsconfigPath = (value: unknown): value is string =>
+  typeof value === 'string' &&
+  (value === SHARED_TSCONFIG_PACKAGE ||
+    value.startsWith(`${SHARED_TSCONFIG_PACKAGE}/`));
+const extendsSharedTsconfig = (raw: string): boolean => {
+  let parsed: unknown;
+  try {
+    parsed = globalThis.Bun.JSONC.parse(raw);
+  } catch {
+    return false;
+  }
+  if (!isRecord(parsed)) {
+    return false;
+  }
+  const extension = parsed.extends;
+  if (typeof extension === 'string') {
+    return isSharedTsconfigPath(extension);
+  }
+  return (
+    Array.isArray(extension) &&
+    extension.every((value) => typeof value === 'string') &&
+    extension.some(isSharedTsconfigPath)
+  );
+};
 const inspectTsconfig = async (
   ws: Workspace,
 ): Promise<ReadonlyArray<string>> => {
@@ -140,7 +146,7 @@ const inspectTsconfig = async (
   const raw = await readFile(join(ws.dir, 'tsconfig.json'), 'utf8').catch(
     () => null,
   );
-  if (raw === null || !TSCONFIG_EXTENDS.test(raw)) {
+  if (raw === null || !extendsSharedTsconfig(raw)) {
     return [`${ws.rel}: tsconfig.json must extend ${SHARED_TSCONFIG_PACKAGE}`];
   }
   return [];
@@ -171,7 +177,7 @@ const inspectA11y = async (
 export const inspectWorkspace = async (
   ws: Workspace,
   workspaceNames: ReadonlySet<string>,
-): Promise<WorkspaceInspection> => {
+) => {
   const [tsconfigProblems, a11y] = await Promise.all([
     inspectTsconfig(ws),
     inspectA11y(ws),
