@@ -22,6 +22,7 @@
     "src/cli.ts",
     "src/github-api.ts",
     "src/github-apply.ts",
+    "src/github-command-shared.ts",
     "src/github-commands.ts",
     "src/github-diff.ts",
     "src/github-settings-parse.ts",

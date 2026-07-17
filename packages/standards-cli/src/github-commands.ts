@@ -12,16 +12,19 @@ import {
   resolveGithubRepo,
   resolveToken,
 } from './github-api';
-import { applyRulesets } from './github-apply';
+import {
+  applyRepositorySettings,
+  applyRulesets,
+  applySummary,
+} from './github-apply';
+import { optOutEligibilityProblem } from './github-command-shared';
 import { diffRepositorySettings, diffRulesets } from './github-diff';
 import { type GithubSettings, isRecord } from './github-settings-parse';
 
 // Printed on every check and apply while the opt-out is declared: the skip
-// must stay louder than the comfort of a green gate. Comparing anyway would
-// either fail closed forever (personal accounts answer HTTP 403) or trust
-// rulesets a free-plan organization reports as active but does not enforce.
+// must stay louder than the comfort of a green gate.
 const UNENFORCEABLE_NOTICE =
-  'standards github: rulesets are declared unenforceable on this GitHub plan (.github/settings.local.json "rulesetEnforcement"); the default branch is NOT protected. Upgrade the plan, run `bun standards github --apply`, then remove the declaration.';
+  'standards github: rulesets are declared unenforceable on this GitHub plan (.github/settings.local.json "rulesetEnforcement"); the default branch is NOT protected. After upgrading the plan, remove the declaration, then run `bun standards github --apply`.';
 
 const reportProblems = (problems: ReadonlyArray<string>): void => {
   console.error(
@@ -39,6 +42,14 @@ const repositoryDrift = async (
   if (repoResponse.status !== HTTP_OK || !isRecord(repoResponse.body)) {
     return [apiError(`reading repository ${repo}`, repoResponse)];
   }
+  const eligibilityProblem = optOutEligibilityProblem(
+    repo,
+    declared,
+    repoResponse.body,
+  );
+  if (eligibilityProblem !== null) {
+    return [eligibilityProblem];
+  }
   const diff = diffRepositorySettings(declared.repository, repoResponse.body);
   if (diff.unverifiable.length > 0) {
     console.log(
@@ -54,7 +65,6 @@ const rulesetDrift = async (
   declared: GithubSettings,
 ): Promise<ReadonlyArray<string>> => {
   if (declared.rulesetEnforcement === 'unavailable-on-plan') {
-    console.log(UNENFORCEABLE_NOTICE);
     return [];
   }
   const live = await fetchLiveRulesets(token, repo);
@@ -93,6 +103,9 @@ const collectLiveDrift = async (
 
 export const runGithubCheck = async (consumer: string): Promise<boolean> => {
   const declared = await loadDeclared(consumer);
+  if (declared.merged?.rulesetEnforcement === 'unavailable-on-plan') {
+    console.log(UNENFORCEABLE_NOTICE);
+  }
   const problems = [...declared.problems];
   if (declared.merged !== null) {
     problems.push(...(await collectLiveDrift(consumer, declared.merged)));
@@ -112,28 +125,11 @@ export const runGithubCheck = async (consumer: string): Promise<boolean> => {
   return true;
 };
 
-const applyRepositorySettings = async (
-  token: string,
-  repo: string,
-  repository: Readonly<Record<string, unknown>>,
-): Promise<ReadonlyArray<string>> => {
-  const repoResponse = await request(token, 'GET', `/repos/${repo}`);
-  if (repoResponse.status !== HTTP_OK || !isRecord(repoResponse.body)) {
-    throw new Error(apiError(`reading repository ${repo}`, repoResponse));
-  }
-  const diff = diffRepositorySettings(repository, repoResponse.body);
-  if (diff.drifted.length === 0 && diff.unverifiable.length === 0) {
-    return [];
-  }
-  const patched = await request(token, 'PATCH', `/repos/${repo}`, repository);
-  if (patched.status !== HTTP_OK) {
-    throw new Error(apiError('updating repository settings', patched));
-  }
-  return ['updated repository merge settings'];
-};
-
 export const runGithubApply = async (consumer: string): Promise<boolean> => {
   const declared = await loadDeclared(consumer);
+  if (declared.merged?.rulesetEnforcement === 'unavailable-on-plan') {
+    console.log(UNENFORCEABLE_NOTICE);
+  }
   if (declared.merged === null || declared.problems.length > 0) {
     reportProblems(declared.problems);
     return false;
@@ -153,26 +149,35 @@ export const runGithubApply = async (consumer: string): Promise<boolean> => {
     return false;
   }
   try {
+    const repoResponse = await request(token, 'GET', `/repos/${repo}`);
+    if (repoResponse.status !== HTTP_OK || !isRecord(repoResponse.body)) {
+      throw new Error(apiError(`reading repository ${repo}`, repoResponse));
+    }
+    const eligibilityProblem = optOutEligibilityProblem(
+      repo,
+      declared.merged,
+      repoResponse.body,
+    );
+    if (eligibilityProblem !== null) {
+      throw new Error(eligibilityProblem);
+    }
     const actions = [
       ...(await applyRepositorySettings(
         token,
         repo,
         declared.merged.repository,
+        repoResponse.body,
       )),
     ];
-    if (declared.merged.rulesetEnforcement === 'unavailable-on-plan') {
-      console.log(UNENFORCEABLE_NOTICE);
-    } else {
+    const rulesetsSkipped =
+      declared.merged.rulesetEnforcement === 'unavailable-on-plan';
+    if (!rulesetsSkipped) {
       actions.push(...(await applyRulesets(token, repo, declared.merged)));
     }
     for (const action of actions) {
       console.log(`  ${action}`);
     }
-    console.log(
-      actions.length === 0
-        ? 'standards github: already converged; no changes'
-        : `standards github: apply complete for ${repo}`,
-    );
+    console.log(applySummary(repo, actions, rulesetsSkipped));
     return true;
   } catch (error) {
     console.error(

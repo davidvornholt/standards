@@ -32,6 +32,7 @@ const quietExec = (
   try {
     const out = execFileSync(file, [...args], {
       encoding: 'utf8',
+      env: process.env,
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
     return out.length > 0 ? out : null;
