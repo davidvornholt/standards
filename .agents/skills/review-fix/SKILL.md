@@ -5,9 +5,9 @@ description: Use when the user asks for a review with fixes, a fix-what-review-f
 
 # Review and fix
 
-One bounded cycle over a pull request in a repo you control: one full review fan-out, dispositioned fixes, one verification pass over the fixes, then an unconditional stop and a residual-risk report.
+One bounded cycle over a pull request in a repo you control: one full review fan-out, dispositioned fixes, delta-scoped verification of the fixes and of any repairs, then an unconditional stop and a residual-risk report.
 
-There is deliberately no convergence condition. A capable reviewer instructed to find problems essentially never returns silence, so "review until clean" diverges: every fix enlarges the diff the next pass must clear, and the loop ends up reviewing its own output forever. Never add review passes beyond the two defined here.
+There is deliberately no convergence condition. A capable reviewer instructed to find problems essentially never returns silence, so "review until clean" diverges: every fix enlarges the diff the next pass must clear, and the loop ends up reviewing its own output forever. Never add review passes beyond those defined here.
 
 This skill orchestrates the `review` skill. The PR is the only durable state: review threads are the findings ledger (unresolved threads block merge via the repository ruleset), the scope contract and report are PR comments, and the work is commits. Any session can resume by reading the PR.
 
@@ -80,9 +80,9 @@ Re-run the deterministic gate after the fix round.
 
 ## Verification pass
 
-One fresh `review-pass` fan-out scoped to the fixes: set `baseRef` to the pre-fix head SHA so the reviewed diff is exactly the fix commits, with lenses answering two questions — does each fix resolve its thread's finding, and did the fixes introduce regressions.
+One fresh `review-pass` fan-out scoped to the fixes: set `baseRef` to the pre-fix head SHA so the reviewed diff is exactly the fix commits, with lenses answering two questions — does each fix resolve its thread's finding, and did the fixes introduce regressions. Verifiers attack the class, not the instance: reconstruct each failure mode with real inputs through the real pipeline, and actively construct sibling inputs that still exhibit the class the fix claims to close.
 
-A fix that failed to resolve its thread's finding, or that introduced a regression, gets one repair round (worker, gate, evidence, thread reply). Everything else verification surfaces is dispositioned defer or discard — verification findings never start another review pass. Then stop, unconditionally.
+A fix that failed to resolve its thread's finding, or that introduced a regression, gets one repair round (worker, gate, evidence, thread reply). If a repair round ran, one further `review-pass` scoped to the repair delta only (baseRef = the pre-repair head) checks the repairs the same way; anything material it finds gets one final repair, verified mechanically only. Everything else verification surfaces is dispositioned defer or discard — verification findings never start a full review pass. Then stop, unconditionally. The final repair alone remains unverified by fresh eyes; name that in the report.
 
 ## Report
 
