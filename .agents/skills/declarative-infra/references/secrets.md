@@ -6,7 +6,34 @@ Standalone setup for a repo that needs encrypted secrets — CI tokens, app cred
 
 - Personal identities are standalone age keys at `~/.config/sops/age/keys.txt`, one per person and machine. Create with `just secrets age-create`; never overwrite an existing key.
 - Automation recipients (CI, PR preview) are purpose-specific keypairs, one per repo — a leaked runner key must not unlock other repos. The private key lives only in the consumer's secret store (for GitHub Actions: the `SOPS_AGE_KEY` secret). Losing one is recoverable: personal identities re-encrypt to a replacement via `updatekeys`.
-- `.sops.yaml` lists recipients as named anchors, each with a comment stating what it is. Every creation rule includes all personal identities; automation recipients go only on the files that automation reads.
+- `.sops.yaml` lists recipients as named anchors, each with a comment stating what it is. Every creation rule includes all personal identities; automation recipients go only on the files that automation reads:
+
+```yaml
+keys:
+  # Standalone age identity at ~/.config/sops/age/keys.txt.
+  - &owner_machine age1...
+  # GitHub Actions CI recipient (private key: SOPS_AGE_KEY Actions secret).
+  - &github_actions_ci age1...
+creation_rules:
+  - path_regex: secrets/dev\.yaml$
+    key_groups:
+      - age:
+          - *owner_machine
+  - path_regex: secrets/ci\.yaml$
+    key_groups:
+      - age:
+          - *owner_machine
+          - *github_actions_ci
+```
+
+- Creating an automation keypair: generate into a temp directory (`age-keygen` refuses existing files), store the private key only in the consumer's secret store, keep only the recipient:
+
+```sh
+d=$(mktemp -d)
+just secrets age-create "$d/key"    # prints the recipient for .sops.yaml
+grep AGE-SECRET-KEY "$d/key" | gh secret set SOPS_AGE_KEY
+rm -rf "$d"
+```
 
 ## Working with secrets files
 
