@@ -21,4 +21,4 @@ Non-mutating gates before pushing: `nix flake check`, build the host toplevel, `
 
 ## Bootstrap
 
-Creating a new host, repo, or first cloud stack — read `references/bootstrap.md`.
+Creating a new host, repo, or first cloud stack — read `references/bootstrap.md`. Setting up SOPS + age secrets alone, without host infrastructure — read `references/secrets.md`.
