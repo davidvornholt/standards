@@ -313,7 +313,9 @@ describe('check', () => {
     const { consumer } = initConsumer(buildUpstream());
     const check = run(consumer, ['check', '--dir', consumer]);
     expect(check.status).toBe(0);
-    expect(check.stdout).toContain('canonical file(s) match upstream');
+    expect(check.stdout).toContain(
+      'canonical file(s) match the last synced state',
+    );
   });
 
   it('fails and reports modified when a managed file is edited', () => {
@@ -321,7 +323,9 @@ describe('check', () => {
     write(consumer, 'managed/a.txt', 'tampered\n');
     const check = run(consumer, ['check', '--dir', consumer]);
     expect(check.status).toBe(1);
-    expect(check.stderr).toContain('canonical file(s) drifted from upstream');
+    expect(check.stderr).toContain(
+      'canonical file(s) drifted from the last synced state',
+    );
     expect(check.stderr).toContain('modified: managed/a.txt');
   });
 
