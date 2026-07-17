@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
-import { isRecord } from './github-settings';
+import { isRecord } from './github-settings-parse';
 import {
   missingPublishedCliProblems,
   rootScriptExpectations,

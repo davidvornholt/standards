@@ -8,10 +8,10 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import process from 'node:process';
 import {
-  isRecord,
   type LoadedGithubSettings,
   loadGithubSettings,
 } from './github-settings';
+import { isRecord } from './github-settings-parse';
 
 const API_ROOT = 'https://api.github.com';
 
@@ -32,6 +32,7 @@ const quietExec = (
   try {
     const out = execFileSync(file, [...args], {
       encoding: 'utf8',
+      env: process.env,
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
     return out.length > 0 ? out : null;

@@ -1,7 +1,7 @@
 // Drift comparison between declared GitHub settings (github-settings.ts) and
 // the live state returned by the GitHub API. Pure logic; no network.
 
-import { isRecord } from './github-settings';
+import { isRecord } from './github-settings-parse';
 
 export type SettingsDiff = {
   readonly drifted: ReadonlyArray<string>;

@@ -1,4 +1,4 @@
-import { isRecord } from './github-settings';
+import { isRecord } from './github-settings-parse';
 
 // Structure validation profiles. `consumer` is the contract every downstream
 // repo satisfies. `source` is the standards template repository itself, which

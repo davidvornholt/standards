@@ -22,7 +22,7 @@ Because bucket-1 files are byte-identical everywhere, every legitimate per-repo 
 | ---------------------- | ------------------------------------------------------------ |
 | `biome.base.jsonc`     | `biome.jsonc` extends it                                     |
 | `AGENTS.md`            | `AGENTS.local.md` extends it; `CLAUDE.md` points to it       |
-| `.github/settings.json` | `.github/settings.local.json` extends it (additive only: it may add repository settings and rulesets but never override canonical ones — GitHub layers rulesets strictest-wins, so additions can only tighten) |
+| `.github/settings.json` | `.github/settings.local.json` extends it (additive only: it may add repository settings and rulesets but never override canonical ones — GitHub layers rulesets strictest-wins, so additions can only tighten; the one subtractive declaration is `"rulesetEnforcement": "unavailable-on-plan"` for repos whose GitHub plan cannot enforce rulesets) |
 | `.github/workflows/standards-sync.yml` | `sync-standards.local.json` configures it (the only policy source since CLI 0.7.0; optional `autoSync` opt-out for the weekly run, optional `ref` pin honored by the workflow and by CLI `init`/`sync`) |
 
 If a task seems to require editing a canonical file for one repo's needs, stop — the change either belongs upstream (it's a real standard) or in the seam (it's repo-specific).
@@ -36,6 +36,8 @@ Run commands as `bun standards <command>`; `help` lists them.
 `github --check` verifies the live GitHub repository (merge settings and rulesets) against the merged declaration and fails closed on drift or API errors; `github --apply` converges the live repository — creating, updating, and deleting rulesets to exactly the declared set. Apply needs admin auth (the local `gh` CLI or `GH_TOKEN`), which CI's token cannot hold, so drift found in CI is fixed by a human or local agent running `bun standards github --apply`. Never hand-edit rulesets or merge settings in the GitHub UI; change the declaration instead.
 
 A PR that changes the declaration fails its own gate until the change is applied: run `github --apply` from that branch before merging. Live state converging ahead of the merge is fine — the declaration is authoritative, not the merge order.
+
+GitHub only enforces rulesets on private repositories on paid plans, and the failure modes differ: personal accounts answer ruleset reads with HTTP 403, while free-plan organizations accept rulesets and report them as active but silently do not enforce them — a green comparison there would be a lie. A repo in that position declares `"rulesetEnforcement": "unavailable-on-plan"` in `.github/settings.local.json`; both commands then skip rulesets, still converge repository merge settings, and print an unprotected-branch notice on every run. Never declare the opt-out to silence ruleset drift on a plan that can enforce — it documents a platform limitation, not a preference.
 
 ## Testing a canonical change before publishing
 

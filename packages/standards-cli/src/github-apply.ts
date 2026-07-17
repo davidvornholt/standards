@@ -10,8 +10,40 @@ import {
   HTTP_OK,
   request,
 } from './github-api';
-import { diffRuleset } from './github-diff';
-import type { GithubSettings } from './github-settings';
+import { diffRepositorySettings, diffRuleset } from './github-diff';
+import type { GithubSettings } from './github-settings-parse';
+
+export const applyRepositorySettings = async (
+  token: string,
+  repo: string,
+  repository: Readonly<Record<string, unknown>>,
+  liveRepository: Readonly<Record<string, unknown>>,
+): Promise<ReadonlyArray<string>> => {
+  const diff = diffRepositorySettings(repository, liveRepository);
+  if (diff.drifted.length === 0 && diff.unverifiable.length === 0) {
+    return [];
+  }
+  const patched = await request(token, 'PATCH', `/repos/${repo}`, repository);
+  if (patched.status !== HTTP_OK) {
+    throw new Error(apiError('updating repository settings', patched));
+  }
+  return ['updated repository merge settings'];
+};
+
+export const applySummary = (
+  repo: string,
+  actions: ReadonlyArray<string>,
+  rulesetsSkipped: boolean,
+): string => {
+  if (rulesetsSkipped) {
+    return actions.length === 0
+      ? `standards github: repository settings already converged for ${repo}; rulesets skipped`
+      : `standards github: repository settings apply complete for ${repo}; rulesets skipped`;
+  }
+  return actions.length === 0
+    ? 'standards github: already converged; no changes'
+    : `standards github: apply complete for ${repo}`;
+};
 
 const reconcileRuleset = async (
   token: string,
