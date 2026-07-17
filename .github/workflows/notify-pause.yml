@@ -8,44 +8,80 @@ name: Notify pause
 # purpose: the ping fires off the durable state transition, not off anything
 # harness-specific the agent has to remember.
 #
+# The topic URL is a secret (the topic name is its only access control) and
+# therefore lives where all work-plane secrets live: as `ci.ntfy_topic_url` in
+# the repo-owned, SOPS-encrypted secrets/ci.yaml, decrypted here with the
+# single SOPS_AGE_KEY bootstrap Actions secret. Rotate by editing the
+# encrypted file like any other secret change.
+#
 # `pull_request_target` instead of `pull_request` so the run has secrets even
 # when the labeled PR comes from a fork. That event is safe here because the
-# job never checks out or executes PR code — untrusted input (the PR title)
-# only ever passes through an env var into curl's request body.
+# checkout is the BASE ref (never PR code) and nothing from the PR is
+# executed — untrusted input (the PR title) only ever passes through an env
+# var into curl's request body.
 #
-# Configure the NTFY_TOPIC_URL Actions secret with a full topic URL, e.g.
-# https://ntfy.sh/<random-unguessable-topic>. The topic name is the only
-# access control — anyone who knows it can push notifications to the phone —
-# so it is a secret; rotate the topic if it leaks. A missing secret fails the
-# run loudly: a doorbell that silently no-ops defeats its purpose.
+# Every missing precondition fails the run loudly instead of no-oping: a
+# doorbell that silently swallows a pause defeats its purpose, and the red
+# run on the paused PR is the durable signal that the ping was not delivered.
 
 on:
   pull_request_target:
     types: [labeled]
 
-permissions: {}
+permissions:
+  contents: read
 
 jobs:
   notify:
     if: github.event.label.name == 'needs-clarification'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
-      - name: Push a notification through ntfy
+      - name: Checkout encrypted CI secrets
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            secrets/ci.yaml
+            .sops.yaml
+          sparse-checkout-cone-mode: false
+
+      - name: Decrypt the topic URL and push a notification
         env:
-          NTFY_TOPIC_URL: ${{ secrets.NTFY_TOPIC_URL }}
+          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+          SOPS_VERSION: v3.13.2
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_URL: ${{ github.event.pull_request.html_url }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          if [ -z "$NTFY_TOPIC_URL" ]; then
-            echo "::error::NTFY_TOPIC_URL secret is not configured, so this pause was not delivered. Set it to a full ntfy topic URL (e.g. https://ntfy.sh/<random-topic>)."
+          if [ -z "$SOPS_AGE_KEY" ]; then
+            echo "::error::SOPS_AGE_KEY secret is not configured, so this pause was not delivered. Set it to the age private key whose recipient encrypts secrets/ci.yaml."
             exit 1
           fi
+          if [ ! -f secrets/ci.yaml ]; then
+            echo "::error::secrets/ci.yaml does not exist, so this pause was not delivered. Create it (SOPS + age) with a ci.ntfy_topic_url value; secrets/ci.example.yaml shows the shape."
+            exit 1
+          fi
+          case "$(uname -m)" in
+            x86_64) arch=amd64 sha=154dfe4cd70554bdd82b98e4cd4acf191d43d01ead6f00a73477aa44c4ac42ef ;;
+            aarch64) arch=arm64 sha=78abf2e15c86250a1553ae6f53aba96be6b2a8126f160b1534959add3467ad76 ;;
+            *)
+              echo "::error::No pinned sops binary for runner architecture $(uname -m)"
+              exit 1
+              ;;
+          esac
+          sops="$RUNNER_TEMP/sops"
+          curl -sfLo "$sops" "https://github.com/getsops/sops/releases/download/${SOPS_VERSION}/sops-${SOPS_VERSION}.linux.${arch}"
+          echo "$sha  $sops" | sha256sum --check --quiet
+          chmod +x "$sops"
+          if ! topic_url=$("$sops" decrypt --extract '["ci"]["ntfy_topic_url"]' secrets/ci.yaml); then
+            echo "::error::Could not read ci.ntfy_topic_url from secrets/ci.yaml, so this pause was not delivered. Add the key (a full ntfy topic URL, e.g. https://ntfy.sh/<random-topic>) or check that SOPS_AGE_KEY matches a recipient."
+            exit 1
+          fi
+          echo "::add-mask::$topic_url"
           curl -sf \
             -H "X-Title: ${REPO}#${PR_NUMBER} needs clarification" \
             -H "X-Click: ${PR_URL}" \
             -H "X-Priority: high" \
             -H "X-Tags: question" \
             --data "$PR_TITLE" \
-            "$NTFY_TOPIC_URL"
+            "$topic_url"
