@@ -493,7 +493,7 @@ const runCheck = async (consumer: string): Promise<boolean> => {
   const problems = results.filter((p): p is string => p !== null);
   if (problems.length > 0) {
     console.error(
-      `standards: ${problems.length} canonical file(s) drifted from upstream:`,
+      `standards: ${problems.length} canonical file(s) drifted from the last synced state:`,
     );
     console.error(problems.join('\n'));
     console.error(
@@ -502,7 +502,7 @@ const runCheck = async (consumer: string): Promise<boolean> => {
     return false;
   }
   console.log(
-    `standards: ${Object.keys(lock.files).length} canonical file(s) match upstream`,
+    `standards: ${Object.keys(lock.files).length} canonical file(s) match the last synced state`,
   );
   return true;
 };
