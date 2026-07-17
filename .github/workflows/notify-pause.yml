@@ -1,0 +1,51 @@
+name: Notify pause
+
+# A review-fix cycle pauses by posting a decision brief on the PR and applying
+# the `needs-clarification` label. The agent posts with the repo owner's own
+# account, and GitHub never notifies you of your own activity — so this
+# workflow is the doorbell: on the label event it pushes a phone notification
+# through ntfy with a deep link to the paused PR. The label is the trigger on
+# purpose: the ping fires off the durable state transition, not off anything
+# harness-specific the agent has to remember.
+#
+# `pull_request_target` instead of `pull_request` so the run has secrets even
+# when the labeled PR comes from a fork. That event is safe here because the
+# job never checks out or executes PR code — untrusted input (the PR title)
+# only ever passes through an env var into curl's request body.
+#
+# Configure the NTFY_TOPIC_URL Actions secret with a full topic URL, e.g.
+# https://ntfy.sh/<random-unguessable-topic>. The topic name is the only
+# access control — anyone who knows it can push notifications to the phone —
+# so it is a secret; rotate the topic if it leaks. A missing secret fails the
+# run loudly: a doorbell that silently no-ops defeats its purpose.
+
+on:
+  pull_request_target:
+    types: [labeled]
+
+permissions: {}
+
+jobs:
+  notify:
+    if: github.event.label.name == 'needs-clarification'
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - name: Push a notification through ntfy
+        env:
+          NTFY_TOPIC_URL: ${{ secrets.NTFY_TOPIC_URL }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [ -z "$NTFY_TOPIC_URL" ]; then
+            echo "::error::NTFY_TOPIC_URL secret is not configured, so this pause was not delivered. Set it to a full ntfy topic URL (e.g. https://ntfy.sh/<random-topic>)."
+            exit 1
+          fi
+          curl -sf \
+            -H "X-Title: ${REPO}#${PR_NUMBER} needs clarification" \
+            -H "X-Click: ${PR_URL}" \
+            -H "X-Priority: high" \
+            -H "X-Tags: question" \
+            --data "$PR_TITLE" \
+            "$NTFY_TOPIC_URL"
