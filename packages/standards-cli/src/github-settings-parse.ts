@@ -16,8 +16,19 @@ export type GithubSettings = {
   readonly rulesetEnforcement: RulesetEnforcement;
 };
 
+export type ParsedGithubSettings = {
+  readonly repository: Readonly<Record<string, unknown>> | null;
+  readonly rulesets: ReadonlyArray<unknown> | null;
+  readonly rulesetEnforcement: RulesetEnforcement | null;
+};
+
 export const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
+
+export const isNamedRuleset = (
+  value: unknown,
+): value is Readonly<Record<string, unknown>> & { readonly name: string } =>
+  isRecord(value) && typeof value.name === 'string' && value.name.length > 0;
 
 export const SETTINGS_KEYS: ReadonlySet<string> = new Set([
   'repository',
@@ -31,8 +42,15 @@ export const LOCAL_SETTINGS_KEYS: ReadonlySet<string> = new Set([
 export const ENFORCEMENT_OPT_OUT = 'unavailable-on-plan';
 
 export type ParseResult = {
-  readonly settings: GithubSettings | null;
+  readonly settings: ParsedGithubSettings | null;
   readonly problems: ReadonlyArray<string>;
+};
+
+const parseRulesetEnforcement = (value: unknown): RulesetEnforcement | null => {
+  if (value === undefined) {
+    return 'enforced';
+  }
+  return value === ENFORCEMENT_OPT_OUT ? ENFORCEMENT_OPT_OUT : null;
 };
 
 const rulesetListProblems = (
@@ -42,13 +60,7 @@ const rulesetListProblems = (
   const problems: Array<string> = [];
   const names = new Set<string>();
   for (const [index, ruleset] of rulesets.entries()) {
-    if (
-      !(
-        isRecord(ruleset) &&
-        typeof ruleset.name === 'string' &&
-        ruleset.name.length > 0
-      )
-    ) {
+    if (!isNamedRuleset(ruleset)) {
       problems.push(
         `${label} rulesets[${index}] must be an object with a non-empty "name"`,
       );
@@ -97,18 +109,12 @@ export const parseSettings = (
       `${label} "rulesetEnforcement" must be "${ENFORCEMENT_OPT_OUT}" when present; omit it on plans where GitHub enforces rulesets`,
     );
   }
-  if (problems.length > 0) {
-    return { settings: null, problems };
-  }
   return {
     settings: {
-      repository: repository as Record<string, unknown>,
-      rulesets: rulesets as ReadonlyArray<Record<string, unknown>>,
-      rulesetEnforcement:
-        raw.rulesetEnforcement === ENFORCEMENT_OPT_OUT
-          ? ENFORCEMENT_OPT_OUT
-          : 'enforced',
+      repository: isRecord(repository) ? repository : null,
+      rulesets: Array.isArray(rulesets) ? rulesets : null,
+      rulesetEnforcement: parseRulesetEnforcement(raw.rulesetEnforcement),
     },
-    problems: [],
+    problems,
   };
 };
