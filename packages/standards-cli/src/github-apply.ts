@@ -11,7 +11,7 @@ import {
   request,
 } from './github-api';
 import { diffRuleset } from './github-diff';
-import type { GithubSettings } from './github-settings';
+import type { GithubSettings } from './github-settings-parse';
 
 const reconcileRuleset = async (
   token: string,

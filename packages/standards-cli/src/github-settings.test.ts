@@ -72,9 +72,63 @@ describe('loadGithubSettings', () => {
     ]);
   });
 
-  it('accepts the empty seam', () => {
+  it('accepts the empty seam and defaults to enforced rulesets', () => {
     const loaded = loadGithubSettings(canonical, emptySeam);
     expect(loaded.problems).toEqual([]);
     expect(loaded.merged?.rulesets).toHaveLength(1);
+    expect(loaded.merged?.rulesetEnforcement).toBe('enforced');
+  });
+});
+
+describe('loadGithubSettings rulesetEnforcement', () => {
+  it('accepts a declared ruleset-enforcement opt-out', () => {
+    const local = JSON.stringify({
+      repository: {},
+      rulesets: [],
+      rulesetEnforcement: 'unavailable-on-plan',
+    });
+    const loaded = loadGithubSettings(canonical, local);
+    expect(loaded.problems).toEqual([]);
+    expect(loaded.merged?.rulesetEnforcement).toBe('unavailable-on-plan');
+    expect(loaded.merged?.rulesets).toHaveLength(1);
+  });
+
+  it('rejects any other rulesetEnforcement value, including an explicit "enforced"', () => {
+    const local = JSON.stringify({
+      repository: {},
+      rulesets: [],
+      rulesetEnforcement: 'enforced',
+    });
+    const loaded = loadGithubSettings(canonical, local);
+    expect(loaded.merged).toBeNull();
+    expect(loaded.problems).toEqual([
+      '.github/settings.local.json "rulesetEnforcement" must be "unavailable-on-plan" when present; omit it on plans where GitHub enforces rulesets',
+    ]);
+  });
+
+  it('rejects rulesetEnforcement in the canonical file', () => {
+    const badCanonical = JSON.stringify({
+      repository: {},
+      rulesets: [],
+      rulesetEnforcement: 'unavailable-on-plan',
+    });
+    const loaded = loadGithubSettings(badCanonical, emptySeam);
+    expect(loaded.merged).toBeNull();
+    expect(loaded.problems).toEqual([
+      '.github/settings.json has unknown key "rulesetEnforcement"',
+    ]);
+  });
+
+  it('rejects local rulesets combined with the opt-out', () => {
+    const local = JSON.stringify({
+      repository: {},
+      rulesets: [{ name: 'Protect releases' }],
+      rulesetEnforcement: 'unavailable-on-plan',
+    });
+    const loaded = loadGithubSettings(canonical, local);
+    expect(loaded.merged).toBeNull();
+    expect(loaded.problems).toEqual([
+      '.github/settings.local.json declares additional rulesets while "rulesetEnforcement" is "unavailable-on-plan"; remove the rulesets or the opt-out',
+    ]);
   });
 });

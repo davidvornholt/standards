@@ -14,13 +14,60 @@ import {
 } from './github-api';
 import { applyRulesets } from './github-apply';
 import { diffRepositorySettings, diffRulesets } from './github-diff';
-import { type GithubSettings, isRecord } from './github-settings';
+import { type GithubSettings, isRecord } from './github-settings-parse';
+
+// Printed on every check and apply while the opt-out is declared: the skip
+// must stay louder than the comfort of a green gate. Comparing anyway would
+// either fail closed forever (personal accounts answer HTTP 403) or trust
+// rulesets a free-plan organization reports as active but does not enforce.
+const UNENFORCEABLE_NOTICE =
+  'standards github: rulesets are declared unenforceable on this GitHub plan (.github/settings.local.json "rulesetEnforcement"); the default branch is NOT protected. Upgrade the plan, run `bun standards github --apply`, then remove the declaration.';
 
 const reportProblems = (problems: ReadonlyArray<string>): void => {
   console.error(
     `standards github: ${problems.length} problem(s) with declared GitHub settings:`,
   );
   console.error(problems.map((problem) => `  - ${problem}`).join('\n'));
+};
+
+const repositoryDrift = async (
+  token: string | null,
+  repo: string,
+  declared: GithubSettings,
+): Promise<ReadonlyArray<string>> => {
+  const repoResponse = await request(token, 'GET', `/repos/${repo}`);
+  if (repoResponse.status !== HTTP_OK || !isRecord(repoResponse.body)) {
+    return [apiError(`reading repository ${repo}`, repoResponse)];
+  }
+  const diff = diffRepositorySettings(declared.repository, repoResponse.body);
+  if (diff.unverifiable.length > 0) {
+    console.log(
+      `standards github: repository setting(s) not visible to this token, verify with admin auth: ${diff.unverifiable.join(', ')}`,
+    );
+  }
+  return diff.drifted;
+};
+
+const rulesetDrift = async (
+  token: string | null,
+  repo: string,
+  declared: GithubSettings,
+): Promise<ReadonlyArray<string>> => {
+  if (declared.rulesetEnforcement === 'unavailable-on-plan') {
+    console.log(UNENFORCEABLE_NOTICE);
+    return [];
+  }
+  const live = await fetchLiveRulesets(token, repo);
+  if (live.rulesets === null) {
+    return [live.problem ?? 'unable to read rulesets'];
+  }
+  const diff = diffRulesets(declared.rulesets, live.rulesets);
+  if (diff.unverifiable.length > 0) {
+    console.log(
+      `standards github: ruleset field(s) not visible to this token, verify with admin auth: ${diff.unverifiable.join('; ')}`,
+    );
+  }
+  return diff.drifted;
 };
 
 const collectLiveDrift = async (
@@ -32,41 +79,16 @@ const collectLiveDrift = async (
     return ['cannot determine the GitHub repository from the origin remote'];
   }
   const token = resolveToken();
-  const problems: Array<string> = [];
   try {
-    const repoResponse = await request(token, 'GET', `/repos/${repo}`);
-    if (repoResponse.status !== HTTP_OK || !isRecord(repoResponse.body)) {
-      problems.push(apiError(`reading repository ${repo}`, repoResponse));
-    } else {
-      const diff = diffRepositorySettings(
-        declared.repository,
-        repoResponse.body,
-      );
-      problems.push(...diff.drifted);
-      if (diff.unverifiable.length > 0) {
-        console.log(
-          `standards github: repository setting(s) not visible to this token, verify with admin auth: ${diff.unverifiable.join(', ')}`,
-        );
-      }
-    }
-    const live = await fetchLiveRulesets(token, repo);
-    if (live.rulesets === null) {
-      problems.push(live.problem ?? 'unable to read rulesets');
-    } else {
-      const rulesetDiff = diffRulesets(declared.rulesets, live.rulesets);
-      problems.push(...rulesetDiff.drifted);
-      if (rulesetDiff.unverifiable.length > 0) {
-        console.log(
-          `standards github: ruleset field(s) not visible to this token, verify with admin auth: ${rulesetDiff.unverifiable.join('; ')}`,
-        );
-      }
-    }
+    return [
+      ...(await repositoryDrift(token, repo, declared)),
+      ...(await rulesetDrift(token, repo, declared)),
+    ];
   } catch (error) {
-    problems.push(
+    return [
       `GitHub API unreachable: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    ];
   }
-  return problems;
 };
 
 export const runGithubCheck = async (consumer: string): Promise<boolean> => {
@@ -83,9 +105,31 @@ export const runGithubCheck = async (consumer: string): Promise<boolean> => {
     return false;
   }
   console.log(
-    'standards github: live GitHub settings match the declared configuration',
+    declared.merged?.rulesetEnforcement === 'unavailable-on-plan'
+      ? 'standards github: live repository settings match the declared configuration (rulesets skipped)'
+      : 'standards github: live GitHub settings match the declared configuration',
   );
   return true;
+};
+
+const applyRepositorySettings = async (
+  token: string,
+  repo: string,
+  repository: Readonly<Record<string, unknown>>,
+): Promise<ReadonlyArray<string>> => {
+  const repoResponse = await request(token, 'GET', `/repos/${repo}`);
+  if (repoResponse.status !== HTTP_OK || !isRecord(repoResponse.body)) {
+    throw new Error(apiError(`reading repository ${repo}`, repoResponse));
+  }
+  const diff = diffRepositorySettings(repository, repoResponse.body);
+  if (diff.drifted.length === 0 && diff.unverifiable.length === 0) {
+    return [];
+  }
+  const patched = await request(token, 'PATCH', `/repos/${repo}`, repository);
+  if (patched.status !== HTTP_OK) {
+    throw new Error(apiError('updating repository settings', patched));
+  }
+  return ['updated repository merge settings'];
 };
 
 export const runGithubApply = async (consumer: string): Promise<boolean> => {
@@ -109,28 +153,18 @@ export const runGithubApply = async (consumer: string): Promise<boolean> => {
     return false;
   }
   try {
-    const actions: Array<string> = [];
-    const repoResponse = await request(token, 'GET', `/repos/${repo}`);
-    if (repoResponse.status !== HTTP_OK || !isRecord(repoResponse.body)) {
-      throw new Error(apiError(`reading repository ${repo}`, repoResponse));
-    }
-    const diff = diffRepositorySettings(
-      declared.merged.repository,
-      repoResponse.body,
-    );
-    if (diff.drifted.length > 0 || diff.unverifiable.length > 0) {
-      const patched = await request(
+    const actions = [
+      ...(await applyRepositorySettings(
         token,
-        'PATCH',
-        `/repos/${repo}`,
+        repo,
         declared.merged.repository,
-      );
-      if (patched.status !== HTTP_OK) {
-        throw new Error(apiError('updating repository settings', patched));
-      }
-      actions.push('updated repository merge settings');
+      )),
+    ];
+    if (declared.merged.rulesetEnforcement === 'unavailable-on-plan') {
+      console.log(UNENFORCEABLE_NOTICE);
+    } else {
+      actions.push(...(await applyRulesets(token, repo, declared.merged)));
     }
-    actions.push(...(await applyRulesets(token, repo, declared.merged)));
     for (const action of actions) {
       console.log(`  ${action}`);
     }

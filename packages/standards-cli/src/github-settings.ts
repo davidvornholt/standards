@@ -1,88 +1,21 @@
-// Declarative GitHub repository settings: parsing and seam merging for the
-// canonical `.github/settings.json` and the repo-owned
-// `.github/settings.local.json` extension. Pure logic only; drift comparison
-// lives in github-diff.ts and the API interaction in github-api.ts. Like
-// cli.ts, this module is zero-dependency so `bunx` can execute the published
-// package.
+// Seam merging for the declarative GitHub repository settings: combines the
+// canonical `.github/settings.json` with the repo-owned
+// `.github/settings.local.json` extension. Per-file shape parsing lives in
+// github-settings-parse.ts, drift comparison in github-diff.ts, and the API
+// interaction in github-api.ts. Like cli.ts, this module is zero-dependency so
+// `bunx` can execute the published package.
 
-export type GithubSettings = {
-  readonly repository: Readonly<Record<string, unknown>>;
-  readonly rulesets: ReadonlyArray<Readonly<Record<string, unknown>>>;
-};
+import {
+  ENFORCEMENT_OPT_OUT,
+  type GithubSettings,
+  LOCAL_SETTINGS_KEYS,
+  parseSettings,
+  SETTINGS_KEYS,
+} from './github-settings-parse';
 
 export type LoadedGithubSettings = {
   readonly merged: GithubSettings | null;
   readonly problems: ReadonlyArray<string>;
-};
-
-export const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
-const SETTINGS_KEYS = new Set(['repository', 'rulesets']);
-
-type ParseResult = {
-  readonly settings: GithubSettings | null;
-  readonly problems: ReadonlyArray<string>;
-};
-
-const rulesetListProblems = (
-  rulesets: ReadonlyArray<unknown>,
-  label: string,
-): ReadonlyArray<string> => {
-  const problems: Array<string> = [];
-  const names = new Set<string>();
-  for (const [index, ruleset] of rulesets.entries()) {
-    if (
-      !(
-        isRecord(ruleset) &&
-        typeof ruleset.name === 'string' &&
-        ruleset.name.length > 0
-      )
-    ) {
-      problems.push(
-        `${label} rulesets[${index}] must be an object with a non-empty "name"`,
-      );
-    } else if (names.has(ruleset.name)) {
-      problems.push(
-        `${label} declares ruleset "${ruleset.name}" more than once`,
-      );
-    } else {
-      names.add(ruleset.name);
-    }
-  }
-  return problems;
-};
-
-const parseSettings = (raw: unknown, label: string): ParseResult => {
-  if (!isRecord(raw)) {
-    return { settings: null, problems: [`${label} must be a JSON object`] };
-  }
-  const problems: Array<string> = [];
-  for (const key of Object.keys(raw)) {
-    if (!SETTINGS_KEYS.has(key)) {
-      problems.push(`${label} has unknown key "${key}"`);
-    }
-  }
-  const repository = raw.repository ?? {};
-  if (!isRecord(repository)) {
-    problems.push(`${label} "repository" must be an object`);
-  }
-  const rulesets = raw.rulesets ?? [];
-  if (Array.isArray(rulesets)) {
-    problems.push(...rulesetListProblems(rulesets, label));
-  } else {
-    problems.push(`${label} "rulesets" must be an array`);
-  }
-  if (problems.length > 0) {
-    return { settings: null, problems };
-  }
-  return {
-    settings: {
-      repository: repository as Record<string, unknown>,
-      rulesets: rulesets as ReadonlyArray<Record<string, unknown>>,
-    },
-    problems: [],
-  };
 };
 
 type MergeResult = {
@@ -92,12 +25,22 @@ type MergeResult = {
 
 // The seam may only add. Overriding a canonical repository key or redefining a
 // canonical ruleset could weaken the canonical floor; GitHub layers multiple
-// rulesets strictest-wins, so adding a ruleset is always safe.
+// rulesets strictest-wins, so adding a ruleset is always safe. The one
+// subtractive declaration is the ruleset-enforcement opt-out, which skips the
+// ruleset gate entirely rather than weakening any single rule.
 const mergeSettings = (
   canonical: GithubSettings,
   local: GithubSettings,
 ): MergeResult => {
   const problems: Array<string> = [];
+  if (
+    local.rulesetEnforcement === ENFORCEMENT_OPT_OUT &&
+    local.rulesets.length > 0
+  ) {
+    problems.push(
+      `.github/settings.local.json declares additional rulesets while "rulesetEnforcement" is "${ENFORCEMENT_OPT_OUT}"; remove the rulesets or the opt-out`,
+    );
+  }
   for (const key of Object.keys(local.repository)) {
     if (key in canonical.repository) {
       problems.push(
@@ -120,6 +63,7 @@ const mergeSettings = (
     merged: {
       repository: { ...canonical.repository, ...local.repository },
       rulesets: [...canonical.rulesets, ...local.rulesets],
+      rulesetEnforcement: local.rulesetEnforcement,
     },
     problems: [],
   };
@@ -163,8 +107,16 @@ export const loadGithubSettings = (
   if (problems.length > 0) {
     return { merged: null, problems };
   }
-  const canonical = parseSettings(canonicalJson.value, '.github/settings.json');
-  const local = parseSettings(localJson?.value, '.github/settings.local.json');
+  const canonical = parseSettings(
+    canonicalJson.value,
+    '.github/settings.json',
+    SETTINGS_KEYS,
+  );
+  const local = parseSettings(
+    localJson?.value,
+    '.github/settings.local.json',
+    LOCAL_SETTINGS_KEYS,
+  );
   problems.push(...canonical.problems, ...local.problems);
   if (canonical.settings === null || local.settings === null) {
     return { merged: null, problems };
