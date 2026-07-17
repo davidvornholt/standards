@@ -65,10 +65,10 @@ Disposition a finding that is one instance of a repeated pattern as its class: t
 
 Escalation tripwires — each converts a fix-now into a user question, and a blanket pre-approval ("I approve all further decisions") does not lift them:
 
-- the fix would add a new subsystem, dependency, or stateful/concurrency construct (a cache, pool, semaphore, queue, pub/sub channel, state machine, or background fiber);
+- the fix would introduce production machinery with invariants of its own — machinery that would deserve a review lens the scope contract never included. A new dependency always qualifies; so does a subsystem or mechanism of any kind (a pool, a state machine, a retry layer, a background fiber — the examples are illustrative, the lens test is the trigger);
 - the fix hardens beyond the stated threat model.
 
-New tests are never a tripwire, and neither is mechanically splitting a file the fix pushed over the line limit — the trigger is new production machinery, not file count or diff size. Tripwires bind fixes as well as dispositions: a worker whose fix would cross one stops, replies in-thread naming the boundary, and leaves the thread unresolved for the orchestrator to escalate.
+New tests are never a tripwire, and neither is mechanically splitting a file the fix pushed over the line limit — corrections to code already under review need no new lens, however large. Tripwires bind fixes as well as dispositions: a worker whose fix would cross one stops, replies in-thread naming the boundary, and leaves the thread unresolved for the orchestrator to escalate.
 
 ## Fix
 
