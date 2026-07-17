@@ -65,8 +65,10 @@ Disposition a finding that is one instance of a repeated pattern as its class: t
 
 Escalation tripwires — each converts a fix-now into a user question, and a blanket pre-approval ("I approve all further decisions") does not lift them:
 
-- the fix would add a new subsystem or dependency;
+- the fix would introduce production machinery with invariants of its own — machinery that would deserve a review lens the scope contract never included. A new dependency always qualifies; so does a subsystem or mechanism of any kind (a pool, a state machine, a retry layer, a background fiber — the examples are illustrative, the lens test is the trigger);
 - the fix hardens beyond the stated threat model.
+
+New tests are never a tripwire, and neither is mechanically splitting a file the fix pushed over the line limit — corrections to code already under review need no new lens, however large. Tripwires bind fixes as well as dispositions: a worker whose fix would cross one stops, replies in-thread naming the boundary, and leaves the thread unresolved for the orchestrator to escalate.
 
 ## Fix
 
@@ -82,7 +84,7 @@ Re-run the deterministic gate after the fix round.
 
 One fresh `review-pass` fan-out scoped to the fixes: set `baseRef` to the pre-fix head SHA so the reviewed diff is exactly the fix commits, with lenses answering two questions — does each fix resolve its thread's finding, and did the fixes introduce regressions. Verifiers attack the class, not the instance: reconstruct each failure mode with real inputs through the real pipeline, and actively construct sibling inputs that still exhibit the class the fix claims to close.
 
-A fix that failed to resolve its thread's finding, or that introduced a regression, gets one repair round (worker, gate, evidence, thread reply). If a repair round ran, one further `review-pass` scoped to the repair delta only (baseRef = the pre-repair head) checks the repairs the same way; anything material it finds gets one final repair, verified mechanically only. Everything else verification surfaces is dispositioned defer or discard — verification findings never start a full review pass. Then stop, unconditionally. The final repair alone remains unverified by fresh eyes; name that in the report.
+A fix that failed to resolve its thread's finding, or that introduced a regression, gets one repair round (worker, gate, evidence, thread reply). "Introduced" is a mechanical test, not a judgment call: a defect reproducible on the pass's base SHA predates the fixes and is deferred, however real — only defects the reviewed commits created qualify for repair. If a repair round ran, one further `review-pass` scoped to the repair delta only (baseRef = the pre-repair head) checks the repairs the same way; anything material it finds gets one final repair, verified mechanically only. Everything else verification surfaces is dispositioned defer or discard — verification findings never start a full review pass. Then stop, unconditionally. The final repair alone remains unverified by fresh eyes; name that in the report.
 
 ## Report
 
