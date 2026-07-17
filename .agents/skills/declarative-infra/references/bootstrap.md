@@ -202,8 +202,9 @@ Host-specific services (containers, jobs) live under the repo's own option names
 
 ## Secrets (SOPS + age)
 
+Identities, recipients, `.sops.yaml` authoring, the `secrets.just` module, and CI wiring — read `secrets.md`. Host-specific on top of that:
+
 - The host key is a recipient: derive it with `ssh-to-age < /etc/ssh/ssh_host_ed25519_key.pub` and list it (plus admin and CI keys) in `.sops.yaml` creation rules.
-- Admin and CI recipients are age keys: `age-keygen -o <file>` creates one, `age-keygen -y <file>` prints its public key. When the repo uses `just`, add a repo-owned `secrets.just` module with `age-create` and `age-recipient` recipes — create the key only if missing, refuse to overwrite an existing file, print the recipient.
 - Host side:
 
 ```nix
