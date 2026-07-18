@@ -269,9 +269,9 @@ const runWorkflowVersionGuard = (version: string): RunResult => {
       '-euo',
       'pipefail',
       '-c',
-      workflowRunScript('Require compatible standards CLI'),
+      workflowRunScript('Require label-aware standards CLI'),
     ],
-    { MINIMUM_STANDARDS_VERSION: '0.10.2' },
+    { MINIMUM_STANDARDS_VERSION: '0.11.0' },
   );
 };
 
@@ -1660,7 +1660,7 @@ describe('canonical standards workflow security boundaries', () => {
     );
     expect(installStep).toContain('bun_version=1.3.14');
     expect(installStep.match(/bun_sha=[a-f0-9]{64}/gu)).toHaveLength(2);
-    expect(installStep).toContain('standards_version=0.10.1');
+    expect(installStep).toContain('standards_version=0.11.0');
     expect(installStep).toContain('yaml_version=2.9.0');
     expect(installStep.match(/sha=[a-f0-9]{128}/gu)).toHaveLength(2);
     expect(installStep).toContain('sha512sum --check --quiet');
@@ -2000,6 +2000,7 @@ describe('standards sync workflow policy', () => {
     '0.9.0',
     '0.10.0',
     '0.10.1',
+    '0.10.2',
     '0.10.0-beta.1',
   ])('rejects installed CLI version %s without a policy file', (version) => {
     const result = runWorkflowVersionGuard(version);
@@ -2007,7 +2008,7 @@ describe('standards sync workflow policy', () => {
     expect(`${result.stdout}${result.stderr}`).toContain('::error::');
   });
 
-  it('makes the 0.10.2 guard unconditional', () => {
+  it('makes the 0.11.0 guard unconditional', () => {
     const workflow = readFileSync(SYNC_WORKFLOW, 'utf8');
     expect(workflow).not.toContain(
       "if: needs.policy.outputs.present == 'true'",
@@ -2015,7 +2016,6 @@ describe('standards sync workflow policy', () => {
   });
 
   it.each([
-    '0.10.2',
     '0.11.0',
     '0.12.0',
   ])('accepts installed CLI version %s without a policy file', (version) => {
