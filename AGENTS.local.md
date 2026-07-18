@@ -8,7 +8,7 @@ This is the standards template repo itself — the source of truth for `AGENTS.m
 
 ## Source-repository structure profile
 
-This repository is deliberately not a `standards structure` consumer: the root gate runs the local CLI (`structure --profile source`, then `github --check`, then the Turbo gate) instead of a recursive `standards check`, and `packages/standards-cli` ships as a published bin-only package with a release SemVer version. The `source` profile in `packages/standards-cli/src/structure-profile.ts` pins exactly these exceptions, and the root `check`/`check:fix` scripts enforce it on this checkout. When the source repository's shape deliberately changes, update the profile and the root scripts in the same change — the gate failing on one without the other is the point.
+This repository is deliberately not a `standards structure` consumer: the root gate runs the local CLI (`structure --profile source`, then `dependabot --check` or `dependabot --write`, then `github --check`, then the Turbo gate) instead of a recursive `standards check`, and `packages/standards-cli` ships as a published bin-only package with a release SemVer version. The `source` profile in `packages/standards-cli/src/structure-profile.ts` pins exactly these exceptions, and the root `check`/`check:fix` scripts enforce it on this checkout. When the source repository's shape deliberately changes, update the profile and the root scripts in the same change — the gate failing on one without the other is the point.
 
 ## Dependency version holds
 

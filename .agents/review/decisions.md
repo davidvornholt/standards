@@ -15,3 +15,7 @@ Starting with CLI 0.7.0, `sync-standards.local.json` is the only standards-sync 
 ## DEPENDABOT-001: Deliberately lean local overlay
 
 The repo-owned Dependabot overlay is additive but intentionally not a general policy override. It may define new ecosystem update blocks, top-level private registries, and `ignore` or `registries` additions on a canonical normalized target. Matching blocks reject labels, groups, cooldowns, pull-request limits, and every other policy key; broader per-repository policy must be proposed as an explicit seam decision.
+
+## RELEASE-001: Installed manifest version asserts CLI capability
+
+Under the frozen non-hostile-consumer threat model, the installed `@davidvornholt/standards` manifest version plus the frozen lockfile is the capability assertion. The consumer already controls that dependency and executes its code, so extra package-name, bin, or capability probes do not establish official identity; defending against a falsely versioned or malicious substitution is out of scope.
