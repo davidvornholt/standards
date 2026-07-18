@@ -50,7 +50,7 @@ jobs:
         with:
           age-key: ${{ secrets.SOPS_AGE_KEY }}
           secret-file: secrets/ci.yaml
-          extract: '["ci"]["ntfy_topic_url"]'
+          secret-key: ntfy_topic_url
           env-name: NTFY_TOPIC_URL
 
       - name: Push a notification

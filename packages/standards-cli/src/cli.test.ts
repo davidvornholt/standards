@@ -280,7 +280,11 @@ const runSopsAction = (
     {
       CURL_MARKER: curlMarker,
       FAKE_SOPS: fakeSops,
-      FAKE_SOPS_OUTPUT: options.sopsOutput ?? JSON.stringify('resolved-token'),
+      FAKE_SOPS_OUTPUT:
+        options.sopsOutput ??
+        JSON.stringify({
+          ci: { standards_sync_token: 'resolved-token' },
+        }),
       FAKE_SOPS_STATUS: String(options.sopsStatus ?? 0),
       GITHUB_ENV: environmentPath,
       GITHUB_OUTPUT: outputPath,
@@ -288,7 +292,7 @@ const runSopsAction = (
       RUNNER_TEMP: runnerTemp,
       SOPS_AGE_KEY: options.ageKey ?? 'age-secret-key',
       SOPS_ENV_NAME: 'GH_TOKEN',
-      SOPS_EXTRACT: '["ci"]["standards_sync_token"]',
+      SOPS_SECRET_KEY: 'standards_sync_token',
       SOPS_FAILURE_MODE: options.failureMode ?? 'fallback',
       SOPS_FALLBACK_VALUE: options.fallbackValue ?? 'workflow-token',
       SOPS_SECRET_FILE: 'secrets/ci.yaml',
@@ -1555,12 +1559,16 @@ describe('canonical SOPS secret action', () => {
   });
 
   it.each([
-    ['an empty string', JSON.stringify('')],
-    ['a line-feed string', JSON.stringify('token\nBASH_ENV=/tmp/payload')],
-    ['a carriage-return string', JSON.stringify('token\rGH_TOKEN=payload')],
-    ['a non-scalar value', JSON.stringify({ token: 'value' })],
-  ])('rejects %s before exporting it', (_label, sopsOutput) => {
-    const actionRun = runSopsAction({ sopsOutput });
+    ['an empty string', ''],
+    ['a line-feed string', 'token\nBASH_ENV=/tmp/payload'],
+    ['a carriage-return string', 'token\rGH_TOKEN=payload'],
+    ['a non-scalar value', { token: 'value' }],
+  ])('rejects %s before exporting it', (_label, sopsValue) => {
+    const actionRun = runSopsAction({
+      sopsOutput: JSON.stringify({
+        ci: { standards_sync_token: sopsValue },
+      }),
+    });
 
     expect(actionRun.result.status).toBe(0);
     expect(actionRun.environment).toBe('GH_TOKEN=workflow-token\n');
@@ -1591,7 +1599,9 @@ describe('canonical SOPS secret action', () => {
   it('fails closed for a required invalid secret', () => {
     const actionRun = runSopsAction({
       failureMode: 'fail',
-      sopsOutput: JSON.stringify('token\nGH_TOKEN=payload'),
+      sopsOutput: JSON.stringify({
+        ci: { standards_sync_token: 'token\nGH_TOKEN=payload' },
+      }),
     });
 
     expect(actionRun.result.status).toBe(1);

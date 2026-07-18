@@ -157,7 +157,7 @@ jobs:
         with:
           age-key: ${{ secrets.SOPS_AGE_KEY }}
           secret-file: secrets/ci.yaml
-          extract: '["ci"]["standards_sync_token"]'
+          secret-key: standards_sync_token
           env-name: GH_TOKEN
           fallback-value: ${{ github.token }}
           failure-mode: fallback

@@ -8,8 +8,8 @@ inputs:
   secret-file:
     description: SOPS-encrypted YAML file
     required: true
-  extract:
-    description: SOPS extract expression for the required scalar
+  secret-key:
+    description: Key to resolve from the decrypted ci mapping
     required: true
   env-name:
     description: Environment variable to export for later workflow steps
@@ -36,7 +36,7 @@ runs:
       env:
         SOPS_AGE_KEY: ${{ inputs.age-key }}
         SOPS_SECRET_FILE: ${{ inputs.secret-file }}
-        SOPS_EXTRACT: ${{ inputs.extract }}
+        SOPS_SECRET_KEY: ${{ inputs.secret-key }}
         SOPS_ENV_NAME: ${{ inputs.env-name }}
         SOPS_FALLBACK_VALUE: ${{ inputs.fallback-value }}
         SOPS_FAILURE_MODE: ${{ inputs.failure-mode }}
@@ -73,11 +73,11 @@ runs:
           curl -sfLo "$sops" "https://github.com/getsops/sops/releases/download/${version}/sops-${version}.linux.${arch}"
           echo "$sha  $sops" | sha256sum --check --quiet
           chmod +x "$sops"
-          if decrypted_json=$("$sops" decrypt --extract "$SOPS_EXTRACT" --output-type json "$SOPS_SECRET_FILE") \
-            && extracted=$(jq -er 'select(type == "string" and length > 0 and (contains("\n") | not) and (contains("\r") | not))' <<< "$decrypted_json"); then
+          if decrypted_json=$("$sops" decrypt --output-type json "$SOPS_SECRET_FILE") \
+            && extracted=$(jq -er --arg key "$SOPS_SECRET_KEY" '.ci[$key] | select(type == "string" and length > 0 and (contains("\n") | not) and (contains("\r") | not))' <<< "$decrypted_json"); then
             value="$extracted"
           else
-            reason="$SOPS_EXTRACT is not a readable non-empty single-line string in $SOPS_SECRET_FILE"
+            reason="ci.$SOPS_SECRET_KEY is not a readable non-empty single-line string in $SOPS_SECRET_FILE"
             use_fallback=true
           fi
         fi
