@@ -11,8 +11,11 @@ import {
   request,
 } from './github-api';
 import { diffRepositorySettings, diffRuleset } from './github-diff';
-import type { GithubSettings } from './github-settings-parse';
+import { type GithubSettings, isRecord } from './github-settings-parse';
 
+// GitHub answers a PATCH containing a plan-unavailable setting with HTTP 200
+// and the old value, so the response body — the updated repository — is
+// diffed again instead of trusting the status code.
 export const applyRepositorySettings = async (
   token: string,
   repo: string,
@@ -24,8 +27,21 @@ export const applyRepositorySettings = async (
     return [];
   }
   const patched = await request(token, 'PATCH', `/repos/${repo}`, repository);
-  if (patched.status !== HTTP_OK) {
+  if (patched.status !== HTTP_OK || !isRecord(patched.body)) {
     throw new Error(apiError('updating repository settings', patched));
+  }
+  const persisted = diffRepositorySettings(repository, patched.body);
+  const ignored = [
+    ...persisted.drifted,
+    ...persisted.unverifiable.map(
+      (key) =>
+        `repository setting "${key}" is missing from the update response`,
+    ),
+  ];
+  if (ignored.length > 0) {
+    throw new Error(
+      `GitHub returned HTTP 200 but ignored part of the update: ${ignored.join('; ')}. A silently ignored setting is usually unavailable on this GitHub plan; if this plan cannot protect branches, declare the ruleset-enforcement opt-out instead`,
+    );
   }
   return ['updated repository merge settings'];
 };
@@ -37,8 +53,8 @@ export const applySummary = (
 ): string => {
   if (rulesetsSkipped) {
     return actions.length === 0
-      ? `standards github: repository settings already converged for ${repo}; rulesets skipped`
-      : `standards github: repository settings apply complete for ${repo}; rulesets skipped`;
+      ? `standards github: enforceable settings already converged for ${repo}; plan-gated settings skipped`
+      : `standards github: enforceable settings apply complete for ${repo}; plan-gated settings skipped`;
   }
   return actions.length === 0
     ? 'standards github: already converged; no changes'

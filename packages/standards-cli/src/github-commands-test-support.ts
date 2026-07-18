@@ -5,10 +5,12 @@ import { join } from 'node:path';
 import { HTTP_OK } from './github-api';
 
 export const OPT_OUT_NOTICE =
-  'standards github: rulesets are declared unenforceable on this GitHub plan (.github/settings.local.json "rulesetEnforcement"); the default branch is NOT protected. After upgrading the plan, remove the declaration, then run `bun standards github --apply`.';
+  'standards github: rulesets are declared unenforceable on this GitHub plan (.github/settings.local.json "rulesetEnforcement"); the default branch is NOT protected, and plan-gated repository settings ("allow_auto_merge") are skipped. After upgrading the plan, remove the declaration, then run `bun standards github --apply`.';
 
+// allow_auto_merge is plan-gated; delete_branch_on_merge is not, so the pair
+// distinguishes plan-gated stripping from skipping repository settings.
 const canonical = JSON.parse(
-  '{"repository":{"allow_auto_merge":true},"rulesets":[{"name":"Protect main","target":"branch","enforcement":"active","rules":[]}]}',
+  '{"repository":{"allow_auto_merge":true,"delete_branch_on_merge":true},"rulesets":[{"name":"Protect main","target":"branch","enforcement":"active","rules":[]}]}',
 ) as unknown;
 
 export const createConsumer = (
@@ -53,17 +55,20 @@ export type ApiCall = {
 export const liveRepository = (
   isPrivate: boolean,
   allowAutoMerge: boolean,
+  deleteBranchOnMerge = true,
 ): Readonly<Record<string, unknown>> =>
   JSON.parse(
-    `{"private":${String(isPrivate)},"allow_auto_merge":${String(allowAutoMerge)}}`,
+    `{"private":${String(isPrivate)},"allow_auto_merge":${String(allowAutoMerge)},"delete_branch_on_merge":${String(deleteBranchOnMerge)}}`,
   ) as Readonly<Record<string, unknown>>;
 
-export const autoMergeSettings = (
-  allowAutoMerge: boolean,
+export const declaredPatchBody = (
+  withPlanGated: boolean,
 ): Readonly<Record<string, unknown>> =>
-  JSON.parse(`{"allow_auto_merge":${String(allowAutoMerge)}}`) as Readonly<
-    Record<string, unknown>
-  >;
+  JSON.parse(
+    withPlanGated
+      ? '{"allow_auto_merge":true,"delete_branch_on_merge":true}'
+      : '{"delete_branch_on_merge":true}',
+  ) as Readonly<Record<string, unknown>>;
 
 export const liveRulesetSummary = (): Readonly<Record<string, unknown>> =>
   JSON.parse(

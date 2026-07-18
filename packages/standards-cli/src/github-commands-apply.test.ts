@@ -3,10 +3,10 @@ import process from 'node:process';
 import { HTTP_CREATED } from './github-api';
 import { runGithubApply } from './github-commands';
 import {
-  autoMergeSettings,
   captureConsole,
   cleanup,
   createConsumer,
+  declaredPatchBody,
   installApi,
   installNetworkFailure,
   liveRepository,
@@ -44,10 +44,10 @@ const consumer = (options?: Parameters<typeof createConsumer>[0]): string => {
 };
 
 describe('runGithubApply', () => {
-  it('applies private repository drift and omits every ruleset request', async () => {
+  it('applies private repository drift without patching plan-gated settings', async () => {
     const calls = installApi([
+      { body: liveRepository(true, false, false) },
       { body: liveRepository(true, false) },
-      { body: liveRepository(true, true) },
     ]);
 
     expect(await runGithubApply(consumer())).toBe(true);
@@ -56,24 +56,24 @@ describe('runGithubApply', () => {
       {
         method: 'PATCH',
         path: '/repos/owner/repo',
-        body: autoMergeSettings(true),
+        body: declaredPatchBody(false),
       },
     ]);
     expect(output.logs).toEqual([
       OPT_OUT_NOTICE,
       '  updated repository merge settings',
-      'standards github: repository settings apply complete for owner/repo; rulesets skipped',
+      'standards github: enforceable settings apply complete for owner/repo; plan-gated settings skipped',
     ]);
   });
 
-  it('reports repository-only convergence when rulesets are skipped', async () => {
-    const calls = installApi([{ body: liveRepository(true, true) }]);
+  it('reports convergence despite plan-gated auto-merge drift', async () => {
+    const calls = installApi([{ body: liveRepository(true, false) }]);
 
     expect(await runGithubApply(consumer())).toBe(true);
     expect(calls).toHaveLength(1);
     expect(output.logs).toEqual([
       OPT_OUT_NOTICE,
-      'standards github: repository settings already converged for owner/repo; rulesets skipped',
+      'standards github: enforceable settings already converged for owner/repo; plan-gated settings skipped',
     ]);
   });
 
@@ -132,5 +132,23 @@ describe('runGithubApply', () => {
     expect(await runGithubApply(consumer())).toBe(false);
     expect(output.logs).toEqual([OPT_OUT_NOTICE]);
     expect(output.errors).toEqual(['standards github: offline']);
+  });
+});
+
+describe('runGithubApply update verification', () => {
+  it('fails when GitHub returns HTTP 200 but silently keeps an old value', async () => {
+    const calls = installApi([
+      { body: liveRepository(false, false) },
+      { body: liveRepository(false, false) },
+    ]);
+
+    expect(await runGithubApply(consumer({ optOut: false }))).toBe(false);
+    expect(calls.map(({ method }) => method)).toEqual(['GET', 'PATCH']);
+    const errors = output.errors.join('\n');
+    expect(errors).toContain(
+      'GitHub returned HTTP 200 but ignored part of the update',
+    );
+    expect(errors).toContain('allow_auto_merge');
+    expect(errors).toContain('declare the ruleset-enforcement opt-out');
   });
 });
