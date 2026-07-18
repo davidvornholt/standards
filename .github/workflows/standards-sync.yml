@@ -105,7 +105,7 @@ jobs:
       # older CLI mirror the base without generating the canonical policy.
       - name: Require Dependabot-aware standards CLI
         env:
-          MINIMUM_STANDARDS_VERSION: "0.10.0"
+          MINIMUM_STANDARDS_VERSION: "0.10.1"
         run: |
           package_path=node_modules/@davidvornholt/standards/package.json
           installed_version=$(jq -er '.version | select(type == "string")' "$package_path")

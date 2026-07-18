@@ -69,6 +69,20 @@ const INVALID_POLICY_CASES = [
   ],
 ] as const;
 
+const DEPENDABOT_OVERLAY = [
+  'updates:',
+  '  - package-ecosystem: nix',
+  '    directory: /',
+  '    schedule:',
+  '      interval: weekly',
+  '  - package-ecosystem: bun',
+  '    directory: /',
+  '    ignore:',
+  '      - dependency-name: left-pad',
+  '        versions: [">1.0.0"]',
+  '',
+].join('\n');
+
 const tmps: Array<string> = [];
 
 const mkTmp = (prefix: string): string => {
@@ -163,7 +177,7 @@ const runWorkflowVersionGuard = (version: string): RunResult => {
       '-c',
       workflowRunScript('Require Dependabot-aware standards CLI'),
     ],
-    { MINIMUM_STANDARDS_VERSION: '0.10.0' },
+    { MINIMUM_STANDARDS_VERSION: '0.10.1' },
   );
 };
 
@@ -633,23 +647,9 @@ describe('doctor Dependabot validation', () => {
 });
 
 describe('dependabot composition seam', () => {
-  const overlay = [
-    'updates:',
-    '  - package-ecosystem: nix',
-    '    directory: /',
-    '    schedule:',
-    '      interval: weekly',
-    '  - package-ecosystem: bun',
-    '    directory: /',
-    '    ignore:',
-    '      - dependency-name: left-pad',
-    '        versions: [">1.0.0"]',
-    '',
-  ].join('\n');
-
   it('merges the repo-owned overlay into the generated file', () => {
     const { consumer } = initConsumer(buildUpstream());
-    write(consumer, '.github/dependabot.local.yml', overlay);
+    write(consumer, '.github/dependabot.local.yml', DEPENDABOT_OVERLAY);
 
     const writeRun = run(consumer, [
       'dependabot',
@@ -716,7 +716,7 @@ describe('dependabot composition seam', () => {
   it('regenerates the composed file on sync after the overlay changes', () => {
     const up = buildUpstream();
     const { consumer } = initConsumer(up);
-    write(consumer, '.github/dependabot.local.yml', overlay);
+    write(consumer, '.github/dependabot.local.yml', DEPENDABOT_OVERLAY);
 
     const dry = run(consumer, [
       'sync',
@@ -1215,57 +1215,90 @@ describe('sync policy validation', () => {
   });
 });
 
-describe('sync policy distribution', () => {
-  it('the packed declared consumer version honors the workflow sync pin', () => {
+type PackedCliInstallation = {
+  readonly consumer: string;
+  readonly help: RunResult;
+  readonly install: RunResult;
+  readonly pack: RunResult;
+  readonly sourceProfile: RunResult;
+};
+
+const installPackedCli = (): PackedCliInstallation => {
+  const packed = mkTmp('standards-pack-');
+  const pack = runExecutable('bun', join(import.meta.dir, '..'), [
+    'pm',
+    'pack',
+    '--destination',
+    packed,
+    '--quiet',
+  ]);
+  const consumer = mkTmp('sync-cons-');
+  write(
+    consumer,
+    'package.json',
+    JSON.stringify({
+      version: '0.0.0',
+      private: true,
+      workspaces: ['apps/*'],
+      scripts: {
+        standards: 'standards',
+        check:
+          'standards check && turbo run lint check-types test build test:a11y',
+        'check:fix':
+          'standards check && turbo run lint:fix check-types test build test:a11y',
+      },
+      devDependencies: {
+        '@davidvornholt/standards': `file:${pack.stdout.trim()}`,
+      },
+    }),
+  );
+  const install = runExecutable('bun', consumer, [
+    'install',
+    '--ignore-scripts',
+  ]);
+  const help = runExecutable('bun', consumer, ['standards', 'help']);
+  const sourceProfile = runExecutable('bun', consumer, [
+    'standards',
+    'structure',
+    '--profile',
+    'source',
+    '--dir',
+    ACTUAL_UPSTREAM,
+  ]);
+  return { consumer, help, install, pack, sourceProfile };
+};
+
+describe('packed artifact distribution', () => {
+  it('ships the Dependabot contract and honors the workflow sync pin', () => {
     const packageManifest = JSON.parse(
       readFileSync(join(import.meta.dir, '../package.json'), 'utf8'),
     ) as { version: string };
     const templateManifest = JSON.parse(
       readFileSync(join(ACTUAL_UPSTREAM, 'template/package.json'), 'utf8'),
-    ) as {
-      devDependencies: Record<string, string>;
-    };
+    ) as { devDependencies: Record<string, string> };
     expect(templateManifest.devDependencies['@davidvornholt/standards']).toBe(
       packageManifest.version,
     );
-
-    const packed = mkTmp('standards-pack-');
-    const pack = runExecutable('bun', join(import.meta.dir, '..'), [
-      'pm',
-      'pack',
-      '--destination',
-      packed,
-      '--quiet',
-    ]);
-    expect(pack.status).toBe(0);
-    const tarball = pack.stdout.trim();
-    const consumer = mkTmp('sync-cons-');
-    write(
-      consumer,
-      'package.json',
-      JSON.stringify({
-        private: true,
-        scripts: { standards: 'standards' },
-        devDependencies: {
-          '@davidvornholt/standards': `file:${tarball}`,
-        },
-      }),
+    const installation = installPackedCli();
+    expect(installation.pack.status).toBe(0);
+    expect(installation.install.status).toBe(0);
+    expect(installation.help.status).toBe(0);
+    expect(installation.help.stdout).toContain(
+      'dependabot  Verify (--check) or regenerate (--write)',
     );
-    expect(
-      runExecutable('bun', consumer, ['install', '--ignore-scripts']).status,
-    ).toBe(0);
-    const installedSourceProfile = runExecutable('bun', consumer, [
-      'standards',
-      'structure',
-      '--profile',
-      'source',
-      '--dir',
-      ACTUAL_UPSTREAM,
-    ]);
-    expect(installedSourceProfile.stderr).toBe('');
-    expect(installedSourceProfile.status).toBe(0);
+    expect(installation.sourceProfile.stderr).toBe('');
+    expect(installation.sourceProfile.status).toBe(0);
 
+    const { consumer } = installation;
     const { up, url } = buildGitUpstream();
+    const command = (name: 'check' | 'dependabot'): RunResult =>
+      runExecutable('bun', consumer, [
+        'standards',
+        name,
+        ...(name === 'dependabot' ? ['--check'] : []),
+        '--dir',
+        consumer,
+      ]);
     expect(
       runExecutable('bun', consumer, [
         'standards',
@@ -1276,19 +1309,41 @@ describe('sync policy distribution', () => {
         consumer,
       ]).status,
     ).toBe(0);
+    write(consumer, '.github/dependabot.local.yml', DEPENDABOT_OVERLAY);
+    expect(
+      runExecutable('bun', consumer, [
+        'standards',
+        'dependabot',
+        '--write',
+        '--dir',
+        consumer,
+      ]).status,
+    ).toBe(0);
+    const composed = read(consumer, '.github/dependabot.yml');
+    expect(composed).toContain('package-ecosystem: "nix"');
+    expect(composed).toContain('dependency-name: "left-pad"');
+    expect(command('dependabot').status).toBe(0);
+    write(consumer, '.github/dependabot.yml', `${composed}# generated drift\n`);
+    for (const driftCheck of (['dependabot', 'check'] as const).map(command)) {
+      expect(driftCheck.status).toBe(1);
+      expect(driftCheck.stderr).toContain(
+        'does not match its composed sources',
+      );
+    }
     write(consumer, 'sync-standards.local.json', '{ "ref": "v1" }\n');
-
-    const result = runExecutable('bun', consumer, [
-      'standards',
-      'sync',
-      '--from',
-      url,
-      '--dir',
-      consumer,
-    ]);
-
-    expect(result.status).toBe(0);
+    expect(
+      runExecutable('bun', consumer, [
+        'standards',
+        'sync',
+        '--from',
+        url,
+        '--dir',
+        consumer,
+      ]).status,
+    ).toBe(0);
     expect(read(consumer, 'managed/a.txt')).toBe('alpha\n');
+    expect(read(consumer, '.github/dependabot.yml')).toBe(composed);
+    expect(command('check').status).toBe(0);
   });
 });
 
@@ -1368,6 +1423,7 @@ describe('standards sync workflow policy', () => {
 
   it.each([
     '0.9.0',
+    '0.10.0',
     '0.10.0-beta.1',
   ])('rejects installed CLI version %s without a policy file', (version) => {
     const result = runWorkflowVersionGuard(version);
@@ -1375,7 +1431,7 @@ describe('standards sync workflow policy', () => {
     expect(`${result.stdout}${result.stderr}`).toContain('::error::');
   });
 
-  it('makes the 0.10 guard unconditional', () => {
+  it('makes the 0.10.1 guard unconditional', () => {
     const workflow = readFileSync(SYNC_WORKFLOW, 'utf8');
     expect(workflow).not.toContain(
       "if: needs.policy.outputs.present == 'true'",
@@ -1383,7 +1439,7 @@ describe('standards sync workflow policy', () => {
   });
 
   it.each([
-    '0.10.0',
+    '0.10.1',
     '0.11.0',
   ])('accepts installed CLI version %s without a policy file', (version) => {
     expect(runWorkflowVersionGuard(version).status).toBe(0);
