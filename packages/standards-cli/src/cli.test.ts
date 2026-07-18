@@ -609,7 +609,16 @@ describe('init', () => {
       'origin',
       'https://github.com/davidvornholt/standards.git',
     ]);
-    expect(run(consumer, ['check', '--dir', consumer]).status).toBe(0);
+    const check = runExecutable(
+      'bun',
+      consumer,
+      [ENGINE, 'check', '--dir', consumer],
+      { STANDARDS_SKIP_GITHUB_CHECK: 'true' },
+    );
+    expect(check.status).toBe(0);
+    expect(check.stdout).toContain(
+      'live settings check skipped because STANDARDS_SKIP_GITHUB_CHECK=true',
+    );
     expect(result.stdout).toContain('seeded .gitignore');
     expect(read(consumer, '.gitignore')).toBe(
       read(ACTUAL_UPSTREAM, 'template/.gitignore'),
@@ -1605,6 +1614,11 @@ describe('canonical standards workflow security boundaries', () => {
     expect(settingsStep).toContain(
       `--extract '["ci"]["github_settings_read_token"]'`,
     );
+    expect(settingsStep).not.toContain('--output-type json');
+    expect(settingsStep).not.toContain('jq ');
+    expect(settingsStep).toContain('[ -n "$extracted" ]');
+    expect(settingsStep).toContain(`[[ "$extracted" != *$'\\n'* ]]`);
+    expect(settingsStep).toContain(`[[ "$extracted" != *$'\\r'* ]]`);
     expect(settingsStep).toContain('unset SOPS_AGE_KEY FALLBACK_TOKEN');
   });
 

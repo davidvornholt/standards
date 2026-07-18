@@ -195,8 +195,10 @@ jobs:
             curl -sfLo "$sops" "https://github.com/getsops/sops/releases/download/${sops_version}/sops-${sops_version}.linux.${arch}"
             echo "$sops_sha  $sops" | sha256sum --check --quiet
             chmod +x "$sops"
-            if extracted=$("$sops" decrypt --output-type json --extract '["ci"]["github_settings_read_token"]' secrets/ci.yaml) \
-              && extracted=$(jq -er 'select(type == "string" and length > 0 and (contains("\n") | not) and (contains("\r") | not))' <<< "$extracted"); then
+            if extracted=$("$sops" decrypt --extract '["ci"]["github_settings_read_token"]' secrets/ci.yaml) \
+              && [ -n "$extracted" ] \
+              && [[ "$extracted" != *$'\n'* ]] \
+              && [[ "$extracted" != *$'\r'* ]]; then
               value="$extracted"
               used_fallback=false
             else
