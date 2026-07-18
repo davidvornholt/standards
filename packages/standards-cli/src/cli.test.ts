@@ -39,6 +39,8 @@ const SOPS_ACTION = join(
 const NON_WHITESPACE = /\S/u;
 const SOPS_VERSION_ASSIGNMENT = /version=v\d+\.\d+\.\d+/gu;
 const SOPS_CHECKSUM_ASSIGNMENT = /sha=[a-f0-9]{64}/gu;
+const ACTIONLINT_ASSET_PATTERN =
+  /actionlint_\$\{version\}_linux_\$\{arch\}\.tar\.gz/u;
 const EXECUTABLE_MODE = 0o755;
 const STD_PATHS: ReadonlyArray<string> = [
   'sync-standards.json',
@@ -226,9 +228,9 @@ const runWorkflowVersionGuard = (version: string): RunResult => {
       '-euo',
       'pipefail',
       '-c',
-      workflowRunScript('Require Dependabot-aware standards CLI'),
+      workflowRunScript('Require compatible standards CLI'),
     ],
-    { MINIMUM_STANDARDS_VERSION: '0.10.1' },
+    { MINIMUM_STANDARDS_VERSION: '0.10.2' },
   );
 };
 
@@ -1571,6 +1573,65 @@ describe('packed artifact distribution', () => {
   });
 });
 
+describe('canonical standards workflow security boundaries', () => {
+  it('isolates the admin-read token from repository-controlled executable code', () => {
+    const workflow = readFileSync(STANDARDS_WORKFLOW, 'utf8');
+    const installStep = yamlStep(
+      STANDARDS_WORKFLOW,
+      'Install pinned settings checker',
+    );
+    const settingsStep = yamlStep(STANDARDS_WORKFLOW, 'Check GitHub settings');
+    expect(workflow).not.toContain('uses: ./.github/actions/sops-secret');
+    expect(workflow).not.toContain('GITHUB_ENV');
+    expect(workflow).not.toContain('GH_TOKEN:');
+    expect(settingsStep).not.toContain('GITHUB_OUTPUT');
+    expect(settingsStep).toContain('GH_TOKEN="$value"');
+    expect(workflow).toContain('STANDARDS_SKIP_GITHUB_CHECK: "true"');
+    expect(workflow).toContain('.github/settings.json');
+    expect(workflow).toContain('.github/settings.local.json');
+    expect(workflow).toContain('secrets/ci.yaml');
+    expect(workflow).toContain('sparse-checkout-cone-mode: false');
+    expect(workflow).toContain('persist-credentials: false');
+    expect(workflow).toContain(
+      'actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0',
+    );
+    expect(installStep).toContain('bun_version=1.3.14');
+    expect(installStep.match(/bun_sha=[a-f0-9]{64}/gu)).toHaveLength(2);
+    expect(installStep).toContain('standards_version=0.10.1');
+    expect(installStep).toContain('yaml_version=2.9.0');
+    expect(installStep.match(/sha=[a-f0-9]{128}/gu)).toHaveLength(2);
+    expect(installStep).toContain('sha512sum --check --quiet');
+    expect(installStep).not.toContain('bun add');
+    expect(settingsStep).toContain(
+      `--extract '["ci"]["github_settings_read_token"]'`,
+    );
+    expect(settingsStep).toContain('unset SOPS_AGE_KEY FALLBACK_TOKEN');
+  });
+
+  it('pins and verifies architecture-specific actionlint release assets', () => {
+    const lintStep = yamlStep(STANDARDS_WORKFLOW, 'Lint workflows');
+    expect(lintStep).toContain('version=1.7.12');
+    expect(lintStep.match(/sha=[a-f0-9]{64}/gu)).toHaveLength(2);
+    expect(lintStep).toMatch(ACTIONLINT_ASSET_PATTERN);
+    expect(lintStep).toContain('sha256sum --check --quiet');
+    expect(lintStep).not.toContain('download-actionlint.bash');
+    expect(lintStep).not.toContain(' latest ');
+  });
+
+  it('keeps the required check name fail-closed over both isolated jobs', () => {
+    const workflow = readFileSync(STANDARDS_WORKFLOW, 'utf8');
+    expect(workflow).toContain('  quality:');
+    expect(workflow).toContain('  github-settings:');
+    expect(workflow).toContain('  check:');
+    expect(workflow).toContain('    if: always()');
+    expect(workflow).toContain('      - quality');
+    expect(workflow).toContain('      - github-settings');
+    expect(workflow).toContain(
+      'if [ "$QUALITY_RESULT" != success ] || [ "$GITHUB_SETTINGS_RESULT" != success ]; then',
+    );
+  });
+});
+
 describe('canonical SOPS secret action', () => {
   it('exports a decrypted non-empty single-line string', () => {
     const actionRun = runSopsAction();
@@ -1645,7 +1706,7 @@ describe('canonical SOPS secret action', () => {
     expect(actionRun.environment).toBe('');
   });
 
-  it('is the only owner of the SOPS pin and serves all three workflows', () => {
+  it('serves workflows that can safely execute the checked-out local action', () => {
     const action = readFileSync(SOPS_ACTION, 'utf8');
     const canonicalActionPath = '.github/actions/sops-secret/action.yml';
     const productionFiles = readProductionGithubFiles();
@@ -1655,18 +1716,29 @@ describe('canonical SOPS secret action', () => {
     const checksumOwners = productionFiles
       .filter(({ content }) => content.match(SOPS_CHECKSUM_ASSIGNMENT) !== null)
       .map(({ path }) => path);
-    const workflows = [
+    const localActionWorkflows = [
       readFileSync(SYNC_WORKFLOW, 'utf8'),
-      readFileSync(STANDARDS_WORKFLOW, 'utf8'),
       readFileSync(NOTIFY_WORKFLOW, 'utf8'),
     ];
+    const isolatedWorkflow = readFileSync(STANDARDS_WORKFLOW, 'utf8');
     expect(action.match(SOPS_VERSION_ASSIGNMENT)).toHaveLength(1);
     expect(action.match(SOPS_CHECKSUM_ASSIGNMENT)).toHaveLength(2);
-    expect(versionOwners).toEqual([canonicalActionPath]);
-    expect(checksumOwners).toEqual([canonicalActionPath]);
-    for (const workflow of workflows) {
+    expect(versionOwners).toEqual([
+      '.github/workflows/standards.yml',
+      canonicalActionPath,
+    ]);
+    expect(checksumOwners).toEqual([
+      '.github/workflows/standards.yml',
+      canonicalActionPath,
+    ]);
+    for (const workflow of localActionWorkflows) {
       expect(workflow).toContain('uses: ./.github/actions/sops-secret');
     }
+    expect(isolatedWorkflow).not.toContain(
+      'uses: ./.github/actions/sops-secret',
+    );
+    expect(isolatedWorkflow).toContain('sops_version=v3.13.2');
+    expect(isolatedWorkflow.match(/sops_sha=[a-f0-9]{64}/gu)).toHaveLength(2);
     const syncManifest = JSON.parse(
       readFileSync(join(ACTUAL_UPSTREAM, 'sync-standards.json'), 'utf8'),
     ) as { readonly paths: ReadonlyArray<string> };
@@ -1811,6 +1883,7 @@ describe('standards sync workflow policy', () => {
   it.each([
     '0.9.0',
     '0.10.0',
+    '0.10.1',
     '0.10.0-beta.1',
   ])('rejects installed CLI version %s without a policy file', (version) => {
     const result = runWorkflowVersionGuard(version);
@@ -1818,7 +1891,7 @@ describe('standards sync workflow policy', () => {
     expect(`${result.stdout}${result.stderr}`).toContain('::error::');
   });
 
-  it('makes the 0.10.1 guard unconditional', () => {
+  it('makes the 0.10.2 guard unconditional', () => {
     const workflow = readFileSync(SYNC_WORKFLOW, 'utf8');
     expect(workflow).not.toContain(
       "if: needs.policy.outputs.present == 'true'",
@@ -1826,7 +1899,7 @@ describe('standards sync workflow policy', () => {
   });
 
   it.each([
-    '0.10.1',
+    '0.10.2',
     '0.11.0',
   ])('accepts installed CLI version %s without a policy file', (version) => {
     expect(runWorkflowVersionGuard(version).status).toBe(0);
@@ -1874,6 +1947,80 @@ describe('github', () => {
     write(consumer, '.github/settings.json', Canonical);
     write(consumer, '.github/settings.local.json', EmptySeam);
     const result = run(consumer, ['check', '--dir', consumer]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      'cannot determine the GitHub repository from the origin remote',
+    );
+  });
+});
+
+describe('github workflow skip seam', () => {
+  const EmptySeam = JSON.stringify({ repository: {}, rulesets: [] });
+  const Canonical = JSON.stringify({
+    repository: { allow_auto_merge: true },
+    rulesets: [{ name: 'Protect main', target: 'branch' }],
+  });
+
+  it('skips the duplicated live check only for the canonical workflow value', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    write(consumer, '.github/settings.json', Canonical);
+    write(consumer, '.github/settings.local.json', EmptySeam);
+    const result = runExecutable(
+      'bun',
+      consumer,
+      [ENGINE, 'check', '--dir', consumer],
+      { STANDARDS_SKIP_GITHUB_CHECK: 'true' },
+    );
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(
+      'live settings check skipped because STANDARDS_SKIP_GITHUB_CHECK=true',
+    );
+  });
+
+  it('applies the workflow skip seam to explicit github checks but not apply', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    write(consumer, '.github/settings.json', Canonical);
+    write(consumer, '.github/settings.local.json', EmptySeam);
+    const check = runExecutable(
+      'bun',
+      consumer,
+      [ENGINE, 'github', '--check', '--dir', consumer],
+      { STANDARDS_SKIP_GITHUB_CHECK: 'true' },
+    );
+    const apply = runExecutable(
+      'bun',
+      consumer,
+      [ENGINE, 'github', '--apply', '--dir', consumer],
+      { STANDARDS_SKIP_GITHUB_CHECK: 'true' },
+    );
+    expect(check.status).toBe(0);
+    expect(check.stdout).toContain(
+      'live settings check skipped because STANDARDS_SKIP_GITHUB_CHECK=true',
+    );
+    expect(apply.status).toBe(1);
+    expect(apply.stderr).toContain(
+      'cannot determine the GitHub repository from the origin remote',
+    );
+  });
+});
+
+describe('github configuration validation', () => {
+  const EmptySeam = JSON.stringify({ repository: {}, rulesets: [] });
+  const Canonical = JSON.stringify({
+    repository: { allow_auto_merge: true },
+    rulesets: [{ name: 'Protect main', target: 'branch' }],
+  });
+
+  it('does not skip for a truthy-looking value other than exact true', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    write(consumer, '.github/settings.json', Canonical);
+    write(consumer, '.github/settings.local.json', EmptySeam);
+    const result = runExecutable(
+      'bun',
+      consumer,
+      [ENGINE, 'github', '--check', '--dir', consumer],
+      { STANDARDS_SKIP_GITHUB_CHECK: 'TRUE' },
+    );
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(
       'cannot determine the GitHub repository from the origin remote',
