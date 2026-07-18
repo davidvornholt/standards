@@ -4,7 +4,14 @@ import { join } from 'node:path';
 import process from 'node:process';
 
 const packageRoot = join(import.meta.dir, '..');
-const subprocessTestTimeoutMilliseconds = 60_000;
+// The installed launcher resolves the native binary locally, so the invocation
+// never touches package resolution or the network.
+const biomeLauncherPath = globalThis.Bun.resolveSync(
+  '@biomejs/biome/bin/biome',
+  import.meta.dir,
+);
+// Last-resort guard only; the direct launcher invocation is the stabilization mechanism.
+const subprocessTestTimeoutMilliseconds = 30_000;
 
 describe('Axe helper consumer lint compatibility', () => {
   it(
@@ -13,9 +20,7 @@ describe('Axe helper consumer lint compatibility', () => {
       const result = spawnSync(
         process.execPath,
         [
-          'x',
-          '--no-install',
-          'biome',
+          biomeLauncherPath,
           'check',
           '--error-on-warnings',
           '--config-path',
