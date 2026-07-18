@@ -16,6 +16,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import process from 'node:process';
+import { parse as parseYaml } from 'yaml';
 
 const ENGINE = join(import.meta.dir, 'cli.ts');
 const ACTUAL_UPSTREAM = join(import.meta.dir, '../../..');
@@ -1713,13 +1714,23 @@ describe('standards sync workflow ordering', () => {
     const detectIndex = workflow.indexOf('- name: Detect mirror changes');
     const resolveIndex = workflow.indexOf('- name: Resolve sync PR token');
     const resolveStep = yamlStep(SYNC_WORKFLOW, 'Resolve sync PR token');
+    const parsedResolveStep: unknown = parseYaml(resolveStep);
+    if (
+      !Array.isArray(parsedResolveStep) ||
+      parsedResolveStep.length !== 1 ||
+      typeof parsedResolveStep[0] !== 'object' ||
+      parsedResolveStep[0] === null
+    ) {
+      throw new Error('Resolve sync PR token must parse as one YAML step');
+    }
+    const resolveGuard = (parsedResolveStep[0] as Record<string, unknown>).if;
 
     expect(result.status).toBe(0);
     expect(readFileSync(outputPath, 'utf8')).toBe('changed=false\n');
     expect(result.stdout).toContain('Already in sync');
     expect(detectIndex).toBeGreaterThan(-1);
     expect(resolveIndex).toBeGreaterThan(detectIndex);
-    expect(resolveStep).toContain("if: steps.mirror.outputs.changed == 'true'");
+    expect(resolveGuard).toBe("steps.mirror.outputs.changed == 'true'");
   });
 });
 
