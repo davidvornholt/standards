@@ -40,6 +40,10 @@ const NON_WHITESPACE = /\S/u;
 const SOPS_VERSION_ASSIGNMENT = /version=v\d+\.\d+\.\d+/gu;
 const SOPS_CHECKSUM_ASSIGNMENT = /sha=[a-f0-9]{64}/gu;
 const EXECUTABLE_MODE = 0o755;
+const ORIGINAL_GITHUB_AUTH = {
+  GH_TOKEN: process.env.GH_TOKEN,
+  GITHUB_TOKEN: process.env.GITHUB_TOKEN,
+};
 const STD_PATHS: ReadonlyArray<string> = [
   'sync-standards.json',
   '.github/dependabot.base.yml',
@@ -149,7 +153,7 @@ const runExecutable = (
   executable: string,
   cwd: string,
   args: ReadonlyArray<string>,
-  env: Readonly<Record<string, string>> = {},
+  env: Readonly<Record<string, string | undefined>> = {},
 ): RunResult => {
   try {
     const stdout = execFileSync(executable, args, {
@@ -169,6 +173,11 @@ const runExecutable = (
 };
 const run = (cwd: string, args: ReadonlyArray<string>): RunResult =>
   runExecutable('bun', cwd, [ENGINE, ...args]);
+const runWithOriginalGithubAuth = (
+  cwd: string,
+  args: ReadonlyArray<string>,
+): RunResult =>
+  runExecutable('bun', cwd, [ENGINE, ...args], ORIGINAL_GITHUB_AUTH);
 
 const yamlStep = (path: string, stepName: string): string => {
   const lines = readFileSync(path, 'utf8').split('\n');
@@ -607,7 +616,9 @@ describe('init', () => {
       'origin',
       'https://github.com/davidvornholt/standards.git',
     ]);
-    expect(run(consumer, ['check', '--dir', consumer]).status).toBe(0);
+    expect(
+      runWithOriginalGithubAuth(consumer, ['check', '--dir', consumer]).status,
+    ).toBe(0);
     expect(result.stdout).toContain('seeded .gitignore');
     expect(read(consumer, '.gitignore')).toBe(
       read(ACTUAL_UPSTREAM, 'template/.gitignore'),
