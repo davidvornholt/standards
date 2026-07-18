@@ -19,7 +19,8 @@ concurrency:
 
 jobs:
   pr-title:
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    # This required verdict stays off the configurable quality runner pool.
+    runs-on: ubuntu-latest
     steps:
       - name: Lint PR title as a Conventional Commit subject
         env:

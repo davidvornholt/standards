@@ -33,8 +33,8 @@ jobs:
   # Secrets and variables → Actions → Variables), not edits to this synced file:
   #   CI_POSTGRES_USER, CI_POSTGRES_PASSWORD, CI_POSTGRES_DB  (defaults below)
   #   CI_RUNNER  — override only the unprivileged quality runner label
-  #                (default ubuntu-latest); secret-bearing and verdict jobs
-  #                always use fresh GitHub-hosted runners
+  #                (default ubuntu-latest); every other canonical workflow job
+  #                always uses a fresh GitHub-hosted runner
   # These are non-secret configuration; leaking them enables nothing.
   #
   # Playwright's Chromium, unlike the Postgres service, is installed only when the
