@@ -1,0 +1,13 @@
+node_modules/
+.turbo/
+dist/
+.next/
+*.log
+
+# Claude agent worktrees are full parallel checkouts; they are never part of
+# this repository's own tree (biome.jsonc force-ignores them from the scanner
+# too, and vcs.useIgnoreFile lets Biome honor this entry as well).
+.claude/worktrees/
+
+# Deliberately not ignored: sync-standards.lock. Consumers commit their lock —
+# it is the drift baseline that `standards check` verifies against.
