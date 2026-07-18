@@ -4,22 +4,28 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import {
-  chmodSync,
   existsSync,
-  mkdirSync,
-  mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join, relative } from 'node:path';
+import { join, relative } from 'node:path';
 import process from 'node:process';
 import { parse as parseYaml } from 'yaml';
+import {
+  ACTUAL_UPSTREAM,
+  cleanupTmpDirs,
+  mkTmp,
+  type RunResult,
+  runProcess,
+  SOPS_ACTION,
+  write,
+  yamlRunScript,
+  yamlStep,
+} from './cli-test-support';
 
 const ENGINE = join(import.meta.dir, 'cli.ts');
-const ACTUAL_UPSTREAM = join(import.meta.dir, '../../..');
 const SYNC_WORKFLOW = join(
   ACTUAL_UPSTREAM,
   '.github/workflows/standards-sync.yml',
@@ -33,23 +39,16 @@ const NOTIFY_WORKFLOW = join(
   '.github/workflows/notify-pause.yml',
 );
 const SYNC_MANIFEST = join(ACTUAL_UPSTREAM, 'sync-standards.json');
-const SOPS_ACTION = join(
-  ACTUAL_UPSTREAM,
-  '.github/actions/sops-secret/action.yml',
-);
-const NON_WHITESPACE = /\S/u;
 const SOPS_VERSION_ASSIGNMENT = /version=v\d+\.\d+\.\d+/gu;
 const SOPS_CHECKSUM_ASSIGNMENT = /sha=[a-f0-9]{64}/gu;
 const ACTIONLINT_ASSET_PATTERN =
   /actionlint_\$\{version\}_linux_\$\{arch\}\.tar\.gz/u;
-const EXECUTABLE_MODE = 0o755;
 const STD_PATHS: ReadonlyArray<string> = [
   'sync-standards.json',
   '.github/dependabot.base.yml',
   'managed',
 ];
 
-type RunResult = { stdout: string; stderr: string; status: number };
 type Lock = { upstream: string; sha: string; files: Record<string, string> };
 type WorkflowJob = Record<string, unknown>;
 
@@ -105,18 +104,6 @@ const DEPENDABOT_OVERLAY = [
   '',
 ].join('\n');
 
-const tmps: Array<string> = [];
-
-const mkTmp = (prefix: string): string => {
-  const dir = mkdtempSync(join(tmpdir(), prefix));
-  tmps.push(dir);
-  return dir;
-};
-const write = (root: string, rel: string, content: string): void => {
-  const abs = join(root, rel);
-  mkdirSync(dirname(abs), { recursive: true });
-  writeFileSync(abs, content);
-};
 const read = (root: string, rel: string): string =>
   readFileSync(join(root, rel), 'utf8');
 const readLock = (root: string): Lock =>
@@ -154,65 +141,10 @@ const runExecutable = (
   cwd: string,
   args: ReadonlyArray<string>,
   env: Readonly<Record<string, string>> = {},
-): RunResult => {
-  try {
-    const stdout = execFileSync(executable, args, {
-      cwd,
-      encoding: 'utf8',
-      env: { ...process.env, ...env },
-    });
-    return { stdout, stderr: '', status: 0 };
-  } catch (error) {
-    const e = error as { status?: number; stdout?: string; stderr?: string };
-    return {
-      stdout: e.stdout ?? '',
-      stderr: e.stderr ?? '',
-      status: e.status ?? 1,
-    };
-  }
-};
+): RunResult => runProcess(executable, cwd, args, { ...process.env, ...env });
 const run = (cwd: string, args: ReadonlyArray<string>): RunResult =>
   runExecutable('bun', cwd, [ENGINE, ...args]);
 
-const yamlStep = (path: string, stepName: string): string => {
-  const lines = readFileSync(path, 'utf8').split('\n');
-  const stepIndex = lines.findIndex(
-    (line) => line.trim() === `- name: ${stepName}`,
-  );
-  if (stepIndex === -1) {
-    throw new Error(`YAML step not found: ${stepName}`);
-  }
-  const stepIndent = (lines[stepIndex] ?? '').search(NON_WHITESPACE);
-  const stepLines = [lines[stepIndex] ?? ''];
-  for (let index = stepIndex + 1; index < lines.length; index += 1) {
-    const line = lines[index] ?? '';
-    if (line.length > 0 && line.search(NON_WHITESPACE) <= stepIndent) {
-      break;
-    }
-    stepLines.push(line);
-  }
-  return stepLines.join('\n').trimEnd();
-};
-const yamlRunScript = (path: string, stepName: string): string => {
-  const lines = yamlStep(path, stepName).split('\n');
-  const runIndex = lines.findIndex((line) => line.trim() === 'run: |');
-  if (runIndex === -1) {
-    throw new Error(`YAML run script not found: ${stepName}`);
-  }
-  const runIndent = (lines[runIndex] ?? '').search(NON_WHITESPACE);
-  const scriptPrefix = ' '.repeat(runIndent + 2);
-  const scriptLines: Array<string> = [];
-  for (let index = runIndex + 1; index < lines.length; index += 1) {
-    const line = lines[index] ?? '';
-    if (line.length > 0 && !line.startsWith(scriptPrefix)) {
-      break;
-    }
-    scriptLines.push(
-      line.startsWith(scriptPrefix) ? line.slice(scriptPrefix.length) : line,
-    );
-  }
-  return scriptLines.join('\n').trimEnd();
-};
 const workflowRunScript = (stepName: string): string =>
   yamlRunScript(SYNC_WORKFLOW, stepName);
 
@@ -273,106 +205,6 @@ const runWorkflowVersionGuard = (version: string): RunResult => {
     ],
     { MINIMUM_STANDARDS_VERSION: '0.11.0' },
   );
-};
-
-type SopsActionOptions = {
-  readonly ageKey?: string;
-  readonly createSecretFile?: boolean;
-  readonly failureMode?: 'fail' | 'fallback';
-  readonly fallbackValue?: string;
-  readonly sopsOutput?: string;
-  readonly sopsStatus?: number;
-};
-
-const runSopsAction = (
-  options: SopsActionOptions = {},
-): {
-  readonly curlCalled: boolean;
-  readonly environment: string;
-  readonly output: string;
-  readonly result: RunResult;
-} => {
-  const fixture = mkTmp('sops-action-');
-  const bin = join(fixture, 'bin');
-  const runnerTemp = join(fixture, 'runner');
-  mkdirSync(bin);
-  mkdirSync(runnerTemp);
-  const fakeSops = join(fixture, 'fake-sops');
-  const curlMarker = join(fixture, 'curl-called');
-  const environmentPath = join(fixture, 'github-env');
-  const outputPath = join(fixture, 'github-output');
-  write(
-    fixture,
-    'bin/curl',
-    [
-      '#!/usr/bin/env bash',
-      'set -euo pipefail',
-      'printf called > "$CURL_MARKER"',
-      'cp "$FAKE_SOPS" "$2"',
-      '',
-    ].join('\n'),
-  );
-  write(
-    fixture,
-    'bin/sha256sum',
-    ['#!/usr/bin/env bash', 'exit 0', ''].join('\n'),
-  );
-  write(
-    fixture,
-    'fake-sops',
-    [
-      '#!/usr/bin/env bash',
-      'if [ "$FAKE_SOPS_STATUS" -ne 0 ]; then',
-      '  exit "$FAKE_SOPS_STATUS"',
-      'fi',
-      'printf \'%s\' "$FAKE_SOPS_OUTPUT"',
-      '',
-    ].join('\n'),
-  );
-  chmodSync(join(bin, 'curl'), EXECUTABLE_MODE);
-  chmodSync(join(bin, 'sha256sum'), EXECUTABLE_MODE);
-  chmodSync(fakeSops, EXECUTABLE_MODE);
-  if (options.createSecretFile !== false) {
-    write(fixture, 'secrets/ci.yaml', 'encrypted\n');
-  }
-  const result = runExecutable(
-    'bash',
-    fixture,
-    [
-      '-euo',
-      'pipefail',
-      '-c',
-      yamlRunScript(SOPS_ACTION, 'Resolve and validate secret'),
-    ],
-    {
-      CURL_MARKER: curlMarker,
-      FAKE_SOPS: fakeSops,
-      FAKE_SOPS_OUTPUT:
-        options.sopsOutput ??
-        JSON.stringify({
-          ci: { standards_sync_token: 'resolved-token' },
-        }),
-      FAKE_SOPS_STATUS: String(options.sopsStatus ?? 0),
-      GITHUB_ENV: environmentPath,
-      GITHUB_OUTPUT: outputPath,
-      PATH: `${bin}:${process.env.PATH ?? ''}`,
-      RUNNER_TEMP: runnerTemp,
-      SOPS_AGE_KEY: options.ageKey ?? 'age-secret-key',
-      SOPS_ENV_NAME: 'GH_TOKEN',
-      SOPS_SECRET_KEY: 'standards_sync_token',
-      SOPS_FAILURE_MODE: options.failureMode ?? 'fallback',
-      SOPS_FALLBACK_VALUE: options.fallbackValue ?? 'workflow-token',
-      SOPS_SECRET_FILE: 'secrets/ci.yaml',
-    },
-  );
-  return {
-    curlCalled: existsSync(curlMarker),
-    environment: existsSync(environmentPath)
-      ? readFileSync(environmentPath, 'utf8')
-      : '',
-    output: existsSync(outputPath) ? readFileSync(outputPath, 'utf8') : '',
-    result,
-  };
 };
 
 // A fake upstream: its own manifest, a `template/` seed dir, two managed files.
@@ -551,14 +383,7 @@ const buildDependabotCutoverUpstream = (): {
   return { up, url: `file://${up}` };
 };
 
-afterEach(() => {
-  while (tmps.length > 0) {
-    const dir = tmps.pop();
-    if (dir !== undefined) {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  }
-});
+afterEach(cleanupTmpDirs);
 
 describe('init', () => {
   it('rejects a source without the canonical Dependabot base before seeding', () => {
@@ -1749,79 +1574,6 @@ describe('canonical workflow runner boundaries', () => {
 });
 
 describe('canonical SOPS secret action', () => {
-  it('exports a decrypted non-empty single-line string', () => {
-    const actionRun = runSopsAction();
-
-    expect(actionRun.result.status).toBe(0);
-    expect(actionRun.environment).toBe('GH_TOKEN=resolved-token\n');
-    expect(actionRun.output).toBe('used-fallback=false\n');
-    expect(actionRun.result.stdout).toContain('::add-mask::resolved-token');
-    expect(actionRun.curlCalled).toBe(true);
-  });
-
-  it.each([
-    ['an empty string', ''],
-    ['a line-feed string', 'token\nBASH_ENV=/tmp/payload'],
-    ['a carriage-return string', 'token\rGH_TOKEN=payload'],
-    ['a non-scalar value', { token: 'value' }],
-  ])('rejects %s before exporting it', (_label, sopsValue) => {
-    const actionRun = runSopsAction({
-      sopsOutput: JSON.stringify({
-        ci: { standards_sync_token: sopsValue },
-      }),
-    });
-
-    expect(actionRun.result.status).toBe(0);
-    expect(actionRun.environment).toBe('GH_TOKEN=workflow-token\n');
-    expect(actionRun.output).toBe('used-fallback=true\n');
-    expect(actionRun.environment).not.toContain('payload');
-  });
-
-  it('uses the fallback when decryption fails', () => {
-    const actionRun = runSopsAction({ sopsStatus: 1 });
-
-    expect(actionRun.result.status).toBe(0);
-    expect(actionRun.environment).toBe('GH_TOKEN=workflow-token\n');
-    expect(actionRun.output).toBe('used-fallback=true\n');
-  });
-
-  it.each([
-    ['the age key is absent', { ageKey: '' }],
-    ['the secret file is absent', { createSecretFile: false }],
-  ] as const)('uses the fallback without downloading when %s', (_label, input) => {
-    const actionRun = runSopsAction(input);
-
-    expect(actionRun.result.status).toBe(0);
-    expect(actionRun.environment).toBe('GH_TOKEN=workflow-token\n');
-    expect(actionRun.output).toBe('used-fallback=true\n');
-    expect(actionRun.curlCalled).toBe(false);
-  });
-
-  it('fails closed for a required invalid secret', () => {
-    const actionRun = runSopsAction({
-      failureMode: 'fail',
-      sopsOutput: JSON.stringify({
-        ci: { standards_sync_token: 'token\nGH_TOKEN=payload' },
-      }),
-    });
-
-    expect(actionRun.result.status).toBe(1);
-    expect(actionRun.environment).toBe('');
-    expect(`${actionRun.result.stdout}${actionRun.result.stderr}`).toContain(
-      '::error::',
-    );
-  });
-
-  it('rejects an invalid fallback before the environment boundary', () => {
-    const actionRun = runSopsAction({
-      ageKey: '',
-      fallbackValue: 'token\nBASH_ENV=/tmp/payload',
-    });
-
-    expect(actionRun.result.status).toBe(1);
-    expect(actionRun.environment).toBe('');
-  });
-
   it('serves workflows that can safely execute the checked-out local action', () => {
     const action = readFileSync(SOPS_ACTION, 'utf8');
     const canonicalActionPath = '.github/actions/sops-secret/action.yml';
@@ -1859,30 +1611,6 @@ describe('canonical SOPS secret action', () => {
       readFileSync(join(ACTUAL_UPSTREAM, 'sync-standards.json'), 'utf8'),
     ) as { readonly paths: ReadonlyArray<string> };
     expect(syncManifest.paths).toContain('.github/actions/sops-secret');
-  });
-});
-
-describe('canonical SOPS missing-key modes', () => {
-  it('uses one validated fallback record when the requested key is absent', () => {
-    const actionRun = runSopsAction({
-      sopsOutput: JSON.stringify({ ci: {} }),
-    });
-
-    expect(actionRun.result.status).toBe(0);
-    expect(actionRun.environment).toBe('GH_TOKEN=workflow-token\n');
-    expect(actionRun.output).toBe('used-fallback=true\n');
-    expect(actionRun.curlCalled).toBe(true);
-  });
-
-  it('fails without exported records when a required key is absent', () => {
-    const actionRun = runSopsAction({
-      failureMode: 'fail',
-      sopsOutput: JSON.stringify({ ci: {} }),
-    });
-
-    expect(actionRun.result.status).toBe(1);
-    expect(actionRun.environment).toBe('');
-    expect(actionRun.output).toBe('');
   });
 });
 

@@ -167,7 +167,7 @@ jobs:
       - name: Report sync PR token fallback
         if: steps.mirror.outputs.changed == 'true' && steps.sync-token.outputs.used-fallback == 'true'
         run: |
-          echo "::warning::ci.standards_sync_token is not readable from secrets/ci.yaml; the workflow will try to open the sync PR with the workflow token."
+          echo "::warning::ci.standards_sync_token could not be resolved from secrets/ci.yaml; the workflow will try to open the sync PR with the workflow token."
           echo "::warning::If repository policy permits that PR, approve its queued workflow runs. Otherwise gh pr create will fail after pushing the sync branch, leaving the branch without a PR."
 
       # This workflow deliberately runs no inline `bun run check`: the synced
