@@ -7,12 +7,13 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import process from 'node:process';
 
 const ENGINE = join(import.meta.dir, 'cli.ts');
@@ -84,6 +85,21 @@ const read = (root: string, rel: string): string =>
   readFileSync(join(root, rel), 'utf8');
 const readLock = (root: string): Lock =>
   JSON.parse(read(root, 'sync-standards.lock')) as Lock;
+const snapshotTree = (
+  root: string,
+  current = root,
+  snapshot: Record<string, string> = {},
+): Record<string, string> => {
+  for (const entry of readdirSync(current, { withFileTypes: true })) {
+    const path = join(current, entry.name);
+    if (entry.isDirectory()) {
+      snapshotTree(root, path, snapshot);
+    } else {
+      snapshot[relative(root, path)] = readFileSync(path).toString('base64');
+    }
+  }
+  return snapshot;
+};
 
 const runExecutable = (
   executable: string,
@@ -129,6 +145,26 @@ const workflowRunScript = (stepName: string): string => {
     scriptLines.push(line.startsWith('          ') ? line.slice(10) : line);
   }
   return scriptLines.join('\n').trimEnd();
+};
+
+const runWorkflowVersionGuard = (version: string): RunResult => {
+  const fixture = mkTmp('sync-version-');
+  write(
+    fixture,
+    'node_modules/@davidvornholt/standards/package.json',
+    JSON.stringify({ version }),
+  );
+  return runExecutable(
+    'bash',
+    fixture,
+    [
+      '-euo',
+      'pipefail',
+      '-c',
+      workflowRunScript('Require Dependabot-aware standards CLI'),
+    ],
+    { MINIMUM_STANDARDS_VERSION: '0.10.0' },
+  );
 };
 
 // A fake upstream: its own manifest, a `template/` seed dir, two managed files.
@@ -258,6 +294,40 @@ afterEach(() => {
 });
 
 describe('init', () => {
+  it('rejects a source without the canonical Dependabot base before seeding', () => {
+    const up = buildUpstream();
+    rmSync(join(up, '.github/dependabot.base.yml'));
+    const consumer = mkTmp('sync-cons-');
+    write(consumer, 'seed.txt', 'mine\n');
+    const before = snapshotTree(consumer);
+
+    const result = run(consumer, ['init', '--from', up, '--dir', consumer]);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('requires a 0.10-compatible content ref');
+    expect(snapshotTree(consumer)).toEqual(before);
+  });
+
+  it('validates the effective overlay seed before changing the consumer', () => {
+    const up = buildUpstream();
+    write(
+      up,
+      'template/.github/dependabot.local.yml',
+      'updates:\n  - package-ecosystem: bun\n    directory: /\n    schedule: { interval: daily }\n',
+    );
+    const consumer = mkTmp('sync-cons-');
+    write(consumer, 'owned.txt', 'unchanged\n');
+    const before = snapshotTree(consumer);
+
+    const result = run(consumer, ['init', '--from', up, '--dir', consumer]);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      'may only add ignore or registries entries',
+    );
+    expect(snapshotTree(consumer)).toEqual(before);
+  });
+
   it('seeds a template-only file, mirrors managed files, writes lock', () => {
     const { consumer, result } = initConsumer(buildUpstream());
     expect(result.status).toBe(0);
@@ -567,10 +637,14 @@ describe('dependabot composition seam', () => {
       consumer,
     ]);
     expect(writeRun.status).toBe(1);
-    expect(writeRun.stderr).toContain('may only add ignore entries');
+    expect(writeRun.stderr).toContain(
+      'may only add ignore or registries entries',
+    );
     const doctor = run(consumer, ['doctor', '--dir', consumer]);
     expect(doctor.status).toBe(1);
-    expect(doctor.stderr).toContain('may only add ignore entries');
+    expect(doctor.stderr).toContain(
+      'may only add ignore or registries entries',
+    );
   });
 
   it('flags a hand-edited generated file and repairs it with --write', () => {
@@ -722,6 +796,74 @@ describe('structure', () => {
   });
 });
 
+describe('prospective Dependabot sync', () => {
+  it('rejects an incoming source without the Dependabot base before mutation', () => {
+    const up = buildUpstream();
+    const { consumer } = initConsumer(up);
+    rmSync(join(up, '.github/dependabot.base.yml'));
+    write(up, 'managed/a.txt', 'alpha v2\n');
+    const before = snapshotTree(consumer);
+
+    const result = sync(up, consumer);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('requires a 0.10-compatible content ref');
+    expect(snapshotTree(consumer)).toEqual(before);
+  });
+
+  it('validates an incoming base against the overlay before every mutation', () => {
+    const up = buildUpstream();
+    const { consumer } = initConsumer(up);
+    write(
+      consumer,
+      '.github/dependabot.local.yml',
+      [
+        'updates:',
+        '  - package-ecosystem: nix',
+        '    directory: /',
+        '    schedule: { interval: weekly }',
+        '',
+      ].join('\n'),
+    );
+    write(up, 'managed/a.txt', 'alpha v2\n');
+    rmSync(join(up, 'managed/b.txt'));
+    write(up, 'managed/new.txt', 'new\n');
+    write(
+      up,
+      '.github/dependabot.base.yml',
+      `${read(up, '.github/dependabot.base.yml')}  - package-ecosystem: nix\n    directory: /\n    schedule: { interval: weekly }\n`,
+    );
+    const before = snapshotTree(consumer);
+
+    const dry = sync(up, consumer, ['--dry-run']);
+    const real = sync(up, consumer);
+
+    expect(dry.status).toBe(1);
+    expect(real.status).toBe(1);
+    expect(dry.stderr).toContain('may only add ignore or registries entries');
+    expect(real.stderr).toContain('may only add ignore or registries entries');
+    expect(snapshotTree(consumer)).toEqual(before);
+  });
+
+  it('dry-run composes the incoming base and reports its generated change', () => {
+    const up = buildUpstream();
+    const { consumer } = initConsumer(up);
+    const before = snapshotTree(consumer);
+    write(
+      up,
+      '.github/dependabot.base.yml',
+      `${read(up, '.github/dependabot.base.yml')}  - package-ecosystem: nix\n    directory: /\n    schedule: { interval: weekly }\n`,
+    );
+
+    const dry = sync(up, consumer, ['--dry-run']);
+
+    expect(dry.status).toBe(0);
+    expect(dry.stdout).toContain('would update .github/dependabot.base.yml');
+    expect(dry.stdout).toContain('would generate .github/dependabot.yml');
+    expect(snapshotTree(consumer)).toEqual(before);
+  });
+});
+
 describe('sync', () => {
   it('uses new managed paths from the upstream manifest immediately', () => {
     const up = buildUpstream();
@@ -788,6 +930,49 @@ describe('sync', () => {
     const dry = sync(up, consumer, ['--dry-run']);
     expect(dry.status).toBe(0);
     expect(dry.stdout).toContain('dry run: already in sync; no changes');
+  });
+});
+
+describe('Dependabot content ref cutover', () => {
+  it('rejects a pre-0.10 pinned ref before init or sync mutation', () => {
+    const up = buildUpstream();
+    const base = read(up, '.github/dependabot.base.yml');
+    rmSync(join(up, '.github/dependabot.base.yml'));
+    git(up, ['init', '--quiet', '-b', 'main']);
+    git(up, ['add', '-A']);
+    git(up, ['commit', '--quiet', '-m', 'legacy']);
+    git(up, ['tag', 'legacy']);
+    write(up, '.github/dependabot.base.yml', base);
+    git(up, ['add', '-A']);
+    git(up, ['commit', '--quiet', '-m', 'current']);
+    const url = `file://${up}`;
+
+    const initTarget = mkTmp('sync-cons-');
+    write(initTarget, 'owned.txt', 'unchanged\n');
+    const initBefore = snapshotTree(initTarget);
+    const initResult = run(initTarget, [
+      'init',
+      '--from',
+      url,
+      '--ref',
+      'legacy',
+      '--dir',
+      initTarget,
+    ]);
+    expect(initResult.status).toBe(1);
+    expect(initResult.stderr).toContain(
+      'requires a 0.10-compatible content ref',
+    );
+    expect(snapshotTree(initTarget)).toEqual(initBefore);
+
+    const { consumer } = initConsumer(up);
+    const syncBefore = snapshotTree(consumer);
+    const syncResult = sync(url, consumer, ['--ref', 'legacy']);
+    expect(syncResult.status).toBe(1);
+    expect(syncResult.stderr).toContain(
+      'requires a 0.10-compatible content ref',
+    );
+    expect(snapshotTree(consumer)).toEqual(syncBefore);
   });
 });
 
@@ -1132,38 +1317,27 @@ describe('standards sync workflow policy', () => {
     expect(output).toBe('');
   });
 
-  const runVersionGuard = (version: string): RunResult => {
-    const fixture = mkTmp('sync-version-');
-    write(
-      fixture,
-      'node_modules/@davidvornholt/standards/package.json',
-      JSON.stringify({ version }),
-    );
-
-    return runExecutable(
-      'bash',
-      fixture,
-      [
-        '-euo',
-        'pipefail',
-        '-c',
-        workflowRunScript('Require policy-aware standards CLI'),
-      ],
-      { MINIMUM_STANDARDS_VERSION: '0.7.0' },
-    );
-  };
-
   it.each([
-    '0.6.0',
-    '0.7.0-beta.1',
-  ])('rejects installed CLI version %s', (version) => {
-    const result = runVersionGuard(version);
+    '0.9.0',
+    '0.10.0-beta.1',
+  ])('rejects installed CLI version %s without a policy file', (version) => {
+    const result = runWorkflowVersionGuard(version);
     expect(result.status).toBe(1);
     expect(`${result.stdout}${result.stderr}`).toContain('::error::');
   });
 
-  it.each(['0.7.0', '0.8.0'])('accepts installed CLI version %s', (version) => {
-    expect(runVersionGuard(version).status).toBe(0);
+  it('makes the 0.10 guard unconditional', () => {
+    const workflow = readFileSync(SYNC_WORKFLOW, 'utf8');
+    expect(workflow).not.toContain(
+      "if: needs.policy.outputs.present == 'true'",
+    );
+  });
+
+  it.each([
+    '0.10.0',
+    '0.11.0',
+  ])('accepts installed CLI version %s without a policy file', (version) => {
+    expect(runWorkflowVersionGuard(version).status).toBe(0);
   });
 });
 

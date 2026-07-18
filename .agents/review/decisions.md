@@ -11,3 +11,7 @@ Workspace declarations must be arrays of literal paths or one-level `<dir>/*` pa
 ## SYNC-001: Checked-in sync policy hard cutover
 
 Starting with CLI 0.7.0, `sync-standards.local.json` is the only standards-sync cadence and ref policy source. The canonical workflow and CLI do not consult `STANDARDS_AUTO_SYNC` or `STANDARDS_SYNC_REF`; consumers must upgrade the package and lockfile and materialize any required policy in the same migration change.
+
+## DEPENDABOT-001: Deliberately lean local overlay
+
+The repo-owned Dependabot overlay is additive but intentionally not a general policy override. It may define new ecosystem update blocks, top-level private registries, and `ignore` or `registries` additions on a canonical normalized target. Matching blocks reject labels, groups, cooldowns, pull-request limits, and every other policy key; broader per-repository policy must be proposed as an explicit seam decision.

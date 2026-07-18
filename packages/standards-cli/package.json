@@ -20,8 +20,10 @@
     "LICENSE",
     "README.md",
     "src/cli.ts",
+    "src/dependabot-compose-input.ts",
     "src/dependabot-compose.ts",
     "src/dependabot-inspect.ts",
+    "src/dependabot-update.ts",
     "src/github-api.ts",
     "src/github-apply.ts",
     "src/github-command-shared.ts",
@@ -33,7 +35,8 @@
     "src/structure-profile.ts",
     "src/structure-script.ts",
     "src/structure-workspace.ts",
-    "src/yaml-emit.ts"
+    "src/yaml-emit.ts",
+    "src/yaml-parse.ts"
   ],
   "scripts": {
     "lint": "biome check --error-on-warnings .",
@@ -51,5 +54,8 @@
   },
   "publishConfig": {
     "access": "public"
+  },
+  "dependencies": {
+    "yaml": "^2.9.0"
   }
 }

@@ -1,12 +1,7 @@
-// Semantic validation for the composed .github/dependabot.yml: structural
-// shape, schedules, multi-ecosystem groups, and the baseline ecosystems every
-// consumer must watch. Like cli.ts, this module is zero-dependency so `bunx`
-// can execute the published package.
-
 import { DEPENDABOT_FILE } from './dependabot-compose';
+import { updateTarget } from './dependabot-update';
 import { isNonEmptyString, isRecord } from './github-settings-parse';
-
-const { YAML: BunYaml } = await import('bun');
+import { parseYaml } from './yaml-parse';
 
 const DEPENDABOT_BASELINE_ECOSYSTEMS = ['bun', 'github-actions'] as const;
 const DEPENDABOT_SCHEDULE_INTERVALS = new Set([
@@ -73,6 +68,41 @@ const inspectDependabotGroups = (
   return { problems, scheduledGroups };
 };
 
+const inspectDependabotUpdateSchedule = (
+  grouped: {
+    readonly name: unknown;
+    readonly patterns: unknown;
+    readonly schedule: unknown;
+  },
+  label: string,
+  scheduledGroups: ReadonlySet<string>,
+): ReadonlyArray<string> => {
+  if (grouped.name === undefined) {
+    return inspectDependabotSchedule(grouped.schedule, label);
+  }
+  const problems: Array<string> = [];
+  if (!isNonEmptyString(grouped.name)) {
+    problems.push(`${label}.multi-ecosystem-group must be a non-empty string`);
+  } else if (!scheduledGroups.has(grouped.name)) {
+    problems.push(`${label} must reference a scheduled multi-ecosystem group`);
+  }
+  if (
+    !(
+      Array.isArray(grouped.patterns) &&
+      grouped.patterns.length > 0 &&
+      grouped.patterns.every(isNonEmptyString)
+    )
+  ) {
+    problems.push(
+      `${label} must define non-empty patterns when using a multi-ecosystem group`,
+    );
+  }
+  if (grouped.schedule !== undefined) {
+    problems.push(...inspectDependabotSchedule(grouped.schedule, label));
+  }
+  return problems;
+};
+
 const inspectDependabotUpdate = (
   update: unknown,
   index: number,
@@ -84,55 +114,32 @@ const inspectDependabotUpdate = (
   }
 
   const {
-    directory,
-    directories,
     schedule,
+    patterns,
     'multi-ecosystem-group': multiEcosystemGroup,
-    'package-ecosystem': ecosystem,
   } = update;
   const problems: Array<string> = [];
-  if (!isNonEmptyString(ecosystem)) {
-    problems.push(`${label} must define package-ecosystem`);
-  }
+  const target = updateTarget(update, label, problems);
 
-  const hasDirectory = isNonEmptyString(directory);
-  const hasDirectories =
-    Array.isArray(directories) &&
-    directories.length > 0 &&
-    directories.every(isNonEmptyString);
-  if (hasDirectory === hasDirectories) {
-    problems.push(
-      `${label} must define exactly one of directory or directories`,
-    );
-  }
+  problems.push(
+    ...inspectDependabotUpdateSchedule(
+      { name: multiEcosystemGroup, patterns, schedule },
+      label,
+      scheduledGroups,
+    ),
+  );
 
-  if (schedule === undefined && isNonEmptyString(multiEcosystemGroup)) {
-    if (!scheduledGroups.has(multiEcosystemGroup)) {
-      problems.push(
-        `${label} must reference a scheduled multi-ecosystem group`,
-      );
-    }
-  } else {
-    problems.push(...inspectDependabotSchedule(schedule, label));
-  }
-
-  const targetsRoot =
-    directory === '/' ||
-    (Array.isArray(directories) && directories.includes('/'));
   return {
     problems,
-    rootEcosystem:
-      isNonEmptyString(ecosystem) && targetsRoot ? ecosystem : null,
+    rootEcosystem: target?.directories.includes('/') ? target.ecosystem : null,
   };
 };
 
 export const inspectDependabot = (raw: string): ReadonlyArray<string> => {
   const problems: Array<string> = [];
-  let config: unknown;
-  try {
-    config = BunYaml.parse(raw);
-  } catch {
-    return [`${DEPENDABOT_FILE} must contain valid YAML`];
+  const { value: config, problem } = parseYaml(raw, DEPENDABOT_FILE);
+  if (problem !== null) {
+    return [problem];
   }
 
   if (!isRecord(config)) {

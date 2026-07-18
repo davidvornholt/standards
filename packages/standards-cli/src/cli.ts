@@ -4,10 +4,11 @@
 // davidvornholt/standards template into a consumer repo and detects local
 // tampering with them. See the standards repository README for the design.
 //
-// This script is intentionally zero-dependency (Bun + Node built-ins only) and
-// does NOT use Effect: `bunx` must be able to execute the published package
-// before a consumer has dependencies. That is the documented exception to the
-// repo's Effect standard for standalone bootstrap tooling.
+// This bootstrap executable keeps its runtime surface minimal and does not use
+// Effect: `bunx` must be able to execute the published package before a
+// consumer has dependencies. Its strict YAML parser is a declared runtime
+// dependency. This is the documented exception to the repo's Effect standard
+// for standalone bootstrap tooling.
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -411,6 +412,12 @@ const runInit = async (
 ): Promise<void> => {
   const seeds = await seedTargets(src.dir, manifest.seedDir);
   assertDisjoint(manifest.paths, [...seeds.keys()]);
+  const prospectiveDependabot = await prepareProspectiveDependabot(
+    manifest,
+    src.dir,
+    consumer,
+    seeds.get(DEPENDABOT_LOCAL_FILE) ?? null,
+  );
   await Promise.all(
     [...seeds].map(async ([rel, abs]) => {
       const dest = join(consumer, rel);
@@ -431,7 +438,7 @@ const runInit = async (
     dryRun: false,
   });
   reportMirror(result, false);
-  await generateDependabot(consumer, false);
+  await applyProspectiveDependabot(consumer, prospectiveDependabot, false);
   await writeLock(consumer, {
     upstream: manifest.upstream,
     sha: src.sha,
@@ -450,6 +457,12 @@ const runSync = async (
 ): Promise<void> => {
   const seeds = await seedTargets(src.dir, manifest.seedDir);
   assertDisjoint(manifest.paths, [...seeds.keys()]);
+  const prospectiveDependabot = await prepareProspectiveDependabot(
+    manifest,
+    src.dir,
+    consumer,
+    null,
+  );
   const lock = await readLock(consumer);
   const result = await mirror({
     manifest,
@@ -459,7 +472,7 @@ const runSync = async (
     dryRun,
   });
   reportMirror(result, dryRun);
-  await generateDependabot(consumer, dryRun);
+  await applyProspectiveDependabot(consumer, prospectiveDependabot, dryRun);
   if (dryRun) {
     return;
   }
@@ -591,31 +604,60 @@ const composeProblemsError = (problems: ReadonlyArray<string>): Error =>
     ].join('\n'),
   );
 
-// The generated Dependabot config is engine-owned but composed from a
-// canonical base and a repo-owned overlay, so init/sync regenerate it instead
-// of mirroring or seeding it. The seam only activates once the canonical base
-// has been mirrored in (a consumer pinned to an older upstream has no base
-// yet, and generating from nothing would guess).
-const generateDependabot = async (
+type ProspectiveDependabot = {
+  readonly composed: string;
+  readonly current: string | null;
+};
+
+// Validate the incoming canonical base against the effective local overlay
+// before init/sync mutates any consumer-owned, canonical, generated, or lock
+// file. For init, an existing overlay wins; otherwise the overlay seed is what
+// the command is about to install.
+const prepareProspectiveDependabot = async (
+  manifest: Manifest,
+  srcDir: string,
   consumer: string,
-  dryRun: boolean,
-): Promise<void> => {
-  const sources = await readDependabotSources(consumer);
-  if (sources.base === null) {
-    return;
+  localSeed: string | null,
+): Promise<ProspectiveDependabot> => {
+  const incoming = await listManaged(srcDir, manifest.paths);
+  const basePath = incoming.get(DEPENDABOT_BASE_FILE);
+  if (basePath === undefined) {
+    throw new Error(
+      `source content must manage ${DEPENDABOT_BASE_FILE}; @davidvornholt/standards 0.10 requires a 0.10-compatible content ref`,
+    );
   }
+  const existingLocal = await readTextIfPresent(
+    join(consumer, DEPENDABOT_LOCAL_FILE),
+  );
+  const local =
+    existingLocal ??
+    (localSeed === null ? null : await readFile(localSeed, 'utf8'));
+  const current = await readTextIfPresent(join(consumer, DEPENDABOT_FILE));
+  const sources = {
+    base: await readFile(basePath, 'utf8'),
+    local,
+    current,
+  };
   const { composed, problems } = composedDependabot(sources);
   if (composed === null) {
     throw composeProblemsError(problems);
   }
-  if (sources.current === composed) {
+  return { composed, current };
+};
+
+const applyProspectiveDependabot = async (
+  consumer: string,
+  prospective: ProspectiveDependabot,
+  dryRun: boolean,
+): Promise<void> => {
+  if (prospective.current === prospective.composed) {
     return;
   }
   if (dryRun) {
     console.log(`  would generate ${DEPENDABOT_FILE}`);
     return;
   }
-  await writeComposedDependabot(consumer, composed);
+  await writeComposedDependabot(consumer, prospective.composed);
   console.log(`  generated ${DEPENDABOT_FILE}`);
 };
 
