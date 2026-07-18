@@ -3,6 +3,7 @@
 // flipping draft to ready (GraphQL: REST cannot change the draft flag).
 
 import { apiError, HTTP_CREATED, HTTP_OK, request } from './github-api';
+import { listAllPages } from './github-paginate';
 import { isNonEmptyString, isRecord } from './github-settings-parse';
 
 export type PullRequest = {
@@ -13,6 +14,7 @@ export type PullRequest = {
   readonly headSha: string;
   readonly headRepo: string;
   readonly baseRef: string;
+  readonly baseSha: string;
   readonly nodeId: string;
   readonly draft: boolean;
 };
@@ -112,26 +114,56 @@ export const getPullRequest = async (
     headSha: isNonEmptyString(body.head.sha) ? body.head.sha : '',
     headRepo: isNonEmptyString(headRepo.full_name) ? headRepo.full_name : '',
     baseRef: isNonEmptyString(body.base.ref) ? body.base.ref : '',
+    baseSha: isNonEmptyString(body.base.sha) ? body.base.sha : '',
     nodeId: body.node_id,
     draft: body.draft === true,
   };
 };
 
-export const createPullRequestReview = async (
-  token: string | null,
-  repo: string,
-  prNumber: number,
-  body: string,
-): Promise<void> => {
+export const createPullRequestReview = async (options: {
+  readonly token: string | null;
+  readonly repo: string;
+  readonly prNumber: number;
+  readonly body: string;
+  readonly commitId: string;
+}): Promise<void> => {
+  const { token, repo, prNumber, body, commitId } = options;
   const response = await request(
     token,
     'POST',
     `/repos/${repo}/pulls/${prNumber}/reviews`,
-    { event: 'COMMENT', body },
+    {
+      event: 'COMMENT',
+      body,
+      // biome-ignore lint/style/useNamingConvention: GitHub's REST field is snake_case.
+      commit_id: commitId,
+    },
   );
   if (response.status !== HTTP_OK) {
     throw new Error(apiError(`post review on ${repo}#${prNumber}`, response));
   }
+};
+
+export const pullRequestReviewWithMarkerExists = async (options: {
+  readonly token: string | null;
+  readonly repo: string;
+  readonly prNumber: number;
+  readonly marker: string;
+  readonly commitId: string;
+}): Promise<boolean> => {
+  const { token, repo, prNumber, marker, commitId } = options;
+  const reviews = await listAllPages(
+    token,
+    `/repos/${repo}/pulls/${prNumber}/reviews`,
+    `list reviews on ${repo}#${prNumber}`,
+  );
+  return reviews.some(
+    (review) =>
+      isRecord(review) &&
+      review.commit_id === commitId &&
+      typeof review.body === 'string' &&
+      review.body.includes(marker),
+  );
 };
 
 export const markPullRequestReady = async (

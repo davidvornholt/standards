@@ -3,16 +3,28 @@ import process from 'node:process';
 import { HTTP_CREATED } from './github-api';
 import { installApi } from './github-commands-test-support';
 import type { PollerConfig } from './poller-config';
-import { jobPreamble } from './poller-job-shared';
+import { jobPreamble, releaseLabels } from './poller-job-shared';
 import { QUESTION_MARKER } from './poller-protocol';
 
 const originalFetch = globalThis.fetch;
 const config = {} as PollerConfig;
+const ISSUE_NUMBER = 8;
 const createdAt = (value: string): Record<string, string> =>
   Object.fromEntries([['created_at', value]]);
 const role = (value: string) => ({
   body: Object.fromEntries([['role_name', value]]),
 });
+const deps = {
+  config,
+  token: 'token',
+  repo: 'owner/repo',
+  roleCache: new Map(),
+};
+const labels = {
+  approved: 'approved-for-fix',
+  inProgress: 'fix-in-progress',
+  failed: 'fix-failed',
+};
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
@@ -130,5 +142,17 @@ describe('jobPreamble', () => {
         'issue:approved',
       ),
     ).rejects.toThrow('add needs-clarification');
+  });
+});
+
+describe('releaseLabels', () => {
+  it('removes approval last so cleanup failures remain schedulable', async () => {
+    const calls = installApi([{ body: {} }, { body: {} }, { body: {} }]);
+    await releaseLabels(deps, labels, ISSUE_NUMBER);
+    expect(calls.map((call) => call.path)).toEqual([
+      '/repos/owner/repo/issues/8/labels/fix-in-progress',
+      '/repos/owner/repo/issues/8/labels/fix-failed',
+      '/repos/owner/repo/issues/8/labels/approved-for-fix',
+    ]);
   });
 });

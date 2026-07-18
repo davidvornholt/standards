@@ -4,42 +4,51 @@
 // PR to ready. GitHub writes stay in deterministic poller code; the agent
 // never holds credentials.
 
-import { join } from 'node:path';
-import { prRevision } from './poller-approval';
+import { prRevision, readApprovalBinding } from './poller-approval';
 import { acquireClaim } from './poller-claim';
-import { runCodex } from './poller-codex';
 import { getIssue, type IssueItem } from './poller-github';
-import { getPullRequest } from './poller-github-pulls';
+import { getPullRequest, type PullRequest } from './poller-github-pulls';
 import { addLabels } from './poller-github-write';
 import {
-  askQuestion,
   failJob,
   type JobDeps,
   type JobLabels,
   type JobResult,
   jobPreamble,
 } from './poller-job-shared';
-import { readReviewOutcome } from './poller-outcome';
-import { reviewPrompt } from './poller-prompts';
 import {
   APPROVED_FOR_REVIEW,
   REVIEW_FAILED,
   REVIEW_IN_PROGRESS,
 } from './poller-protocol';
+import { executeReviewJob } from './poller-review-execution';
 import {
-  finishReviewedJob,
-  validateReviewClaim,
-} from './poller-review-publication';
-import {
-  createWorktree,
-  ensureCacheClone,
-  mergeBase,
-} from './poller-workspace';
+  readSealedReviewPlan,
+  reviewOutputBranch,
+} from './poller-review-output';
+import { resumeReviewedJob } from './poller-review-publication';
+import { publishReviewPlan, readReviewPlan } from './poller-review-state';
+import { ensureCacheClone, localBranchExists } from './poller-workspace';
 
 const REVIEW_LABELS: JobLabels = {
   approved: APPROVED_FOR_REVIEW,
   inProgress: REVIEW_IN_PROGRESS,
   failed: REVIEW_FAILED,
+};
+
+const currentReviewPlan = async (deps: JobDeps, pr: PullRequest) => {
+  const plan = await readReviewPlan(deps, pr);
+  if (plan === null) {
+    return null;
+  }
+  const binding = await readApprovalBinding(
+    { token: deps.token, repo: deps.repo, issueNumber: pr.number },
+    APPROVED_FOR_REVIEW,
+    prRevision(plan.approvedHead),
+  );
+  return typeof binding === 'string' || binding.id !== plan.approvalId
+    ? null
+    : plan;
 };
 
 export const runReviewJob = async (
@@ -48,12 +57,13 @@ export const runReviewJob = async (
 ): Promise<JobResult> => {
   const { config, token, repo } = deps;
   const pr = await getPullRequest(token, repo, prItem.number);
+  let plan = await currentReviewPlan(deps, pr);
   const currentItem = await getIssue(token, repo, prItem.number);
   const preamble = await jobPreamble(
     deps,
     currentItem,
     REVIEW_LABELS,
-    prRevision(pr.headSha),
+    prRevision(plan?.approvedHead ?? pr.headSha),
   );
   if (preamble.kind === 'rejected') {
     return {
@@ -64,6 +74,18 @@ export const runReviewJob = async (
   if (preamble.kind === 'waiting') {
     return {
       lines: [`PR #${prItem.number}: waiting on an answer`],
+      ranCodex: false,
+    };
+  }
+  if (!pr.draft && plan === null) {
+    await failJob(
+      deps,
+      REVIEW_LABELS,
+      pr.number,
+      'automated review requires a draft PR',
+    );
+    return {
+      lines: [`PR #${pr.number}: rejected (not draft)`],
       ranCodex: false,
     };
   }
@@ -95,59 +117,35 @@ export const runReviewJob = async (
     };
   }
   const cacheClone = ensureCacheClone(config.cacheDir, repo, token);
-  const reviewBase = mergeBase(cacheClone, pr.baseRef, pr.headSha);
-  const workspace = createWorktree(
-    cacheClone,
-    pr.headSha,
-    pr.headRef,
-    join(config.cacheDir, 'work', `${repo.replace('/', '--')}-pr-${pr.number}`),
-  );
-  try {
-    const run = runCodex(
-      workspace.dir,
-      reviewPrompt({
-        repo,
-        prNumber: pr.number,
-        title: pr.title,
-        baseSha: reviewBase,
-        answers: preamble.answers,
-      }),
-      config,
-    );
-    await validateReviewClaim(deps, pr.number, claim);
-    const outcome = run.succeeded
-      ? await readReviewOutcome(workspace.dir)
-      : null;
-    if (outcome === null) {
-      await failJob(
-        deps,
-        REVIEW_LABELS,
-        pr.number,
-        run.failure ?? 'run wrote no valid outcome file',
-      );
-      return {
-        lines: [`PR #${pr.number}: failed (no valid outcome)`],
-        ranCodex: true,
-      };
-    }
-    if (outcome.status === 'question') {
-      await askQuestion(deps, REVIEW_LABELS, pr.number, outcome.question ?? '');
-      return { lines: [`PR #${pr.number}: asked a question`], ranCodex: true };
-    }
-    if (outcome.status === 'cannot-review') {
-      await failJob(deps, REVIEW_LABELS, pr.number, outcome.summary);
-      return { lines: [`PR #${pr.number}: cannot review`], ranCodex: true };
-    }
-    const line = await finishReviewedJob({
-      deps,
-      labels: REVIEW_LABELS,
-      pr,
-      claim,
-      workDir: workspace.dir,
-      outcome,
-    });
-    return { lines: [line], ranCodex: true };
-  } finally {
-    workspace.cleanup();
+  const outputBranch = reviewOutputBranch(pr.number, claim.approval.id);
+  const sealed = readSealedReviewPlan(cacheClone, outputBranch);
+  if (plan === null && sealed !== null) {
+    await publishReviewPlan(deps, pr, claim, sealed);
+    plan = sealed;
+  } else if (plan === null && localBranchExists(cacheClone, outputBranch)) {
+    throw new Error(`sealed output on ${outputBranch} is invalid`);
   }
+  if (plan !== null) {
+    return {
+      lines: [
+        await resumeReviewedJob({
+          deps,
+          labels: REVIEW_LABELS,
+          pr,
+          claim,
+          plan,
+          cloneDir: cacheClone,
+        }),
+      ],
+      ranCodex: false,
+    };
+  }
+  return executeReviewJob({
+    deps,
+    labels: REVIEW_LABELS,
+    pr,
+    claim,
+    cacheClone,
+    answers: preamble.answers,
+  });
 };

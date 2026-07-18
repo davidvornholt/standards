@@ -143,6 +143,24 @@ export const commitCount = (workDir: string, baseSha: string): number =>
     10,
   );
 
+export const headSha = (workDir: string): string =>
+  runGit(['-C', workDir, 'rev-parse', 'HEAD'], null).trim();
+
+export const localBranchExists = (
+  cloneDir: string,
+  branch: string,
+): boolean => {
+  try {
+    runGit(
+      ['-C', cloneDir, 'show-ref', '--verify', `refs/heads/${branch}`],
+      null,
+    );
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 export const changedPaths = (
   workDir: string,
   baseSha: string,
@@ -161,6 +179,7 @@ export const pushBranch = (
     readonly branch: string;
     readonly token: string | null;
     readonly expectedRemoteSha?: string;
+    readonly sourceRef?: string;
   },
 ): void => {
   authedGit(
@@ -173,7 +192,7 @@ export const pushBranch = (
             `--force-with-lease=refs/heads/${options.branch}:${options.expectedRemoteSha}`,
           ]),
       githubRepoUrl(options.repo),
-      `HEAD:refs/heads/${options.branch}`,
+      `${options.sourceRef ?? 'HEAD'}:refs/heads/${options.branch}`,
     ],
     options.token,
   );

@@ -7,7 +7,7 @@ import { issueRevision } from './poller-approval';
 import { acquireClaim } from './poller-claim';
 import { runCodex } from './poller-codex';
 import { handleNonFixedOutcome } from './poller-fix-outcome';
-import { localBranchExists, readSealedFixOutput } from './poller-fix-output';
+import { readSealedFixOutput } from './poller-fix-output';
 import {
   type FixPublication,
   finishFixedJob,
@@ -34,6 +34,7 @@ import {
 import {
   createWorktree,
   ensureCacheClone,
+  localBranchExists,
   type Workspace,
 } from './poller-workspace';
 

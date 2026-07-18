@@ -5,6 +5,7 @@
 // unlike merge settings there are no unverifiable states.
 
 import { apiError, HTTP_CREATED, HTTP_OK, request } from './github-api';
+import { labelIdentity } from './github-label-identity';
 import { listAllPages } from './github-paginate';
 import { isRecord, type LabelDeclaration } from './github-settings-parse';
 
@@ -52,9 +53,11 @@ export const diffLabels = (
   declared: ReadonlyArray<LabelDeclaration>,
   live: ReadonlyArray<LiveLabel>,
 ): ReadonlyArray<string> => {
-  const liveByName = new Map(live.map((label) => [label.name, label]));
+  const liveByName = new Map(
+    live.map((label) => [labelIdentity(label.name), label]),
+  );
   return declared.flatMap((label) => {
-    const drift = labelDrift(label, liveByName.get(label.name));
+    const drift = labelDrift(label, liveByName.get(labelIdentity(label.name)));
     return drift === null ? [] : [drift];
   });
 };
@@ -82,7 +85,7 @@ const convergeLabel = async (
   const updated = await request(
     token,
     'PATCH',
-    `/repos/${repo}/labels/${encodeURIComponent(declared.name)}`,
+    `/repos/${repo}/labels/${encodeURIComponent(live.name)}`,
     { color: declared.color, description: declared.description },
   );
   if (updated.status !== HTTP_OK) {
@@ -100,7 +103,9 @@ export const applyLabels = async (
     return [];
   }
   const live = await fetchLiveLabels(token, repo);
-  const liveByName = new Map(live.map((label) => [label.name, label]));
+  const liveByName = new Map(
+    live.map((label) => [labelIdentity(label.name), label]),
+  );
   const actions: Array<string> = [];
   for (const label of declared) {
     // biome-ignore lint/performance/noAwaitInLoops: GitHub advises against concurrent write requests (secondary rate limits); mutations run sequentially on purpose.
@@ -108,7 +113,7 @@ export const applyLabels = async (
       token,
       repo,
       label,
-      liveByName.get(label.name),
+      liveByName.get(labelIdentity(label.name)),
     );
     if (action !== null) {
       actions.push(action);

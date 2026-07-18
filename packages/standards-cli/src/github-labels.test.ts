@@ -17,9 +17,15 @@ afterEach(() => {
 
 const declared = [
   { name: 'approved-for-fix', color: '0e8a16', description: 'Approve a fix' },
-];
+] as const;
 
 describe('diffLabels', () => {
+  it('matches live label identity without regard to case', () => {
+    expect(
+      diffLabels(declared, [{ ...declared[0], name: 'Approved-For-Fix' }]),
+    ).toEqual([]);
+  });
+
   it('reports a missing declared label', () => {
     expect(diffLabels(declared, [])).toEqual([
       'label "approved-for-fix" is declared but missing on GitHub',
@@ -62,6 +68,25 @@ describe('diffLabels', () => {
 });
 
 describe('applyLabels', () => {
+  it('updates a case-variant through its live display spelling', async () => {
+    const calls = installApi([
+      {
+        body: [
+          {
+            ...declared[0],
+            name: 'Approved-For-Fix',
+            description: 'old',
+          },
+        ],
+      },
+      { body: {} },
+    ]);
+    expect(await applyLabels('token', 'o/r', declared)).toEqual([
+      'updated label "approved-for-fix"',
+    ]);
+    expect(calls[1]?.path).toBe('/repos/o/r/labels/Approved-For-Fix');
+  });
+
   it('creates missing labels and updates drifted ones', async () => {
     const calls: ReadonlyArray<ApiCall> = installApi([
       {
@@ -134,10 +159,28 @@ describe('declared label settings', () => {
     ]);
   });
 
+  it('rejects case-variant canonical collisions', () => {
+    const { problems } = loadGithubSettings(
+      '{"repository":{},"rulesets":[],"labels":[{"name":"Needs-Clarification","color":"0e8a16","description":"d"}]}',
+      '{"repository":{},"rulesets":[],"labels":[{"name":"needs-clarification","color":"ffffff","description":"mine"}]}',
+    );
+    expect(problems[0]).toContain('collides with a canonical label');
+  });
+
   it('rejects duplicate labels within one file', () => {
     const { problems } = loadGithubSettings(
       '{"repository":{},"rulesets":[],"labels":[{"name":"a","color":"0e8a16","description":"d"},{"name":"a","color":"0e8a16","description":"d"}]}',
       local,
+    );
+    expect(problems).toEqual([
+      '.github/settings.json declares label "a" more than once',
+    ]);
+  });
+
+  it('rejects case-variant duplicates within one file', () => {
+    const { problems } = loadGithubSettings(
+      '{"repository":{},"rulesets":[],"labels":[{"name":"A","color":"0e8a16","description":"d"},{"name":"a","color":"0e8a16","description":"d"}]}',
+      '{"repository":{},"rulesets":[],"labels":[]}',
     );
     expect(problems).toEqual([
       '.github/settings.json declares label "a" more than once',

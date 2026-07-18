@@ -106,18 +106,3 @@ export const readSealedFixOutput = (
     return null;
   }
 };
-
-export const localBranchExists = (
-  cloneDir: string,
-  branch: string,
-): boolean => {
-  try {
-    runGit(
-      ['-C', cloneDir, 'show-ref', '--verify', `refs/heads/${branch}`],
-      null,
-    );
-    return true;
-  } catch {
-    return false;
-  }
-};

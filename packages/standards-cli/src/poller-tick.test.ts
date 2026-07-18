@@ -16,10 +16,12 @@ const FRESH_ISSUE = 6;
 const CLAIMED_ISSUE = 7;
 const REJECTED_ISSUE = 9;
 
-const config = (): PollerConfig => {
+const config = (
+  repos: ReadonlyArray<string> = ['owner/repo'],
+): PollerConfig => {
   const parsed = parsePollerConfig(
     {
-      repos: ['owner/repo'],
+      repos,
       model: 'gpt-5.6-sol',
       reasoningEffort: 'high',
     },
@@ -116,6 +118,16 @@ describe('runPollerTick', () => {
       { body: [] }, // review-in-progress sweep
       { body: [] }, // approved-for-review
       { body: [issue(REJECTED_ISSUE, ['approved-for-fix'])] },
+      {
+        body: [
+          {
+            event: 'labeled',
+            label: { name: 'APPROVED-FOR-FIX' },
+            actor: { login: 'drive-by' },
+            created_at: '2026-07-18T11:30:00Z',
+          },
+        ],
+      }, // scheduling timestamp
       { body: { default_branch: 'main' } },
       { body: issue(REJECTED_ISSUE, ['approved-for-fix']) }, // current issue
       { body: issue(REJECTED_ISSUE, ['approved-for-fix']) }, // approval presence

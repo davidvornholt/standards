@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { hasLabel } from './github-label-identity';
 import {
   collaboratorRole,
   getIssue,
@@ -39,7 +40,7 @@ export const readApprovalBinding = async (
     context.repo,
     context.issueNumber,
   );
-  if (!issue.labels.includes(label)) {
+  if (!hasLabel(issue.labels, label)) {
     return `"${label}" is not currently present on ${context.repo}#${context.issueNumber}`;
   }
   const event = await lastLabelEvent(

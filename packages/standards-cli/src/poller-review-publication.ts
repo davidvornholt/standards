@@ -1,43 +1,76 @@
-import { prRevision } from './poller-approval';
-import { type ClaimBinding, validateClaim } from './poller-claim';
-import {
-  createPullRequestReview,
-  getPullRequest,
-  markPullRequestReady,
-  type PullRequest,
-} from './poller-github-pulls';
-import { createIssue } from './poller-github-write';
-import {
-  failJob,
-  type JobDeps,
-  type JobLabels,
-  releaseLabels,
-} from './poller-job-shared';
+import type { ClaimBinding } from './poller-claim';
+import type { PullRequest } from './poller-github-pulls';
+import { failJob, type JobDeps, type JobLabels } from './poller-job-shared';
 import {
   changedWorkspaceQualityManifests,
   lockedPathsOf,
 } from './poller-protected-paths';
+import { forbiddenDiffPaths, type ReviewOutcome } from './poller-protocol';
+import { publishReviewArtifacts } from './poller-review-artifacts';
 import {
-  DEFERRED_FINDING,
-  forbiddenDiffPaths,
-  type ReviewOutcome,
-} from './poller-protocol';
-import { changedPaths, commitCount, pushBranch } from './poller-workspace';
+  type ReviewPublicationPlan,
+  readSealedReviewPlan,
+  reviewOutputBranch,
+  sealReviewPlan,
+} from './poller-review-output';
+import { publishReviewPlan, validateReviewClaim } from './poller-review-state';
+import {
+  changedPaths,
+  commitCount,
+  headSha,
+  localBranchExists,
+  pushBranch,
+} from './poller-workspace';
 
-export const validateReviewClaim = async (
-  deps: JobDeps,
-  prNumber: number,
-  claim: ClaimBinding,
-): Promise<void> => {
-  const current = await getPullRequest(deps.token, deps.repo, prNumber);
-  const problem = await validateClaim(
-    { token: deps.token, repo: deps.repo, issueNumber: prNumber },
-    claim,
-    prRevision(current.headSha),
-  );
-  if (problem !== null) {
-    throw new Error(`publication blocked: ${problem}`);
+export const resumeReviewedJob = async (options: {
+  readonly deps: JobDeps;
+  readonly labels: JobLabels;
+  readonly pr: PullRequest;
+  readonly claim: ClaimBinding;
+  readonly plan: ReviewPublicationPlan;
+  readonly cloneDir: string;
+}): Promise<string> => {
+  const { deps, labels, pr, claim, plan, cloneDir } = options;
+  if (claim.approval.id !== plan.approvalId) {
+    throw new Error('publication blocked: review plan approval changed');
   }
+  const outputBranch = reviewOutputBranch(pr.number, plan.approvalId);
+  const sealed = readSealedReviewPlan(cloneDir, outputBranch);
+  if (sealed === null) {
+    const detail = localBranchExists(cloneDir, outputBranch)
+      ? 'is not valid sealed review output'
+      : 'is missing';
+    throw new Error(`publication blocked: ${outputBranch} ${detail}`);
+  }
+  if (JSON.stringify(sealed) !== JSON.stringify(plan)) {
+    throw new Error('publication blocked: sealed review plan changed');
+  }
+  if (pr.headSha === plan.approvedHead && plan.publishedHead !== pr.headSha) {
+    await validateReviewClaim({
+      deps,
+      pr,
+      claim,
+      plan,
+      expectedHead: plan.approvedHead,
+      requireDraft: true,
+    });
+    pushBranch(cloneDir, {
+      repo: deps.repo,
+      branch: pr.headRef,
+      token: deps.token,
+      sourceRef: plan.publishedHead,
+      expectedRemoteSha: plan.approvedHead,
+    });
+  }
+  await validateReviewClaim({
+    deps,
+    pr,
+    claim,
+    plan,
+    expectedHead: plan.publishedHead,
+    requireDraft: false,
+  });
+  return publishReviewArtifacts({ deps, labels, pr, claim, plan });
 };
 
 export const finishReviewedJob = async (options: {
@@ -50,48 +83,64 @@ export const finishReviewedJob = async (options: {
 }): Promise<string> => {
   const { deps, labels, pr, claim, workDir, outcome } = options;
   const commits = commitCount(workDir, pr.headSha);
+  const paths = commits > 0 ? changedPaths(workDir, pr.headSha) : [];
+  const forbidden = [
+    ...forbiddenDiffPaths(paths, await lockedPathsOf(workDir)),
+    ...changedWorkspaceQualityManifests(workDir, pr.headSha, paths),
+  ];
+  if (forbidden.length > 0) {
+    await failJob(
+      deps,
+      labels,
+      pr.number,
+      `review fixes modified protected paths:\n${forbidden.map((path) => `- ${path}`).join('\n')}`,
+    );
+    return `PR #${pr.number}: failed (protected paths)`;
+  }
+  const plan: ReviewPublicationPlan = {
+    approvalId: claim.approval.id,
+    approvedHead: pr.headSha,
+    publishedHead: headSha(workDir),
+    baseRef: pr.baseRef,
+    baseSha: pr.baseSha,
+    report: outcome.report ?? '',
+    commits,
+    deferred: outcome.deferred ?? [],
+  };
+  const outputBranch = reviewOutputBranch(pr.number, plan.approvalId);
+  const sealedHead = sealReviewPlan(workDir, plan);
+  pushBranch(workDir, {
+    repo: deps.repo,
+    branch: outputBranch,
+    token: deps.token,
+    expectedRemoteSha: '',
+    sourceRef: sealedHead,
+  });
+  await publishReviewPlan(deps, pr, claim, plan);
   if (commits > 0) {
-    const paths = changedPaths(workDir, pr.headSha);
-    const forbidden = [
-      ...forbiddenDiffPaths(paths, await lockedPathsOf(workDir)),
-      ...changedWorkspaceQualityManifests(workDir, pr.headSha, paths),
-    ];
-    if (forbidden.length > 0) {
-      await failJob(
-        deps,
-        labels,
-        pr.number,
-        `review fixes modified protected paths:\n${forbidden.map((path) => `- ${path}`).join('\n')}`,
-      );
-      return `PR #${pr.number}: failed (protected paths)`;
-    }
-    await validateReviewClaim(deps, pr.number, claim);
+    await validateReviewClaim({
+      deps,
+      pr,
+      claim,
+      plan,
+      expectedHead: plan.approvedHead,
+      requireDraft: true,
+    });
     pushBranch(workDir, {
       repo: deps.repo,
       branch: pr.headRef,
       token: deps.token,
+      sourceRef: plan.publishedHead,
+      expectedRemoteSha: plan.approvedHead,
     });
   }
-  await validateReviewClaim(deps, pr.number, claim);
-  await createPullRequestReview(
-    deps.token,
-    deps.repo,
-    pr.number,
-    `${outcome.report ?? ''}\n\n---\n${commits} fix commit(s) pushed by the automated review run.`,
-  );
-  const deferred = outcome.deferred ?? [];
-  for (const finding of deferred) {
-    // biome-ignore lint/performance/noAwaitInLoops: every publication boundary revalidates the exact approved PR head and current roles.
-    await validateReviewClaim(deps, pr.number, claim);
-    await createIssue(deps.token, deps.repo, {
-      title: finding.title,
-      body: `${finding.body}\n\nDeferred from the automated review of PR #${pr.number}.`,
-      labels: [DEFERRED_FINDING],
-    });
-  }
-  await validateReviewClaim(deps, pr.number, claim);
-  await markPullRequestReady(deps.token, pr.nodeId);
-  await validateReviewClaim(deps, pr.number, claim);
-  await releaseLabels(deps, labels, pr.number);
-  return `PR #${pr.number}: reviewed (${commits} fix commit(s), ${deferred.length} deferred issue(s)), marked ready`;
+  await validateReviewClaim({
+    deps,
+    pr,
+    claim,
+    plan,
+    expectedHead: plan.publishedHead,
+    requireDraft: true,
+  });
+  return publishReviewArtifacts({ deps, labels, pr, claim, plan });
 };

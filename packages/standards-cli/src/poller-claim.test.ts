@@ -143,4 +143,18 @@ describe('approval and claim bindings', () => {
     ).toContain('not currently present');
     expect(calls).toHaveLength(1);
   });
+
+  it('matches approval and timeline label identity without regard to case', async () => {
+    installApi([
+      { body: rawIssue(['Approved-For-Fix']) },
+      { body: [labeled('APPROVED-FOR-FIX')] },
+      role('maintain'),
+    ]);
+    const approval = await readApprovalBinding(
+      context,
+      'approved-for-fix',
+      'issue:revision',
+    );
+    expect(typeof approval).not.toBe('string');
+  });
 });

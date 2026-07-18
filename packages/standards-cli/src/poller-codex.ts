@@ -21,6 +21,19 @@ export type CodexRunResult = {
   readonly failure: string | null;
 };
 
+type CodexExecutor = (
+  file: string,
+  args: ReadonlyArray<string>,
+  options: {
+    readonly encoding: 'utf8';
+    readonly timeout: number;
+    readonly stdio: readonly ['ignore', 'ignore', 'pipe'];
+    readonly env: Record<string, string | undefined>;
+  },
+) => unknown;
+
+const defaultExecutor: CodexExecutor = execFileSync;
+
 // Remove the poller's direct GitHub token variables so an approved Codex run
 // cannot trivially bypass the protected-path and trust checks with API writes.
 // The shared service identity is not credential-isolated: auth state and other
@@ -37,10 +50,11 @@ export const runCodex = (
   workDir: string,
   prompt: string,
   config: PollerConfig,
+  execute: CodexExecutor = defaultExecutor,
 ): CodexRunResult => {
   rmSync(join(workDir, OUTCOME_DIR), { recursive: true, force: true });
   try {
-    execFileSync(
+    execute(
       'codex',
       [
         'exec',

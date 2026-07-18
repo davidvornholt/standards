@@ -2,6 +2,7 @@
 // transitions are identical state-machine moves, parameterized only by which
 // approval/progress/failure labels the job family uses.
 
+import { hasLabel } from './github-label-identity';
 import { type ApprovalBinding, readApprovalBinding } from './poller-approval';
 import type { PollerConfig } from './poller-config';
 import { addLabels, createComment, removeLabel } from './poller-github-write';
@@ -69,7 +70,7 @@ export const jobPreamble = async (
   }
   const answers = await answerState(trust);
   if (answers.waiting) {
-    if (!item.labels.includes(NEEDS_CLARIFICATION)) {
+    if (!hasLabel(item.labels, NEEDS_CLARIFICATION)) {
       await addLabels(deps.token, deps.repo, item.number, [
         NEEDS_CLARIFICATION,
       ]);
@@ -77,7 +78,7 @@ export const jobPreamble = async (
     await removeLabel(deps.token, deps.repo, item.number, labels.inProgress);
     return { kind: 'waiting' };
   }
-  if (item.labels.includes(NEEDS_CLARIFICATION)) {
+  if (hasLabel(item.labels, NEEDS_CLARIFICATION)) {
     await removeLabel(deps.token, deps.repo, item.number, NEEDS_CLARIFICATION);
   }
   return { kind: 'go', answers: answers.answers, approval };
@@ -123,7 +124,9 @@ export const releaseLabels = async (
   labels: JobLabels,
   issueNumber: number,
 ): Promise<void> => {
-  await removeLabel(deps.token, deps.repo, issueNumber, labels.approved);
   await removeLabel(deps.token, deps.repo, issueNumber, labels.inProgress);
   await removeLabel(deps.token, deps.repo, issueNumber, labels.failed);
+  // Approval is the scheduler's retry signal, so remove it only after every
+  // other cleanup write has succeeded.
+  await removeLabel(deps.token, deps.repo, issueNumber, labels.approved);
 };

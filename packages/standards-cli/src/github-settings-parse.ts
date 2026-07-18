@@ -4,6 +4,8 @@
 // github-diff.ts, and the API interaction in github-api.ts. Like cli.ts, this
 // module is zero-dependency so `bunx` can execute the published package.
 
+import { labelIdentity } from './github-label-identity';
+
 // GitHub only enforces rulesets on private repositories on paid plans. The
 // seam can declare that fact so the gate skips rulesets loudly instead of
 // failing closed forever (personal accounts) or trusting rulesets the API
@@ -112,12 +114,12 @@ const labelListProblems = (
       problems.push(
         `${label} labels[${index}] must be {"name","color","description"} with a non-empty name, a 6-digit lowercase hex color, and a non-empty description`,
       );
-    } else if (names.has(declaration.name)) {
+    } else if (names.has(labelIdentity(declaration.name))) {
       problems.push(
         `${label} declares label "${declaration.name}" more than once`,
       );
     } else {
-      names.add(declaration.name);
+      names.add(labelIdentity(declaration.name));
     }
   }
   return problems;

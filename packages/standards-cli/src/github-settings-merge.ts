@@ -5,6 +5,7 @@
 // subtractive declaration is the ruleset-enforcement opt-out, which skips the
 // ruleset gate entirely rather than weakening any single rule.
 
+import { labelIdentity } from './github-label-identity';
 import {
   ENFORCEMENT_OPT_OUT,
   type GithubSettings,
@@ -114,11 +115,13 @@ const labelMergeProblems = (
     return [];
   }
   const canonicalNames = new Set(
-    canonical.labels.filter(isLabelDeclaration).map((label) => label.name),
+    canonical.labels
+      .filter(isLabelDeclaration)
+      .map((label) => labelIdentity(label.name)),
   );
   return local.labels
     .filter(isLabelDeclaration)
-    .filter((label) => canonicalNames.has(label.name))
+    .filter((label) => canonicalNames.has(labelIdentity(label.name)))
     .map(
       (label) =>
         `.github/settings.local.json label "${label.name}" collides with a canonical label; canonical labels are read-only`,

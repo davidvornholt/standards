@@ -5,6 +5,7 @@
 // label event", which a truncated page would silently falsify.
 
 import { apiError, HTTP_OK, request } from './github-api';
+import { labelIdentity } from './github-label-identity';
 import { listAllPages } from './github-paginate';
 import { isNonEmptyString, isRecord } from './github-settings-parse';
 
@@ -120,6 +121,7 @@ export const lastLabelEvent = async (
   issueNumber: number,
   label: string,
 ): Promise<LabelEvent | null> => {
+  const expectedIdentity = labelIdentity(label);
   const events = await listAllPages(
     token,
     `/repos/${repo}/issues/${issueNumber}/timeline`,
@@ -131,7 +133,8 @@ export const lastLabelEvent = async (
       isRecord(raw) &&
       raw.event === 'labeled' &&
       isRecord(raw.label) &&
-      raw.label.name === label &&
+      typeof raw.label.name === 'string' &&
+      labelIdentity(raw.label.name) === expectedIdentity &&
       isRecord(raw.actor) &&
       isNonEmptyString(raw.actor.login) &&
       isNonEmptyString(raw.created_at)

@@ -13,6 +13,7 @@ import process from 'node:process';
 import { readSealedFixOutput, sealFixOutput } from './poller-fix-output';
 import { lockedPathsOf } from './poller-protected-paths';
 import {
+  createWorktree,
   ensureCacheClone,
   githubRepoUrl,
   pushBranch,
@@ -55,6 +56,13 @@ describe('authenticated git remotes', () => {
       token: 'secret',
       expectedRemoteSha: '',
     });
+    pushBranch(root, {
+      repo: 'owner/repo',
+      branch: 'reviewed',
+      token: 'secret',
+      expectedRemoteSha: 'old',
+      sourceRef: 'new',
+    });
 
     const calls = readFileSync(log, 'utf8');
     expect(calls).toContain(
@@ -63,8 +71,43 @@ describe('authenticated git remotes', () => {
     expect(calls).toContain(
       `push --force-with-lease=refs/heads/topic: ${githubRepoUrl('owner/repo')} HEAD:refs/heads/topic`,
     );
+    expect(calls).toContain(
+      `push --force-with-lease=refs/heads/reviewed:old ${githubRepoUrl('owner/repo')} new:refs/heads/reviewed`,
+    );
     expect(calls).not.toContain('fetch --prune origin');
     expect(calls).not.toContain('push origin');
+  });
+});
+
+describe('worktree lifecycle', () => {
+  it('creates a real branch and removes the worktree on cleanup', () => {
+    const root = tempDir();
+    const bare = join(root, 'cache.git');
+    const source = join(root, 'source');
+    const work = join(root, 'work');
+    execFileSync('git', ['init', '-q', source]);
+    writeFileSync(join(source, 'file.txt'), 'initial\n');
+    execFileSync('git', ['-C', source, 'add', 'file.txt']);
+    execFileSync('git', [
+      '-C',
+      source,
+      '-c',
+      'user.name=test',
+      '-c',
+      'user.email=test@example.com',
+      '-c',
+      'commit.gpgSign=false',
+      'commit',
+      '-qm',
+      'initial',
+    ]);
+    execFileSync('git', ['clone', '-q', '--bare', source, bare]);
+    const workspace = createWorktree(bare, 'HEAD', 'topic', work);
+    expect(readFileSync(join(workspace.dir, 'file.txt'), 'utf8')).toBe(
+      'initial\n',
+    );
+    workspace.cleanup();
+    expect(() => readFileSync(join(work, 'file.txt'), 'utf8')).toThrow();
   });
 });
 

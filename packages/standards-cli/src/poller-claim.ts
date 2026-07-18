@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { hasLabel } from './github-label-identity';
 import { type ApprovalBinding, readApprovalBinding } from './poller-approval';
 import {
   collaboratorRole,
@@ -143,7 +144,7 @@ export const validateClaim = async (
     context.repo,
     context.issueNumber,
   );
-  if (!issue.labels.includes(claim.claimLabel)) {
+  if (!hasLabel(issue.labels, claim.claimLabel)) {
     return `"${claim.claimLabel}" is no longer present`;
   }
   const winner = await winningMarkerId(context, claim);
