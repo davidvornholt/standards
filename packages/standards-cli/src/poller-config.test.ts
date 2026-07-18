@@ -12,7 +12,7 @@ const validConfig = (): Record<string, unknown> => ({
 });
 
 const DEFAULT_STALE_CLAIM_HOURS = 6;
-const DEFAULT_RUN_TIMEOUT_MINUTES = 40;
+const DEFAULT_RUN_TIMEOUT_MINUTES = 240;
 
 describe('parsePollerConfig', () => {
   it('accepts a minimal config and fills defaults', () => {
@@ -25,6 +25,17 @@ describe('parsePollerConfig', () => {
     expect(config?.cacheDir).toBe(
       join(homedir(), '.cache', 'standards-poller'),
     );
+  });
+
+  it('rejects a stale sweep shorter than the run timeout', () => {
+    const { config, problems } = parsePollerConfig(
+      { ...validConfig(), staleClaimHours: 4, runTimeoutMinutes: 240 },
+      CONFIG_DIR,
+    );
+    expect(config).toBeNull();
+    expect(problems).toEqual([
+      'poller config "staleClaimHours" must exceed "runTimeoutMinutes": a shorter stale sweep would release the claim of a job that is still running',
+    ]);
   });
 
   it('rejects unknown keys', () => {

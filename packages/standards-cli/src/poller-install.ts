@@ -11,9 +11,12 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
+import type { PollerConfig } from './poller-config';
 
 const SERVICE_NAME = 'standards-poller';
 const TICK_INTERVAL_MINUTES = 10;
+// Non-agent tick work: stale sweeps, clone/fetch, GitHub reads and writes.
+const TICK_OVERHEAD_MINUTES = 30;
 const NIXOS_OS_RELEASE_ID = /^ID=nixos$/mu;
 
 export const isNixOs = async (): Promise<boolean> => {
@@ -30,8 +33,15 @@ export const isNixOs = async (): Promise<boolean> => {
 const cliEntryPath = (): string =>
   fileURLToPath(new URL('cli.ts', import.meta.url));
 
+// The tick budget follows the config — every job may use the full agent
+// timeout — so raising "runTimeoutMinutes" or "maxJobsPerTick" cannot
+// silently outgrow the unit. Changing either means re-rendering the units.
+const tickBudgetMinutes = (config: PollerConfig): number =>
+  config.maxJobsPerTick * config.runTimeoutMinutes + TICK_OVERHEAD_MINUTES;
+
 export const renderUnits = (
   configPath: string,
+  config: PollerConfig,
 ): { readonly service: string; readonly timer: string } => ({
   service: `[Unit]
 Description=Standards fix poller tick
@@ -41,7 +51,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 ExecStart=${process.execPath} ${cliEntryPath()} poller --config ${configPath}
-TimeoutStartSec=90min
+TimeoutStartSec=${tickBudgetMinutes(config)}min
 `,
   timer: `[Unit]
 Description=Run the standards fix poller on an interval
@@ -56,15 +66,21 @@ WantedBy=timers.target
 `,
 });
 
-export const runPollerPrintUnits = (configPath: string): void => {
-  const units = renderUnits(resolve(configPath));
+export const runPollerPrintUnits = (
+  configPath: string,
+  config: PollerConfig,
+): void => {
+  const units = renderUnits(resolve(configPath), config);
   console.log(`# ${SERVICE_NAME}.service`);
   console.log(units.service);
   console.log(`# ${SERVICE_NAME}.timer`);
   console.log(units.timer);
 };
 
-export const runPollerInstall = async (configPath: string): Promise<void> => {
+export const runPollerInstall = async (
+  configPath: string,
+  config: PollerConfig,
+): Promise<void> => {
   if (await isNixOs()) {
     throw new Error(
       'standards poller --install refuses to run on NixOS: imperative unit files would fight the declarative system. Wire the tick into your infra repository instead (a systemd service and timer running `standards poller --config ...`); `standards poller --print-units` emits the unit content to adapt.',
@@ -72,7 +88,7 @@ export const runPollerInstall = async (configPath: string): Promise<void> => {
   }
   const unitDir = join(homedir(), '.config', 'systemd', 'user');
   await mkdir(unitDir, { recursive: true });
-  const units = renderUnits(resolve(configPath));
+  const units = renderUnits(resolve(configPath), config);
   const servicePath = join(unitDir, `${SERVICE_NAME}.service`);
   const timerPath = join(unitDir, `${SERVICE_NAME}.timer`);
   await writeFile(servicePath, units.service);

@@ -48,15 +48,16 @@ export const runPollerCommand = async (
     console.error('standards poller: --config <path> is required');
     return false;
   }
+  // Every branch loads the config first: the units derive their tick budget
+  // from it, and a broken file must fail now, not on the first timer firing
+  // at 3am.
+  const config = await loadConfig(options.configPath);
   if (options.printUnits) {
-    runPollerPrintUnits(options.configPath);
+    runPollerPrintUnits(options.configPath, config);
     return true;
   }
-  // Validate the config before install so a broken file fails now, not on
-  // the first timer firing at 3am.
-  const config = await loadConfig(options.configPath);
   if (options.install) {
-    await runPollerInstall(options.configPath);
+    await runPollerInstall(options.configPath, config);
     return true;
   }
   const token = resolveToken();

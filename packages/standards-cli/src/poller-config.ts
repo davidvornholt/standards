@@ -24,7 +24,10 @@ const CONFIG_KEYS: ReadonlySet<string> = new Set([
 
 const DEFAULT_MAX_JOBS_PER_TICK = 1;
 const DEFAULT_STALE_CLAIM_HOURS = 6;
-const DEFAULT_RUN_TIMEOUT_MINUTES = 40;
+// Thorough review runs legitimately take hours; the timeout exists to catch
+// wedged agents, not to bound honest work.
+const DEFAULT_RUN_TIMEOUT_MINUTES = 240;
+const MINUTES_PER_HOUR = 60;
 
 export type PollerConfig = {
   readonly repos: ReadonlyArray<string>;
@@ -174,6 +177,11 @@ export const parsePollerConfig = (
     cacheDir: parseCacheDir(raw.cacheDir, configDir, problems),
     extraCodexArgs: parseExtraCodexArgs(raw.extraCodexArgs, problems),
   };
+  if (config.staleClaimHours * MINUTES_PER_HOUR <= config.runTimeoutMinutes) {
+    problems.push(
+      'poller config "staleClaimHours" must exceed "runTimeoutMinutes": a shorter stale sweep would release the claim of a job that is still running',
+    );
+  }
   return problems.length > 0
     ? { config: null, problems }
     : { config, problems: [] };

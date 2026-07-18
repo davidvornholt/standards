@@ -1597,9 +1597,13 @@ describe('poller', () => {
     );
   });
 
-  it('prints systemd units without touching the host', () => {
+  it('prints systemd units sized from the config without touching the host', () => {
     const consumer = mkTmp('poller-');
     const configPath = join(consumer, 'poller.json');
+    writeFileSync(
+      configPath,
+      '{"repos":["owner/repo"],"model":"gpt-5.6-sol","reasoningEffort":"high"}',
+    );
     const result = run(consumer, [
       'poller',
       '--print-units',
@@ -1609,5 +1613,6 @@ describe('poller', () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('standards-poller.service');
     expect(result.stdout).toContain(`poller --config ${configPath}`);
+    expect(result.stdout).toContain('TimeoutStartSec=270min');
   });
 });
