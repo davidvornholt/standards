@@ -132,43 +132,41 @@ jobs:
             bun standards sync
           fi
 
+      - name: Detect mirror changes
+        id: mirror
+        run: |
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "Already in sync with upstream standards; nothing to open."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
       # The PR-opening token comes from the repo's encrypted CI secrets
       # (ci.standards_sync_token in secrets/ci.yaml, a fine-grained PAT with
-      # contents and pull-requests write), decrypted with the single
-      # SOPS_AGE_KEY bootstrap Actions secret. PRs opened with a PAT trigger
-      # workflows, so the required Standards gate runs on them automatically;
-      # PRs opened with the default workflow-token fallback do not, and need a
-      # manual nudge (push to the branch or close and reopen) to run the gate.
-      # The pinned sops install mirrors standards.yml because synced workflows
-      # stay self-contained single files.
+      # pull-requests write), decrypted with the single SOPS_AGE_KEY bootstrap
+      # Actions secret. The PAT is only resolved after the cheap no-change
+      # check. PRs opened with it trigger the required Standards gate
+      # automatically. Without it, the workflow token can create a PR only
+      # when repository or organization policy allows Actions to do so; the
+      # resulting workflow runs wait for maintainer approval.
       - name: Resolve sync PR token
-        env:
-          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
-          SOPS_VERSION: v3.13.2
-          FALLBACK_TOKEN: ${{ github.token }}
+        if: steps.mirror.outputs.changed == 'true'
+        id: sync-token
+        uses: ./.github/actions/sops-secret
+        with:
+          age-key: ${{ secrets.SOPS_AGE_KEY }}
+          secret-file: secrets/ci.yaml
+          extract: '["ci"]["standards_sync_token"]'
+          env-name: GH_TOKEN
+          fallback-value: ${{ github.token }}
+          failure-mode: fallback
+
+      - name: Report sync PR token fallback
+        if: steps.mirror.outputs.changed == 'true' && steps.sync-token.outputs.used-fallback == 'true'
         run: |
-          token="$FALLBACK_TOKEN"
-          if [ -n "$SOPS_AGE_KEY" ] && [ -f secrets/ci.yaml ]; then
-            case "$(uname -m)" in
-              x86_64) arch=amd64 sha=154dfe4cd70554bdd82b98e4cd4acf191d43d01ead6f00a73477aa44c4ac42ef ;;
-              aarch64) arch=arm64 sha=78abf2e15c86250a1553ae6f53aba96be6b2a8126f160b1534959add3467ad76 ;;
-              *)
-                echo "::error::No pinned sops binary for runner architecture $(uname -m)"
-                exit 1
-                ;;
-            esac
-            sops="$RUNNER_TEMP/sops"
-            curl -sfLo "$sops" "https://github.com/getsops/sops/releases/download/${SOPS_VERSION}/sops-${SOPS_VERSION}.linux.${arch}"
-            echo "$sha  $sops" | sha256sum --check --quiet
-            chmod +x "$sops"
-            if extracted=$("$sops" decrypt --extract '["ci"]["standards_sync_token"]' secrets/ci.yaml); then
-              token="$extracted"
-            else
-              echo "ci.standards_sync_token is not readable from secrets/ci.yaml; the sync PR will be opened with the workflow token and needs a manual nudge to run the gate."
-            fi
-          fi
-          echo "::add-mask::$token"
-          echo "GH_TOKEN=$token" >> "$GITHUB_ENV"
+          echo "::warning::ci.standards_sync_token is not readable from secrets/ci.yaml; the workflow will try to open the sync PR with the workflow token."
+          echo "::warning::If repository policy permits that PR, approve its queued workflow runs. Otherwise gh pr create will fail after pushing the sync branch, leaving the branch without a PR."
 
       # This workflow deliberately runs no inline `bun run check`: the synced
       # result is validated by the required Standards gate on the PR it opens,
@@ -182,11 +180,8 @@ jobs:
       # branch: the `schedule` event carries no payload, so expressions like
       # `github.event.repository.default_branch` are empty here.
       - name: Open a pull request if the mirror changed
+        if: steps.mirror.outputs.changed == 'true'
         run: |
-          if [ -z "$(git status --porcelain)" ]; then
-            echo "Already in sync with upstream standards; nothing to open."
-            exit 0
-          fi
           branch="standards-sync/$(date -u +%Y%m%d%H%M%S)"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

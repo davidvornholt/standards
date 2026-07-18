@@ -73,37 +73,21 @@ jobs:
       # secrets/ci.yaml, a fine-grained PAT with read-only "Administration"
       # access to this repository), decrypted with the single SOPS_AGE_KEY
       # bootstrap Actions secret. When the key, file, or entry is absent the
-      # gate runs with the workflow token and fails, loudly, by design. The
-      # pinned sops install mirrors notify-pause.yml because synced workflows
-      # stay self-contained single files.
+      # gate runs with the workflow token and fails, loudly, by design.
       - name: Resolve GitHub settings gate token
-        env:
-          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
-          SOPS_VERSION: v3.13.2
-          FALLBACK_TOKEN: ${{ github.token }}
-        run: |
-          token="$FALLBACK_TOKEN"
-          if [ -n "$SOPS_AGE_KEY" ] && [ -f secrets/ci.yaml ]; then
-            case "$(uname -m)" in
-              x86_64) arch=amd64 sha=154dfe4cd70554bdd82b98e4cd4acf191d43d01ead6f00a73477aa44c4ac42ef ;;
-              aarch64) arch=arm64 sha=78abf2e15c86250a1553ae6f53aba96be6b2a8126f160b1534959add3467ad76 ;;
-              *)
-                echo "::error::No pinned sops binary for runner architecture $(uname -m)"
-                exit 1
-                ;;
-            esac
-            sops="$RUNNER_TEMP/sops"
-            curl -sfLo "$sops" "https://github.com/getsops/sops/releases/download/${SOPS_VERSION}/sops-${SOPS_VERSION}.linux.${arch}"
-            echo "$sha  $sops" | sha256sum --check --quiet
-            chmod +x "$sops"
-            if extracted=$("$sops" decrypt --extract '["ci"]["github_settings_read_token"]' secrets/ci.yaml); then
-              token="$extracted"
-            else
-              echo "ci.github_settings_read_token is not readable from secrets/ci.yaml; the GitHub settings gate will fail on settings the workflow token cannot see."
-            fi
-          fi
-          echo "::add-mask::$token"
-          echo "GH_TOKEN=$token" >> "$GITHUB_ENV"
+        id: settings-token
+        uses: ./.github/actions/sops-secret
+        with:
+          age-key: ${{ secrets.SOPS_AGE_KEY }}
+          secret-file: secrets/ci.yaml
+          extract: '["ci"]["github_settings_read_token"]'
+          env-name: GH_TOKEN
+          fallback-value: ${{ github.token }}
+          failure-mode: fallback
+
+      - name: Report GitHub settings token fallback
+        if: steps.settings-token.outputs.used-fallback == 'true'
+        run: echo "ci.github_settings_read_token is not readable from secrets/ci.yaml; the GitHub settings gate will fail on settings the workflow token cannot see."
 
       # Workflows are the one file class the rest of the gate never exercises —
       # a broken workflow only fails when its trigger fires, after merge. Lint

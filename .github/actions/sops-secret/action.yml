@@ -1,0 +1,100 @@
+name: Resolve SOPS secret
+description: Install pinned SOPS and export one validated secret value
+
+inputs:
+  age-key:
+    description: Age identity that can decrypt the secret file
+    required: false
+  secret-file:
+    description: SOPS-encrypted YAML file
+    required: true
+  extract:
+    description: SOPS extract expression for the required scalar
+    required: true
+  env-name:
+    description: Environment variable to export for later workflow steps
+    required: true
+  fallback-value:
+    description: Value to export when fallback mode handles an unavailable secret
+    required: false
+  failure-mode:
+    description: Whether an unavailable or invalid secret fails or uses fallback-value
+    required: false
+    default: fail
+
+outputs:
+  used-fallback:
+    description: Whether fallback-value was exported
+    value: ${{ steps.resolve.outputs.used-fallback }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve and validate secret
+      id: resolve
+      shell: bash
+      env:
+        SOPS_AGE_KEY: ${{ inputs.age-key }}
+        SOPS_SECRET_FILE: ${{ inputs.secret-file }}
+        SOPS_EXTRACT: ${{ inputs.extract }}
+        SOPS_ENV_NAME: ${{ inputs.env-name }}
+        SOPS_FALLBACK_VALUE: ${{ inputs.fallback-value }}
+        SOPS_FAILURE_MODE: ${{ inputs.failure-mode }}
+      run: |
+        set -euo pipefail
+
+        if [[ ! "$SOPS_ENV_NAME" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+          echo "::error::env-name must be a valid environment variable name"
+          exit 1
+        fi
+        if [[ "$SOPS_FAILURE_MODE" != fail && "$SOPS_FAILURE_MODE" != fallback ]]; then
+          echo "::error::failure-mode must be either fail or fallback"
+          exit 1
+        fi
+
+        use_fallback=false
+        if [ -z "$SOPS_AGE_KEY" ]; then
+          reason="SOPS_AGE_KEY is not configured"
+          use_fallback=true
+        elif [ ! -f "$SOPS_SECRET_FILE" ]; then
+          reason="$SOPS_SECRET_FILE does not exist"
+          use_fallback=true
+        else
+          version=v3.13.2
+          case "$(uname -m)" in
+            x86_64) arch=amd64 sha=154dfe4cd70554bdd82b98e4cd4acf191d43d01ead6f00a73477aa44c4ac42ef ;;
+            aarch64) arch=arm64 sha=78abf2e15c86250a1553ae6f53aba96be6b2a8126f160b1534959add3467ad76 ;;
+            *)
+              echo "::error::No pinned SOPS binary for runner architecture $(uname -m)"
+              exit 1
+              ;;
+          esac
+          sops="$RUNNER_TEMP/sops"
+          curl -sfLo "$sops" "https://github.com/getsops/sops/releases/download/${version}/sops-${version}.linux.${arch}"
+          echo "$sha  $sops" | sha256sum --check --quiet
+          chmod +x "$sops"
+          if decrypted_json=$("$sops" decrypt --extract "$SOPS_EXTRACT" --output-type json "$SOPS_SECRET_FILE") \
+            && extracted=$(jq -er 'select(type == "string" and length > 0 and (contains("\n") | not) and (contains("\r") | not))' <<< "$decrypted_json"); then
+            value="$extracted"
+          else
+            reason="$SOPS_EXTRACT is not a readable non-empty single-line string in $SOPS_SECRET_FILE"
+            use_fallback=true
+          fi
+        fi
+
+        if [ "$use_fallback" = true ]; then
+          if [ "$SOPS_FAILURE_MODE" = fail ]; then
+            echo "::error::$reason"
+            exit 1
+          fi
+          value="$SOPS_FALLBACK_VALUE"
+          echo "::warning::$reason; using the configured fallback"
+        fi
+        if [ -z "$value" ] || [[ "$value" == *$'\n'* ]] || [[ "$value" == *$'\r'* ]]; then
+          echo "::error::Resolved secret value must be non-empty and single-line"
+          exit 1
+        fi
+
+        echo "::add-mask::$value"
+        printf '%s=%s\n' "$SOPS_ENV_NAME" "$value" >> "$GITHUB_ENV"
+        printf 'used-fallback=%s\n' "$use_fallback" >> "$GITHUB_OUTPUT"
