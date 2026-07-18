@@ -26,9 +26,9 @@ import {
 import { readReviewOutcome } from './poller-outcome';
 import { reviewPrompt } from './poller-prompts';
 import {
+  APPROVED_FOR_REVIEW,
   DEFERRED_FINDING,
   forbiddenDiffPaths,
-  REVIEW_APPROVED,
   REVIEW_FAILED,
   REVIEW_IN_PROGRESS,
   type ReviewOutcome,
@@ -44,7 +44,7 @@ import {
 } from './poller-workspace';
 
 const REVIEW_LABELS: JobLabels = {
-  approved: REVIEW_APPROVED,
+  approved: APPROVED_FOR_REVIEW,
   inProgress: REVIEW_IN_PROGRESS,
   failed: REVIEW_FAILED,
 };

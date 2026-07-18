@@ -56,7 +56,7 @@ describe('runPollerTick', () => {
     installApi([
       { body: [] }, // fix-in-progress sweep
       { body: [] }, // review-in-progress sweep
-      { body: [] }, // review-approved
+      { body: [] }, // approved-for-review
       { body: [] }, // approved-for-fix
     ]);
     const report = await runPollerTick(config(), 'test-token', NOW);
@@ -95,7 +95,7 @@ describe('runPollerTick', () => {
         ],
       },
       { body: [] }, // review-in-progress sweep
-      { body: [] }, // review-approved
+      { body: [] }, // approved-for-review
       { body: [] }, // approved-for-fix
     ]);
     const report = await runPollerTick(config(), 'test-token', NOW);
@@ -114,7 +114,7 @@ describe('runPollerTick', () => {
     const calls: ReadonlyArray<ApiCall> = installApi([
       { body: [] }, // fix-in-progress sweep
       { body: [] }, // review-in-progress sweep
-      { body: [] }, // review-approved
+      { body: [] }, // approved-for-review
       { body: [issue(REJECTED_ISSUE, ['approved-for-fix'])] },
       { body: { default_branch: 'main' } },
       {
@@ -154,7 +154,7 @@ describe('runPollerTick', () => {
         ],
       },
       { body: [] }, // review-in-progress sweep
-      { body: [] }, // review-approved
+      { body: [] }, // approved-for-review
       { body: [issue(CLAIMED_ISSUE, ['approved-for-fix', 'fix-in-progress'])] },
     ]);
     const report = await runPollerTick(config(), 'test-token', NOW);

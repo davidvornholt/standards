@@ -6,7 +6,7 @@
 export const APPROVED_FOR_FIX = 'approved-for-fix';
 export const FIX_IN_PROGRESS = 'fix-in-progress';
 export const FIX_FAILED = 'fix-failed';
-export const REVIEW_APPROVED = 'review-approved';
+export const APPROVED_FOR_REVIEW = 'approved-for-review';
 export const REVIEW_IN_PROGRESS = 'review-in-progress';
 export const REVIEW_FAILED = 'review-failed';
 export const NEEDS_CLARIFICATION = 'needs-clarification';

@@ -64,7 +64,7 @@
       "description": "An automated fix run failed and needs a human look"
     },
     {
-      "name": "review-approved",
+      "name": "approved-for-review",
       "color": "1d76db",
       "description": "Maintainer approval: the fix poller may run review-fix on this pull request"
     },

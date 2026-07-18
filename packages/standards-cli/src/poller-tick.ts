@@ -15,8 +15,8 @@ import { createComment, removeLabel } from './poller-github-write';
 import type { JobDeps, JobResult } from './poller-job-shared';
 import {
   APPROVED_FOR_FIX,
+  APPROVED_FOR_REVIEW,
   FIX_IN_PROGRESS,
-  REVIEW_APPROVED,
   REVIEW_IN_PROGRESS,
 } from './poller-protocol';
 import { runReviewJob } from './poller-review-run';
@@ -120,7 +120,7 @@ const processRepo = async (
     lines.push(...swept);
   }
   const reviewItems = unclaimed(
-    (await listOpenIssuesWithLabel(token, repo, REVIEW_APPROVED)).filter(
+    (await listOpenIssuesWithLabel(token, repo, APPROVED_FOR_REVIEW)).filter(
       (item) => item.isPullRequest,
     ),
     REVIEW_IN_PROGRESS,

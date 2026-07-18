@@ -20,12 +20,12 @@ import { readFixOutcome } from './poller-outcome';
 import { fixPrompt } from './poller-prompts';
 import {
   APPROVED_FOR_FIX,
+  APPROVED_FOR_REVIEW,
   branchNameForIssue,
   FIX_FAILED,
   FIX_IN_PROGRESS,
   type FixOutcome,
   forbiddenDiffPaths,
-  REVIEW_APPROVED,
 } from './poller-protocol';
 import {
   changedPaths,
@@ -89,7 +89,7 @@ const finishFixedJob = async (
     deps.token,
     deps.repo,
     issue.number,
-    `Opened draft PR #${prNumber} for this issue. Apply \`${REVIEW_APPROVED}\` on the PR to run the automated review-fix pass, or review it directly.`,
+    `Opened draft PR #${prNumber} for this issue. Apply \`${APPROVED_FOR_REVIEW}\` on the PR to run the automated review-fix pass, or review it directly.`,
   );
   await releaseLabels(deps, FIX_LABELS, issue.number);
   return `#${issue.number}: opened draft PR #${prNumber}`;
