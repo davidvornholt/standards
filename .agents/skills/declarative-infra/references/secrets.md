@@ -106,7 +106,7 @@ Wire it from the root `justfile` with `mod secrets 'secrets.just'`.
 
 - One bootstrap Actions secret per repo: `SOPS_AGE_KEY`, the CI recipient's private key (`gh secret set SOPS_AGE_KEY`).
 - Workflows decrypt at runtime with a version- and checksum-pinned sops, and mask every decrypted value with `::add-mask::` — SOPS output gets no automatic log masking.
-- Plane separation: secrets that bootstrap the machinery (`SOPS_AGE_KEY`, sync PATs) stay native Actions secrets; work-plane secrets live in SOPS targets.
+- Plane separation: only `SOPS_AGE_KEY` bootstraps the machinery and stays a native Actions secret; every other CI secret, including workflow PATs like `ci.standards_sync_token`, lives in SOPS targets and is decrypted at runtime.
 
 ## Rotation
 
