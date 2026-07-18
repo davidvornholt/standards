@@ -111,6 +111,53 @@ export const loadDeclared = async (
   );
 };
 
+const GRAPHQL_MERGE_FIELDS: ReadonlyMap<string, string> = new Map([
+  ['allow_auto_merge', 'autoMergeAllowed'],
+  ['allow_merge_commit', 'mergeCommitAllowed'],
+  ['allow_rebase_merge', 'rebaseMergeAllowed'],
+  ['allow_squash_merge', 'squashMergeAllowed'],
+  ['delete_branch_on_merge', 'deleteBranchOnMerge'],
+  ['merge_commit_message', 'mergeCommitMessage'],
+  ['merge_commit_title', 'mergeCommitTitle'],
+  ['squash_merge_commit_message', 'squashMergeCommitMessage'],
+  ['squash_merge_commit_title', 'squashMergeCommitTitle'],
+]);
+
+// REST omits repository merge settings for read-only viewers (they surface
+// only with write access — community discussion #153258), but GraphQL serves
+// the same values, with identical enum spellings, to any token that can read
+// the repository. This keeps a read-only PAT sufficient for the check.
+// Returns only the keys GraphQL answered; the rest stay unverifiable.
+export const fetchMergeSettingsViaGraphql = async (
+  token: string | null,
+  repo: string,
+  keys: ReadonlyArray<string>,
+): Promise<Readonly<Record<string, unknown>>> => {
+  const mapped = keys.filter((key) => GRAPHQL_MERGE_FIELDS.has(key));
+  const [owner, name] = repo.split('/');
+  if (mapped.length === 0 || owner === undefined || name === undefined) {
+    return {};
+  }
+  const fields = mapped.map((key) => GRAPHQL_MERGE_FIELDS.get(key)).join(' ');
+  const response = await request(token, 'POST', '/graphql', {
+    query: `query { repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) { ${fields} } }`,
+  });
+  if (response.status !== HTTP_OK || !isRecord(response.body)) {
+    return {};
+  }
+  const data = isRecord(response.body.data) ? response.body.data : null;
+  const repository =
+    data !== null && isRecord(data.repository) ? data.repository : null;
+  if (repository === null) {
+    return {};
+  }
+  return Object.fromEntries(
+    mapped
+      .map((key) => [key, repository[GRAPHQL_MERGE_FIELDS.get(key) ?? '']])
+      .filter(([, value]) => value !== undefined && value !== null),
+  );
+};
+
 export type LiveRulesets = {
   readonly rulesets: ReadonlyArray<Record<string, unknown>> | null;
   readonly problem: string | null;

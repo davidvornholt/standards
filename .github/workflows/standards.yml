@@ -59,15 +59,51 @@ jobs:
           --health-retries 10
     env:
       DATABASE_URL: postgresql://${{ vars.CI_POSTGRES_USER || 'app' }}:${{ vars.CI_POSTGRES_PASSWORD || 'app' }}@127.0.0.1:5432/${{ vars.CI_POSTGRES_DB || 'app' }}
-      # `standards check` verifies the declared GitHub settings
-      # (.github/settings.json) against the live repository. The token makes
-      # those API reads work on private repos and avoids anonymous rate limits;
-      # it cannot hold the admin permission, so repo merge settings it cannot
-      # see are reported as unverifiable rather than failing the gate.
-      GH_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+
+      # `standards check` verifies the declared GitHub settings
+      # (.github/settings.json) against the live repository and fails closed:
+      # declared state its token cannot see fails the gate instead of passing
+      # unverified. GitHub reveals repo merge settings and ruleset bypass
+      # actors only to admin-capable viewers — a permission the workflow token
+      # can never hold — so the verifying token comes from the repo's
+      # encrypted CI secrets (ci.github_settings_read_token in
+      # secrets/ci.yaml, a fine-grained PAT with read-only "Administration"
+      # access to this repository), decrypted with the single SOPS_AGE_KEY
+      # bootstrap Actions secret. When the key, file, or entry is absent the
+      # gate runs with the workflow token and fails, loudly, by design. The
+      # pinned sops install mirrors notify-pause.yml because synced workflows
+      # stay self-contained single files.
+      - name: Resolve GitHub settings gate token
+        env:
+          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+          SOPS_VERSION: v3.13.2
+          FALLBACK_TOKEN: ${{ github.token }}
+        run: |
+          token="$FALLBACK_TOKEN"
+          if [ -n "$SOPS_AGE_KEY" ] && [ -f secrets/ci.yaml ]; then
+            case "$(uname -m)" in
+              x86_64) arch=amd64 sha=154dfe4cd70554bdd82b98e4cd4acf191d43d01ead6f00a73477aa44c4ac42ef ;;
+              aarch64) arch=arm64 sha=78abf2e15c86250a1553ae6f53aba96be6b2a8126f160b1534959add3467ad76 ;;
+              *)
+                echo "::error::No pinned sops binary for runner architecture $(uname -m)"
+                exit 1
+                ;;
+            esac
+            sops="$RUNNER_TEMP/sops"
+            curl -sfLo "$sops" "https://github.com/getsops/sops/releases/download/${SOPS_VERSION}/sops-${SOPS_VERSION}.linux.${arch}"
+            echo "$sha  $sops" | sha256sum --check --quiet
+            chmod +x "$sops"
+            if extracted=$("$sops" decrypt --extract '["ci"]["github_settings_read_token"]' secrets/ci.yaml); then
+              token="$extracted"
+            else
+              echo "ci.github_settings_read_token is not readable from secrets/ci.yaml; the GitHub settings gate will fail on settings the workflow token cannot see."
+            fi
+          fi
+          echo "::add-mask::$token"
+          echo "GH_TOKEN=$token" >> "$GITHUB_ENV"
 
       # Workflows are the one file class the rest of the gate never exercises —
       # a broken workflow only fails when its trigger fires, after merge. Lint

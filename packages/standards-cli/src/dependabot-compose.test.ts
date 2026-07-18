@@ -98,7 +98,7 @@ describe('composeDependabot overlay validation', () => {
     const { composed, problems } = composeDependabot(BASE, local);
     expect(composed).toBeNull();
     expect(problems.join('\n')).toContain(
-      'may only add ignore entries; remove: schedule',
+      'may only add ignore or registries entries; remove: schedule',
     );
   });
 
@@ -111,13 +111,17 @@ describe('composeDependabot overlay validation', () => {
     ].join('\n');
     const { composed, problems } = composeDependabot(BASE, local);
     expect(composed).toBeNull();
-    expect(problems.join('\n')).toContain('must add a non-empty ignore list');
+    expect(problems.join('\n')).toContain(
+      'must add a non-empty ignore or registries list',
+    );
   });
 
   it('rejects unknown top-level overlay keys', () => {
     const { composed, problems } = composeDependabot(BASE, 'version: 2\n');
     expect(composed).toBeNull();
-    expect(problems.join('\n')).toContain('may only define "updates"');
+    expect(problems.join('\n')).toContain(
+      'may only define "updates" and "registries"',
+    );
   });
 
   it('rejects duplicate overlay blocks for one ecosystem and directory', () => {
@@ -135,9 +139,7 @@ describe('composeDependabot overlay validation', () => {
     ].join('\n');
     const { composed, problems } = composeDependabot(BASE, local);
     expect(composed).toBeNull();
-    expect(problems.join('\n')).toContain(
-      'must be unique per ecosystem and directory',
-    );
+    expect(problems.join('\n')).toContain('updates[1] overlaps');
   });
 
   it('reports invalid YAML per file', () => {
