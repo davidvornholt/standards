@@ -8,12 +8,12 @@
   ],
   "scripts": {
     "standards": "bun packages/standards-cli/src/cli.ts",
-    "check": "bun packages/standards-cli/src/cli.ts structure --profile source && bun packages/standards-cli/src/cli.ts github --check && turbo run lint check-types test",
-    "check:fix": "bun packages/standards-cli/src/cli.ts structure --profile source && bun packages/standards-cli/src/cli.ts github --check && turbo run lint:fix check-types test"
+    "check": "bun packages/standards-cli/src/cli.ts structure --profile source && bun packages/standards-cli/src/cli.ts dependabot --check && bun packages/standards-cli/src/cli.ts github --check && turbo run lint check-types test",
+    "check:fix": "bun packages/standards-cli/src/cli.ts structure --profile source && bun packages/standards-cli/src/cli.ts dependabot --write && bun packages/standards-cli/src/cli.ts github --check && turbo run lint:fix check-types test"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.3",
-    "turbo": "^2.10.4",
+    "@biomejs/biome": "2.5.2",
+    "turbo": "^2.10.5",
     "typescript": "7.0.2"
   },
   "engines": {

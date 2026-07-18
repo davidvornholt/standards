@@ -1,6 +1,6 @@
 {
   "name": "@davidvornholt/standards",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "Bootstrap, synchronize, and validate davidvornholt/standards consumers",
   "license": "MIT",
   "repository": {
@@ -20,6 +20,8 @@
     "LICENSE",
     "README.md",
     "src/cli.ts",
+    "src/dependabot-compose.ts",
+    "src/dependabot-inspect.ts",
     "src/github-api.ts",
     "src/github-apply.ts",
     "src/github-command-shared.ts",
@@ -30,7 +32,8 @@
     "src/structure-check.ts",
     "src/structure-profile.ts",
     "src/structure-script.ts",
-    "src/structure-workspace.ts"
+    "src/structure-workspace.ts",
+    "src/yaml-emit.ts"
   ],
   "scripts": {
     "lint": "biome check --error-on-warnings .",

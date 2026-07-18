@@ -17,11 +17,13 @@ Quality gates are deliberately strict so that **agents can verify their work mec
 - **`.github/settings.json`** — the declared GitHub repository state: merge settings (auto-merge, delete-branch-on-merge, squash commit shape) and the default-branch ruleset (PR required, `check` status required, linear history, no bypass). `standards github --apply` converges the live repo; `standards check` fails on drift.
 - **`@davidvornholt/standards`** — the Bun-executable CLI for bootstrap, sync, drift detection, and consumer integration validation.
 
-## Two buckets
+## File ownership
 
-Every file is either **synced** (upstream-owned, read-only in consumers — the list in `sync-standards.json`) or **seeded once** (written by `init` from `template/`, then owned by the repo: the `biome.jsonc` wrapper, `AGENTS.local.md`, `.github/dependabot.yml`, `.sops.yaml`, `secrets/*.example.yaml`, root scaffolding, `README.md`). Secret-shape examples are seeded, not synced, so each repo can extend them to mirror its own real secrets without the next sync clobbering them.
+Every file is **synced** (upstream-owned, read-only in consumers — the list in `sync-standards.json`), **seeded once** (written by `init` from `template/`, then owned by the repo: the `biome.jsonc` wrapper, `AGENTS.local.md`, `.github/dependabot.local.yml`, `.sops.yaml`, `secrets/*.example.yaml`, root scaffolding, `README.md`), or **generated** (engine-owned output that `sync` recomposes: `.github/dependabot.yml`, built from the canonical `.github/dependabot.base.yml` plus the repo-owned `.github/dependabot.local.yml`). Secret-shape examples are seeded, not synced, so each repo can extend them to mirror its own real secrets without the next sync clobbering them.
 
-Because canonical files are read-only, every point of legitimate per-repo variation goes through a wrapper seam: `biome.jsonc` extends `biome.base.jsonc`, `AGENTS.local.md` extends `AGENTS.md`, and `.github/settings.local.json` extends `.github/settings.json` (additively — it can add repository settings and rulesets but never override canonical ones; its one subtractive declaration is `"rulesetEnforcement": "unavailable-on-plan"` for repos whose GitHub plan cannot enforce rulesets, which skips the ruleset gate loudly instead of weakening any rule).
+Because canonical files are read-only, every point of legitimate per-repo variation goes through a wrapper seam: `biome.jsonc` extends `biome.base.jsonc`, `AGENTS.local.md` extends `AGENTS.md`, `.github/dependabot.local.yml` extends `.github/dependabot.base.yml` (additively — it can add ecosystems and append `ignore` holds to canonical blocks, never override them), and `.github/settings.local.json` extends `.github/settings.json` (additively — it can add repository settings and rulesets but never override canonical ones; its one subtractive declaration is `"rulesetEnforcement": "unavailable-on-plan"` for repos whose GitHub plan cannot enforce rulesets, which skips the ruleset gate loudly instead of weakening any rule).
+
+The canonical Dependabot base carries the baseline ecosystems (Bun, GitHub Actions) and the template-wide version holds — dependencies deliberately not bumped, each with the reason and lift condition in a comment (Biome is pinned because `biome.base.jsonc` is authored against an exact version; TypeScript is held while Next.js does not support newer releases). Adding or lifting a hold is one upstream change that reaches every consumer on its next sync.
 
 ## Adopt it
 
@@ -49,7 +51,7 @@ bun standards init
 - **`CLAUDE.md`** — replace its contents with the single line `@AGENTS.md`. It is canonical and synced, so it must match byte-for-byte.
 - **`AGENTS.md`** — now canonical and synced; move anything repo-specific into `AGENTS.local.md`, which `AGENTS.md` includes.
 - **`package.json`** — declare `@davidvornholt/standards` directly and make `check` and `check:fix` run `standards check` first.
-- **`.github/dependabot.yml`** — keep the baseline root entries for the Bun and GitHub Actions ecosystems; add repo-specific ecosystems such as Nix or OpenTofu when the repository uses them.
+- **`.github/dependabot.yml`** — now generated: `sync` composes it from the canonical `.github/dependabot.base.yml` and your repo-owned `.github/dependabot.local.yml`. Move any customizations from a previously hand-maintained `dependabot.yml` into `.github/dependabot.local.yml` — repo-specific ecosystems such as Nix or OpenTofu as new update blocks, repo-local version holds by repeating a canonical block's `package-ecosystem` and `directory` with only an `ignore` list. The next `sync` (or `bun standards dependabot --write`) overwrites the generated file.
 - **`.sops.yaml`** — keep your real age recipients; only the `secrets/*.example.yaml` *shapes* are canonical.
 - **CI** — the synced `.github/workflows/standards.yml` is your quality gate. If the repo already ran its own gate, drop that duplication and keep only what the canonical gate does not (deploy, infra). If your tests need a specific database, set the repo Actions variables `CI_POSTGRES_USER` / `CI_POSTGRES_PASSWORD` / `CI_POSTGRES_DB` (and optionally `CI_RUNNER`). To get a phone push when an agent review cycle pauses on a question (the synced `Notify pause` workflow, triggered by the `needs-clarification` label), set `ci.ntfy_topic_url` in your SOPS-encrypted `secrets/ci.yaml` to a full [ntfy](https://ntfy.sh) topic URL with a random unguessable topic name — the topic name is the only access control — and configure the `SOPS_AGE_KEY` Actions secret so CI can decrypt it; that key is the single bootstrap secret for all CI secrets.
 
@@ -69,6 +71,8 @@ bun standards sync --dry-run  # preview a sync, writing nothing
 bun standards check           # verify canonical files, seams, structure, and GitHub settings
 bun standards doctor          # validate extension seams without drift checks
 bun standards structure       # validate monorepo structure rules only
+bun standards dependabot --check  # verify the composed .github/dependabot.yml matches its sources
+bun standards dependabot --write  # regenerate it after editing .github/dependabot.local.yml
 bun standards github --check  # compare live GitHub settings to the declaration
 bun standards github --apply  # converge the live repo (needs admin gh auth)
 bun standards help            # list commands and options
@@ -90,6 +94,10 @@ Every CLI release already creates a `vX.Y.Z` tag and GitHub Release, so released
 Version 0.7.0 is an intentional hard cutover: `sync-standards.local.json` is the only cadence and ref policy source. The canonical workflow and CLI no longer read `STANDARDS_AUTO_SYNC` or `STANDARDS_SYNC_REF`; leaving those Actions variables configured has no effect.
 
 Upgrade `@davidvornholt/standards` and `bun.lock` to 0.7.0 or newer, create `sync-standards.local.json` with any required opt-out or pin, and accept the canonical workflow update in the same consumer PR. When the policy file is present, the workflow fails before syncing with an actionable error if the installed CLI is older than 0.7.0. This prevents a canonical workflow update from silently running a CLI that does not understand the checked-in policy.
+
+### Breaking migration to 0.10.0
+
+Version 0.10.0 makes `.github/dependabot.yml` a generated file. It is no longer seeded and repo-owned: `sync` composes it from the synced `.github/dependabot.base.yml` and the optional repo-owned `.github/dependabot.local.yml`, overwriting whatever is there, and `check` fails while the generated file does not match its sources. Before (or with) the upgrade, move any customizations out of your old hand-maintained `dependabot.yml` into `.github/dependabot.local.yml` — new ecosystems as new update blocks, extra version holds by repeating the canonical block with only an `ignore` list. Template-wide holds (Biome, TypeScript) now arrive through the canonical base, so delete local copies of them rather than duplicating the entries.
 
 ## Release the CLI
 

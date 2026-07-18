@@ -67,7 +67,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       # Workflows are the one file class the rest of the gate never exercises —
       # a broken workflow only fails when its trigger fires, after merge. Lint

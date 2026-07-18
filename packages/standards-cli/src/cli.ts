@@ -32,14 +32,20 @@ import {
   sep,
 } from 'node:path';
 import process from 'node:process';
+import {
+  composeDependabot,
+  DEPENDABOT_BASE_FILE,
+  DEPENDABOT_FILE,
+  DEPENDABOT_LOCAL_FILE,
+} from './dependabot-compose';
+import { inspectDependabot } from './dependabot-inspect';
 import { CANONICAL_SETTINGS_FILE, LOCAL_SETTINGS_FILE } from './github-api';
 import { runGithubApply, runGithubCheck } from './github-commands';
 import { loadGithubSettings } from './github-settings';
+import { isNonEmptyString, isRecord } from './github-settings-parse';
 import { collectStructureProblems } from './structure-check';
 import type { StructureProfile } from './structure-profile';
 import { hasSafeCommand } from './structure-script';
-
-const { YAML: BunYaml } = await import('bun');
 
 const DEFAULT_UPSTREAM = 'github:davidvornholt/standards';
 
@@ -79,6 +85,7 @@ type Source = {
 
 type Command =
   | 'check'
+  | 'dependabot'
   | 'doctor'
   | 'github'
   | 'help'
@@ -93,6 +100,7 @@ type CliOptions = {
   readonly from: string | undefined;
   readonly ref: string | undefined;
   readonly apply: boolean;
+  readonly write: boolean;
   readonly profile: StructureProfile;
 };
 
@@ -423,6 +431,7 @@ const runInit = async (
     dryRun: false,
   });
   reportMirror(result, false);
+  await generateDependabot(consumer, false);
   await writeLock(consumer, {
     upstream: manifest.upstream,
     sha: src.sha,
@@ -450,6 +459,7 @@ const runSync = async (
     dryRun,
   });
   reportMirror(result, dryRun);
+  await generateDependabot(consumer, dryRun);
   if (dryRun) {
     return;
   }
@@ -510,177 +520,130 @@ const runCheck = async (consumer: string): Promise<boolean> => {
 const readTextIfPresent = async (path: string): Promise<string | null> =>
   existsSync(path) ? readFile(path, 'utf8') : null;
 
-const DEPENDABOT_BASELINE_ECOSYSTEMS = ['bun', 'github-actions'] as const;
-const DEPENDABOT_SCHEDULE_INTERVALS = new Set([
-  'daily',
-  'weekly',
-  'monthly',
-  'quarterly',
-  'semiannually',
-  'yearly',
-  'cron',
-]);
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
-const isNonEmptyString = (value: unknown): value is string =>
-  typeof value === 'string' && value.length > 0;
-
-type DependabotUpdateInspection = {
-  readonly problems: ReadonlyArray<string>;
-  readonly rootEcosystem: string | null;
+type DependabotSources = {
+  readonly base: string | null;
+  readonly local: string | null;
+  readonly current: string | null;
 };
 
-const inspectDependabotSchedule = (
-  schedule: unknown,
-  label: string,
-): ReadonlyArray<string> => {
-  if (!(isRecord(schedule) && isNonEmptyString(schedule.interval))) {
-    return [`${label} must define schedule.interval`];
+const readDependabotSources = async (
+  consumer: string,
+): Promise<DependabotSources> => ({
+  base: await readTextIfPresent(join(consumer, DEPENDABOT_BASE_FILE)),
+  local: await readTextIfPresent(join(consumer, DEPENDABOT_LOCAL_FILE)),
+  current: await readTextIfPresent(join(consumer, DEPENDABOT_FILE)),
+});
+
+// Compose the generated Dependabot config from its on-disk sources, folding
+// Dependabot semantic validation into the same problem list.
+const composedDependabot = (
+  sources: DependabotSources,
+): {
+  readonly composed: string | null;
+  readonly problems: ReadonlyArray<string>;
+} => {
+  if (sources.base === null) {
+    return {
+      composed: null,
+      problems: [
+        `${DEPENDABOT_BASE_FILE} must exist; run \`bun standards sync\` to mirror it in`,
+      ],
+    };
   }
-  if (!DEPENDABOT_SCHEDULE_INTERVALS.has(schedule.interval)) {
-    return [`${label} has an unsupported schedule.interval`];
+  const result = composeDependabot(sources.base, sources.local);
+  if (result.composed === null) {
+    return result;
   }
-  if (schedule.interval === 'cron' && !isNonEmptyString(schedule.cronjob)) {
-    return [`${label} must define schedule.cronjob for a cron interval`];
+  const problems = inspectDependabot(result.composed);
+  return problems.length > 0 ? { composed: null, problems } : result;
+};
+
+const dependabotProblems = async (
+  consumer: string,
+): Promise<ReadonlyArray<string>> => {
+  const sources = await readDependabotSources(consumer);
+  const { composed, problems } = composedDependabot(sources);
+  if (composed === null) {
+    return problems;
+  }
+  if (sources.current !== composed) {
+    return [
+      `${DEPENDABOT_FILE} does not match its composed sources; regenerate it with \`bun standards dependabot --write\``,
+    ];
   }
   return [];
 };
 
-type DependabotGroupInspection = {
-  readonly problems: ReadonlyArray<string>;
-  readonly scheduledGroups: ReadonlySet<string>;
+const writeComposedDependabot = async (
+  consumer: string,
+  composed: string,
+): Promise<void> => {
+  const dest = join(consumer, DEPENDABOT_FILE);
+  await mkdir(dirname(dest), { recursive: true });
+  await writeFile(dest, composed);
 };
 
-const inspectDependabotGroups = (
-  groups: unknown,
-): DependabotGroupInspection => {
-  if (groups === undefined) {
-    return { problems: [], scheduledGroups: new Set() };
-  }
-  if (!isRecord(groups)) {
-    return {
-      problems: [
-        '.github/dependabot.yml multi-ecosystem-groups must be a mapping',
-      ],
-      scheduledGroups: new Set(),
-    };
-  }
+const composeProblemsError = (problems: ReadonlyArray<string>): Error =>
+  new Error(
+    [
+      `cannot compose ${DEPENDABOT_FILE}:`,
+      ...problems.map((problem) => `  - ${problem}`),
+    ].join('\n'),
+  );
 
-  const problems: Array<string> = [];
-  const scheduledGroups = new Set<string>();
-  for (const [name, group] of Object.entries(groups)) {
-    const label = `.github/dependabot.yml multi-ecosystem-groups.${name}`;
-    const groupProblems = isRecord(group)
-      ? inspectDependabotSchedule(group.schedule, label)
-      : [`${label} must be a mapping`];
-    problems.push(...groupProblems);
-    if (groupProblems.length === 0) {
-      scheduledGroups.add(name);
-    }
+// The generated Dependabot config is engine-owned but composed from a
+// canonical base and a repo-owned overlay, so init/sync regenerate it instead
+// of mirroring or seeding it. The seam only activates once the canonical base
+// has been mirrored in (a consumer pinned to an older upstream has no base
+// yet, and generating from nothing would guess).
+const generateDependabot = async (
+  consumer: string,
+  dryRun: boolean,
+): Promise<void> => {
+  const sources = await readDependabotSources(consumer);
+  if (sources.base === null) {
+    return;
   }
-  return { problems, scheduledGroups };
+  const { composed, problems } = composedDependabot(sources);
+  if (composed === null) {
+    throw composeProblemsError(problems);
+  }
+  if (sources.current === composed) {
+    return;
+  }
+  if (dryRun) {
+    console.log(`  would generate ${DEPENDABOT_FILE}`);
+    return;
+  }
+  await writeComposedDependabot(consumer, composed);
+  console.log(`  generated ${DEPENDABOT_FILE}`);
 };
 
-const inspectDependabotUpdate = (
-  update: unknown,
-  index: number,
-  scheduledGroups: ReadonlySet<string>,
-): DependabotUpdateInspection => {
-  const label = `.github/dependabot.yml updates[${index}]`;
-  if (!isRecord(update)) {
-    return { problems: [`${label} must be a mapping`], rootEcosystem: null };
+const runDependabotCheck = async (consumer: string): Promise<boolean> => {
+  const problems = await dependabotProblems(consumer);
+  if (problems.length > 0) {
+    console.error(`standards dependabot: ${problems.length} problem(s):`);
+    console.error(problems.map((problem) => `  - ${problem}`).join('\n'));
+    return false;
   }
-
-  const {
-    directory,
-    directories,
-    schedule,
-    'multi-ecosystem-group': multiEcosystemGroup,
-    'package-ecosystem': ecosystem,
-  } = update;
-  const problems: Array<string> = [];
-  if (!isNonEmptyString(ecosystem)) {
-    problems.push(`${label} must define package-ecosystem`);
-  }
-
-  const hasDirectory = isNonEmptyString(directory);
-  const hasDirectories =
-    Array.isArray(directories) &&
-    directories.length > 0 &&
-    directories.every(isNonEmptyString);
-  if (hasDirectory === hasDirectories) {
-    problems.push(
-      `${label} must define exactly one of directory or directories`,
-    );
-  }
-
-  if (schedule === undefined && isNonEmptyString(multiEcosystemGroup)) {
-    if (!scheduledGroups.has(multiEcosystemGroup)) {
-      problems.push(
-        `${label} must reference a scheduled multi-ecosystem group`,
-      );
-    }
-  } else {
-    problems.push(...inspectDependabotSchedule(schedule, label));
-  }
-
-  const targetsRoot =
-    directory === '/' ||
-    (Array.isArray(directories) && directories.includes('/'));
-  return {
-    problems,
-    rootEcosystem:
-      isNonEmptyString(ecosystem) && targetsRoot ? ecosystem : null,
-  };
+  console.log(
+    `standards dependabot: ${DEPENDABOT_FILE} matches its composed sources`,
+  );
+  return true;
 };
 
-const inspectDependabot = (raw: string): ReadonlyArray<string> => {
-  const problems: Array<string> = [];
-  let config: unknown;
-  try {
-    config = BunYaml.parse(raw);
-  } catch {
-    return ['.github/dependabot.yml must contain valid YAML'];
+const runDependabotWrite = async (consumer: string): Promise<void> => {
+  const sources = await readDependabotSources(consumer);
+  const { composed, problems } = composedDependabot(sources);
+  if (composed === null) {
+    throw composeProblemsError(problems);
   }
-
-  if (!isRecord(config)) {
-    return ['.github/dependabot.yml must contain a YAML mapping'];
+  if (sources.current === composed) {
+    console.log(`standards dependabot: ${DEPENDABOT_FILE} is up to date`);
+    return;
   }
-  if (config.version !== 2) {
-    problems.push('.github/dependabot.yml must use version: 2');
-  }
-
-  const { updates, 'multi-ecosystem-groups': multiEcosystemGroups } = config;
-  if (!Array.isArray(updates)) {
-    problems.push('.github/dependabot.yml must define an updates list');
-    return problems;
-  }
-
-  const groupInspection = inspectDependabotGroups(multiEcosystemGroups);
-  problems.push(...groupInspection.problems);
-  const rootEcosystems = new Set<string>();
-  for (const [index, update] of updates.entries()) {
-    const inspection = inspectDependabotUpdate(
-      update,
-      index,
-      groupInspection.scheduledGroups,
-    );
-    problems.push(...inspection.problems);
-    if (inspection.rootEcosystem !== null) {
-      rootEcosystems.add(inspection.rootEcosystem);
-    }
-  }
-
-  for (const ecosystem of DEPENDABOT_BASELINE_ECOSYSTEMS) {
-    if (!rootEcosystems.has(ecosystem)) {
-      problems.push(
-        `.github/dependabot.yml must include a root-directory ${ecosystem} ecosystem`,
-      );
-    }
-  }
-  return problems;
+  await writeComposedDependabot(consumer, composed);
+  console.log(`standards dependabot: generated ${DEPENDABOT_FILE}`);
 };
 
 const inspectPackageJson = (packageRaw: string): ReadonlyArray<string> => {
@@ -726,14 +689,7 @@ const runDoctor = async (consumer: string): Promise<boolean> => {
     problems.push('AGENTS.local.md must exist for project-specific guidance');
   }
 
-  const dependabot = await readTextIfPresent(
-    join(consumer, '.github/dependabot.yml'),
-  );
-  if (dependabot === null) {
-    problems.push('.github/dependabot.yml must exist');
-  } else {
-    problems.push(...inspectDependabot(dependabot));
-  }
+  problems.push(...(await dependabotProblems(consumer)));
 
   const packagePath = join(consumer, 'package.json');
   const packageRaw = await readTextIfPresent(packagePath);
@@ -773,13 +729,14 @@ const runDoctor = async (consumer: string): Promise<boolean> => {
 const USAGE = `Usage: standards <command> [options]
 
 Commands:
-  init       Bootstrap a consumer repo: seed repo-owned files, mirror canonical files, write the lock
-  sync       Mirror canonical files from upstream and rewrite the lock
-  check      Verify canonical files, extension seams, monorepo structure, and GitHub settings
-  doctor     Validate extension seams only
-  structure  Validate monorepo structure rules only
-  github     Compare (--check) or converge (--apply) live GitHub settings
-  help       Show this help
+  init        Bootstrap a consumer repo: seed repo-owned files, mirror canonical files, write the lock
+  sync        Mirror canonical files from upstream, regenerate the composed Dependabot config, and rewrite the lock
+  check       Verify canonical files, extension seams, monorepo structure, and GitHub settings
+  doctor      Validate extension seams only
+  structure   Validate monorepo structure rules only
+  dependabot  Verify (--check) or regenerate (--write) the composed .github/dependabot.yml
+  github      Compare (--check) or converge (--apply) live GitHub settings
+  help        Show this help
 
 Options:
   --dir <path>   Consumer directory to operate on (default: current directory)
@@ -787,12 +744,14 @@ Options:
   --from <src>   Upstream override for init/sync (GitHub repo or local path)
   --ref <ref>    Upstream tag, branch, or full commit sha for init/sync (remote Git/GitHub sources only; default: main)
   --dry-run      Preview a sync without writing anything
-  --check        With github: compare live settings to the declaration (default)
-  --apply        With github: converge the live repository (needs admin auth)`;
+  --check        With github/dependabot: compare against the declared sources (default)
+  --apply        With github: converge the live repository (needs admin auth)
+  --write        With dependabot: regenerate the composed .github/dependabot.yml`;
 
 const commandFromArg = (arg: string): Command => {
   if (
     arg === 'check' ||
+    arg === 'dependabot' ||
     arg === 'doctor' ||
     arg === 'github' ||
     arg === 'help' ||
@@ -832,6 +791,44 @@ const nextOptionValue = (
   return value;
 };
 
+type ParsedFlags = {
+  readonly command: Command | undefined;
+  readonly checkFlag: boolean;
+  readonly apply: boolean;
+  readonly write: boolean;
+  readonly ref: string | undefined;
+  readonly profile: StructureProfile | undefined;
+};
+
+// Every option is only meaningful with specific commands; reject the rest so a
+// typo fails loudly instead of silently doing the default thing.
+const assertOptionUsage = (flags: ParsedFlags): void => {
+  const { command, checkFlag, apply, write, ref, profile } = flags;
+  if (checkFlag && command !== 'github' && command !== 'dependabot') {
+    throw new Error(
+      '--check is only valid with the github and dependabot commands',
+    );
+  }
+  if (apply && command !== 'github') {
+    throw new Error('--apply is only valid with the github command');
+  }
+  if (apply && checkFlag) {
+    throw new Error('github accepts exactly one of --check or --apply');
+  }
+  if (write && command !== 'dependabot') {
+    throw new Error('--write is only valid with the dependabot command');
+  }
+  if (write && checkFlag) {
+    throw new Error('dependabot accepts exactly one of --check or --write');
+  }
+  if (ref !== undefined && command !== 'init' && command !== 'sync') {
+    throw new Error('--ref is only valid with the init and sync commands');
+  }
+  if (profile !== undefined && command !== 'structure') {
+    throw new Error('--profile is only valid with the structure command');
+  }
+};
+
 const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
   let command: Command | undefined;
   let consumer = process.cwd();
@@ -840,6 +837,7 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
   let ref: string | undefined;
   let checkFlag = false;
   let apply = false;
+  let write = false;
   let profile: StructureProfile | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -850,6 +848,9 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
         break;
       case '--check':
         checkFlag = true;
+        break;
+      case '--write':
+        write = true;
         break;
       case '--dir':
         consumer = nextOptionValue(argv, index);
@@ -879,21 +880,7 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
     }
   }
 
-  if (checkFlag && command !== 'github') {
-    throw new Error('--check is only valid with the github command');
-  }
-  if (apply && command !== 'github') {
-    throw new Error('--apply is only valid with the github command');
-  }
-  if (apply && checkFlag) {
-    throw new Error('github accepts exactly one of --check or --apply');
-  }
-  if (ref !== undefined && command !== 'init' && command !== 'sync') {
-    throw new Error('--ref is only valid with the init and sync commands');
-  }
-  if (profile !== undefined && command !== 'structure') {
-    throw new Error('--profile is only valid with the structure command');
-  }
+  assertOptionUsage({ command, checkFlag, apply, write, ref, profile });
 
   return {
     command,
@@ -902,6 +889,7 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
     from,
     ref,
     apply,
+    write,
     profile: profile ?? 'consumer',
   };
 };
@@ -1069,13 +1057,16 @@ const runSyncCommand = async (
 
 // Commands whose success is reported through the exit code.
 const runGateCommand = (
-  command: 'check' | 'doctor' | 'github' | 'structure',
+  command: 'check' | 'dependabot' | 'doctor' | 'github' | 'structure',
   consumer: string,
   apply: boolean,
   profile: StructureProfile,
 ): Promise<boolean> => {
   if (command === 'check') {
     return runCheckCommand(consumer);
+  }
+  if (command === 'dependabot') {
+    return runDependabotCheck(consumer);
   }
   if (command === 'doctor') {
     return runDoctor(consumer);
@@ -1087,9 +1078,8 @@ const runGateCommand = (
 };
 
 const main = async (): Promise<void> => {
-  const { command, consumer, dryRun, from, ref, apply, profile } = parseArgs(
-    process.argv.slice(2),
-  );
+  const { command, consumer, dryRun, from, ref, apply, write, profile } =
+    parseArgs(process.argv.slice(2));
 
   if (command === undefined) {
     console.error('standards: a command is required\n');
@@ -1110,6 +1100,11 @@ const main = async (): Promise<void> => {
 
   if (command === 'sync') {
     await runSyncCommand(consumer, from, ref, dryRun);
+    return;
+  }
+
+  if (command === 'dependabot' && write) {
+    await runDependabotWrite(consumer);
     return;
   }
 

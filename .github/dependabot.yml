@@ -1,0 +1,18 @@
+# GENERATED FILE - do not edit. `bun standards sync` (or
+# `bun standards dependabot --write`) composes .github/dependabot.base.yml
+# (canonical) with .github/dependabot.local.yml (repo-owned) into this file.
+version: 2
+updates:
+  - package-ecosystem: "bun"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    ignore:
+      - dependency-name: "@biomejs/biome"
+      - dependency-name: "typescript"
+        versions:
+          - ">7.0.2"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

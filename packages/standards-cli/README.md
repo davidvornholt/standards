@@ -8,9 +8,13 @@ standards sync
 standards check
 standards doctor
 standards structure
+standards dependabot --check
+standards dependabot --write
 standards github --check
 standards github --apply
 ```
+
+`dependabot --write` regenerates the composed `.github/dependabot.yml` from the canonical `.github/dependabot.base.yml` and the optional repo-owned `.github/dependabot.local.yml`; `init` and `sync` do the same automatically. `dependabot --check` verifies the generated file still matches its sources, and `doctor`/`check` include the same verification. The overlay is additive only: new update blocks for repo-specific ecosystems, or extra `ignore` holds appended to a canonical block by repeating its `package-ecosystem` and `directory` with only an ignore list.
 
 `github --check` compares the live GitHub repository (merge settings and rulesets) against the merged declaration in `.github/settings.json` + `.github/settings.local.json`; `github --apply` converges the live repository to exactly the declared state. `check` runs the same comparison whenever `.github/settings.json` is present. A repository whose GitHub plan cannot enforce rulesets can declare that in the seam (see `rulesetEnforcement` below); both commands then skip rulesets, still converge repository merge settings, and print an unprotected-branch notice on every run.
 
@@ -20,6 +24,7 @@ standards github --apply
 
 ## Configuration
 
+- **`.github/dependabot.local.yml`** (optional) — repo-owned Dependabot extension composed with the canonical `.github/dependabot.base.yml` into the generated `.github/dependabot.yml`. May only define `updates`; a block matching a canonical ecosystem/directory pair may only add `ignore` entries. A missing or comments-only file means no additions.
 - **`sync-standards.local.json`** (optional) — consumer-owned sync policy at the repo root, validated by `doctor`/`check` and every `init`/`sync` even when an explicit ref or local source makes its `"ref"` irrelevant. All fields optional; a missing file means the defaults. `"ref"` is a non-empty single-line string that pins a tag, branch, or full commit sha to sync from instead of `main` (an explicit `--ref` overrides it; a local-path `--from` source is used as-is and ignores only the validated pin). `"autoSync": false` is read by the standards-sync workflow, not the CLI, and skips the weekly scheduled run. Version 0.7.0 removes the legacy `STANDARDS_AUTO_SYNC` and `STANDARDS_SYNC_REF` variable behavior; consumers must upgrade the package and lockfile before adopting a policy file.
 - **`.github/settings.local.json` `"rulesetEnforcement": "unavailable-on-plan"`** (optional) — declares that the repository's GitHub plan cannot enforce rulesets (private repositories on GitHub Free, both personal accounts and organizations). `github --check` and `--apply` then skip rulesets instead of comparing them, because a comparison cannot be trusted there: personal accounts answer ruleset reads with HTTP 403, and free-plan organizations report declared rulesets as active while silently not enforcing them. Repository merge settings are still checked and converged, and both commands print an unprotected-branch notice on every run. The only accepted value is `"unavailable-on-plan"` (enforcement is the default; omit the key on paid plans), and combining the opt-out with additional local rulesets is rejected. After upgrading the plan, remove the declaration and run `bun standards github --apply` to restore enforcement.
 - **`GH_TOKEN` / `GITHUB_TOKEN`** (optional) — GitHub API token for the `github` command and the GitHub portion of `check`. When neither is set, the token from the local `gh` CLI is used; with no token at all, reads still work on public repositories. `--apply` and private-repo reads need an authenticated token, and repo merge settings are only visible (and thus verifiable) to admin tokens — non-admin runs report them as unverifiable.

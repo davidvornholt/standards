@@ -42,7 +42,7 @@ jobs:
       ref: ${{ steps.read.outputs.ref }}
     steps:
       - name: Checkout policy file
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           sparse-checkout: sync-standards.local.json
           sparse-checkout-cone-mode: false
@@ -90,7 +90,7 @@ jobs:
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -106,7 +106,7 @@ jobs:
       - name: Require policy-aware standards CLI
         if: needs.policy.outputs.present == 'true'
         env:
-          MINIMUM_STANDARDS_VERSION: "0.7.0"
+          MINIMUM_STANDARDS_VERSION: "0.10.0"
         run: |
           package_path=node_modules/@davidvornholt/standards/package.json
           installed_version=$(jq -er '.version | select(type == "string")' "$package_path")

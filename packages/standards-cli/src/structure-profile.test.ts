@@ -26,26 +26,36 @@ const TSCONFIG = '{ "extends": "@davidvornholt/typescript-config/base" }\n';
 const SOURCE_GATE_COMMANDS = {
   check: [
     `${CLI} structure --profile source`,
+    `${CLI} dependabot --check`,
     `${CLI} github --check`,
     'turbo run lint check-types test',
   ],
   'check:fix': [
     `${CLI} structure --profile source`,
+    `${CLI} dependabot --write`,
     `${CLI} github --check`,
     'turbo run lint:fix check-types test',
   ],
 } as const;
 const INVALID_SOURCE_GATES = (['check', 'check:fix'] as const).flatMap(
   (name) => {
-    const [structure, github, turbo] = SOURCE_GATE_COMMANDS[name];
+    const [structure, dependabot, github, turbo] = SOURCE_GATE_COMMANDS[name];
     return [
-      [`${name} reversed`, name, [github, structure, turbo].join(' && ')],
+      [
+        `${name} reversed`,
+        name,
+        [github, structure, dependabot, turbo].join(' && '),
+      ],
       [
         `${name} interleaved`,
         name,
-        [structure, 'true', github, turbo].join(' && '),
+        [structure, 'true', dependabot, github, turbo].join(' && '),
       ],
-      [`${name} extra`, name, ['true', structure, github, turbo].join(' && ')],
+      [
+        `${name} extra`,
+        name,
+        ['true', structure, dependabot, github, turbo].join(' && '),
+      ],
     ] as const;
   },
 );
@@ -118,8 +128,8 @@ describe('source profile', () => {
     );
     expect(problems).toEqual([
       `package.json: root script "standards" must run exactly ${CLI}`,
-      `package.json: root script "check" must run exactly ${CLI} structure --profile source && ${CLI} github --check && turbo run lint check-types test`,
-      `package.json: root script "check:fix" must run exactly ${CLI} structure --profile source && ${CLI} github --check && turbo run lint:fix check-types test`,
+      `package.json: root script "check" must run exactly ${SOURCE_GATE_COMMANDS.check.join(' && ')}`,
+      `package.json: root script "check:fix" must run exactly ${SOURCE_GATE_COMMANDS['check:fix'].join(' && ')}`,
     ]);
   });
 
