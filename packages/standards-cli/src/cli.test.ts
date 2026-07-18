@@ -263,6 +263,36 @@ const git = (dir: string, args: ReadonlyArray<string>): string =>
     { encoding: 'utf8' },
   ).trim();
 
+const exerciseSeededGitignore = (
+  consumer: string,
+): {
+  ignoredOutput: string;
+  ignoredPaths: ReadonlyArray<string>;
+  lockIgnoreStatus: number;
+} => {
+  const ignoredPaths = [
+    'node_modules/package/index.js',
+    '.turbo/cache/state',
+    'dist/app.js',
+    '.next/server/app.js',
+    'debug.log',
+    '.claude/worktrees/task/src/wip.ts',
+  ];
+  for (const path of ignoredPaths) {
+    write(consumer, path, 'ignored\n');
+  }
+  const ignoredOutput = git(consumer, ['check-ignore', '--', ...ignoredPaths]);
+  const lockIgnoreStatus = runExecutable('git', consumer, [
+    '-C',
+    consumer,
+    'check-ignore',
+    '--quiet',
+    '--',
+    'sync-standards.lock',
+  ]).status;
+  return { ignoredOutput, ignoredPaths, lockIgnoreStatus };
+};
+
 // A git-backed upstream with two commits: tag `v1` and branch `stable` hold
 // the original managed content while `main` has moved on. `file://` forces the
 // remote-source code path that a plain local path would bypass.
@@ -384,6 +414,13 @@ describe('init', () => {
       'https://github.com/davidvornholt/standards.git',
     ]);
     expect(run(consumer, ['check', '--dir', consumer]).status).toBe(0);
+    expect(result.stdout).toContain('seeded .gitignore');
+    expect(read(consumer, '.gitignore')).toBe(
+      read(ACTUAL_UPSTREAM, 'template/.gitignore'),
+    );
+    const gitignore = exerciseSeededGitignore(consumer);
+    expect(gitignore.ignoredOutput).toBe(gitignore.ignoredPaths.join('\n'));
+    expect(gitignore.lockIgnoreStatus).toBe(1);
   });
 });
 

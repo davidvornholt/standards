@@ -19,7 +19,7 @@ const REPO_ROOT = join(import.meta.dir, '../../..');
 const BIOME = join(REPO_ROOT, 'node_modules/.bin/biome');
 const BASE = readFileSync(join(REPO_ROOT, 'biome.base.jsonc'), 'utf8');
 const WRAPPER = readFileSync(join(REPO_ROOT, 'template/biome.jsonc'), 'utf8');
-const WORKTREE_ENTRY = ', "!!.claude/worktrees"';
+const WORKTREE_ENTRY = /, "!{1,2}\.claude\/worktrees"/u;
 
 type RunResult = { output: string; status: number };
 
@@ -70,15 +70,23 @@ const check = (dir: string): RunResult => {
 
 describe('template biome wrapper', () => {
   it('keeps a worktree biome.jsonc undiscovered as a nested root', () => {
-    expect(WRAPPER).toContain(WORKTREE_ENTRY);
     const result = check(buildFixture(WRAPPER));
+    expect(result.output).not.toContain('nested root configuration');
+    expect(result.status).toBe(0);
+  });
+
+  it('keeps ordinary worktree exclusion compatible with Biome 2.5.2', () => {
+    const ordinaryExclude = WRAPPER.replace(
+      WORKTREE_ENTRY,
+      ', "!.claude/worktrees"',
+    );
+    const result = check(buildFixture(ordinaryExclude));
     expect(result.output).not.toContain('nested root configuration');
     expect(result.status).toBe(0);
   });
 
   it('fails on the nested root without the worktree ignore, proving the entry is load-bearing', () => {
     const stripped = WRAPPER.replace(WORKTREE_ENTRY, '');
-    expect(stripped).not.toBe(WRAPPER);
     const result = check(buildFixture(stripped));
     expect(result.status).not.toBe(0);
     expect(result.output).toContain('nested root configuration');
