@@ -106,7 +106,6 @@ type CliOptions = {
   readonly write: boolean;
   readonly profile: StructureProfile;
   readonly config: string | undefined;
-  readonly install: boolean;
   readonly printUnits: boolean;
 };
 
@@ -796,8 +795,7 @@ Options:
   --apply          With github: converge the live repository (needs admin auth)
   --write          With dependabot: regenerate the composed .github/dependabot.yml
   --config <path>  With poller: the host-level poller config file (required)
-  --install        With poller: install and start systemd user units (refuses on NixOS)
-  --print-units    With poller: print the systemd unit content instead of touching the host`;
+  --print-units    With poller: print declarative systemd unit content without touching the host`;
 
 const commandFromArg = (arg: string): Command => {
   if (
@@ -851,7 +849,6 @@ type ParsedFlags = {
   readonly ref: string | undefined;
   readonly profile: StructureProfile | undefined;
   readonly config: string | undefined;
-  readonly install: boolean;
   readonly printUnits: boolean;
 };
 
@@ -859,13 +856,8 @@ const assertPollerOptionUsage = (flags: ParsedFlags): void => {
   if (flags.config !== undefined && flags.command !== 'poller') {
     throw new Error('--config is only valid with the poller command');
   }
-  if ((flags.install || flags.printUnits) && flags.command !== 'poller') {
-    throw new Error(
-      '--install and --print-units are only valid with the poller command',
-    );
-  }
-  if (flags.install && flags.printUnits) {
-    throw new Error('poller accepts at most one of --install or --print-units');
+  if (flags.printUnits && flags.command !== 'poller') {
+    throw new Error('--print-units is only valid with the poller command');
   }
 };
 
@@ -910,7 +902,6 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
   let write = false;
   let profile: StructureProfile | undefined;
   let config: string | undefined;
-  let install = false;
   let printUnits = false;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -922,9 +913,6 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
       case '--config':
         config = nextOptionValue(argv, index);
         index += 1;
-        break;
-      case '--install':
-        install = true;
         break;
       case '--print-units':
         printUnits = true;
@@ -971,7 +959,6 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
     ref,
     profile,
     config,
-    install,
     printUnits,
   });
 
@@ -985,7 +972,6 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
     write,
     profile: profile ?? 'consumer',
     config,
-    install,
     printUnits,
   };
 };
@@ -1184,7 +1170,6 @@ const main = async (): Promise<void> => {
     write,
     profile,
     config,
-    install,
     printUnits,
   } = parseArgs(process.argv.slice(2));
 
@@ -1216,9 +1201,7 @@ const main = async (): Promise<void> => {
   }
 
   if (command === 'poller') {
-    if (
-      !(await runPollerCommand({ configPath: config, install, printUnits }))
-    ) {
+    if (!(await runPollerCommand({ configPath: config, printUnits }))) {
       process.exitCode = 1;
     }
     return;

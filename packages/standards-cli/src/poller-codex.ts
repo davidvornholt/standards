@@ -21,12 +21,10 @@ export type CodexRunResult = {
   readonly failure: string | null;
 };
 
-// The agent must never inherit the poller's GitHub credentials: a prompt
-// injected through an issue body could otherwise use them to bypass every
-// protected-path and trust check with direct API writes. Residual risk — auth
-// state in $HOME (gh keyring, codex tokens) remains readable; the README
-// tells poller hosts to supply the GitHub token via unit environment, which
-// this strip removes, rather than a logged-in gh.
+// Remove the poller's direct GitHub token variables so an approved Codex run
+// cannot trivially bypass the protected-path and trust checks with API writes.
+// The shared service identity is not credential-isolated: auth state and other
+// ambient credentials in HOME remain readable as an explicitly accepted risk.
 const agentEnv = (): Record<string, string | undefined> => {
   const env = { ...process.env };
   env.GH_TOKEN = undefined;

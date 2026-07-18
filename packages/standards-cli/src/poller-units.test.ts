@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import type { PollerConfig } from './poller-config';
-import { renderUnits } from './poller-install';
+import { quoteSystemdExecArg, renderUnits } from './poller-units';
 
 const config = (overrides: Partial<PollerConfig> = {}): PollerConfig => ({
   repos: ['owner/repo'],
@@ -22,7 +22,7 @@ describe('renderUnits', () => {
     );
     expect(service).toContain('Type=oneshot');
     expect(service).toContain(
-      'poller --config /etc/standards-poller/config.json',
+      'poller --config "/etc/standards-poller/config.json"',
     );
     expect(timer).toContain('OnUnitActiveSec=10min');
     expect(timer).toContain('Persistent=true');
@@ -34,5 +34,21 @@ describe('renderUnits', () => {
       config({ maxJobsPerTick: 2, runTimeoutMinutes: 240 }),
     );
     expect(service).toContain('TimeoutStartSec=510min');
+  });
+
+  it('quotes paths and escapes systemd expansion sigils', () => {
+    const { service } = renderUnits(
+      '/srv/poller config/$current/%i\\config.json',
+      config(),
+    );
+    expect(service).toContain(
+      'poller --config "/srv/poller config/$$current/%%i\\\\config.json"',
+    );
+  });
+
+  it('rejects control characters in ExecStart arguments', () => {
+    expect(() => quoteSystemdExecArg('/tmp/a\nb')).toThrow(
+      'systemd ExecStart arguments cannot contain control characters',
+    );
   });
 });

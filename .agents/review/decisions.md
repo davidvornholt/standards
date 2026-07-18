@@ -15,3 +15,7 @@ Starting with CLI 0.7.0, `sync-standards.local.json` is the only standards-sync 
 ## DEPENDABOT-001: Deliberately lean local overlay
 
 The repo-owned Dependabot overlay is additive but intentionally not a general policy override. It may define new ecosystem update blocks, top-level private registries, and `ignore` or `registries` additions on a canonical normalized target. Matching blocks reject labels, groups, cooldowns, pull-request limits, and every other policy key; broader per-repository policy must be proposed as an explicit seam decision.
+
+## POLLER-001: Shared service identity risk
+
+The fix poller and its approved Codex runs may share one host service identity and HOME. The poller removes its direct GitHub token variables before launching Codex, but the approved run can still read that identity's other ambient credentials and logged-in tool state. This credential visibility is an accepted risk because only an admin- or maintain-approved exact issue revision or pull-request head may run, and the approval binding is revalidated before publication. The host infrastructure repository owns the identity, PATH, token wiring, lingering, and declarative unit deployment; do not describe the Codex process as credential-isolated.

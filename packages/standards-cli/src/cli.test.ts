@@ -161,9 +161,9 @@ const runWorkflowVersionGuard = (version: string): RunResult => {
       '-euo',
       'pipefail',
       '-c',
-      workflowRunScript('Require Dependabot-aware standards CLI'),
+      workflowRunScript('Require label-aware standards CLI'),
     ],
-    { MINIMUM_STANDARDS_VERSION: '0.10.0' },
+    { MINIMUM_STANDARDS_VERSION: '0.11.0' },
   );
 };
 
@@ -1264,6 +1264,19 @@ describe('sync policy distribution', () => {
     ]);
     expect(installedSourceProfile.stderr).toBe('');
     expect(installedSourceProfile.status).toBe(0);
+    const installedSettingsParser = runExecutable('bun', consumer, [
+      '-e',
+      [
+        `import { loadGithubSettings } from ${JSON.stringify(join(consumer, 'node_modules/@davidvornholt/standards/src/github-settings.ts'))};`,
+        'const loaded = loadGithubSettings(',
+        '  JSON.stringify({ repository: {}, rulesets: [], labels: [{ name: "approved-for-fix", color: "0e8a16", description: "Approved" }] }),',
+        '  JSON.stringify({ repository: {}, rulesets: [], labels: [] }),',
+        ');',
+        'if (loaded.merged?.labels[0]?.name !== "approved-for-fix" || loaded.problems.length !== 0) process.exit(1);',
+      ].join('\n'),
+    ]);
+    expect(installedSettingsParser.stderr).toBe('');
+    expect(installedSettingsParser.status).toBe(0);
 
     const { up, url } = buildGitUpstream();
     expect(
@@ -1369,13 +1382,14 @@ describe('standards sync workflow policy', () => {
   it.each([
     '0.9.0',
     '0.10.0-beta.1',
+    '0.10.1',
   ])('rejects installed CLI version %s without a policy file', (version) => {
     const result = runWorkflowVersionGuard(version);
     expect(result.status).toBe(1);
     expect(`${result.stdout}${result.stderr}`).toContain('::error::');
   });
 
-  it('makes the 0.10 guard unconditional', () => {
+  it('makes the 0.11 guard unconditional', () => {
     const workflow = readFileSync(SYNC_WORKFLOW, 'utf8');
     expect(workflow).not.toContain(
       "if: needs.policy.outputs.present == 'true'",
@@ -1383,8 +1397,8 @@ describe('standards sync workflow policy', () => {
   });
 
   it.each([
-    '0.10.0',
     '0.11.0',
+    '0.12.0',
   ])('accepts installed CLI version %s without a policy file', (version) => {
     expect(runWorkflowVersionGuard(version).status).toBe(0);
   });
@@ -1565,19 +1579,11 @@ describe('poller', () => {
     );
   });
 
-  it('rejects combining --install with --print-units', () => {
+  it('rejects the removed imperative --install option', () => {
     const consumer = mkTmp('poller-');
-    const result = run(consumer, [
-      'poller',
-      '--install',
-      '--print-units',
-      '--config',
-      'x.json',
-    ]);
+    const result = run(consumer, ['poller', '--install', '--config', 'x.json']);
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain(
-      'poller accepts at most one of --install or --print-units',
-    );
+    expect(result.stderr).toContain('Unknown option: --install');
   });
 
   it('fails loudly on an invalid config file', () => {
@@ -1612,7 +1618,7 @@ describe('poller', () => {
     ]);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('standards-poller.service');
-    expect(result.stdout).toContain(`poller --config ${configPath}`);
+    expect(result.stdout).toContain(`poller --config "${configPath}"`);
     expect(result.stdout).toContain('TimeoutStartSec=270min');
   });
 });

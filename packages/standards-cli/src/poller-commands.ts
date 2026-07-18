@@ -7,12 +7,11 @@ import { readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { resolveToken } from './github-api';
 import { type PollerConfig, parsePollerConfig } from './poller-config';
-import { runPollerInstall, runPollerPrintUnits } from './poller-install';
 import { runPollerTick } from './poller-tick';
+import { runPollerPrintUnits } from './poller-units';
 
 export type PollerCommandOptions = {
   readonly configPath: string | undefined;
-  readonly install: boolean;
   readonly printUnits: boolean;
 };
 
@@ -54,10 +53,6 @@ export const runPollerCommand = async (
   const config = await loadConfig(options.configPath);
   if (options.printUnits) {
     runPollerPrintUnits(options.configPath, config);
-    return true;
-  }
-  if (options.install) {
-    await runPollerInstall(options.configPath, config);
     return true;
   }
   const token = resolveToken();

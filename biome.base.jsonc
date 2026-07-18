@@ -242,7 +242,7 @@
         "packages/standards-cli/src/github-commands.ts",
         "packages/standards-cli/src/poller-codex.ts",
         "packages/standards-cli/src/poller-commands.ts",
-        "packages/standards-cli/src/poller-install.ts",
+        "packages/standards-cli/src/poller-units.ts",
         "packages/standards-cli/src/poller-workspace.ts"
       ],
       "linter": {

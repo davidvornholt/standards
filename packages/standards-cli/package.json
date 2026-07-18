@@ -1,6 +1,6 @@
 {
   "name": "@davidvornholt/standards",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Bootstrap, synchronize, and validate davidvornholt/standards consumers",
   "license": "MIT",
   "repository": {
@@ -42,7 +42,6 @@
     "src/poller-github-pulls.ts",
     "src/poller-github-write.ts",
     "src/poller-github.ts",
-    "src/poller-install.ts",
     "src/poller-job-shared.ts",
     "src/poller-outcome.ts",
     "src/poller-prompts.ts",
@@ -50,6 +49,7 @@
     "src/poller-review-run.ts",
     "src/poller-tick.ts",
     "src/poller-trust.ts",
+    "src/poller-units.ts",
     "src/poller-workspace.ts",
     "src/structure-check.ts",
     "src/structure-profile.ts",
