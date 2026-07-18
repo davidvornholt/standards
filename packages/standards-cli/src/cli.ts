@@ -44,6 +44,7 @@ import { CANONICAL_SETTINGS_FILE, LOCAL_SETTINGS_FILE } from './github-api';
 import { runGithubApply, runGithubCheck } from './github-commands';
 import { loadGithubSettings } from './github-settings';
 import { isNonEmptyString, isRecord } from './github-settings-parse';
+import { runPollerCommand } from './poller-commands';
 import { collectStructureProblems } from './structure-check';
 import type { StructureProfile } from './structure-profile';
 import { hasSafeCommand } from './structure-script';
@@ -91,6 +92,7 @@ type Command =
   | 'github'
   | 'help'
   | 'init'
+  | 'poller'
   | 'structure'
   | 'sync';
 
@@ -103,6 +105,9 @@ type CliOptions = {
   readonly apply: boolean;
   readonly write: boolean;
   readonly profile: StructureProfile;
+  readonly config: string | undefined;
+  readonly install: boolean;
+  readonly printUnits: boolean;
 };
 
 const sha256 = (buf: Buffer): string =>
@@ -778,17 +783,21 @@ Commands:
   structure   Validate monorepo structure rules only
   dependabot  Verify (--check) or regenerate (--write) the composed .github/dependabot.yml
   github      Compare (--check) or converge (--apply) live GitHub settings
+  poller      Run one fix-poller tick over the configured repositories (host automation)
   help        Show this help
 
 Options:
-  --dir <path>   Consumer directory to operate on (default: current directory)
-  --profile <p>  With structure: validate as a "consumer" (default) or as the standards "source" repository itself
-  --from <src>   Upstream override for init/sync (GitHub repo or local path)
-  --ref <ref>    Upstream tag, branch, or full commit sha for init/sync (remote Git/GitHub sources only; default: main)
-  --dry-run      Preview a sync without writing anything
-  --check        With github/dependabot: compare against the declared sources (default)
-  --apply        With github: converge the live repository (needs admin auth)
-  --write        With dependabot: regenerate the composed .github/dependabot.yml`;
+  --dir <path>     Consumer directory to operate on (default: current directory)
+  --profile <p>    With structure: validate as a "consumer" (default) or as the standards "source" repository itself
+  --from <src>     Upstream override for init/sync (GitHub repo or local path)
+  --ref <ref>      Upstream tag, branch, or full commit sha for init/sync (remote Git/GitHub sources only; default: main)
+  --dry-run        Preview a sync without writing anything
+  --check          With github/dependabot: compare against the declared sources (default)
+  --apply          With github: converge the live repository (needs admin auth)
+  --write          With dependabot: regenerate the composed .github/dependabot.yml
+  --config <path>  With poller: the host-level poller config file (required)
+  --install        With poller: install and start systemd user units (refuses on NixOS)
+  --print-units    With poller: print the systemd unit content instead of touching the host`;
 
 const commandFromArg = (arg: string): Command => {
   if (
@@ -798,6 +807,7 @@ const commandFromArg = (arg: string): Command => {
     arg === 'github' ||
     arg === 'help' ||
     arg === 'init' ||
+    arg === 'poller' ||
     arg === 'structure' ||
     arg === 'sync'
   ) {
@@ -840,12 +850,30 @@ type ParsedFlags = {
   readonly write: boolean;
   readonly ref: string | undefined;
   readonly profile: StructureProfile | undefined;
+  readonly config: string | undefined;
+  readonly install: boolean;
+  readonly printUnits: boolean;
+};
+
+const assertPollerOptionUsage = (flags: ParsedFlags): void => {
+  if (flags.config !== undefined && flags.command !== 'poller') {
+    throw new Error('--config is only valid with the poller command');
+  }
+  if ((flags.install || flags.printUnits) && flags.command !== 'poller') {
+    throw new Error(
+      '--install and --print-units are only valid with the poller command',
+    );
+  }
+  if (flags.install && flags.printUnits) {
+    throw new Error('poller accepts at most one of --install or --print-units');
+  }
 };
 
 // Every option is only meaningful with specific commands; reject the rest so a
 // typo fails loudly instead of silently doing the default thing.
 const assertOptionUsage = (flags: ParsedFlags): void => {
   const { command, checkFlag, apply, write, ref, profile } = flags;
+  assertPollerOptionUsage(flags);
   if (checkFlag && command !== 'github' && command !== 'dependabot') {
     throw new Error(
       '--check is only valid with the github and dependabot commands',
@@ -881,12 +909,25 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
   let apply = false;
   let write = false;
   let profile: StructureProfile | undefined;
+  let config: string | undefined;
+  let install = false;
+  let printUnits = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     switch (arg) {
       case '--apply':
         apply = true;
+        break;
+      case '--config':
+        config = nextOptionValue(argv, index);
+        index += 1;
+        break;
+      case '--install':
+        install = true;
+        break;
+      case '--print-units':
+        printUnits = true;
         break;
       case '--check':
         checkFlag = true;
@@ -922,7 +963,17 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
     }
   }
 
-  assertOptionUsage({ command, checkFlag, apply, write, ref, profile });
+  assertOptionUsage({
+    command,
+    checkFlag,
+    apply,
+    write,
+    ref,
+    profile,
+    config,
+    install,
+    printUnits,
+  });
 
   return {
     command,
@@ -933,6 +984,9 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
     apply,
     write,
     profile: profile ?? 'consumer',
+    config,
+    install,
+    printUnits,
   };
 };
 
@@ -1120,8 +1174,19 @@ const runGateCommand = (
 };
 
 const main = async (): Promise<void> => {
-  const { command, consumer, dryRun, from, ref, apply, write, profile } =
-    parseArgs(process.argv.slice(2));
+  const {
+    command,
+    consumer,
+    dryRun,
+    from,
+    ref,
+    apply,
+    write,
+    profile,
+    config,
+    install,
+    printUnits,
+  } = parseArgs(process.argv.slice(2));
 
   if (command === undefined) {
     console.error('standards: a command is required\n');
@@ -1147,6 +1212,15 @@ const main = async (): Promise<void> => {
 
   if (command === 'dependabot' && write) {
     await runDependabotWrite(consumer);
+    return;
+  }
+
+  if (command === 'poller') {
+    if (
+      !(await runPollerCommand({ configPath: config, install, printUnits }))
+    ) {
+      process.exitCode = 1;
+    }
     return;
   }
 

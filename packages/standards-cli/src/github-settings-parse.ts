@@ -10,15 +10,26 @@
 // reports as active but a free-plan organization silently does not enforce.
 export type RulesetEnforcement = 'enforced' | 'unavailable-on-plan';
 
+// Declared issue labels are an additive floor like rulesets: declared labels
+// must exist with the declared color and description; extra live labels are
+// not drift. The fix-poller protocol labels ride this seam to every consumer.
+export type LabelDeclaration = {
+  readonly name: string;
+  readonly color: string;
+  readonly description: string;
+};
+
 export type GithubSettings = {
   readonly repository: Readonly<Record<string, unknown>>;
   readonly rulesets: ReadonlyArray<Readonly<Record<string, unknown>>>;
+  readonly labels: ReadonlyArray<LabelDeclaration>;
   readonly rulesetEnforcement: RulesetEnforcement;
 };
 
 export type ParsedGithubSettings = {
   readonly repository: Readonly<Record<string, unknown>> | null;
   readonly rulesets: ReadonlyArray<unknown> | null;
+  readonly labels: ReadonlyArray<unknown> | null;
   readonly rulesetEnforcement: RulesetEnforcement | null;
 };
 
@@ -33,9 +44,21 @@ export const isNamedRuleset = (
 ): value is Readonly<Record<string, unknown>> & { readonly name: string } =>
   isRecord(value) && typeof value.name === 'string' && value.name.length > 0;
 
+const LABEL_COLOR = /^[0-9a-f]{6}$/u;
+const LABEL_DECLARATION_KEY_COUNT = 3;
+
+export const isLabelDeclaration = (value: unknown): value is LabelDeclaration =>
+  isRecord(value) &&
+  Object.keys(value).length === LABEL_DECLARATION_KEY_COUNT &&
+  isNonEmptyString(value.name) &&
+  typeof value.color === 'string' &&
+  LABEL_COLOR.test(value.color) &&
+  isNonEmptyString(value.description);
+
 export const SETTINGS_KEYS: ReadonlySet<string> = new Set([
   'repository',
   'rulesets',
+  'labels',
 ]);
 export const LOCAL_SETTINGS_KEYS: ReadonlySet<string> = new Set([
   ...SETTINGS_KEYS,
@@ -78,6 +101,51 @@ const rulesetListProblems = (
   return problems;
 };
 
+const labelListProblems = (
+  labels: ReadonlyArray<unknown>,
+  label: string,
+): ReadonlyArray<string> => {
+  const problems: Array<string> = [];
+  const names = new Set<string>();
+  for (const [index, declaration] of labels.entries()) {
+    if (!isLabelDeclaration(declaration)) {
+      problems.push(
+        `${label} labels[${index}] must be {"name","color","description"} with a non-empty name, a 6-digit lowercase hex color, and a non-empty description`,
+      );
+    } else if (names.has(declaration.name)) {
+      problems.push(
+        `${label} declares label "${declaration.name}" more than once`,
+      );
+    } else {
+      names.add(declaration.name);
+    }
+  }
+  return problems;
+};
+
+type ListField = {
+  readonly label: string;
+  readonly field: string;
+  readonly listProblems: (
+    list: ReadonlyArray<unknown>,
+    label: string,
+  ) => ReadonlyArray<string>;
+};
+
+const parseDeclarationList = (
+  raw: unknown,
+  options: ListField,
+  problems: Array<string>,
+): ReadonlyArray<unknown> | null => {
+  const list = raw ?? [];
+  if (!Array.isArray(list)) {
+    problems.push(`${options.label} "${options.field}" must be an array`);
+    return null;
+  }
+  problems.push(...options.listProblems(list, options.label));
+  return list;
+};
+
 export const parseSettings = (
   raw: unknown,
   label: string,
@@ -96,12 +164,16 @@ export const parseSettings = (
   if (!isRecord(repository)) {
     problems.push(`${label} "repository" must be an object`);
   }
-  const rulesets = raw.rulesets ?? [];
-  if (Array.isArray(rulesets)) {
-    problems.push(...rulesetListProblems(rulesets, label));
-  } else {
-    problems.push(`${label} "rulesets" must be an array`);
-  }
+  const rulesets = parseDeclarationList(
+    raw.rulesets,
+    { label, field: 'rulesets', listProblems: rulesetListProblems },
+    problems,
+  );
+  const labels = parseDeclarationList(
+    raw.labels,
+    { label, field: 'labels', listProblems: labelListProblems },
+    problems,
+  );
   // Only the opt-out value is accepted: enforcement is the default, and an
   // explicit "enforced" would be a second way to spell the same state.
   if (
@@ -115,7 +187,8 @@ export const parseSettings = (
   return {
     settings: {
       repository: isRecord(repository) ? repository : null,
-      rulesets: Array.isArray(rulesets) ? rulesets : null,
+      rulesets,
+      labels,
       rulesetEnforcement: parseRulesetEnforcement(raw.rulesetEnforcement),
     },
     problems,

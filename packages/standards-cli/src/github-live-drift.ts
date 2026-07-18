@@ -17,6 +17,7 @@ import {
   unverifiableProblem,
 } from './github-command-shared';
 import { diffRepositorySettings, diffRulesets } from './github-diff';
+import { diffLabels, fetchLiveLabels } from './github-labels';
 import { type GithubSettings, isRecord } from './github-settings-parse';
 
 const repositoryDrift = async (
@@ -87,9 +88,16 @@ export const collectLiveDrift = async (
   }
   const token = resolveToken();
   try {
+    // No declared labels means nothing to verify — skipping the fetch is
+    // exact, not lenient.
+    const labelDrift =
+      declared.labels.length === 0
+        ? []
+        : diffLabels(declared.labels, await fetchLiveLabels(token, repo));
     return [
       ...(await repositoryDrift(token, repo, declared)),
       ...(await rulesetDrift(token, repo, declared)),
+      ...labelDrift,
     ];
   } catch (error) {
     return [

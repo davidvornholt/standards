@@ -1,12 +1,12 @@
-// Merge canonical GitHub settings with the repo-owned extension. Parsing,
-// drift, and API work live in named modules; this stays dependency-free.
+// Load and merge canonical GitHub settings with the repo-owned extension.
+// Parsing lives in github-settings-parse.ts, merge policy in
+// github-settings-merge.ts, drift in github-diff.ts, and API work in
+// github-api.ts; this stays dependency-free.
 
+import { mergeSettings } from './github-settings-merge';
 import {
-  ENFORCEMENT_OPT_OUT,
   type GithubSettings,
-  isNamedRuleset,
   LOCAL_SETTINGS_KEYS,
-  type ParsedGithubSettings,
   parseSettings,
   SETTINGS_KEYS,
 } from './github-settings-parse';
@@ -14,124 +14,6 @@ import {
 export type LoadedGithubSettings = {
   readonly merged: GithubSettings | null;
   readonly problems: ReadonlyArray<string>;
-};
-
-const completeSettings = (
-  parsed: ParsedGithubSettings | null,
-): GithubSettings | null => {
-  if (
-    parsed === null ||
-    parsed.repository === null ||
-    parsed.rulesets === null ||
-    parsed.rulesetEnforcement === null
-  ) {
-    return null;
-  }
-  const rulesets = parsed.rulesets.filter(isNamedRuleset);
-  if (rulesets.length !== parsed.rulesets.length) {
-    return null;
-  }
-  return {
-    repository: parsed.repository,
-    rulesets,
-    rulesetEnforcement: parsed.rulesetEnforcement,
-  };
-};
-
-const enforcementMergeProblems = (
-  local: ParsedGithubSettings | null,
-): ReadonlyArray<string> => {
-  if (
-    local?.rulesetEnforcement !== ENFORCEMENT_OPT_OUT ||
-    local.rulesets === null ||
-    local.rulesets.length === 0
-  ) {
-    return [];
-  }
-  return [
-    `.github/settings.local.json declares additional rulesets while "rulesetEnforcement" is "${ENFORCEMENT_OPT_OUT}"; remove the rulesets or the opt-out`,
-  ];
-};
-
-const repositoryMergeProblems = (
-  canonical: ParsedGithubSettings | null,
-  local: ParsedGithubSettings | null,
-): ReadonlyArray<string> => {
-  if (
-    canonical === null ||
-    canonical.repository === null ||
-    local === null ||
-    local.repository === null
-  ) {
-    return [];
-  }
-  const canonicalRepository = canonical.repository;
-  return Object.keys(local.repository)
-    .filter((key) => key in canonicalRepository)
-    .map(
-      (key) =>
-        `.github/settings.local.json repository."${key}" would override a canonical value; canonical settings are read-only`,
-    );
-};
-
-const rulesetMergeProblems = (
-  canonical: ParsedGithubSettings | null,
-  local: ParsedGithubSettings | null,
-): ReadonlyArray<string> => {
-  if (
-    canonical === null ||
-    canonical.rulesets === null ||
-    local === null ||
-    local.rulesets === null
-  ) {
-    return [];
-  }
-  const canonicalNames = new Set(
-    canonical.rulesets.filter(isNamedRuleset).map((ruleset) => ruleset.name),
-  );
-  return local.rulesets
-    .filter(isNamedRuleset)
-    .filter((ruleset) => canonicalNames.has(ruleset.name))
-    .map(
-      (ruleset) =>
-        `.github/settings.local.json ruleset "${ruleset.name}" collides with a canonical ruleset; add a separately named ruleset to tighten further`,
-    );
-};
-
-// The seam may only add. Overriding a canonical repository key or redefining a
-// canonical ruleset could weaken the canonical floor; GitHub layers multiple
-// rulesets strictest-wins, so adding a ruleset is always safe. The one
-// subtractive declaration is the ruleset-enforcement opt-out, which skips the
-// ruleset gate entirely rather than weakening any single rule.
-const mergeSettings = (
-  canonical: ParsedGithubSettings | null,
-  local: ParsedGithubSettings | null,
-) => {
-  const problems = [
-    ...enforcementMergeProblems(local),
-    ...repositoryMergeProblems(canonical, local),
-    ...rulesetMergeProblems(canonical, local),
-  ];
-  const completeCanonical = completeSettings(canonical);
-  const completeLocal = completeSettings(local);
-  if (
-    problems.length > 0 ||
-    completeCanonical === null ||
-    completeLocal === null
-  ) {
-    return { merged: null, problems };
-  }
-  return {
-    merged: {
-      repository: {
-        ...completeCanonical.repository,
-        ...completeLocal.repository,
-      },
-      rulesets: [...completeCanonical.rulesets, ...completeLocal.rulesets],
-      rulesetEnforcement: completeLocal.rulesetEnforcement,
-    },
-    problems: [],
-  };
 };
 
 type JsonParse = {

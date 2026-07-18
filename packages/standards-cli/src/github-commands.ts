@@ -20,6 +20,7 @@ import {
   enforceableRepositorySettings,
   optOutEligibilityProblem,
 } from './github-command-shared';
+import { applyLabels } from './github-labels';
 import { collectLiveDrift } from './github-live-drift';
 import { isRecord } from './github-settings-parse';
 
@@ -108,6 +109,7 @@ export const runGithubApply = async (consumer: string): Promise<boolean> => {
     if (!rulesetsSkipped) {
       actions.push(...(await applyRulesets(token, repo, declared.merged)));
     }
+    actions.push(...(await applyLabels(token, repo, declared.merged.labels)));
     for (const action of actions) {
       console.log(`  ${action}`);
     }

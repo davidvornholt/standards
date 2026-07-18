@@ -1547,3 +1547,67 @@ describe('path safety', () => {
     );
   });
 });
+
+describe('poller', () => {
+  it('requires --config', () => {
+    const consumer = mkTmp('poller-');
+    const result = run(consumer, ['poller']);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('--config <path> is required');
+  });
+
+  it('rejects poller flags on other commands', () => {
+    const consumer = mkTmp('poller-');
+    const result = run(consumer, ['check', '--config', 'x.json']);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      '--config is only valid with the poller command',
+    );
+  });
+
+  it('rejects combining --install with --print-units', () => {
+    const consumer = mkTmp('poller-');
+    const result = run(consumer, [
+      'poller',
+      '--install',
+      '--print-units',
+      '--config',
+      'x.json',
+    ]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      'poller accepts at most one of --install or --print-units',
+    );
+  });
+
+  it('fails loudly on an invalid config file', () => {
+    const consumer = mkTmp('poller-');
+    writeFileSync(
+      join(consumer, 'poller.json'),
+      '{"repos":[],"model":"gpt-5.6-sol","reasoningEffort":"high"}',
+    );
+    const result = run(consumer, [
+      'poller',
+      '--config',
+      join(consumer, 'poller.json'),
+    ]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      'poller config "repos" must list at least one repository',
+    );
+  });
+
+  it('prints systemd units without touching the host', () => {
+    const consumer = mkTmp('poller-');
+    const configPath = join(consumer, 'poller.json');
+    const result = run(consumer, [
+      'poller',
+      '--print-units',
+      '--config',
+      configPath,
+    ]);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('standards-poller.service');
+    expect(result.stdout).toContain(`poller --config ${configPath}`);
+  });
+});

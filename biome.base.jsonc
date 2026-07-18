@@ -232,12 +232,18 @@
     },
     {
       // CLI scripts: console output is the user interface, and they read
-      // environment configuration at the edge.
+      // environment configuration at the edge. The poller modules that spawn
+      // git and codex subprocesses pass the process environment through for
+      // the same reason.
       "includes": [
         "scripts/**",
         "packages/standards-cli/src/cli.ts",
         "packages/standards-cli/src/github-api.ts",
-        "packages/standards-cli/src/github-commands.ts"
+        "packages/standards-cli/src/github-commands.ts",
+        "packages/standards-cli/src/poller-codex.ts",
+        "packages/standards-cli/src/poller-commands.ts",
+        "packages/standards-cli/src/poller-install.ts",
+        "packages/standards-cli/src/poller-workspace.ts"
       ],
       "linter": {
         "rules": {
@@ -256,7 +262,9 @@
       "includes": [
         "packages/standards-cli/src/cli.test.ts",
         "packages/standards-cli/src/github-diff.test.ts",
-        "packages/standards-cli/src/github-settings.test.ts"
+        "packages/standards-cli/src/github-settings.test.ts",
+        "packages/standards-cli/src/poller-tick.test.ts",
+        "packages/standards-cli/src/poller-trust.test.ts"
       ],
       "linter": {
         "rules": {
