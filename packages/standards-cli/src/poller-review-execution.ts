@@ -52,6 +52,8 @@ export const executeReviewJob = async (options: {
       pr,
       claim,
       plan: {
+        repo: deps.repo,
+        prNumber: pr.number,
         approvalId: claim.approval.id,
         approvedHead: pr.headSha,
         publishedHead: pr.headSha,

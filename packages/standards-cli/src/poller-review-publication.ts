@@ -14,6 +14,7 @@ import {
   sealReviewPlan,
 } from './poller-review-output';
 import { publishReviewPlan, validateReviewClaim } from './poller-review-state';
+import { validateSealedReviewOutput } from './poller-review-validation';
 import {
   changedPaths,
   commitCount,
@@ -21,6 +22,9 @@ import {
   localBranchExists,
   pushBranch,
 } from './poller-workspace';
+
+const outputBranchFor = (plan: ReviewPublicationPlan): string =>
+  reviewOutputBranch(plan);
 
 export const resumeReviewedJob = async (options: {
   readonly deps: JobDeps;
@@ -34,7 +38,7 @@ export const resumeReviewedJob = async (options: {
   if (claim.approval.id !== plan.approvalId) {
     throw new Error('publication blocked: review plan approval changed');
   }
-  const outputBranch = reviewOutputBranch(pr.number, plan.approvalId);
+  const outputBranch = outputBranchFor(plan);
   const sealed = readSealedReviewPlan(cloneDir, outputBranch);
   if (sealed === null) {
     const detail = localBranchExists(cloneDir, outputBranch)
@@ -45,6 +49,7 @@ export const resumeReviewedJob = async (options: {
   if (JSON.stringify(sealed) !== JSON.stringify(plan)) {
     throw new Error('publication blocked: sealed review plan changed');
   }
+  await validateSealedReviewOutput({ deps, pr, plan, cloneDir });
   if (pr.headSha === plan.approvedHead && plan.publishedHead !== pr.headSha) {
     await validateReviewClaim({
       deps,
@@ -98,6 +103,8 @@ export const finishReviewedJob = async (options: {
     return `PR #${pr.number}: failed (protected paths)`;
   }
   const plan: ReviewPublicationPlan = {
+    repo: deps.repo,
+    prNumber: pr.number,
     approvalId: claim.approval.id,
     approvedHead: pr.headSha,
     publishedHead: headSha(workDir),
@@ -107,7 +114,7 @@ export const finishReviewedJob = async (options: {
     commits,
     deferred: outcome.deferred ?? [],
   };
-  const outputBranch = reviewOutputBranch(pr.number, plan.approvalId);
+  const outputBranch = outputBranchFor(plan);
   const sealedHead = sealReviewPlan(workDir, plan);
   pushBranch(workDir, {
     repo: deps.repo,

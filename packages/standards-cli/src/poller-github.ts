@@ -26,6 +26,7 @@ export type IssueComment = {
 };
 
 export type LabelEvent = {
+  readonly id: number;
   readonly actorLogin: string;
   readonly createdAt: string;
 };
@@ -131,6 +132,7 @@ export const lastLabelEvent = async (
   for (const raw of events) {
     if (
       isRecord(raw) &&
+      typeof raw.id === 'number' &&
       raw.event === 'labeled' &&
       isRecord(raw.label) &&
       typeof raw.label.name === 'string' &&
@@ -139,7 +141,11 @@ export const lastLabelEvent = async (
       isNonEmptyString(raw.actor.login) &&
       isNonEmptyString(raw.created_at)
     ) {
-      latest = { actorLogin: raw.actor.login, createdAt: raw.created_at };
+      latest = {
+        id: raw.id,
+        actorLogin: raw.actor.login,
+        createdAt: raw.created_at,
+      };
     }
   }
   return latest;

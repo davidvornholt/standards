@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { installApi } from './github-commands-test-support';
+import { prRevision } from './poller-approval';
 import type { JobDeps } from './poller-job-shared';
 import { CLAIM_MARKER } from './poller-protocol';
 import type { ReviewPublicationPlan } from './poller-review-output';
@@ -26,10 +27,13 @@ const pr = {
   draft: true,
 };
 const approvalFields = {
+  repo: 'owner/repo',
+  issueNumber: PR_NUMBER,
+  eventId: 101,
   label: 'approved-for-review',
   actorLogin: 'maintainer',
   approvedAt: '2026-07-18T10:00:00Z',
-  target: 'pr:head',
+  target: prRevision('main', 'base', 'head'),
 };
 const approval = {
   id: createHash('sha256').update(JSON.stringify(approvalFields)).digest('hex'),
@@ -42,6 +46,8 @@ const claim = {
   markerId: 9,
 };
 const plan: ReviewPublicationPlan = {
+  repo: 'owner/repo',
+  prNumber: PR_NUMBER,
   approvalId: approval.id,
   approvedHead: 'head',
   publishedHead: 'head',
@@ -86,6 +92,7 @@ describe('validateReviewClaim', () => {
       {
         body: [
           {
+            id: approval.eventId,
             event: 'labeled',
             label: { name: 'APPROVED-FOR-REVIEW' },
             actor: { login: 'maintainer' },

@@ -29,6 +29,7 @@ const role = (value: string) => ({
   body: Object.fromEntries([['role_name', value]]),
 });
 const labeled = (label: string, actor = 'maintainer'): unknown => ({
+  id: 101,
   event: 'labeled',
   label: { name: label },
   actor: { login: actor },
@@ -49,6 +50,9 @@ describe('approval and claim bindings', () => {
   it('elects the earliest trusted marker for one claim epoch', async () => {
     const approval = {
       id: 'approval',
+      repo: context.repo,
+      issueNumber,
+      eventId: 100,
       label: 'approved-for-fix',
       actorLogin: 'maintainer',
       approvedAt: '2026-07-18T11:00:00Z',
@@ -59,7 +63,7 @@ describe('approval and claim bindings', () => {
       body: `<!-- standards-poller:claim -->\n${JSON.stringify({
         approval,
         claimLabel: 'fix-in-progress',
-        claimEpoch: '2026-07-18T12:00:00Z',
+        claimEpoch: '101',
         nonce: 'earlier',
       })}`,
       user: { login: 'maintainer' },
@@ -157,4 +161,39 @@ describe('approval and claim bindings', () => {
     );
     expect(typeof approval).not.toBe('string');
   });
+});
+
+it('distinguishes same-second approval generations by timeline event ID', async () => {
+  installApi([
+    { body: rawIssue(['approved-for-fix']) },
+    { body: [labeled('approved-for-fix')] },
+    role('maintain'),
+  ]);
+  const first = await readApprovalBinding(
+    context,
+    'approved-for-fix',
+    'issue:revision',
+  );
+  installApi([
+    { body: rawIssue(['approved-for-fix']) },
+    {
+      body: [
+        {
+          ...(labeled('approved-for-fix') as Record<string, unknown>),
+          id: 102,
+        },
+      ],
+    },
+    role('maintain'),
+  ]);
+  const second = await readApprovalBinding(
+    context,
+    'approved-for-fix',
+    'issue:revision',
+  );
+  if (typeof first === 'string' || typeof second === 'string') {
+    throw new Error('test approvals must be valid');
+  }
+  expect(first.approvedAt).toBe(second.approvedAt);
+  expect(first.id).not.toBe(second.id);
 });

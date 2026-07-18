@@ -3,7 +3,7 @@
 // any check is treated as no outcome at all, which routes the job to the
 // explicit failure path instead of acting on half-trusted data.
 
-import { existsSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isNonEmptyString, isRecord } from './github-settings-parse';
@@ -23,6 +23,8 @@ const readOutcomeRaw = async (workDir: string): Promise<unknown | null> => {
     return JSON.parse(await readFile(path, 'utf8')) as unknown;
   } catch {
     return null;
+  } finally {
+    rmSync(path, { force: true });
   }
 };
 

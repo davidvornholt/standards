@@ -1,10 +1,10 @@
-import { prRevision } from './poller-approval';
+import { prRevision, readApprovalBinding } from './poller-approval';
 import { type ClaimBinding, validateClaim } from './poller-claim';
 import { collaboratorRole, listIssueComments } from './poller-github';
 import { getPullRequest, type PullRequest } from './poller-github-pulls';
 import { createComment } from './poller-github-write';
 import type { JobDeps } from './poller-job-shared';
-import { isTrustedRole } from './poller-protocol';
+import { APPROVED_FOR_REVIEW, isTrustedRole } from './poller-protocol';
 import {
   parseReviewPlan,
   type ReviewPublicationPlan,
@@ -16,10 +16,13 @@ export const readReviewPlan = async (
   pr: PullRequest,
 ): Promise<ReviewPublicationPlan | null> => {
   const comments = await listIssueComments(deps.token, deps.repo, pr.number);
+  const currentPlans: Array<ReviewPublicationPlan> = [];
   for (const comment of comments) {
     const plan = parseReviewPlan(comment.body);
     if (
       plan !== null &&
+      plan.repo === deps.repo &&
+      plan.prNumber === pr.number &&
       plan.baseRef === pr.baseRef &&
       plan.baseSha === pr.baseSha &&
       (plan.approvedHead === pr.headSha || plan.publishedHead === pr.headSha)
@@ -31,11 +34,30 @@ export const readReviewPlan = async (
         comment.authorLogin,
       );
       if (isTrustedRole(role)) {
-        return plan;
+        const binding = await readApprovalBinding(
+          {
+            token: deps.token,
+            repo: deps.repo,
+            issueNumber: pr.number,
+          },
+          APPROVED_FOR_REVIEW,
+          prRevision(plan.baseRef, plan.baseSha, plan.approvedHead),
+        );
+        if (typeof binding !== 'string' && binding.id === plan.approvalId) {
+          currentPlans.push(plan);
+        }
       }
     }
   }
-  return null;
+  const distinct = new Map(
+    currentPlans.map((plan) => [JSON.stringify(plan), plan]),
+  );
+  if (distinct.size > 1) {
+    throw new Error(
+      'publication blocked: conflicting review plans exist for this approval generation',
+    );
+  }
+  return distinct.values().next().value ?? null;
 };
 
 export const validateReviewClaim = async (options: {
@@ -62,7 +84,7 @@ export const validateReviewClaim = async (options: {
   const problem = await validateClaim(
     { token: deps.token, repo: deps.repo, issueNumber: pr.number },
     claim,
-    prRevision(plan.approvedHead),
+    prRevision(plan.baseRef, plan.baseSha, plan.approvedHead),
   );
   if (problem !== null) {
     throw new Error(`publication blocked: ${problem}`);
@@ -78,6 +100,9 @@ export const publishReviewPlan = async (
 ): Promise<void> => {
   if (plan.approvalId !== claim.approval.id) {
     throw new Error('publication blocked: sealed review approval changed');
+  }
+  if (plan.repo !== deps.repo || plan.prNumber !== pr.number) {
+    throw new Error('publication blocked: sealed review repository changed');
   }
   const existing = await readReviewPlan(deps, pr);
   if (existing !== null) {

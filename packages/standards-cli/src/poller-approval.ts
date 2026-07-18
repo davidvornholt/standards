@@ -10,6 +10,9 @@ import { isTrustedRole } from './poller-protocol';
 
 export type ApprovalBinding = {
   readonly id: string;
+  readonly repo: string;
+  readonly issueNumber: number;
+  readonly eventId: number;
   readonly label: string;
   readonly actorLogin: string;
   readonly approvedAt: string;
@@ -28,7 +31,11 @@ const stableDigest = (value: unknown): string =>
 export const issueRevision = (issue: IssueItem): string =>
   `issue:${stableDigest({ title: issue.title, body: issue.body })}`;
 
-export const prRevision = (headSha: string): string => `pr:${headSha}`;
+export const prRevision = (
+  baseRef: string,
+  baseSha: string,
+  headSha: string,
+): string => `pr:${stableDigest({ baseRef, baseSha, headSha })}`;
 
 export const readApprovalBinding = async (
   context: ApprovalContext,
@@ -61,6 +68,9 @@ export const readApprovalBinding = async (
     return `"${label}" on ${context.repo}#${context.issueNumber} was applied by ${event.actorLogin} (role: ${role}); only admin or maintain roles may approve automation`;
   }
   const fields = {
+    repo: context.repo,
+    issueNumber: context.issueNumber,
+    eventId: event.id,
     label,
     actorLogin: event.actorLogin,
     approvedAt: event.createdAt,

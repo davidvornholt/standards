@@ -1,13 +1,23 @@
 import { Buffer } from 'node:buffer';
 import { isRecord } from './github-settings-parse';
+import {
+  assertCleanOutputWorktree,
+  commitCountBetween,
+  isAncestor,
+  isGitObjectId,
+  singleParentOf,
+} from './poller-output-integrity';
 import { FIX_OUTPUT_MARKER } from './poller-protocol';
 import { runGit } from './poller-workspace';
 
 export type SealedFixOutput = {
+  readonly repo: string;
   readonly issueNumber: number;
   readonly approvalId: string;
   readonly title: string;
   readonly body: string;
+  readonly baseSha: string;
+  readonly commits: number;
   readonly generatedHead: string;
   readonly sealedHead: string;
 };
@@ -31,11 +41,18 @@ const parseFixOutputMessage = (
     ) as unknown;
     if (
       !isRecord(raw) ||
+      typeof raw.repo !== 'string' ||
       typeof raw.issueNumber !== 'number' ||
       typeof raw.approvalId !== 'string' ||
       typeof raw.title !== 'string' ||
       typeof raw.body !== 'string' ||
-      typeof raw.generatedHead !== 'string'
+      typeof raw.baseSha !== 'string' ||
+      typeof raw.commits !== 'number' ||
+      !Number.isInteger(raw.commits) ||
+      raw.commits < 1 ||
+      typeof raw.generatedHead !== 'string' ||
+      !isGitObjectId(raw.baseSha) ||
+      !isGitObjectId(raw.generatedHead)
     ) {
       return null;
     }
@@ -49,6 +66,7 @@ export const sealFixOutput = (
   workDir: string,
   output: Omit<SealedFixOutput, 'generatedHead' | 'sealedHead'>,
 ): SealedFixOutput => {
+  assertCleanOutputWorktree(workDir);
   const generatedHead = runGit(
     ['-C', workDir, 'rev-parse', 'HEAD'],
     null,
@@ -65,6 +83,7 @@ export const sealFixOutput = (
       'commit.gpgSign=false',
       'commit',
       '--allow-empty',
+      '--only',
       '-m',
       fixOutputMessage({ ...output, generatedHead }),
     ],
@@ -95,13 +114,21 @@ export const readSealedFixOutput = (
       ],
       null,
     ).trim();
-    if (changed.length > 0) {
-      return null;
-    }
-    return parseFixOutputMessage(
+    const parsed = parseFixOutputMessage(
       runGit(['-C', cloneDir, 'log', '-1', '--format=%B', sealedHead], null),
       sealedHead,
     );
+    if (
+      changed.length > 0 ||
+      parsed === null ||
+      singleParentOf(cloneDir, sealedHead) !== parsed.generatedHead ||
+      !isAncestor(cloneDir, parsed.baseSha, parsed.generatedHead) ||
+      commitCountBetween(cloneDir, parsed.baseSha, parsed.generatedHead) !==
+        parsed.commits
+    ) {
+      return null;
+    }
+    return parsed;
   } catch {
     return null;
   }

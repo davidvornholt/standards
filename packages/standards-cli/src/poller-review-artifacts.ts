@@ -1,10 +1,11 @@
 import type { ClaimBinding } from './poller-claim';
-import { repositoryIssueWithMarkerExists } from './poller-github-publication';
+import { collaboratorRole } from './poller-github';
+import { repositoryIssueMarkerAuthors } from './poller-github-publication';
 import {
   createPullRequestReview,
   markPullRequestReady,
   type PullRequest,
-  pullRequestReviewWithMarkerExists,
+  pullRequestReviewMarkerAuthors,
 } from './poller-github-pulls';
 import { createIssue } from './poller-github-write';
 import {
@@ -12,15 +13,28 @@ import {
   type JobLabels,
   releaseLabels,
 } from './poller-job-shared';
-import { DEFERRED_FINDING } from './poller-protocol';
+import { DEFERRED_FINDING, isTrustedRole } from './poller-protocol';
 import type { ReviewPublicationPlan } from './poller-review-output';
 import { validateReviewClaim } from './poller-review-state';
 
 const reviewMarker = (plan: ReviewPublicationPlan): string =>
-  `<!-- standards-poller:review approval=${plan.approvalId} -->`;
+  `<!-- standards-poller:review repo=${plan.repo} pr=${plan.prNumber} approval=${plan.approvalId} -->`;
 
 const deferredMarker = (plan: ReviewPublicationPlan, index: number): string =>
-  `<!-- standards-poller:deferred approval=${plan.approvalId} index=${index} -->`;
+  `<!-- standards-poller:deferred repo=${plan.repo} pr=${plan.prNumber} approval=${plan.approvalId} index=${index} -->`;
+
+const hasTrustedAuthor = async (
+  deps: JobDeps,
+  authors: ReadonlyArray<string>,
+): Promise<boolean> => {
+  for (const author of new Set(authors)) {
+    // biome-ignore lint/performance/noAwaitInLoops: marker authorship is a publication trust boundary and each role must be current.
+    if (isTrustedRole(await collaboratorRole(deps.token, deps.repo, author))) {
+      return true;
+    }
+  }
+  return false;
+};
 
 export const publishReviewArtifacts = async (options: {
   readonly deps: JobDeps;
@@ -31,13 +45,16 @@ export const publishReviewArtifacts = async (options: {
 }): Promise<string> => {
   const { deps, labels, pr, claim, plan } = options;
   const marker = reviewMarker(plan);
-  const reviewExists = await pullRequestReviewWithMarkerExists({
-    token: deps.token,
-    repo: deps.repo,
-    prNumber: pr.number,
-    marker,
-    commitId: plan.publishedHead,
-  });
+  const reviewExists = await hasTrustedAuthor(
+    deps,
+    await pullRequestReviewMarkerAuthors({
+      token: deps.token,
+      repo: deps.repo,
+      prNumber: pr.number,
+      marker,
+      commitId: plan.publishedHead,
+    }),
+  );
   if (!reviewExists) {
     await validateReviewClaim({
       deps,
@@ -58,10 +75,9 @@ export const publishReviewArtifacts = async (options: {
   for (const [index, finding] of plan.deferred.entries()) {
     const issueMarker = deferredMarker(plan, index);
     // biome-ignore lint/performance/noAwaitInLoops: deferred issues are sequential GitHub writes and each is independently replay-safe.
-    const exists = await repositoryIssueWithMarkerExists(
-      deps.token,
-      deps.repo,
-      issueMarker,
+    const exists = await hasTrustedAuthor(
+      deps,
+      await repositoryIssueMarkerAuthors(deps.token, deps.repo, issueMarker),
     );
     if (!exists) {
       await validateReviewClaim({

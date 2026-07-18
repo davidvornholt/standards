@@ -50,6 +50,7 @@ describe('jobPreamble', () => {
       {
         body: [
           {
+            id: 101,
             event: 'labeled',
             label: { name: 'approved-for-fix' },
             actor: { login: 'maintainer' },
@@ -104,6 +105,7 @@ describe('jobPreamble', () => {
       {
         body: [
           {
+            id: 102,
             event: 'labeled',
             label: { name: 'approved-for-fix' },
             actor: { login: 'maintainer' },

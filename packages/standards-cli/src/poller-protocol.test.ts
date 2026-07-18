@@ -102,7 +102,7 @@ describe('branchNameForIssue', () => {
   it('derives a stable branch name', () => {
     const issueNumber = 41;
     expect(branchNameForIssue(issueNumber, 'abcdef1234567890')).toBe(
-      'poller/fix-issue-41-abcdef123456',
+      'poller/fix-issue-41-abcdef1234567890',
     );
   });
 });

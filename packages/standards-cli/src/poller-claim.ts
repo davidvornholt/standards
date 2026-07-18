@@ -110,7 +110,7 @@ export const acquireClaim = async (
   const provisional = {
     approval,
     claimLabel,
-    claimEpoch: event.createdAt,
+    claimEpoch: String(event.id),
   };
   const nonce = randomUUID();
   const markerId = await createComment(

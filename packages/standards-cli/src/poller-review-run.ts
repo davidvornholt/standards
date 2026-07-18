@@ -4,10 +4,10 @@
 // PR to ready. GitHub writes stay in deterministic poller code; the agent
 // never holds credentials.
 
-import { prRevision, readApprovalBinding } from './poller-approval';
+import { prRevision } from './poller-approval';
 import { acquireClaim } from './poller-claim';
 import { getIssue, type IssueItem } from './poller-github';
-import { getPullRequest, type PullRequest } from './poller-github-pulls';
+import { getPullRequest } from './poller-github-pulls';
 import { addLabels } from './poller-github-write';
 import {
   failJob,
@@ -36,24 +36,20 @@ const REVIEW_LABELS: JobLabels = {
   failed: REVIEW_FAILED,
 };
 
-const currentReviewPlan = async (deps: JobDeps, pr: PullRequest) => {
-  const plan = await readReviewPlan(deps, pr);
-  if (plan === null) {
-    return null;
-  }
-  const binding = await readApprovalBinding(
-    { token: deps.token, repo: deps.repo, issueNumber: pr.number },
-    APPROVED_FOR_REVIEW,
-    prRevision(plan.approvedHead),
-  );
-  return typeof binding === 'string' || binding.id !== plan.approvalId
-    ? null
-    : plan;
-};
+const currentReviewPlan = readReviewPlan;
+
+const hasInvalidLocalOutput = (
+  plan: Awaited<ReturnType<typeof readReviewPlan>>,
+  sealed: ReturnType<typeof readSealedReviewPlan>,
+  cloneDir: string,
+  branch: string,
+): boolean =>
+  plan === null && sealed === null && localBranchExists(cloneDir, branch);
 
 export const runReviewJob = async (
   deps: JobDeps,
   prItem: IssueItem,
+  allowCodex = true,
 ): Promise<JobResult> => {
   const { config, token, repo } = deps;
   const pr = await getPullRequest(token, repo, prItem.number);
@@ -63,7 +59,7 @@ export const runReviewJob = async (
     deps,
     currentItem,
     REVIEW_LABELS,
-    prRevision(plan?.approvedHead ?? pr.headSha),
+    prRevision(pr.baseRef, pr.baseSha, plan?.approvedHead ?? pr.headSha),
   );
   if (preamble.kind === 'rejected') {
     return {
@@ -104,6 +100,24 @@ export const runReviewJob = async (
       ranCodex: false,
     };
   }
+  const cacheClone = ensureCacheClone(config.cacheDir, repo, token);
+  const outputBranch = reviewOutputBranch({
+    repo,
+    prNumber: pr.number,
+    baseSha: pr.baseSha,
+    approvedHead: plan?.approvedHead ?? pr.headSha,
+    approvalId: preamble.approval.id,
+  });
+  const sealed = readSealedReviewPlan(cacheClone, outputBranch);
+  if (hasInvalidLocalOutput(plan, sealed, cacheClone, outputBranch)) {
+    throw new Error(`sealed output on ${outputBranch} is invalid`);
+  }
+  if (plan === null && sealed === null && !allowCodex) {
+    return {
+      lines: [`PR #${pr.number}: waiting for run capacity`],
+      ranCodex: false,
+    };
+  }
   await addLabels(token, repo, prItem.number, [REVIEW_IN_PROGRESS]);
   const claim = await acquireClaim(
     { token, repo, issueNumber: pr.number },
@@ -116,14 +130,9 @@ export const runReviewJob = async (
       ranCodex: false,
     };
   }
-  const cacheClone = ensureCacheClone(config.cacheDir, repo, token);
-  const outputBranch = reviewOutputBranch(pr.number, claim.approval.id);
-  const sealed = readSealedReviewPlan(cacheClone, outputBranch);
   if (plan === null && sealed !== null) {
     await publishReviewPlan(deps, pr, claim, sealed);
     plan = sealed;
-  } else if (plan === null && localBranchExists(cacheClone, outputBranch)) {
-    throw new Error(`sealed output on ${outputBranch} is invalid`);
   }
   if (plan !== null) {
     return {

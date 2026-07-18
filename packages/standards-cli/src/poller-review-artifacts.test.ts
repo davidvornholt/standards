@@ -1,6 +1,7 @@
 import { afterEach, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { type ApiCall, installApi } from './github-commands-test-support';
+import { prRevision } from './poller-approval';
 import type { JobDeps } from './poller-job-shared';
 import { CLAIM_MARKER } from './poller-protocol';
 import { publishReviewArtifacts } from './poller-review-artifacts';
@@ -10,10 +11,13 @@ const originalFetch = globalThis.fetch;
 const PR_NUMBER = 4;
 const RELEASE_LABEL_COUNT = 3;
 const approvalFields = {
+  repo: 'owner/repo',
+  issueNumber: PR_NUMBER,
+  eventId: 101,
   label: 'approved-for-review',
   actorLogin: 'maintainer',
   approvedAt: '2026-07-18T10:00:00Z',
-  target: 'pr:head',
+  target: prRevision('main', 'base', 'head'),
 };
 const approval = {
   id: createHash('sha256').update(JSON.stringify(approvalFields)).digest('hex'),
@@ -26,6 +30,8 @@ const claim = {
   markerId: 9,
 };
 const plan: ReviewPublicationPlan = {
+  repo: 'owner/repo',
+  prNumber: PR_NUMBER,
   approvalId: approval.id,
   approvedHead: 'head',
   publishedHead: 'head',
@@ -79,6 +85,7 @@ const validationResponses = () => [
   {
     body: [
       {
+        id: approval.eventId,
         event: 'labeled',
         label: { name: 'approved-for-review' },
         actor: { login: 'maintainer' },
@@ -115,18 +122,33 @@ it('replays a fully published ready review without duplicate artifacts', async (
     {
       body: [
         {
-          body: `<!-- standards-poller:review approval=${approval.id} -->`,
+          body: `<!-- standards-poller:review repo=${plan.repo} pr=${plan.prNumber} approval=${approval.id} -->`,
           ...Object.fromEntries([['commit_id', 'head']]),
+          user: { login: 'outsider' },
+        },
+        {
+          body: `<!-- standards-poller:review repo=${plan.repo} pr=${plan.prNumber} approval=${approval.id} -->`,
+          ...Object.fromEntries([['commit_id', 'head']]),
+          user: { login: 'poller' },
         },
       ],
     },
+    { body: Object.fromEntries([['role_name', 'write']]) },
+    { body: Object.fromEntries([['role_name', 'admin']]) },
     {
       body: [
         {
-          body: `<!-- standards-poller:deferred approval=${approval.id} index=0 -->`,
+          body: `<!-- standards-poller:deferred repo=${plan.repo} pr=${plan.prNumber} approval=${approval.id} index=0 -->`,
+          user: { login: 'revoked' },
+        },
+        {
+          body: `<!-- standards-poller:deferred repo=${plan.repo} pr=${plan.prNumber} approval=${approval.id} index=0 -->`,
+          user: { login: 'poller' },
         },
       ],
     },
+    { body: Object.fromEntries([['role_name', 'write']]) },
+    { body: Object.fromEntries([['role_name', 'admin']]) },
     ...validationResponses(),
     ...validationResponses(),
     { body: {} },

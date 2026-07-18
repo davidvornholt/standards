@@ -144,25 +144,28 @@ export const createPullRequestReview = async (options: {
   }
 };
 
-export const pullRequestReviewWithMarkerExists = async (options: {
+export const pullRequestReviewMarkerAuthors = async (options: {
   readonly token: string | null;
   readonly repo: string;
   readonly prNumber: number;
   readonly marker: string;
   readonly commitId: string;
-}): Promise<boolean> => {
+}): Promise<ReadonlyArray<string>> => {
   const { token, repo, prNumber, marker, commitId } = options;
   const reviews = await listAllPages(
     token,
     `/repos/${repo}/pulls/${prNumber}/reviews`,
     `list reviews on ${repo}#${prNumber}`,
   );
-  return reviews.some(
-    (review) =>
-      isRecord(review) &&
-      review.commit_id === commitId &&
-      typeof review.body === 'string' &&
-      review.body.includes(marker),
+  return reviews.flatMap((review) =>
+    isRecord(review) &&
+    review.commit_id === commitId &&
+    typeof review.body === 'string' &&
+    review.body.includes(marker) &&
+    isRecord(review.user) &&
+    typeof review.user.login === 'string'
+      ? [review.user.login]
+      : [],
   );
 };
 

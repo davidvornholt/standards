@@ -26,6 +26,7 @@ const issue = (
 const timeline = (label: string, createdAt: string) => ({
   body: [
     {
+      id: 101,
       event: 'labeled',
       label: { name: label },
       actor: { login: 'maintainer' },
@@ -34,7 +35,7 @@ const timeline = (label: string, createdAt: string) => ({
   ],
 });
 
-it('schedules every repository review before an earlier repository fix', async () => {
+it('runs the oldest job globally and still offers later recovery work', async () => {
   const parsed = parsePollerConfig(
     {
       repos: ['owner/repo-a', 'owner/repo-b'],
@@ -57,21 +58,25 @@ it('schedules every repository review before an earlier repository fix', async (
     { body: [issue(2, 'Approved-For-Review', true)] },
     { body: [] }, // repo-b fixes
     timeline('APPROVED-FOR-REVIEW', '2026-07-18T11:00:00Z'),
+    { body: Object.fromEntries([['default_branch', 'main']]) },
   ]);
   const ran: Array<string> = [];
   const report = await runPollerTick(parsed.config, 'test-token', NOW, {
-    review: (_deps, item) => {
-      ran.push(`review:${item.number}`);
-      return Promise.resolve({ lines: ['reviewed'], ranCodex: true });
+    review: (_deps, item, allowCodex) => {
+      ran.push(`review:${item.number}:${String(allowCodex)}`);
+      return Promise.resolve({
+        lines: ['reviewed'],
+        ranCodex: allowCodex === true,
+      });
     },
-    fix: (_deps, item) => {
-      ran.push(`fix:${item.number}`);
-      return Promise.resolve({ lines: ['fixed'], ranCodex: true });
+    fix: (_deps, item, _defaultBranch, allowCodex) => {
+      ran.push(`fix:${item.number}:${String(allowCodex)}`);
+      return Promise.resolve({
+        lines: ['fixed'],
+        ranCodex: allowCodex === true,
+      });
     },
   });
-  expect(ran).toEqual(['review:2']);
+  expect(ran).toEqual(['fix:1:true', 'review:2:false']);
   expect(report.problems).toEqual([]);
-  expect(report.lines).toContain(
-    'global: run cap reached; remaining jobs wait',
-  );
 });

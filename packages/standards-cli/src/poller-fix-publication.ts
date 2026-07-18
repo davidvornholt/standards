@@ -1,6 +1,7 @@
 import { issueRevision } from './poller-approval';
 import { type ClaimBinding, validateClaim } from './poller-claim';
 import { type SealedFixOutput, sealFixOutput } from './poller-fix-output';
+import { validateSealedFixOutput } from './poller-fix-validation';
 import { getIssue, type IssueItem } from './poller-github';
 import {
   createDraftPullRequest,
@@ -37,6 +38,7 @@ export type FixPublication = {
   readonly defaultBranch: string;
   readonly claim: ClaimBinding;
   readonly branch: string;
+  readonly cloneDir: string;
 };
 
 const fixPullRequestBody = (output: SealedFixOutput): string =>
@@ -71,6 +73,16 @@ export const publishFixedOutput = async (
   push: (() => void) | null,
 ): Promise<string> => {
   const { deps, issue, branch } = job;
+  await validateSealedFixOutput(
+    {
+      deps: job.deps,
+      issueNumber: job.issue.number,
+      defaultBranch: job.defaultBranch,
+      approvalId: job.claim.approval.id,
+      cloneDir: job.cloneDir,
+    },
+    output,
+  );
   await validateFixClaim(job);
   push?.();
   await validateFixClaim(job);
@@ -156,10 +168,13 @@ export const finishFixedJob = async (
     return `#${issue.number}: failed (protected paths: ${forbidden.join(', ')})`;
   }
   const sealed = sealFixOutput(workspace.dir, {
+    repo: deps.repo,
     issueNumber: issue.number,
     approvalId: job.claim.approval.id,
     title: outcome.prTitle ?? '',
     body: outcome.prBody ?? '',
+    baseSha: workspace.baseSha,
+    commits: commitCount(workspace.dir, workspace.baseSha),
   });
   return publishFixedOutput(job, labels, sealed, () =>
     pushBranch(workspace.dir, {

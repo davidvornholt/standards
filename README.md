@@ -99,7 +99,7 @@ Every CLI release already creates a `vX.Y.Z` tag and GitHub Release, so released
 
 Version 0.7.0 is an intentional hard cutover: `sync-standards.local.json` is the only cadence and ref policy source. The canonical workflow and CLI no longer read `STANDARDS_AUTO_SYNC` or `STANDARDS_SYNC_REF`; leaving those Actions variables configured has no effect.
 
-Upgrade `@davidvornholt/standards` and `bun.lock` to 0.7.0 or newer, create `sync-standards.local.json` with any required opt-out or pin, and accept the canonical workflow update in the same consumer PR. The 0.7 workflow fails before syncing with an actionable error if a policy file is present but the installed CLI is older than 0.7.0. The current 0.10 workflow supersedes that conditional guard with an unconditional 0.10 minimum so every sync can compose Dependabot policy.
+Upgrade `@davidvornholt/standards` and `bun.lock` to 0.7.0 or newer, create `sync-standards.local.json` with any required opt-out or pin, and accept the canonical workflow update in the same consumer PR. The 0.7 workflow fails before syncing with an actionable error if a policy file is present but the installed CLI is older than 0.7.0. The 0.10 workflow superseded that conditional guard with an unconditional minimum so every sync could compose Dependabot policy; the current 0.11 workflow retains the unconditional guard and raises the minimum to 0.11.
 
 ### Breaking migration to 0.10.0
 

@@ -48,10 +48,17 @@ type FixJob = FixPublication & {
   readonly workspace: Workspace;
 };
 
+const hasInvalidLocalOutput = (
+  sealed: ReturnType<typeof readSealedFixOutput>,
+  cloneDir: string,
+  branch: string,
+): boolean => sealed === null && localBranchExists(cloneDir, branch);
+
 export const runFixJob = async (
   deps: JobDeps,
   issue: IssueItem,
   defaultBranch: string,
+  allowCodex = true,
 ): Promise<JobResult> => {
   const { config, token, repo } = deps;
   const currentIssue = await getIssue(token, repo, issue.number);
@@ -70,6 +77,20 @@ export const runFixJob = async (
       ranCodex: false,
     };
   }
+  const cacheClone = ensureCacheClone(config.cacheDir, repo, token);
+  const branch = branchNameForIssue(issue.number, preamble.approval.id);
+  const sealed = readSealedFixOutput(cacheClone, branch);
+  if (hasInvalidLocalOutput(sealed, cacheClone, branch)) {
+    throw new Error(
+      `refusing to overwrite ${branch}: it is not valid sealed output for this approval`,
+    );
+  }
+  if (sealed === null && !allowCodex) {
+    return {
+      lines: [`#${issue.number}: waiting for run capacity`],
+      ranCodex: false,
+    };
+  }
   await addLabels(token, repo, issue.number, [FIX_IN_PROGRESS]);
   const claim = await acquireClaim(
     { token, repo, issueNumber: issue.number },
@@ -82,15 +103,13 @@ export const runFixJob = async (
       ranCodex: false,
     };
   }
-  const cacheClone = ensureCacheClone(config.cacheDir, repo, token);
-  const branch = branchNameForIssue(issue.number, claim.approval.id);
-  const sealed = readSealedFixOutput(cacheClone, branch);
   const resumableJob = {
     deps,
     issue: currentIssue,
     defaultBranch,
     claim,
     branch,
+    cloneDir: cacheClone,
   };
   if (sealed !== null) {
     if (
@@ -103,11 +122,6 @@ export const runFixJob = async (
       lines: [await publishFixedOutput(resumableJob, FIX_LABELS, sealed, null)],
       ranCodex: false,
     };
-  }
-  if (localBranchExists(cacheClone, branch)) {
-    throw new Error(
-      `refusing to overwrite ${branch}: it is not valid sealed output for this approval`,
-    );
   }
   const workspace = createWorktree(
     cacheClone,

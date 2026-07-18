@@ -43,6 +43,7 @@ const rawIssue = (label: string) => ({
 const timeline = (label: string) => ({
   body: [
     {
+      id: 101,
       event: 'labeled',
       label: { name: label },
       actor: { login: 'maintainer' },

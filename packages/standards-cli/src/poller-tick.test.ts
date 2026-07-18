@@ -77,6 +77,7 @@ describe('runPollerTick', () => {
       {
         body: [
           {
+            id: 101,
             event: 'labeled',
             label: { name: 'fix-in-progress' },
             actor: { login: 'poller' },
@@ -89,6 +90,7 @@ describe('runPollerTick', () => {
       {
         body: [
           {
+            id: 102,
             event: 'labeled',
             label: { name: 'fix-in-progress' },
             actor: { login: 'poller' },
@@ -121,6 +123,7 @@ describe('runPollerTick', () => {
       {
         body: [
           {
+            id: 103,
             event: 'labeled',
             label: { name: 'APPROVED-FOR-FIX' },
             actor: { login: 'drive-by' },
@@ -134,6 +137,7 @@ describe('runPollerTick', () => {
       {
         body: [
           {
+            id: 104,
             event: 'labeled',
             label: { name: 'approved-for-fix' },
             actor: { login: 'drive-by' },
@@ -160,6 +164,7 @@ describe('runPollerTick', () => {
       {
         body: [
           {
+            id: 105,
             event: 'labeled',
             label: { name: 'fix-in-progress' },
             actor: { login: 'poller' },

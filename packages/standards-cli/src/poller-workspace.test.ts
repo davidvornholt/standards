@@ -140,15 +140,51 @@ describe('sealed fix output', () => {
       'initial',
     ]);
     execFileSync('git', ['-C', root, 'branch', '-M', 'owned']);
+    const baseSha = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], {
+      encoding: 'utf8',
+    }).trim();
+    writeFileSync(join(root, 'file.txt'), 'changed\n');
+    execFileSync('git', ['-C', root, 'add', 'file.txt']);
+    execFileSync('git', [
+      '-C',
+      root,
+      '-c',
+      'user.name=test',
+      '-c',
+      'user.email=test@example.com',
+      '-c',
+      'commit.gpgSign=false',
+      'commit',
+      '-qm',
+      'change',
+    ]);
 
     const sealed = sealFixOutput(root, {
+      repo: 'owner/repo',
       issueNumber: 4,
       approvalId: 'approval',
       title: 'fix(cli): repair poller',
       body: 'Body',
+      baseSha,
+      commits: 1,
     });
 
     expect(readSealedFixOutput(root, 'owned')).toEqual(sealed);
     expect(sealed.generatedHead).not.toBe(sealed.sealedHead);
+    execFileSync('git', [
+      '-C',
+      root,
+      '-c',
+      'user.name=test',
+      '-c',
+      'user.email=test@example.com',
+      '-c',
+      'commit.gpgSign=false',
+      'commit',
+      '--allow-empty',
+      '-qC',
+      sealed.sealedHead,
+    ]);
+    expect(readSealedFixOutput(root, 'owned')).toBeNull();
   });
 });

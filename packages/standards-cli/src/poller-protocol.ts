@@ -68,7 +68,6 @@ const WORKSPACE_GATE_CONFIG =
   /(?:^|\/)(?:biome\.jsonc|turbo\.json|tsconfig(?:\.[^.]+)?\.json|vitest\.config\.[cm]?[jt]s|playwright\.config\.[cm]?[jt]s)$/u;
 const QUALITY_SCRIPT = /^(?:check|lint|test|typecheck)(?::|$)/u;
 const WORKSPACE_MANIFEST = /^(?:apps|packages)\/[^/]+\/package\.json$/u;
-const APPROVAL_ID_LENGTH = 12;
 
 const isEncryptedSecret = (path: string): boolean =>
   !path.endsWith('.example.yaml') &&
@@ -135,5 +134,4 @@ export const changesWorkspaceQualityScripts = (
 export const branchNameForIssue = (
   issueNumber: number,
   approvalId: string,
-): string =>
-  `poller/fix-issue-${issueNumber}-${approvalId.slice(0, APPROVAL_ID_LENGTH)}`;
+): string => `poller/fix-issue-${issueNumber}-${approvalId}`;

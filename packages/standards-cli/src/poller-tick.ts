@@ -8,11 +8,7 @@ import { runFixJob } from './poller-fix-run';
 import { repoDefaultBranch } from './poller-github';
 import type { JobDeps, JobResult } from './poller-job-shared';
 import { runReviewJob } from './poller-review-run';
-import {
-  byApprovalAge,
-  discoverRepositoryJobs,
-  type ScheduledJob,
-} from './poller-schedule';
+import { discoverRepositoryJobs, type ScheduledJob } from './poller-schedule';
 import type { RoleCache } from './poller-trust';
 
 export type TickReport = {
@@ -34,43 +30,64 @@ const DEFAULT_JOB_RUNNERS: TickJobRunners = {
   fix: runFixJob,
 };
 
-const runQueue = async (options: {
+type TypedScheduledJob = ScheduledJob & {
   readonly kind: 'review' | 'fix';
-  readonly queue: ReadonlyArray<ScheduledJob>;
+};
+
+const approvalTime = (job: ScheduledJob): number => {
+  const parsed = Date.parse(job.approvedAt);
+  return Number.isNaN(parsed) ? Number.NEGATIVE_INFINITY : parsed;
+};
+
+const kindPriority = (
+  left: TypedScheduledJob,
+  right: TypedScheduledJob,
+): number => {
+  if (left.kind === right.kind) {
+    return 0;
+  }
+  return left.kind === 'review' ? -1 : 1;
+};
+
+const byGlobalPriority = (
+  left: TypedScheduledJob,
+  right: TypedScheduledJob,
+): number =>
+  approvalTime(left) - approvalTime(right) ||
+  kindPriority(left, right) ||
+  left.deps.repo.localeCompare(right.deps.repo) ||
+  left.item.number - right.item.number;
+
+const runQueue = async (options: {
+  readonly queue: ReadonlyArray<TypedScheduledJob>;
   readonly token: string | null;
   readonly runners: TickJobRunners;
   readonly budget: RunBudget;
   readonly lines: Array<string>;
   readonly problems: Array<string>;
   readonly defaultBranches: Map<string, string>;
-}): Promise<boolean> => {
-  const {
-    kind,
-    queue,
-    token,
-    runners,
-    budget,
-    lines,
-    problems,
-    defaultBranches,
-  } = options;
+}): Promise<void> => {
+  const { queue, token, runners, budget, lines, problems, defaultBranches } =
+    options;
   for (const job of queue) {
-    if (budget.remaining <= 0) {
-      lines.push('global: run cap reached; remaining jobs wait');
-      return false;
-    }
     try {
       let result: JobResult;
-      if (kind === 'review') {
+      const allowCodex = budget.remaining > 0;
+      if (job.kind === 'review') {
         // biome-ignore lint/performance/noAwaitInLoops: jobs are heavyweight Codex runs and the shared run budget is the concurrency cap.
-        result = await runners.review(job.deps, job.item);
+        result = await runners.review(job.deps, job.item, allowCodex);
       } else {
         let defaultBranch = defaultBranches.get(job.deps.repo);
         if (defaultBranch === undefined) {
           defaultBranch = await repoDefaultBranch(token, job.deps.repo);
           defaultBranches.set(job.deps.repo, defaultBranch);
         }
-        result = await runners.fix(job.deps, job.item, defaultBranch);
+        result = await runners.fix(
+          job.deps,
+          job.item,
+          defaultBranch,
+          allowCodex,
+        );
       }
       lines.push(...result.lines.map((line) => `${job.deps.repo} ${line}`));
       budget.remaining -= result.ranCodex ? 1 : 0;
@@ -80,7 +97,6 @@ const runQueue = async (options: {
       );
     }
   }
-  return true;
 };
 
 export const runPollerTick = async (
@@ -111,25 +127,18 @@ export const runPollerTick = async (
     }
   }
   const defaultBranches = new Map<string, string>();
-  for (const [kind, queue] of [
-    ['review', reviews.sort(byApprovalAge)],
-    ['fix', fixes.sort(byApprovalAge)],
-  ] as const) {
-    if (
-      // biome-ignore lint/performance/noAwaitInLoops: reviews must drain before fixes, and both queues share one sequential heavyweight-job budget.
-      !(await runQueue({
-        kind,
-        queue,
-        token,
-        runners,
-        budget,
-        lines,
-        problems,
-        defaultBranches,
-      }))
-    ) {
-      return { lines, problems };
-    }
-  }
+  const queue: ReadonlyArray<TypedScheduledJob> = [
+    ...reviews.map((job) => ({ ...job, kind: 'review' as const })),
+    ...fixes.map((job) => ({ ...job, kind: 'fix' as const })),
+  ].sort(byGlobalPriority);
+  await runQueue({
+    queue,
+    token,
+    runners,
+    budget,
+    lines,
+    problems,
+    defaultBranches,
+  });
   return { lines, problems };
 };

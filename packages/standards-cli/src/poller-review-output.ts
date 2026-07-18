@@ -1,14 +1,24 @@
 import { Buffer } from 'node:buffer';
+import { createHash } from 'node:crypto';
 import { isRecord } from './github-settings-parse';
+import {
+  assertCleanOutputWorktree,
+  commitCountBetween,
+  isAncestor,
+  isGitObjectId,
+  singleParentOf,
+} from './poller-output-integrity';
 import type { DeferredFinding } from './poller-protocol';
 import { runGit } from './poller-workspace';
 
 const REVIEW_OUTPUT_MARKER = '<!-- standards-poller:review-output\n';
 const REVIEW_OUTPUT_END = '\n-->';
 const REVIEW_COMMIT_MARKER = 'standards-poller:review-output';
-const APPROVAL_ID_LENGTH = 12;
+const OUTPUT_BRANCH_DIGEST_LENGTH = 16;
 
 export type ReviewPublicationPlan = {
+  readonly repo: string;
+  readonly prNumber: number;
   readonly approvalId: string;
   readonly approvedHead: string;
   readonly publishedHead: string;
@@ -45,11 +55,16 @@ export const parseReviewPlan = (body: string): ReviewPublicationPlan | null => {
     ) as unknown;
     if (
       !isRecord(raw) ||
+      typeof raw.repo !== 'string' ||
+      typeof raw.prNumber !== 'number' ||
       typeof raw.approvalId !== 'string' ||
       typeof raw.approvedHead !== 'string' ||
       typeof raw.publishedHead !== 'string' ||
       typeof raw.baseRef !== 'string' ||
       typeof raw.baseSha !== 'string' ||
+      !isGitObjectId(raw.approvedHead) ||
+      !isGitObjectId(raw.publishedHead) ||
+      !isGitObjectId(raw.baseSha) ||
       typeof raw.report !== 'string' ||
       typeof raw.commits !== 'number' ||
       !Number.isInteger(raw.commits) ||
@@ -66,10 +81,20 @@ export const parseReviewPlan = (body: string): ReviewPublicationPlan | null => {
 };
 
 export const reviewOutputBranch = (
-  prNumber: number,
-  approvalId: string,
-): string =>
-  `poller/review-pr-${prNumber}-${approvalId.slice(0, APPROVAL_ID_LENGTH)}`;
+  identity: Pick<
+    ReviewPublicationPlan,
+    'repo' | 'prNumber' | 'baseSha' | 'approvedHead' | 'approvalId'
+  >,
+): string => {
+  const { repo, prNumber, baseSha, approvedHead, approvalId } = identity;
+  const generation = createHash('sha256')
+    .update(
+      JSON.stringify({ repo, prNumber, baseSha, approvedHead, approvalId }),
+    )
+    .digest('hex')
+    .slice(0, OUTPUT_BRANCH_DIGEST_LENGTH);
+  return `poller/review-pr-${prNumber}-${generation}`;
+};
 
 const commitMessage = (plan: ReviewPublicationPlan): string =>
   `${REVIEW_COMMIT_MARKER}\n${Buffer.from(JSON.stringify(plan)).toString('base64url')}`;
@@ -78,6 +103,19 @@ export const sealReviewPlan = (
   workDir: string,
   plan: ReviewPublicationPlan,
 ): string => {
+  assertCleanOutputWorktree(workDir);
+  const publishedHead = runGit(
+    ['-C', workDir, 'rev-parse', 'HEAD'],
+    null,
+  ).trim();
+  if (
+    publishedHead !== plan.publishedHead ||
+    !isAncestor(workDir, plan.approvedHead, plan.publishedHead) ||
+    commitCountBetween(workDir, plan.approvedHead, plan.publishedHead) !==
+      plan.commits
+  ) {
+    throw new Error('refusing to seal a review plan for a different history');
+  }
   runGit(
     [
       '-C',
@@ -90,6 +128,7 @@ export const sealReviewPlan = (
       'commit.gpgSign=false',
       'commit',
       '--allow-empty',
+      '--only',
       '-m',
       commitMessage(plan),
     ],
@@ -128,11 +167,22 @@ export const readSealedReviewPlan = (
     if (changed.length > 0 || marker !== REVIEW_COMMIT_MARKER) {
       return null;
     }
-    return encoded === undefined
-      ? null
-      : parseReviewPlan(
-          `${REVIEW_OUTPUT_MARKER}${encoded}${REVIEW_OUTPUT_END}`,
-        );
+    const plan =
+      encoded === undefined
+        ? null
+        : parseReviewPlan(
+            `${REVIEW_OUTPUT_MARKER}${encoded}${REVIEW_OUTPUT_END}`,
+          );
+    if (
+      plan === null ||
+      singleParentOf(cloneDir, sealedHead) !== plan.publishedHead ||
+      !isAncestor(cloneDir, plan.approvedHead, plan.publishedHead) ||
+      commitCountBetween(cloneDir, plan.approvedHead, plan.publishedHead) !==
+        plan.commits
+    ) {
+      return null;
+    }
+    return plan;
   } catch {
     return null;
   }
