@@ -5,7 +5,6 @@
 
 import {
   apiError,
-  fetchLiveRulesets,
   HTTP_OK,
   loadDeclared,
   request,
@@ -20,10 +19,9 @@ import {
 import {
   enforceableRepositorySettings,
   optOutEligibilityProblem,
-  unverifiableProblem,
 } from './github-command-shared';
-import { diffRepositorySettings, diffRulesets } from './github-diff';
-import { type GithubSettings, isRecord } from './github-settings-parse';
+import { collectLiveDrift } from './github-live-drift';
+import { isRecord } from './github-settings-parse';
 
 // Printed on every check and apply while the opt-out is declared: the skip
 // must stay louder than the comfort of a green gate.
@@ -35,73 +33,6 @@ const reportProblems = (problems: ReadonlyArray<string>): void => {
     `standards github: ${problems.length} problem(s) with declared GitHub settings:`,
   );
   console.error(problems.map((problem) => `  - ${problem}`).join('\n'));
-};
-
-const repositoryDrift = async (
-  token: string | null,
-  repo: string,
-  declared: GithubSettings,
-): Promise<ReadonlyArray<string>> => {
-  const repoResponse = await request(token, 'GET', `/repos/${repo}`);
-  if (repoResponse.status !== HTTP_OK || !isRecord(repoResponse.body)) {
-    return [apiError(`reading repository ${repo}`, repoResponse)];
-  }
-  const eligibilityProblem = optOutEligibilityProblem(
-    repo,
-    declared,
-    repoResponse.body,
-  );
-  if (eligibilityProblem !== null) {
-    return [eligibilityProblem];
-  }
-  const diff = diffRepositorySettings(
-    enforceableRepositorySettings(declared),
-    repoResponse.body,
-  );
-  return [
-    ...diff.drifted,
-    ...unverifiableProblem('repository setting(s)', diff.unverifiable),
-  ];
-};
-
-const rulesetDrift = async (
-  token: string | null,
-  repo: string,
-  declared: GithubSettings,
-): Promise<ReadonlyArray<string>> => {
-  if (declared.rulesetEnforcement === 'unavailable-on-plan') {
-    return [];
-  }
-  const live = await fetchLiveRulesets(token, repo);
-  if (live.rulesets === null) {
-    return [live.problem ?? 'unable to read rulesets'];
-  }
-  const diff = diffRulesets(declared.rulesets, live.rulesets);
-  return [
-    ...diff.drifted,
-    ...unverifiableProblem('ruleset field(s)', diff.unverifiable),
-  ];
-};
-
-const collectLiveDrift = async (
-  consumer: string,
-  declared: GithubSettings,
-): Promise<ReadonlyArray<string>> => {
-  const repo = resolveGithubRepo(consumer);
-  if (repo === null) {
-    return ['cannot determine the GitHub repository from the origin remote'];
-  }
-  const token = resolveToken();
-  try {
-    return [
-      ...(await repositoryDrift(token, repo, declared)),
-      ...(await rulesetDrift(token, repo, declared)),
-    ];
-  } catch (error) {
-    return [
-      `GitHub API unreachable: ${error instanceof Error ? error.message : String(error)}`,
-    ];
-  }
 };
 
 export const runGithubCheck = async (consumer: string): Promise<boolean> => {
