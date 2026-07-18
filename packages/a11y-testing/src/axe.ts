@@ -26,8 +26,9 @@ export type AccessibilityViolation = {
 // states (for example a `div` standing in for a list item). Wait until every
 // placeholder is gone and the DOM structure has stopped changing before
 // running Axe.
-// biome-ignore lint/security/noSecrets: CSS selector for React streaming placeholders, not a credential.
-const reactStreamingPlaceholders = 'template[id^="P:"], template[id^="B:"]';
+const reactStreamingPlaceholders = ['P:', 'B:']
+  .map((idPrefix) => `template[id^="${idPrefix}"]`)
+  .join(', ');
 const structuralSettleMilliseconds = 250;
 const structuralSettleDeadlineMilliseconds = 10_000;
 

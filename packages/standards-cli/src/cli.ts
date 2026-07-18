@@ -627,7 +627,7 @@ const prepareProspectiveDependabot = async (
   const basePath = incoming.get(DEPENDABOT_BASE_FILE);
   if (basePath === undefined) {
     throw new Error(
-      `source content must manage ${DEPENDABOT_BASE_FILE}; @davidvornholt/standards 0.10 requires a 0.10-compatible content ref`,
+      `source content must manage ${DEPENDABOT_BASE_FILE}; @davidvornholt/standards 0.10.1 requires a 0.10.1-compatible content ref`,
     );
   }
   const existingLocal = await readTextIfPresent(

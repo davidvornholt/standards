@@ -46,46 +46,28 @@ jobs:
           sparse-checkout: |
             secrets/ci.yaml
             .sops.yaml
+            .github/actions/sops-secret/action.yml
           sparse-checkout-cone-mode: false
 
-      - name: Decrypt the topic URL and push a notification
+      - name: Resolve notification topic URL
+        uses: ./.github/actions/sops-secret
+        with:
+          age-key: ${{ secrets.SOPS_AGE_KEY }}
+          secret-file: secrets/ci.yaml
+          secret-key: ntfy_topic_url
+          env-name: NTFY_TOPIC_URL
+
+      - name: Push a notification
         env:
-          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
-          SOPS_VERSION: v3.13.2
           PAUSE_TITLE: ${{ github.event.pull_request.title || github.event.issue.title }}
           PAUSE_URL: ${{ github.event.pull_request.html_url || github.event.issue.html_url }}
           REPO: ${{ github.repository }}
           PAUSE_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
         run: |
-          if [ -z "$SOPS_AGE_KEY" ]; then
-            echo "::error::SOPS_AGE_KEY secret is not configured, so this pause was not delivered. Set it to the age private key whose recipient encrypts secrets/ci.yaml."
-            exit 1
-          fi
-          if [ ! -f secrets/ci.yaml ]; then
-            echo "::error::secrets/ci.yaml does not exist, so this pause was not delivered. Create it (SOPS + age) with a ci.ntfy_topic_url value; secrets/ci.example.yaml shows the shape."
-            exit 1
-          fi
-          case "$(uname -m)" in
-            x86_64) arch=amd64 sha=154dfe4cd70554bdd82b98e4cd4acf191d43d01ead6f00a73477aa44c4ac42ef ;;
-            aarch64) arch=arm64 sha=78abf2e15c86250a1553ae6f53aba96be6b2a8126f160b1534959add3467ad76 ;;
-            *)
-              echo "::error::No pinned sops binary for runner architecture $(uname -m)"
-              exit 1
-              ;;
-          esac
-          sops="$RUNNER_TEMP/sops"
-          curl -sfLo "$sops" "https://github.com/getsops/sops/releases/download/${SOPS_VERSION}/sops-${SOPS_VERSION}.linux.${arch}"
-          echo "$sha  $sops" | sha256sum --check --quiet
-          chmod +x "$sops"
-          if ! topic_url=$("$sops" decrypt --extract '["ci"]["ntfy_topic_url"]' secrets/ci.yaml); then
-            echo "::error::Could not read ci.ntfy_topic_url from secrets/ci.yaml, so this pause was not delivered. Add the key (a full ntfy topic URL, e.g. https://ntfy.sh/<random-topic>) or check that SOPS_AGE_KEY matches a recipient."
-            exit 1
-          fi
-          echo "::add-mask::$topic_url"
           curl -sf \
             -H "X-Title: ${REPO}#${PAUSE_NUMBER} needs clarification" \
             -H "X-Click: ${PAUSE_URL}" \
             -H "X-Priority: high" \
             -H "X-Tags: question" \
             --data "$PAUSE_TITLE" \
-            "$topic_url"
+            "$NTFY_TOPIC_URL"

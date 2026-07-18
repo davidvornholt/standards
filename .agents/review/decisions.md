@@ -19,3 +19,7 @@ The repo-owned Dependabot overlay is additive but intentionally not a general po
 ## POLLER-001: Shared service identity risk
 
 The fix poller and its approved Codex runs may share one host service identity and HOME. The poller removes its direct GitHub token variables before launching Codex, but the approved run can still read that identity's other ambient credentials and logged-in tool state. This credential visibility is an accepted risk because only an admin- or maintain-approved exact issue revision or pull-request head may run, and the approval binding is revalidated before publication. The host infrastructure repository owns the identity, PATH, token wiring, lingering, and declarative unit deployment; do not describe the Codex process as credential-isolated.
+
+## RELEASE-001: Installed manifest version asserts CLI capability
+
+Under the frozen non-hostile-consumer threat model, the installed `@davidvornholt/standards` manifest version plus the frozen lockfile is the capability assertion. The consumer already controls that dependency and executes its code, so extra package-name, bin, or capability probes do not establish official identity; defending against a falsely versioned or malicious substitution is out of scope.

@@ -4,6 +4,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -15,6 +16,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import process from 'node:process';
+import { parse as parseYaml } from 'yaml';
 
 const ENGINE = join(import.meta.dir, 'cli.ts');
 const ACTUAL_UPSTREAM = join(import.meta.dir, '../../..');
@@ -22,6 +24,22 @@ const SYNC_WORKFLOW = join(
   ACTUAL_UPSTREAM,
   '.github/workflows/standards-sync.yml',
 );
+const STANDARDS_WORKFLOW = join(
+  ACTUAL_UPSTREAM,
+  '.github/workflows/standards.yml',
+);
+const NOTIFY_WORKFLOW = join(
+  ACTUAL_UPSTREAM,
+  '.github/workflows/notify-pause.yml',
+);
+const SOPS_ACTION = join(
+  ACTUAL_UPSTREAM,
+  '.github/actions/sops-secret/action.yml',
+);
+const NON_WHITESPACE = /\S/u;
+const SOPS_VERSION_ASSIGNMENT = /version=v\d+\.\d+\.\d+/gu;
+const SOPS_CHECKSUM_ASSIGNMENT = /sha=[a-f0-9]{64}/gu;
+const EXECUTABLE_MODE = 0o755;
 const STD_PATHS: ReadonlyArray<string> = [
   'sync-standards.json',
   '.github/dependabot.base.yml',
@@ -69,6 +87,20 @@ const INVALID_POLICY_CASES = [
   ],
 ] as const;
 
+const DEPENDABOT_OVERLAY = [
+  'updates:',
+  '  - package-ecosystem: nix',
+  '    directory: /',
+  '    schedule:',
+  '      interval: weekly',
+  '  - package-ecosystem: bun',
+  '    directory: /',
+  '    ignore:',
+  '      - dependency-name: left-pad',
+  '        versions: [">1.0.0"]',
+  '',
+].join('\n');
+
 const tmps: Array<string> = [];
 
 const mkTmp = (prefix: string): string => {
@@ -100,6 +132,18 @@ const snapshotTree = (
   }
   return snapshot;
 };
+const readProductionGithubFiles = (): ReadonlyArray<{
+  readonly content: string;
+  readonly path: string;
+}> =>
+  ['.github/workflows', '.github/actions'].flatMap((root) =>
+    Object.entries(snapshotTree(join(ACTUAL_UPSTREAM, root))).map(
+      ([path, content]) => ({
+        content: Buffer.from(content, 'base64').toString('utf8'),
+        path: `${root}/${path}`,
+      }),
+    ),
+  );
 
 const runExecutable = (
   executable: string,
@@ -126,26 +170,47 @@ const runExecutable = (
 const run = (cwd: string, args: ReadonlyArray<string>): RunResult =>
   runExecutable('bun', cwd, [ENGINE, ...args]);
 
-const workflowRunScript = (stepName: string): string => {
-  const lines = readFileSync(SYNC_WORKFLOW, 'utf8').split('\n');
-  const stepIndex = lines.indexOf(`      - name: ${stepName}`);
+const yamlStep = (path: string, stepName: string): string => {
+  const lines = readFileSync(path, 'utf8').split('\n');
+  const stepIndex = lines.findIndex(
+    (line) => line.trim() === `- name: ${stepName}`,
+  );
   if (stepIndex === -1) {
-    throw new Error(`Workflow step not found: ${stepName}`);
+    throw new Error(`YAML step not found: ${stepName}`);
   }
-  const runIndex = lines.indexOf('        run: |', stepIndex);
+  const stepIndent = (lines[stepIndex] ?? '').search(NON_WHITESPACE);
+  const stepLines = [lines[stepIndex] ?? ''];
+  for (let index = stepIndex + 1; index < lines.length; index += 1) {
+    const line = lines[index] ?? '';
+    if (line.length > 0 && line.search(NON_WHITESPACE) <= stepIndent) {
+      break;
+    }
+    stepLines.push(line);
+  }
+  return stepLines.join('\n').trimEnd();
+};
+const yamlRunScript = (path: string, stepName: string): string => {
+  const lines = yamlStep(path, stepName).split('\n');
+  const runIndex = lines.findIndex((line) => line.trim() === 'run: |');
   if (runIndex === -1) {
-    throw new Error(`Workflow run script not found: ${stepName}`);
+    throw new Error(`YAML run script not found: ${stepName}`);
   }
+  const runIndent = (lines[runIndex] ?? '').search(NON_WHITESPACE);
+  const scriptPrefix = ' '.repeat(runIndent + 2);
   const scriptLines: Array<string> = [];
   for (let index = runIndex + 1; index < lines.length; index += 1) {
     const line = lines[index] ?? '';
-    if (line.length > 0 && !line.startsWith('          ')) {
+    if (line.length > 0 && !line.startsWith(scriptPrefix)) {
       break;
     }
-    scriptLines.push(line.startsWith('          ') ? line.slice(10) : line);
+    scriptLines.push(
+      line.startsWith(scriptPrefix) ? line.slice(scriptPrefix.length) : line,
+    );
   }
   return scriptLines.join('\n').trimEnd();
 };
+const workflowRunScript = (stepName: string): string =>
+  yamlRunScript(SYNC_WORKFLOW, stepName);
 
 const runWorkflowVersionGuard = (version: string): RunResult => {
   const fixture = mkTmp('sync-version-');
@@ -165,6 +230,106 @@ const runWorkflowVersionGuard = (version: string): RunResult => {
     ],
     { MINIMUM_STANDARDS_VERSION: '0.11.0' },
   );
+};
+
+type SopsActionOptions = {
+  readonly ageKey?: string;
+  readonly createSecretFile?: boolean;
+  readonly failureMode?: 'fail' | 'fallback';
+  readonly fallbackValue?: string;
+  readonly sopsOutput?: string;
+  readonly sopsStatus?: number;
+};
+
+const runSopsAction = (
+  options: SopsActionOptions = {},
+): {
+  readonly curlCalled: boolean;
+  readonly environment: string;
+  readonly output: string;
+  readonly result: RunResult;
+} => {
+  const fixture = mkTmp('sops-action-');
+  const bin = join(fixture, 'bin');
+  const runnerTemp = join(fixture, 'runner');
+  mkdirSync(bin);
+  mkdirSync(runnerTemp);
+  const fakeSops = join(fixture, 'fake-sops');
+  const curlMarker = join(fixture, 'curl-called');
+  const environmentPath = join(fixture, 'github-env');
+  const outputPath = join(fixture, 'github-output');
+  write(
+    fixture,
+    'bin/curl',
+    [
+      '#!/usr/bin/env bash',
+      'set -euo pipefail',
+      'printf called > "$CURL_MARKER"',
+      'cp "$FAKE_SOPS" "$2"',
+      '',
+    ].join('\n'),
+  );
+  write(
+    fixture,
+    'bin/sha256sum',
+    ['#!/usr/bin/env bash', 'exit 0', ''].join('\n'),
+  );
+  write(
+    fixture,
+    'fake-sops',
+    [
+      '#!/usr/bin/env bash',
+      'if [ "$FAKE_SOPS_STATUS" -ne 0 ]; then',
+      '  exit "$FAKE_SOPS_STATUS"',
+      'fi',
+      'printf \'%s\' "$FAKE_SOPS_OUTPUT"',
+      '',
+    ].join('\n'),
+  );
+  chmodSync(join(bin, 'curl'), EXECUTABLE_MODE);
+  chmodSync(join(bin, 'sha256sum'), EXECUTABLE_MODE);
+  chmodSync(fakeSops, EXECUTABLE_MODE);
+  if (options.createSecretFile !== false) {
+    write(fixture, 'secrets/ci.yaml', 'encrypted\n');
+  }
+  const result = runExecutable(
+    'bash',
+    fixture,
+    [
+      '-euo',
+      'pipefail',
+      '-c',
+      yamlRunScript(SOPS_ACTION, 'Resolve and validate secret'),
+    ],
+    {
+      CURL_MARKER: curlMarker,
+      FAKE_SOPS: fakeSops,
+      FAKE_SOPS_OUTPUT:
+        options.sopsOutput ??
+        JSON.stringify({
+          ci: { standards_sync_token: 'resolved-token' },
+        }),
+      FAKE_SOPS_STATUS: String(options.sopsStatus ?? 0),
+      GITHUB_ENV: environmentPath,
+      GITHUB_OUTPUT: outputPath,
+      PATH: `${bin}:${process.env.PATH ?? ''}`,
+      RUNNER_TEMP: runnerTemp,
+      SOPS_AGE_KEY: options.ageKey ?? 'age-secret-key',
+      SOPS_ENV_NAME: 'GH_TOKEN',
+      SOPS_SECRET_KEY: 'standards_sync_token',
+      SOPS_FAILURE_MODE: options.failureMode ?? 'fallback',
+      SOPS_FALLBACK_VALUE: options.fallbackValue ?? 'workflow-token',
+      SOPS_SECRET_FILE: 'secrets/ci.yaml',
+    },
+  );
+  return {
+    curlCalled: existsSync(curlMarker),
+    environment: existsSync(environmentPath)
+      ? readFileSync(environmentPath, 'utf8')
+      : '',
+    output: existsSync(outputPath) ? readFileSync(outputPath, 'utf8') : '',
+    result,
+  };
 };
 
 // A fake upstream: its own manifest, a `template/` seed dir, two managed files.
@@ -326,6 +491,23 @@ const buildGitUpstream = (): {
   return { up, url: `file://${up}`, taggedSha };
 };
 
+const buildDependabotCutoverUpstream = (): {
+  up: string;
+  url: string;
+} => {
+  const up = buildUpstream();
+  const base = read(up, '.github/dependabot.base.yml');
+  rmSync(join(up, '.github/dependabot.base.yml'));
+  git(up, ['init', '--quiet', '-b', 'main']);
+  git(up, ['add', '-A']);
+  git(up, ['commit', '--quiet', '-m', 'v0.10.0']);
+  git(up, ['tag', 'v0.10.0']);
+  write(up, '.github/dependabot.base.yml', base);
+  git(up, ['add', '-A']);
+  git(up, ['commit', '--quiet', '-m', 'v0.10.1']);
+  return { up, url: `file://${up}` };
+};
+
 afterEach(() => {
   while (tmps.length > 0) {
     const dir = tmps.pop();
@@ -346,7 +528,7 @@ describe('init', () => {
     const result = run(consumer, ['init', '--from', up, '--dir', consumer]);
 
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain('requires a 0.10-compatible content ref');
+    expect(result.stderr).toContain('requires a 0.10.1-compatible content ref');
     expect(snapshotTree(consumer)).toEqual(before);
   });
 
@@ -633,23 +815,9 @@ describe('doctor Dependabot validation', () => {
 });
 
 describe('dependabot composition seam', () => {
-  const overlay = [
-    'updates:',
-    '  - package-ecosystem: nix',
-    '    directory: /',
-    '    schedule:',
-    '      interval: weekly',
-    '  - package-ecosystem: bun',
-    '    directory: /',
-    '    ignore:',
-    '      - dependency-name: left-pad',
-    '        versions: [">1.0.0"]',
-    '',
-  ].join('\n');
-
   it('merges the repo-owned overlay into the generated file', () => {
     const { consumer } = initConsumer(buildUpstream());
-    write(consumer, '.github/dependabot.local.yml', overlay);
+    write(consumer, '.github/dependabot.local.yml', DEPENDABOT_OVERLAY);
 
     const writeRun = run(consumer, [
       'dependabot',
@@ -716,7 +884,7 @@ describe('dependabot composition seam', () => {
   it('regenerates the composed file on sync after the overlay changes', () => {
     const up = buildUpstream();
     const { consumer } = initConsumer(up);
-    write(consumer, '.github/dependabot.local.yml', overlay);
+    write(consumer, '.github/dependabot.local.yml', DEPENDABOT_OVERLAY);
 
     const dry = run(consumer, [
       'sync',
@@ -856,7 +1024,7 @@ describe('prospective Dependabot sync', () => {
     const result = sync(up, consumer);
 
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain('requires a 0.10-compatible content ref');
+    expect(result.stderr).toContain('requires a 0.10.1-compatible content ref');
     expect(snapshotTree(consumer)).toEqual(before);
   });
 
@@ -983,18 +1151,8 @@ describe('sync', () => {
 });
 
 describe('Dependabot content ref cutover', () => {
-  it('rejects a pre-0.10 pinned ref before init or sync mutation', () => {
-    const up = buildUpstream();
-    const base = read(up, '.github/dependabot.base.yml');
-    rmSync(join(up, '.github/dependabot.base.yml'));
-    git(up, ['init', '--quiet', '-b', 'main']);
-    git(up, ['add', '-A']);
-    git(up, ['commit', '--quiet', '-m', 'legacy']);
-    git(up, ['tag', 'legacy']);
-    write(up, '.github/dependabot.base.yml', base);
-    git(up, ['add', '-A']);
-    git(up, ['commit', '--quiet', '-m', 'current']);
-    const url = `file://${up}`;
+  it('rejects the v0.10.0 pinned ref before init or sync mutation', () => {
+    const { up, url } = buildDependabotCutoverUpstream();
 
     const initTarget = mkTmp('sync-cons-');
     write(initTarget, 'owned.txt', 'unchanged\n');
@@ -1004,22 +1162,22 @@ describe('Dependabot content ref cutover', () => {
       '--from',
       url,
       '--ref',
-      'legacy',
+      'v0.10.0',
       '--dir',
       initTarget,
     ]);
     expect(initResult.status).toBe(1);
     expect(initResult.stderr).toContain(
-      'requires a 0.10-compatible content ref',
+      'requires a 0.10.1-compatible content ref',
     );
     expect(snapshotTree(initTarget)).toEqual(initBefore);
 
     const { consumer } = initConsumer(up);
     const syncBefore = snapshotTree(consumer);
-    const syncResult = sync(url, consumer, ['--ref', 'legacy']);
+    const syncResult = sync(url, consumer, ['--ref', 'v0.10.0']);
     expect(syncResult.status).toBe(1);
     expect(syncResult.stderr).toContain(
-      'requires a 0.10-compatible content ref',
+      'requires a 0.10.1-compatible content ref',
     );
     expect(snapshotTree(consumer)).toEqual(syncBefore);
   });
@@ -1215,55 +1373,146 @@ describe('sync policy validation', () => {
   });
 });
 
-describe('sync policy distribution', () => {
-  it('the packed declared consumer version honors the workflow sync pin', () => {
+type PackedCliInstallation = {
+  readonly consumer: string;
+  readonly help: RunResult;
+  readonly sourceProfile: RunResult;
+};
+
+type ExecutableRunner = typeof runExecutable;
+
+const requireSuccessfulStage = (stage: string, result: RunResult): void => {
+  if (result.status !== 0) {
+    throw new Error(`${stage} failed: ${result.stderr}`);
+  }
+};
+
+const installPackedCli = (
+  execute: ExecutableRunner = runExecutable,
+): PackedCliInstallation => {
+  const packed = mkTmp('standards-pack-');
+  const pack = execute('bun', join(import.meta.dir, '..'), [
+    'pm',
+    'pack',
+    '--destination',
+    packed,
+    '--quiet',
+  ]);
+  requireSuccessfulStage('pack', pack);
+  const tarball = pack.stdout.trim();
+  if (tarball.length === 0) {
+    throw new Error('pack succeeded without reporting a tarball');
+  }
+
+  const consumer = mkTmp('sync-cons-');
+  write(
+    consumer,
+    'package.json',
+    JSON.stringify({
+      version: '0.0.0',
+      private: true,
+      workspaces: ['apps/*'],
+      scripts: {
+        standards: 'standards',
+        check:
+          'standards check && turbo run lint check-types test build test:a11y',
+        'check:fix':
+          'standards check && turbo run lint:fix check-types test build test:a11y',
+      },
+      devDependencies: {
+        '@davidvornholt/standards': `file:${tarball}`,
+      },
+    }),
+  );
+  const install = execute('bun', consumer, ['install', '--ignore-scripts']);
+  requireSuccessfulStage('install', install);
+
+  const help = execute('bun', consumer, ['standards', 'help']);
+  const sourceProfile = execute('bun', consumer, [
+    'standards',
+    'structure',
+    '--profile',
+    'source',
+    '--dir',
+    ACTUAL_UPSTREAM,
+  ]);
+  return { consumer, help, sourceProfile };
+};
+
+describe('packed artifact prerequisite staging', () => {
+  it.each([
+    ['pack', 1],
+    ['install', 2],
+  ] as const)('does not execute later stages after %s fails', (_stage, failureCall) => {
+    let calls = 0;
+    const execute: ExecutableRunner = () => {
+      calls += 1;
+      return {
+        stdout: calls === 1 ? '/tmp/standards.tgz\n' : '',
+        stderr: '',
+        status: calls === failureCall ? 1 : 0,
+      };
+    };
+
+    expect(() => installPackedCli(execute)).toThrow();
+    expect(calls).toBe(failureCall);
+  });
+});
+
+describe('packed artifact content ref cutover', () => {
+  it('rejects v0.10.0 content before packed init or sync mutation', () => {
+    const { consumer: runner } = installPackedCli();
+    const { up, url } = buildDependabotCutoverUpstream();
+    const execute = (args: ReadonlyArray<string>, target: string): RunResult =>
+      runExecutable('bun', runner, ['standards', ...args, '--dir', target]);
+
+    const initTarget = mkTmp('sync-cons-');
+    write(initTarget, 'owned.txt', 'unchanged\n');
+    const initBefore = snapshotTree(initTarget);
+    const initResult = execute(
+      ['init', '--from', url, '--ref', 'v0.10.0'],
+      initTarget,
+    );
+    expect(initResult.status).toBe(1);
+    expect(initResult.stderr).toContain(
+      'requires a 0.10.1-compatible content ref',
+    );
+    expect(snapshotTree(initTarget)).toEqual(initBefore);
+
+    const syncTarget = mkTmp('sync-cons-');
+    expect(execute(['init', '--from', up], syncTarget).status).toBe(0);
+    const syncBefore = snapshotTree(syncTarget);
+    const syncResult = execute(
+      ['sync', '--from', url, '--ref', 'v0.10.0'],
+      syncTarget,
+    );
+    expect(syncResult.status).toBe(1);
+    expect(syncResult.stderr).toContain(
+      'requires a 0.10.1-compatible content ref',
+    );
+    expect(snapshotTree(syncTarget)).toEqual(syncBefore);
+  });
+});
+
+describe('packed artifact distribution', () => {
+  it('ships the Dependabot contract and honors the workflow sync pin', () => {
     const packageManifest = JSON.parse(
       readFileSync(join(import.meta.dir, '../package.json'), 'utf8'),
     ) as { version: string };
     const templateManifest = JSON.parse(
       readFileSync(join(ACTUAL_UPSTREAM, 'template/package.json'), 'utf8'),
-    ) as {
-      devDependencies: Record<string, string>;
-    };
+    ) as { devDependencies: Record<string, string> };
     expect(templateManifest.devDependencies['@davidvornholt/standards']).toBe(
       packageManifest.version,
     );
-
-    const packed = mkTmp('standards-pack-');
-    const pack = runExecutable('bun', join(import.meta.dir, '..'), [
-      'pm',
-      'pack',
-      '--destination',
-      packed,
-      '--quiet',
-    ]);
-    expect(pack.status).toBe(0);
-    const tarball = pack.stdout.trim();
-    const consumer = mkTmp('sync-cons-');
-    write(
-      consumer,
-      'package.json',
-      JSON.stringify({
-        private: true,
-        scripts: { standards: 'standards' },
-        devDependencies: {
-          '@davidvornholt/standards': `file:${tarball}`,
-        },
-      }),
+    const installation = installPackedCli();
+    expect(installation.help.status).toBe(0);
+    expect(installation.help.stdout).toContain(
+      'dependabot  Verify (--check) or regenerate (--write)',
     );
-    expect(
-      runExecutable('bun', consumer, ['install', '--ignore-scripts']).status,
-    ).toBe(0);
-    const installedSourceProfile = runExecutable('bun', consumer, [
-      'standards',
-      'structure',
-      '--profile',
-      'source',
-      '--dir',
-      ACTUAL_UPSTREAM,
-    ]);
-    expect(installedSourceProfile.stderr).toBe('');
-    expect(installedSourceProfile.status).toBe(0);
+    expect(installation.sourceProfile.stderr).toBe('');
+    expect(installation.sourceProfile.status).toBe(0);
+    const { consumer } = installation;
     const installedSettingsParser = runExecutable('bun', consumer, [
       '-e',
       [
@@ -1279,6 +1528,14 @@ describe('sync policy distribution', () => {
     expect(installedSettingsParser.status).toBe(0);
 
     const { up, url } = buildGitUpstream();
+    const command = (name: 'check' | 'dependabot'): RunResult =>
+      runExecutable('bun', consumer, [
+        'standards',
+        name,
+        ...(name === 'dependabot' ? ['--check'] : []),
+        '--dir',
+        consumer,
+      ]);
     expect(
       runExecutable('bun', consumer, [
         'standards',
@@ -1289,19 +1546,204 @@ describe('sync policy distribution', () => {
         consumer,
       ]).status,
     ).toBe(0);
+    write(consumer, '.github/dependabot.local.yml', DEPENDABOT_OVERLAY);
+    expect(
+      runExecutable('bun', consumer, [
+        'standards',
+        'dependabot',
+        '--write',
+        '--dir',
+        consumer,
+      ]).status,
+    ).toBe(0);
+    const composed = read(consumer, '.github/dependabot.yml');
+    expect(composed).toContain('package-ecosystem: "nix"');
+    expect(composed).toContain('dependency-name: "left-pad"');
+    expect(command('dependabot').status).toBe(0);
+    write(consumer, '.github/dependabot.yml', `${composed}# generated drift\n`);
+    for (const driftCheck of (['dependabot', 'check'] as const).map(command)) {
+      expect(driftCheck.status).toBe(1);
+      expect(driftCheck.stderr).toContain(
+        'does not match its composed sources',
+      );
+    }
     write(consumer, 'sync-standards.local.json', '{ "ref": "v1" }\n');
+    expect(
+      runExecutable('bun', consumer, [
+        'standards',
+        'sync',
+        '--from',
+        url,
+        '--dir',
+        consumer,
+      ]).status,
+    ).toBe(0);
+    expect(read(consumer, 'managed/a.txt')).toBe('alpha\n');
+    expect(read(consumer, '.github/dependabot.yml')).toBe(composed);
+    expect(command('check').status).toBe(0);
+  });
+});
 
-    const result = runExecutable('bun', consumer, [
-      'standards',
-      'sync',
-      '--from',
-      url,
-      '--dir',
-      consumer,
-    ]);
+describe('canonical SOPS secret action', () => {
+  it('exports a decrypted non-empty single-line string', () => {
+    const actionRun = runSopsAction();
+
+    expect(actionRun.result.status).toBe(0);
+    expect(actionRun.environment).toBe('GH_TOKEN=resolved-token\n');
+    expect(actionRun.output).toBe('used-fallback=false\n');
+    expect(actionRun.result.stdout).toContain('::add-mask::resolved-token');
+    expect(actionRun.curlCalled).toBe(true);
+  });
+
+  it.each([
+    ['an empty string', ''],
+    ['a line-feed string', 'token\nBASH_ENV=/tmp/payload'],
+    ['a carriage-return string', 'token\rGH_TOKEN=payload'],
+    ['a non-scalar value', { token: 'value' }],
+  ])('rejects %s before exporting it', (_label, sopsValue) => {
+    const actionRun = runSopsAction({
+      sopsOutput: JSON.stringify({
+        ci: { standards_sync_token: sopsValue },
+      }),
+    });
+
+    expect(actionRun.result.status).toBe(0);
+    expect(actionRun.environment).toBe('GH_TOKEN=workflow-token\n');
+    expect(actionRun.output).toBe('used-fallback=true\n');
+    expect(actionRun.environment).not.toContain('payload');
+  });
+
+  it('uses the fallback when decryption fails', () => {
+    const actionRun = runSopsAction({ sopsStatus: 1 });
+
+    expect(actionRun.result.status).toBe(0);
+    expect(actionRun.environment).toBe('GH_TOKEN=workflow-token\n');
+    expect(actionRun.output).toBe('used-fallback=true\n');
+  });
+
+  it.each([
+    ['the age key is absent', { ageKey: '' }],
+    ['the secret file is absent', { createSecretFile: false }],
+  ] as const)('uses the fallback without downloading when %s', (_label, input) => {
+    const actionRun = runSopsAction(input);
+
+    expect(actionRun.result.status).toBe(0);
+    expect(actionRun.environment).toBe('GH_TOKEN=workflow-token\n');
+    expect(actionRun.output).toBe('used-fallback=true\n');
+    expect(actionRun.curlCalled).toBe(false);
+  });
+
+  it('fails closed for a required invalid secret', () => {
+    const actionRun = runSopsAction({
+      failureMode: 'fail',
+      sopsOutput: JSON.stringify({
+        ci: { standards_sync_token: 'token\nGH_TOKEN=payload' },
+      }),
+    });
+
+    expect(actionRun.result.status).toBe(1);
+    expect(actionRun.environment).toBe('');
+    expect(`${actionRun.result.stdout}${actionRun.result.stderr}`).toContain(
+      '::error::',
+    );
+  });
+
+  it('rejects an invalid fallback before the environment boundary', () => {
+    const actionRun = runSopsAction({
+      ageKey: '',
+      fallbackValue: 'token\nBASH_ENV=/tmp/payload',
+    });
+
+    expect(actionRun.result.status).toBe(1);
+    expect(actionRun.environment).toBe('');
+  });
+
+  it('is the only owner of the SOPS pin and serves all three workflows', () => {
+    const action = readFileSync(SOPS_ACTION, 'utf8');
+    const canonicalActionPath = '.github/actions/sops-secret/action.yml';
+    const productionFiles = readProductionGithubFiles();
+    const versionOwners = productionFiles
+      .filter(({ content }) => content.match(SOPS_VERSION_ASSIGNMENT) !== null)
+      .map(({ path }) => path);
+    const checksumOwners = productionFiles
+      .filter(({ content }) => content.match(SOPS_CHECKSUM_ASSIGNMENT) !== null)
+      .map(({ path }) => path);
+    const workflows = [
+      readFileSync(SYNC_WORKFLOW, 'utf8'),
+      readFileSync(STANDARDS_WORKFLOW, 'utf8'),
+      readFileSync(NOTIFY_WORKFLOW, 'utf8'),
+    ];
+    expect(action.match(SOPS_VERSION_ASSIGNMENT)).toHaveLength(1);
+    expect(action.match(SOPS_CHECKSUM_ASSIGNMENT)).toHaveLength(2);
+    expect(versionOwners).toEqual([canonicalActionPath]);
+    expect(checksumOwners).toEqual([canonicalActionPath]);
+    for (const workflow of workflows) {
+      expect(workflow).toContain('uses: ./.github/actions/sops-secret');
+    }
+    const syncManifest = JSON.parse(
+      readFileSync(join(ACTUAL_UPSTREAM, 'sync-standards.json'), 'utf8'),
+    ) as { readonly paths: ReadonlyArray<string> };
+    expect(syncManifest.paths).toContain('.github/actions/sops-secret');
+  });
+});
+
+describe('canonical SOPS missing-key modes', () => {
+  it('uses one validated fallback record when the requested key is absent', () => {
+    const actionRun = runSopsAction({
+      sopsOutput: JSON.stringify({ ci: {} }),
+    });
+
+    expect(actionRun.result.status).toBe(0);
+    expect(actionRun.environment).toBe('GH_TOKEN=workflow-token\n');
+    expect(actionRun.output).toBe('used-fallback=true\n');
+    expect(actionRun.curlCalled).toBe(true);
+  });
+
+  it('fails without exported records when a required key is absent', () => {
+    const actionRun = runSopsAction({
+      failureMode: 'fail',
+      sopsOutput: JSON.stringify({ ci: {} }),
+    });
+
+    expect(actionRun.result.status).toBe(1);
+    expect(actionRun.environment).toBe('');
+    expect(actionRun.output).toBe('');
+  });
+});
+
+describe('standards sync workflow ordering', () => {
+  it('stops a clean mirror before token resolution', () => {
+    const fixture = mkTmp('sync-clean-');
+    const outputPath = join(mkTmp('sync-output-'), 'github-output');
+    expect(runExecutable('git', fixture, ['init', '--quiet']).status).toBe(0);
+
+    const result = runExecutable(
+      'bash',
+      fixture,
+      ['-euo', 'pipefail', '-c', workflowRunScript('Detect mirror changes')],
+      { GITHUB_OUTPUT: outputPath },
+    );
+    const workflow = readFileSync(SYNC_WORKFLOW, 'utf8');
+    const detectIndex = workflow.indexOf('- name: Detect mirror changes');
+    const resolveIndex = workflow.indexOf('- name: Resolve sync PR token');
+    const resolveStep = yamlStep(SYNC_WORKFLOW, 'Resolve sync PR token');
+    const parsedResolveStep: unknown = parseYaml(resolveStep);
+    if (
+      !Array.isArray(parsedResolveStep) ||
+      parsedResolveStep.length !== 1 ||
+      typeof parsedResolveStep[0] !== 'object' ||
+      parsedResolveStep[0] === null
+    ) {
+      throw new Error('Resolve sync PR token must parse as one YAML step');
+    }
+    const resolveGuard = (parsedResolveStep[0] as Record<string, unknown>).if;
 
     expect(result.status).toBe(0);
-    expect(read(consumer, 'managed/a.txt')).toBe('alpha\n');
+    expect(readFileSync(outputPath, 'utf8')).toBe('changed=false\n');
+    expect(result.stdout).toContain('Already in sync');
+    expect(detectIndex).toBeGreaterThan(-1);
+    expect(resolveIndex).toBeGreaterThan(detectIndex);
+    expect(resolveGuard).toBe("steps.mirror.outputs.changed == 'true'");
   });
 });
 
@@ -1381,6 +1823,7 @@ describe('standards sync workflow policy', () => {
 
   it.each([
     '0.9.0',
+    '0.10.0',
     '0.10.0-beta.1',
     '0.10.1',
   ])('rejects installed CLI version %s without a policy file', (version) => {

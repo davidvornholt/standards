@@ -1,0 +1,15 @@
+{
+  // Biome 2.5.2 does not follow the wrapper's transitive extend when a custom
+  // --config-path is used, so load the strict base and repo-owned seams directly.
+  "extends": ["../../biome.base.jsonc", "../../biome.jsonc"],
+  "vcs": {
+    "root": "../.."
+  },
+  "linter": {
+    "rules": {
+      "security": {
+        "noSecrets": "off"
+      }
+    }
+  }
+}

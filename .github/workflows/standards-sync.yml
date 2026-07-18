@@ -132,6 +132,42 @@ jobs:
             bun standards sync
           fi
 
+      - name: Detect mirror changes
+        id: mirror
+        run: |
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "Already in sync with upstream standards; nothing to open."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The PR-opening token comes from the repo's encrypted CI secrets
+      # (ci.standards_sync_token in secrets/ci.yaml, a fine-grained PAT with
+      # Contents read + Pull requests write), decrypted with the single
+      # SOPS_AGE_KEY bootstrap Actions secret. The PAT is only resolved after
+      # the cheap no-change check. PRs opened with it trigger the required
+      # Standards gate automatically. Without it, the workflow token can create
+      # a PR only when repository or organization policy allows Actions to do
+      # so; the resulting workflow runs wait for maintainer approval.
+      - name: Resolve sync PR token
+        if: steps.mirror.outputs.changed == 'true'
+        id: sync-token
+        uses: ./.github/actions/sops-secret
+        with:
+          age-key: ${{ secrets.SOPS_AGE_KEY }}
+          secret-file: secrets/ci.yaml
+          secret-key: standards_sync_token
+          env-name: GH_TOKEN
+          fallback-value: ${{ github.token }}
+          failure-mode: fallback
+
+      - name: Report sync PR token fallback
+        if: steps.mirror.outputs.changed == 'true' && steps.sync-token.outputs.used-fallback == 'true'
+        run: |
+          echo "::warning::ci.standards_sync_token is not readable from secrets/ci.yaml; the workflow will try to open the sync PR with the workflow token."
+          echo "::warning::If repository policy permits that PR, approve its queued workflow runs. Otherwise gh pr create will fail after pushing the sync branch, leaving the branch without a PR."
+
       # This workflow deliberately runs no inline `bun run check`: the synced
       # result is validated by the required Standards gate on the PR it opens,
       # like any other change. An inline gate would duplicate the gate's
@@ -140,22 +176,12 @@ jobs:
       # consumer most needs to be visible — an open PR with a red required
       # check is the signal, and branch protection keeps it unmergeable.
       #
-      # Configure STANDARDS_SYNC_TOKEN (fine-grained PAT: contents + pull
-      # requests write) so the opened PR triggers workflows; PRs opened with
-      # the default GITHUB_TOKEN fallback do not, and need a manual nudge
-      # (push to the branch or close and reopen) to run the gate.
-      #
       # `gh pr create` is left to default `--base` to the repository's default
       # branch: the `schedule` event carries no payload, so expressions like
       # `github.event.repository.default_branch` are empty here.
       - name: Open a pull request if the mirror changed
-        env:
-          GH_TOKEN: ${{ secrets.STANDARDS_SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+        if: steps.mirror.outputs.changed == 'true'
         run: |
-          if [ -z "$(git status --porcelain)" ]; then
-            echo "Already in sync with upstream standards; nothing to open."
-            exit 0
-          fi
           branch="standards-sync/$(date -u +%Y%m%d%H%M%S)"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

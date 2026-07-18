@@ -88,4 +88,15 @@ A fix that failed to resolve its thread's finding, or that introduced a regressi
 
 ## Report
 
-Flip the PR from draft to ready for review and post the report: lens coverage, findings by disposition with counts, issues filed, ratchets implemented, verification result — including any repaired regressions and what remains unverified by fresh eyes — and residual risk. State the cycle's shape honestly ("one review fan-out over N lenses, one verification pass"), and hand what remains to the human: review the PR and decide the merge.
+Flip the PR from draft to ready for review and post the report. It opens with a pass table — one row per pass this skill defines (review fan-out, fix verification, repair verification), in cycle order:
+
+| Pass | Scope | Lenses | fix-now | defer | discard | Outcome | Details |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+
+- Every defined pass gets a row even when it did not run — mark it explicitly with the reason ("not run — no repair round"), never omit it, so a short cycle reads as deliberately short rather than silently truncated.
+- Scope is the pass's reviewed range (baseRef → head SHA). Outcome names what the pass produced: threads fixed, repairs triggered, mechanical-only verification.
+- Details links to the artifact carrying the pass's output — its posted PR review, or the threads and comments holding its findings. The table carries counts and provenance; evidence stays in the linked artifacts.
+
+Below the table, a finding index: one line per finding — short title, originating pass, disposition, and a link to its review thread, filed issue, or `.agents/review/decisions.md` entry. Do not restate evidence or reasoning in the index; the linked artifact is the ledger.
+
+The rest stays prose: ratchets implemented, residual risk, any repaired regressions and what remains unverified by fresh eyes, and an honest cycle-shape statement ("one review fan-out over N lenses, one verification pass"). Then hand what remains to the human: review the PR and decide the merge.
