@@ -1,5 +1,5 @@
 {
   "extends": "./base.json",
-  "include": ["*.json"],
+  "include": ["*.json", "*.ts"],
   "exclude": ["node_modules"]
 }
