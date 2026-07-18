@@ -4,7 +4,7 @@ Shared Playwright + Axe accessibility-testing helpers. App workspaces keep their
 
 ## Public API
 
-- `@davidvornholt/a11y-testing/axe` — `scanWcag22AaViolations(page)` runs Axe against the current page state for the full WCAG 2.2 AA tag set (`wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa`, `wcag22a`, `wcag22aa`, exported as `wcag22AaTags`) and returns the mapped violations. Specs assert `expect(await scanWcag22AaViolations(page)).toEqual([])` so every test carries its own visible zero-violation assertion.
+- `@davidvornholt/a11y-testing/axe` — `scanWcag22AaViolations(page)` runs Axe's automated WCAG 2.0, 2.1, and 2.2 rules through Level AA against the current page state using `wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa`, and `wcag22aa` (exported as `wcag22AaTags`), then returns the mapped violations. WCAG criteria without an Axe rule require separate manual or process evaluation. Specs assert `expect(await scanWcag22AaViolations(page)).toEqual([])` so every test carries its own visible zero-violation assertion.
 - `@davidvornholt/a11y-testing/playwright-config` — `createA11yPlaywrightConfig({ baseUrl, webServerCommand })` returns the Playwright config used by app `test:a11y` scripts: `a11y/` test dir, desktop and mobile Chromium projects, and a managed web server.
 
 ## Configuration

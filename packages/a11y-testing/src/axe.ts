@@ -6,7 +6,6 @@ export const wcag22AaTags: ReadonlyArray<string> = [
   'wcag2aa',
   'wcag21a',
   'wcag21aa',
-  'wcag22a',
   'wcag22aa',
 ];
 

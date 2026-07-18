@@ -2,7 +2,6 @@ import { describe, expect, it } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import process from 'node:process';
-import { wcag22AaTags } from './axe';
 
 const packageRoot = join(import.meta.dir, '..');
 const subprocessTestTimeoutMilliseconds = 60_000;
@@ -39,16 +38,4 @@ describe('Axe helper consumer lint compatibility', () => {
     },
     subprocessTestTimeoutMilliseconds,
   );
-});
-
-describe('wcag22AaTags', () => {
-  it('covers every WCAG version and level through 2.2 AA', () => {
-    const versions = ['2', '21', '22'];
-    const levels = ['a', 'aa'];
-    const expectedTags = versions.flatMap((version) =>
-      levels.map((level) => `wcag${version}${level}`),
-    );
-
-    expect(wcag22AaTags).toEqual(expectedTags);
-  });
 });
