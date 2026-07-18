@@ -32,7 +32,9 @@ jobs:
   # Per-repo DB coordinates come from repository Actions VARIABLES (Settings →
   # Secrets and variables → Actions → Variables), not edits to this synced file:
   #   CI_POSTGRES_USER, CI_POSTGRES_PASSWORD, CI_POSTGRES_DB  (defaults below)
-  #   CI_RUNNER  — override the runner label (default ubuntu-latest)
+  #   CI_RUNNER  — override only the unprivileged quality runner label
+  #                (default ubuntu-latest); secret-bearing and verdict jobs
+  #                always use fresh GitHub-hosted runners
   # These are non-secret configuration; leaking them enables nothing.
   #
   # Playwright's Chromium, unlike the Postgres service, is installed only when the
@@ -118,7 +120,7 @@ jobs:
   # encrypted token source; the CLI is a published, checksum-pinned artifact
   # installed under RUNNER_TEMP from direct, checksum-pinned release URLs.
   github-settings:
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout settings inputs
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -229,7 +231,7 @@ jobs:
     needs:
       - quality
       - github-settings
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - name: Require all standards gates
         env:

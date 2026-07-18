@@ -1585,11 +1585,35 @@ describe('packed artifact distribution', () => {
 describe('canonical standards workflow security boundaries', () => {
   it('isolates the admin-read token from repository-controlled executable code', () => {
     const workflow = readFileSync(STANDARDS_WORKFLOW, 'utf8');
+    const parsedWorkflow: unknown = parseYaml(workflow);
+    if (
+      typeof parsedWorkflow !== 'object' ||
+      parsedWorkflow === null ||
+      !('jobs' in parsedWorkflow) ||
+      typeof parsedWorkflow.jobs !== 'object' ||
+      parsedWorkflow.jobs === null
+    ) {
+      throw new Error('Standards workflow must contain a jobs mapping');
+    }
+    const jobs = parsedWorkflow.jobs as Record<string, unknown>;
     const installStep = yamlStep(
       STANDARDS_WORKFLOW,
       'Install pinned settings checker',
     );
     const settingsStep = yamlStep(STANDARDS_WORKFLOW, 'Check GitHub settings');
+    const qualityJob = jobs.quality;
+    if (typeof qualityJob !== 'object' || qualityJob === null) {
+      throw new Error('Standards workflow must contain the quality job');
+    }
+    expect(JSON.stringify(qualityJob)).toContain('vars.CI_RUNNER');
+    for (const jobName of ['github-settings', 'check']) {
+      const job = jobs[jobName];
+      if (typeof job !== 'object' || job === null) {
+        throw new Error(`Standards workflow must contain the ${jobName} job`);
+      }
+      expect((job as Record<string, unknown>)['runs-on']).toBe('ubuntu-latest');
+      expect(JSON.stringify(job)).not.toContain('vars.CI_RUNNER');
+    }
     expect(workflow).not.toContain('uses: ./.github/actions/sops-secret');
     expect(workflow).not.toContain('GITHUB_ENV');
     expect(workflow).not.toContain('GH_TOKEN:');
