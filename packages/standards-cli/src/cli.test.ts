@@ -281,10 +281,22 @@ const exerciseSeededGitignore = (
   for (const path of ignoredPaths) {
     write(consumer, path, 'ignored\n');
   }
-  const ignoredOutput = git(consumer, ['check-ignore', '--', ...ignoredPaths]);
+  const unignoredPath = 'src/not-ignored.ts';
+  write(consumer, unignoredPath, 'export {};\n');
+  const emptyExcludes = join(consumer, '.git/test-empty-global-excludes');
+  write(consumer, '.git/test-empty-global-excludes', '');
+  const isolatedExcludes = ['-c', `core.excludesFile=${emptyExcludes}`];
+  const ignoredOutput = git(consumer, [
+    ...isolatedExcludes,
+    'check-ignore',
+    '--',
+    ...ignoredPaths,
+    unignoredPath,
+  ]);
   const lockIgnoreStatus = runExecutable('git', consumer, [
     '-C',
     consumer,
+    ...isolatedExcludes,
     'check-ignore',
     '--quiet',
     '--',
