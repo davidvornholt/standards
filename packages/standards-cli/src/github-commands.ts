@@ -1,7 +1,7 @@
 // `standards github --check` verifies the live GitHub repository against the
-// declared settings and fails closed on any drift or API error. `standards
-// github --apply` converges the live repository; it needs an admin token, so
-// it runs locally rather than in CI.
+// declared settings and fails closed on any drift, API error, or declared
+// state the token cannot see. `standards github --apply` converges the live
+// repository; it needs an admin token, so it runs locally rather than in CI.
 
 import {
   apiError,
@@ -17,14 +17,18 @@ import {
   applyRulesets,
   applySummary,
 } from './github-apply';
-import { optOutEligibilityProblem } from './github-command-shared';
+import {
+  enforceableRepositorySettings,
+  optOutEligibilityProblem,
+  unverifiableProblem,
+} from './github-command-shared';
 import { diffRepositorySettings, diffRulesets } from './github-diff';
 import { type GithubSettings, isRecord } from './github-settings-parse';
 
 // Printed on every check and apply while the opt-out is declared: the skip
 // must stay louder than the comfort of a green gate.
 const UNENFORCEABLE_NOTICE =
-  'standards github: rulesets are declared unenforceable on this GitHub plan (.github/settings.local.json "rulesetEnforcement"); the default branch is NOT protected. After upgrading the plan, remove the declaration, then run `bun standards github --apply`.';
+  'standards github: rulesets are declared unenforceable on this GitHub plan (.github/settings.local.json "rulesetEnforcement"); the default branch is NOT protected, and plan-gated repository settings ("allow_auto_merge") are skipped. After upgrading the plan, remove the declaration, then run `bun standards github --apply`.';
 
 const reportProblems = (problems: ReadonlyArray<string>): void => {
   console.error(
@@ -50,13 +54,14 @@ const repositoryDrift = async (
   if (eligibilityProblem !== null) {
     return [eligibilityProblem];
   }
-  const diff = diffRepositorySettings(declared.repository, repoResponse.body);
-  if (diff.unverifiable.length > 0) {
-    console.log(
-      `standards github: repository setting(s) not visible to this token, verify with admin auth: ${diff.unverifiable.join(', ')}`,
-    );
-  }
-  return diff.drifted;
+  const diff = diffRepositorySettings(
+    enforceableRepositorySettings(declared),
+    repoResponse.body,
+  );
+  return [
+    ...diff.drifted,
+    ...unverifiableProblem('repository setting(s)', diff.unverifiable),
+  ];
 };
 
 const rulesetDrift = async (
@@ -72,12 +77,10 @@ const rulesetDrift = async (
     return [live.problem ?? 'unable to read rulesets'];
   }
   const diff = diffRulesets(declared.rulesets, live.rulesets);
-  if (diff.unverifiable.length > 0) {
-    console.log(
-      `standards github: ruleset field(s) not visible to this token, verify with admin auth: ${diff.unverifiable.join('; ')}`,
-    );
-  }
-  return diff.drifted;
+  return [
+    ...diff.drifted,
+    ...unverifiableProblem('ruleset field(s)', diff.unverifiable),
+  ];
 };
 
 const collectLiveDrift = async (
@@ -119,7 +122,7 @@ export const runGithubCheck = async (consumer: string): Promise<boolean> => {
   }
   console.log(
     declared.merged?.rulesetEnforcement === 'unavailable-on-plan'
-      ? 'standards github: live repository settings match the declared configuration (rulesets skipped)'
+      ? 'standards github: live repository settings match the declared configuration (plan-gated settings skipped)'
       : 'standards github: live GitHub settings match the declared configuration',
   );
   return true;
@@ -165,7 +168,7 @@ export const runGithubApply = async (consumer: string): Promise<boolean> => {
       ...(await applyRepositorySettings(
         token,
         repo,
-        declared.merged.repository,
+        enforceableRepositorySettings(declared.merged),
         repoResponse.body,
       )),
     ];

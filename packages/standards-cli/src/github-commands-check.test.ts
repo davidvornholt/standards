@@ -41,8 +41,8 @@ const consumer = (options?: Parameters<typeof createConsumer>[0]): string => {
 };
 
 describe('runGithubCheck', () => {
-  it('accepts a private opt-out while checking only repository settings', async () => {
-    const calls = installApi([{ body: liveRepository(true, true) }]);
+  it('accepts a private opt-out and ignores plan-gated auto-merge drift', async () => {
+    const calls = installApi([{ body: liveRepository(true, false) }]);
 
     expect(await runGithubCheck(consumer())).toBe(true);
     expect(calls).toEqual([
@@ -50,7 +50,7 @@ describe('runGithubCheck', () => {
     ]);
     expect(output.logs).toEqual([
       OPT_OUT_NOTICE,
-      'standards github: live repository settings match the declared configuration (rulesets skipped)',
+      'standards github: live repository settings match the declared configuration (plan-gated settings skipped)',
     ]);
     expect(output.errors).toEqual([]);
   });
@@ -107,6 +107,44 @@ describe('runGithubCheck', () => {
     expect(output.logs).toEqual([OPT_OUT_NOTICE]);
     expect(output.errors.join('\n')).toContain(
       'GitHub API unreachable: offline',
+    );
+  });
+});
+
+describe('runGithubCheck fail-closed visibility', () => {
+  it('fails when repository settings are invisible to the token', async () => {
+    installApi([
+      { body: JSON.parse('{"private":false}') },
+      { body: [liveRulesetSummary()] },
+      {
+        body: {
+          id: 7,
+          name: 'Protect main',
+          target: 'branch',
+          enforcement: 'active',
+          rules: [],
+        },
+      },
+    ]);
+
+    expect(await runGithubCheck(consumer({ optOut: false }))).toBe(false);
+    const errors = output.errors.join('\n');
+    expect(errors).toContain(
+      'repository setting(s) not visible to this token, so the gate cannot verify: allow_auto_merge; delete_branch_on_merge',
+    );
+    expect(errors).toContain('ci.github_settings_read_token');
+  });
+
+  it('fails when a declared ruleset field is invisible to the token', async () => {
+    installApi([
+      { body: liveRepository(false, true) },
+      { body: [liveRulesetSummary()] },
+      { body: { id: 7, name: 'Protect main', target: 'branch', rules: [] } },
+    ]);
+
+    expect(await runGithubCheck(consumer({ optOut: false }))).toBe(false);
+    expect(output.errors.join('\n')).toContain(
+      'ruleset field(s) not visible to this token, so the gate cannot verify: ruleset "Protect main": enforcement',
     );
   });
 });
