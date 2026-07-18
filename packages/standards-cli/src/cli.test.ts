@@ -69,6 +69,20 @@ const INVALID_POLICY_CASES = [
   ],
 ] as const;
 
+const DEPENDABOT_OVERLAY = [
+  'updates:',
+  '  - package-ecosystem: nix',
+  '    directory: /',
+  '    schedule:',
+  '      interval: weekly',
+  '  - package-ecosystem: bun',
+  '    directory: /',
+  '    ignore:',
+  '      - dependency-name: left-pad',
+  '        versions: [">1.0.0"]',
+  '',
+].join('\n');
+
 const tmps: Array<string> = [];
 
 const mkTmp = (prefix: string): string => {
@@ -163,7 +177,7 @@ const runWorkflowVersionGuard = (version: string): RunResult => {
       '-c',
       workflowRunScript('Require Dependabot-aware standards CLI'),
     ],
-    { MINIMUM_STANDARDS_VERSION: '0.10.0' },
+    { MINIMUM_STANDARDS_VERSION: '0.10.1' },
   );
 };
 
@@ -326,6 +340,23 @@ const buildGitUpstream = (): {
   return { up, url: `file://${up}`, taggedSha };
 };
 
+const buildDependabotCutoverUpstream = (): {
+  up: string;
+  url: string;
+} => {
+  const up = buildUpstream();
+  const base = read(up, '.github/dependabot.base.yml');
+  rmSync(join(up, '.github/dependabot.base.yml'));
+  git(up, ['init', '--quiet', '-b', 'main']);
+  git(up, ['add', '-A']);
+  git(up, ['commit', '--quiet', '-m', 'v0.10.0']);
+  git(up, ['tag', 'v0.10.0']);
+  write(up, '.github/dependabot.base.yml', base);
+  git(up, ['add', '-A']);
+  git(up, ['commit', '--quiet', '-m', 'v0.10.1']);
+  return { up, url: `file://${up}` };
+};
+
 afterEach(() => {
   while (tmps.length > 0) {
     const dir = tmps.pop();
@@ -346,7 +377,7 @@ describe('init', () => {
     const result = run(consumer, ['init', '--from', up, '--dir', consumer]);
 
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain('requires a 0.10-compatible content ref');
+    expect(result.stderr).toContain('requires a 0.10.1-compatible content ref');
     expect(snapshotTree(consumer)).toEqual(before);
   });
 
@@ -633,23 +664,9 @@ describe('doctor Dependabot validation', () => {
 });
 
 describe('dependabot composition seam', () => {
-  const overlay = [
-    'updates:',
-    '  - package-ecosystem: nix',
-    '    directory: /',
-    '    schedule:',
-    '      interval: weekly',
-    '  - package-ecosystem: bun',
-    '    directory: /',
-    '    ignore:',
-    '      - dependency-name: left-pad',
-    '        versions: [">1.0.0"]',
-    '',
-  ].join('\n');
-
   it('merges the repo-owned overlay into the generated file', () => {
     const { consumer } = initConsumer(buildUpstream());
-    write(consumer, '.github/dependabot.local.yml', overlay);
+    write(consumer, '.github/dependabot.local.yml', DEPENDABOT_OVERLAY);
 
     const writeRun = run(consumer, [
       'dependabot',
@@ -716,7 +733,7 @@ describe('dependabot composition seam', () => {
   it('regenerates the composed file on sync after the overlay changes', () => {
     const up = buildUpstream();
     const { consumer } = initConsumer(up);
-    write(consumer, '.github/dependabot.local.yml', overlay);
+    write(consumer, '.github/dependabot.local.yml', DEPENDABOT_OVERLAY);
 
     const dry = run(consumer, [
       'sync',
@@ -856,7 +873,7 @@ describe('prospective Dependabot sync', () => {
     const result = sync(up, consumer);
 
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain('requires a 0.10-compatible content ref');
+    expect(result.stderr).toContain('requires a 0.10.1-compatible content ref');
     expect(snapshotTree(consumer)).toEqual(before);
   });
 
@@ -983,18 +1000,8 @@ describe('sync', () => {
 });
 
 describe('Dependabot content ref cutover', () => {
-  it('rejects a pre-0.10 pinned ref before init or sync mutation', () => {
-    const up = buildUpstream();
-    const base = read(up, '.github/dependabot.base.yml');
-    rmSync(join(up, '.github/dependabot.base.yml'));
-    git(up, ['init', '--quiet', '-b', 'main']);
-    git(up, ['add', '-A']);
-    git(up, ['commit', '--quiet', '-m', 'legacy']);
-    git(up, ['tag', 'legacy']);
-    write(up, '.github/dependabot.base.yml', base);
-    git(up, ['add', '-A']);
-    git(up, ['commit', '--quiet', '-m', 'current']);
-    const url = `file://${up}`;
+  it('rejects the v0.10.0 pinned ref before init or sync mutation', () => {
+    const { up, url } = buildDependabotCutoverUpstream();
 
     const initTarget = mkTmp('sync-cons-');
     write(initTarget, 'owned.txt', 'unchanged\n');
@@ -1004,22 +1011,22 @@ describe('Dependabot content ref cutover', () => {
       '--from',
       url,
       '--ref',
-      'legacy',
+      'v0.10.0',
       '--dir',
       initTarget,
     ]);
     expect(initResult.status).toBe(1);
     expect(initResult.stderr).toContain(
-      'requires a 0.10-compatible content ref',
+      'requires a 0.10.1-compatible content ref',
     );
     expect(snapshotTree(initTarget)).toEqual(initBefore);
 
     const { consumer } = initConsumer(up);
     const syncBefore = snapshotTree(consumer);
-    const syncResult = sync(url, consumer, ['--ref', 'legacy']);
+    const syncResult = sync(url, consumer, ['--ref', 'v0.10.0']);
     expect(syncResult.status).toBe(1);
     expect(syncResult.stderr).toContain(
-      'requires a 0.10-compatible content ref',
+      'requires a 0.10.1-compatible content ref',
     );
     expect(snapshotTree(consumer)).toEqual(syncBefore);
   });
@@ -1215,57 +1222,156 @@ describe('sync policy validation', () => {
   });
 });
 
-describe('sync policy distribution', () => {
-  it('the packed declared consumer version honors the workflow sync pin', () => {
+type PackedCliInstallation = {
+  readonly consumer: string;
+  readonly help: RunResult;
+  readonly sourceProfile: RunResult;
+};
+
+type ExecutableRunner = typeof runExecutable;
+
+const requireSuccessfulStage = (stage: string, result: RunResult): void => {
+  if (result.status !== 0) {
+    throw new Error(`${stage} failed: ${result.stderr}`);
+  }
+};
+
+const installPackedCli = (
+  execute: ExecutableRunner = runExecutable,
+): PackedCliInstallation => {
+  const packed = mkTmp('standards-pack-');
+  const pack = execute('bun', join(import.meta.dir, '..'), [
+    'pm',
+    'pack',
+    '--destination',
+    packed,
+    '--quiet',
+  ]);
+  requireSuccessfulStage('pack', pack);
+  const tarball = pack.stdout.trim();
+  if (tarball.length === 0) {
+    throw new Error('pack succeeded without reporting a tarball');
+  }
+
+  const consumer = mkTmp('sync-cons-');
+  write(
+    consumer,
+    'package.json',
+    JSON.stringify({
+      version: '0.0.0',
+      private: true,
+      workspaces: ['apps/*'],
+      scripts: {
+        standards: 'standards',
+        check:
+          'standards check && turbo run lint check-types test build test:a11y',
+        'check:fix':
+          'standards check && turbo run lint:fix check-types test build test:a11y',
+      },
+      devDependencies: {
+        '@davidvornholt/standards': `file:${tarball}`,
+      },
+    }),
+  );
+  const install = execute('bun', consumer, ['install', '--ignore-scripts']);
+  requireSuccessfulStage('install', install);
+
+  const help = execute('bun', consumer, ['standards', 'help']);
+  const sourceProfile = execute('bun', consumer, [
+    'standards',
+    'structure',
+    '--profile',
+    'source',
+    '--dir',
+    ACTUAL_UPSTREAM,
+  ]);
+  return { consumer, help, sourceProfile };
+};
+
+describe('packed artifact prerequisite staging', () => {
+  it.each([
+    ['pack', 1],
+    ['install', 2],
+  ] as const)('does not execute later stages after %s fails', (_stage, failureCall) => {
+    let calls = 0;
+    const execute: ExecutableRunner = () => {
+      calls += 1;
+      return {
+        stdout: calls === 1 ? '/tmp/standards.tgz\n' : '',
+        stderr: '',
+        status: calls === failureCall ? 1 : 0,
+      };
+    };
+
+    expect(() => installPackedCli(execute)).toThrow();
+    expect(calls).toBe(failureCall);
+  });
+});
+
+describe('packed artifact content ref cutover', () => {
+  it('rejects v0.10.0 content before packed init or sync mutation', () => {
+    const { consumer: runner } = installPackedCli();
+    const { up, url } = buildDependabotCutoverUpstream();
+    const execute = (args: ReadonlyArray<string>, target: string): RunResult =>
+      runExecutable('bun', runner, ['standards', ...args, '--dir', target]);
+
+    const initTarget = mkTmp('sync-cons-');
+    write(initTarget, 'owned.txt', 'unchanged\n');
+    const initBefore = snapshotTree(initTarget);
+    const initResult = execute(
+      ['init', '--from', url, '--ref', 'v0.10.0'],
+      initTarget,
+    );
+    expect(initResult.status).toBe(1);
+    expect(initResult.stderr).toContain(
+      'requires a 0.10.1-compatible content ref',
+    );
+    expect(snapshotTree(initTarget)).toEqual(initBefore);
+
+    const syncTarget = mkTmp('sync-cons-');
+    expect(execute(['init', '--from', up], syncTarget).status).toBe(0);
+    const syncBefore = snapshotTree(syncTarget);
+    const syncResult = execute(
+      ['sync', '--from', url, '--ref', 'v0.10.0'],
+      syncTarget,
+    );
+    expect(syncResult.status).toBe(1);
+    expect(syncResult.stderr).toContain(
+      'requires a 0.10.1-compatible content ref',
+    );
+    expect(snapshotTree(syncTarget)).toEqual(syncBefore);
+  });
+});
+
+describe('packed artifact distribution', () => {
+  it('ships the Dependabot contract and honors the workflow sync pin', () => {
     const packageManifest = JSON.parse(
       readFileSync(join(import.meta.dir, '../package.json'), 'utf8'),
     ) as { version: string };
     const templateManifest = JSON.parse(
       readFileSync(join(ACTUAL_UPSTREAM, 'template/package.json'), 'utf8'),
-    ) as {
-      devDependencies: Record<string, string>;
-    };
+    ) as { devDependencies: Record<string, string> };
     expect(templateManifest.devDependencies['@davidvornholt/standards']).toBe(
       packageManifest.version,
     );
-
-    const packed = mkTmp('standards-pack-');
-    const pack = runExecutable('bun', join(import.meta.dir, '..'), [
-      'pm',
-      'pack',
-      '--destination',
-      packed,
-      '--quiet',
-    ]);
-    expect(pack.status).toBe(0);
-    const tarball = pack.stdout.trim();
-    const consumer = mkTmp('sync-cons-');
-    write(
-      consumer,
-      'package.json',
-      JSON.stringify({
-        private: true,
-        scripts: { standards: 'standards' },
-        devDependencies: {
-          '@davidvornholt/standards': `file:${tarball}`,
-        },
-      }),
+    const installation = installPackedCli();
+    expect(installation.help.status).toBe(0);
+    expect(installation.help.stdout).toContain(
+      'dependabot  Verify (--check) or regenerate (--write)',
     );
-    expect(
-      runExecutable('bun', consumer, ['install', '--ignore-scripts']).status,
-    ).toBe(0);
-    const installedSourceProfile = runExecutable('bun', consumer, [
-      'standards',
-      'structure',
-      '--profile',
-      'source',
-      '--dir',
-      ACTUAL_UPSTREAM,
-    ]);
-    expect(installedSourceProfile.stderr).toBe('');
-    expect(installedSourceProfile.status).toBe(0);
+    expect(installation.sourceProfile.stderr).toBe('');
+    expect(installation.sourceProfile.status).toBe(0);
 
+    const { consumer } = installation;
     const { up, url } = buildGitUpstream();
+    const command = (name: 'check' | 'dependabot'): RunResult =>
+      runExecutable('bun', consumer, [
+        'standards',
+        name,
+        ...(name === 'dependabot' ? ['--check'] : []),
+        '--dir',
+        consumer,
+      ]);
     expect(
       runExecutable('bun', consumer, [
         'standards',
@@ -1276,19 +1382,41 @@ describe('sync policy distribution', () => {
         consumer,
       ]).status,
     ).toBe(0);
+    write(consumer, '.github/dependabot.local.yml', DEPENDABOT_OVERLAY);
+    expect(
+      runExecutable('bun', consumer, [
+        'standards',
+        'dependabot',
+        '--write',
+        '--dir',
+        consumer,
+      ]).status,
+    ).toBe(0);
+    const composed = read(consumer, '.github/dependabot.yml');
+    expect(composed).toContain('package-ecosystem: "nix"');
+    expect(composed).toContain('dependency-name: "left-pad"');
+    expect(command('dependabot').status).toBe(0);
+    write(consumer, '.github/dependabot.yml', `${composed}# generated drift\n`);
+    for (const driftCheck of (['dependabot', 'check'] as const).map(command)) {
+      expect(driftCheck.status).toBe(1);
+      expect(driftCheck.stderr).toContain(
+        'does not match its composed sources',
+      );
+    }
     write(consumer, 'sync-standards.local.json', '{ "ref": "v1" }\n');
-
-    const result = runExecutable('bun', consumer, [
-      'standards',
-      'sync',
-      '--from',
-      url,
-      '--dir',
-      consumer,
-    ]);
-
-    expect(result.status).toBe(0);
+    expect(
+      runExecutable('bun', consumer, [
+        'standards',
+        'sync',
+        '--from',
+        url,
+        '--dir',
+        consumer,
+      ]).status,
+    ).toBe(0);
     expect(read(consumer, 'managed/a.txt')).toBe('alpha\n');
+    expect(read(consumer, '.github/dependabot.yml')).toBe(composed);
+    expect(command('check').status).toBe(0);
   });
 });
 
@@ -1368,6 +1496,7 @@ describe('standards sync workflow policy', () => {
 
   it.each([
     '0.9.0',
+    '0.10.0',
     '0.10.0-beta.1',
   ])('rejects installed CLI version %s without a policy file', (version) => {
     const result = runWorkflowVersionGuard(version);
@@ -1375,7 +1504,7 @@ describe('standards sync workflow policy', () => {
     expect(`${result.stdout}${result.stderr}`).toContain('::error::');
   });
 
-  it('makes the 0.10 guard unconditional', () => {
+  it('makes the 0.10.1 guard unconditional', () => {
     const workflow = readFileSync(SYNC_WORKFLOW, 'utf8');
     expect(workflow).not.toContain(
       "if: needs.policy.outputs.present == 'true'",
@@ -1383,7 +1512,7 @@ describe('standards sync workflow policy', () => {
   });
 
   it.each([
-    '0.10.0',
+    '0.10.1',
     '0.11.0',
   ])('accepts installed CLI version %s without a policy file', (version) => {
     expect(runWorkflowVersionGuard(version).status).toBe(0);
