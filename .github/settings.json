@@ -46,5 +46,47 @@
         }
       ]
     }
+  ],
+  "labels": [
+    {
+      "name": "approved-for-fix",
+      "color": "0e8a16",
+      "description": "Maintainer approval: the fix poller may implement this issue"
+    },
+    {
+      "name": "fix-in-progress",
+      "color": "fbca04",
+      "description": "A fix-poller run has claimed this issue"
+    },
+    {
+      "name": "fix-failed",
+      "color": "d73a4a",
+      "description": "An automated fix run failed and needs a human look"
+    },
+    {
+      "name": "approved-for-review",
+      "color": "1d76db",
+      "description": "Maintainer approval: the fix poller may run review-fix on this pull request"
+    },
+    {
+      "name": "review-in-progress",
+      "color": "fbca04",
+      "description": "A fix-poller review run has claimed this pull request"
+    },
+    {
+      "name": "review-failed",
+      "color": "d73a4a",
+      "description": "An automated review run failed and needs a human look"
+    },
+    {
+      "name": "needs-clarification",
+      "color": "d4c5f9",
+      "description": "An agent paused on a question; answering resumes the cycle"
+    },
+    {
+      "name": "deferred-finding",
+      "color": "bfdadc",
+      "description": "Deferred review finding filed by a review-fix cycle"
+    }
   ]
 }
