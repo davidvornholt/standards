@@ -57,8 +57,11 @@ export const inspectRegistryReferences = (
   if (registries === undefined) {
     return [];
   }
+  if (registries === '*') {
+    return [];
+  }
   if (!listOfNonEmptyStrings(registries)) {
-    return [`${label}.registries must be a non-empty string list`];
+    return [`${label}.registries must be "*" or a non-empty string list`];
   }
   return new Set(registries).size === registries.length
     ? []

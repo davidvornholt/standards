@@ -50,7 +50,9 @@ const mergeMatchingBlock = (
   const hasIgnore =
     Array.isArray(local.block.ignore) && local.block.ignore.length > 0;
   const hasRegistries =
-    Array.isArray(local.block.registries) && local.block.registries.length > 0;
+    local.block.registries === '*' ||
+    (Array.isArray(local.block.registries) &&
+      local.block.registries.length > 0);
   if (!(hasIgnore || hasRegistries)) {
     problems.push(
       `${local.label} matches a canonical block and must add a non-empty ignore or registries list`,
@@ -64,12 +66,16 @@ const mergeMatchingBlock = (
     ];
   }
   if (hasRegistries) {
-    target.registries = [
-      ...new Set([
-        ...((target.registries as ReadonlyArray<string> | undefined) ?? []),
-        ...(local.block.registries as ReadonlyArray<string>),
-      ]),
-    ];
+    if (target.registries === '*' || local.block.registries === '*') {
+      target.registries = '*';
+    } else {
+      target.registries = [
+        ...new Set([
+          ...((target.registries as ReadonlyArray<string> | undefined) ?? []),
+          ...(local.block.registries as ReadonlyArray<string>),
+        ]),
+      ];
+    }
   }
 };
 
