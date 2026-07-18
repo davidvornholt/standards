@@ -5,7 +5,8 @@ dist/
 *.log
 
 # Claude agent worktrees are full parallel checkouts; they are never part of
-# this repository's own tree (biome.jsonc excludes them from the scanner too).
+# this repository's own tree (biome.jsonc force-ignores them from the scanner
+# too).
 .claude/worktrees/
 
 # The standards repo is the authority for canonical files, so it does not run
