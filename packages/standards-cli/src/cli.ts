@@ -54,6 +54,7 @@ const DEFAULT_UPSTREAM = 'github:davidvornholt/standards';
 const HASH_PREVIEW_LENGTH = 12;
 
 const GITHUB_PREFIX = 'github:';
+const SKIP_GITHUB_CHECK_ENV = 'STANDARDS_SKIP_GITHUB_CHECK';
 
 // Never mirrored, even under a managed directory path: build output, VCS
 // metadata, and installed dependencies would otherwise pollute the lock when
@@ -964,11 +965,25 @@ const runCheckCommand = async (consumer: string): Promise<boolean> => {
   // closed: once .github/settings.json exists, an unreachable API or an
   // unreadable origin is a failure, not a skip.
   const githubIsConverged = existsSync(join(consumer, CANONICAL_SETTINGS_FILE))
-    ? await runGithubCheck(consumer)
+    ? await runGithubCheckGate(consumer)
     : true;
   return (
     driftIsClean && integrationIsValid && structureIsValid && githubIsConverged
   );
+};
+
+// The canonical workflow sets this only for its unprivileged quality job,
+// where a separate isolated job runs the same live check with the admin-read
+// token. Absent that exact workflow seam, local and explicit checks remain
+// fail-closed.
+const runGithubCheckGate = (consumer: string): Promise<boolean> => {
+  if (process.env[SKIP_GITHUB_CHECK_ENV] === 'true') {
+    console.log(
+      `standards github: live settings check skipped because ${SKIP_GITHUB_CHECK_ENV}=true; the canonical workflow's isolated github-settings job must own this check`,
+    );
+    return Promise.resolve(true);
+  }
+  return runGithubCheck(consumer);
 };
 
 // Consumer-owned sync policy, checked in next to the canonical (read-only)
@@ -1116,7 +1131,7 @@ const runGateCommand = (
   if (command === 'structure') {
     return runStructure(consumer, profile);
   }
-  return apply ? runGithubApply(consumer) : runGithubCheck(consumer);
+  return apply ? runGithubApply(consumer) : runGithubCheckGate(consumer);
 };
 
 const main = async (): Promise<void> => {

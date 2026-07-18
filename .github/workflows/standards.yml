@@ -32,7 +32,9 @@ jobs:
   # Per-repo DB coordinates come from repository Actions VARIABLES (Settings →
   # Secrets and variables → Actions → Variables), not edits to this synced file:
   #   CI_POSTGRES_USER, CI_POSTGRES_PASSWORD, CI_POSTGRES_DB  (defaults below)
-  #   CI_RUNNER  — override the runner label (default ubuntu-latest)
+  #   CI_RUNNER  — override only the unprivileged quality runner label
+  #                (default ubuntu-latest); every other canonical workflow job
+  #                always uses a fresh GitHub-hosted runner
   # These are non-secret configuration; leaking them enables nothing.
   #
   # Playwright's Chromium, unlike the Postgres service, is installed only when the
@@ -41,7 +43,7 @@ jobs:
   # per-run download rather than an idle service container, and a step can carry
   # an `if:` whereas a service cannot. So gating it keeps one uniform file while
   # skipping a pointless download in repos with nothing to render.
-  check:
+  quality:
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     services:
       postgres:
@@ -63,41 +65,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      # `standards check` verifies the declared GitHub settings
-      # (.github/settings.json) against the live repository and fails closed:
-      # declared state its token cannot see fails the gate instead of passing
-      # unverified. GitHub reveals repo merge settings and ruleset bypass
-      # actors only to admin-capable viewers — a permission the workflow token
-      # can never hold — so the verifying token comes from the repo's
-      # encrypted CI secrets (ci.github_settings_read_token in
-      # secrets/ci.yaml, a fine-grained PAT with read-only "Administration"
-      # access to this repository), decrypted with the single SOPS_AGE_KEY
-      # bootstrap Actions secret. When the key, file, or entry is absent the
-      # gate runs with the workflow token and fails, loudly, by design.
-      - name: Resolve GitHub settings gate token
-        id: settings-token
-        uses: ./.github/actions/sops-secret
-        with:
-          age-key: ${{ secrets.SOPS_AGE_KEY }}
-          secret-file: secrets/ci.yaml
-          secret-key: github_settings_read_token
-          env-name: GH_TOKEN
-          fallback-value: ${{ github.token }}
-          failure-mode: fallback
-
-      - name: Report GitHub settings token fallback
-        if: steps.settings-token.outputs.used-fallback == 'true'
-        run: echo "ci.github_settings_read_token is not readable from secrets/ci.yaml; the GitHub settings gate will fail on settings the workflow token cannot see."
-
       # Workflows are the one file class the rest of the gate never exercises —
       # a broken workflow only fails when its trigger fires, after merge. Lint
       # them first: it is the cheapest step, so certain failures cost nothing.
-      # The pinless download intentionally tracks the latest release (Dependabot
-      # cannot see script-installed binaries, so a pin would go stale silently).
       - name: Lint workflows
         run: |
-          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash) latest /tmp
-          /tmp/actionlint -color
+          set -euo pipefail
+          version=1.7.12
+          case "$(uname -m)" in
+            x86_64) arch=amd64; sha=8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8 ;;
+            aarch64) arch=arm64; sha=325e971b6ba9bfa504672e29be93c24981eeb1c07576d730e9f7c8805afff0c6 ;;
+            *)
+              echo "::error::No pinned actionlint binary for runner architecture $(uname -m)"
+              exit 1
+              ;;
+          esac
+          archive="$RUNNER_TEMP/actionlint.tar.gz"
+          curl -sfLo "$archive" "https://github.com/rhysd/actionlint/releases/download/v${version}/actionlint_${version}_linux_${arch}.tar.gz"
+          echo "$sha  $archive" | sha256sum --check --quiet
+          tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" -color
 
       - name: Detect browser a11y suite
         id: a11y
@@ -122,4 +109,136 @@ jobs:
         run: bunx playwright install --with-deps chromium
 
       - name: Check
+        env:
+          # The isolated github-settings job owns this live check in CI. This
+          # workflow-only seam keeps local `bun run check` fail-closed.
+          STANDARDS_SKIP_GITHUB_CHECK: "true"
         run: bun run check
+
+  # The admin-read PAT is isolated from all repository-controlled executable
+  # code. The checkout contains only declarative settings inputs and the
+  # encrypted token source; the CLI is a published, checksum-pinned artifact
+  # installed under RUNNER_TEMP from direct, checksum-pinned release URLs.
+  github-settings:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout settings inputs
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github/settings.json
+            .github/settings.local.json
+            secrets/ci.yaml
+          sparse-checkout-cone-mode: false
+
+      - name: Install pinned settings checker
+        run: |
+          set -euo pipefail
+          bun_version=1.3.14
+          case "$(uname -m)" in
+            x86_64) bun_arch=x64; bun_sha=951ee2aee855f08595aeec6225226a298d3fea83a3dcd6465c09cbccdf7e848f ;;
+            aarch64) bun_arch=aarch64; bun_sha=a27ffb63a8310375836e0d6f668ae17fa8d8d18b88c37c821c65331973a19a3b ;;
+            *)
+              echo "::error::No pinned Bun binary for runner architecture $(uname -m)"
+              exit 1
+              ;;
+          esac
+          bun_archive="$RUNNER_TEMP/bun.zip"
+          bun_root="$RUNNER_TEMP/standards-bin"
+          curl -sfLo "$bun_archive" "https://github.com/oven-sh/bun/releases/download/bun-v${bun_version}/bun-linux-${bun_arch}.zip"
+          echo "$bun_sha  $bun_archive" | sha256sum --check --quiet
+          mkdir "$bun_root"
+          unzip -q "$bun_archive" -d "$bun_root"
+          install -m 0755 "$bun_root/bun-linux-${bun_arch}/bun" "$bun_root/bun"
+
+          standards_version=0.10.1
+          standards_sha=b0a12e17066cb25dea69a11a1be1f032e659bc0a16d5de36f5877306ae51f53cc26e282b041cfe3b9828b96ad30e153234de63b262146a5824317ae5df9512e1
+          standards_archive="$RUNNER_TEMP/standards.tgz"
+          cli_root="$RUNNER_TEMP/standards-cli"
+          mkdir -p "$cli_root/package"
+          curl -sfLo "$standards_archive" "https://registry.npmjs.org/@davidvornholt/standards/-/standards-${standards_version}.tgz"
+          echo "$standards_sha  $standards_archive" | sha512sum --check --quiet
+          tar -xzf "$standards_archive" -C "$cli_root/package" --strip-components=1
+
+          yaml_version=2.9.0
+          yaml_sha=d80be1357de66fccdde99cbb20d4ed4a9975175e475ba5a7aa3d2cad696428b729625fe03083098b2b86ab629e236605c543e376507edcb735d2c78c2ed2f870
+          yaml_archive="$RUNNER_TEMP/yaml.tgz"
+          mkdir -p "$cli_root/node_modules/yaml"
+          curl -sfLo "$yaml_archive" "https://registry.npmjs.org/yaml/-/yaml-${yaml_version}.tgz"
+          echo "$yaml_sha  $yaml_archive" | sha512sum --check --quiet
+          tar -xzf "$yaml_archive" -C "$cli_root/node_modules/yaml" --strip-components=1
+
+      # GitHub hides ruleset bypass actors from the workflow token, so this
+      # resolves a repository-scoped fine-grained PAT with read-only
+      # Administration access. Missing secret state deliberately falls back to
+      # the workflow token so the settings check fails closed with its normal
+      # actionable visibility error.
+      - name: Check GitHub settings
+        env:
+          FALLBACK_TOKEN: ${{ github.token }}
+          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+        run: |
+          set -euo pipefail
+          value="$FALLBACK_TOKEN"
+          used_fallback=true
+
+          if [ -n "$SOPS_AGE_KEY" ] && [ -f secrets/ci.yaml ]; then
+            sops_version=v3.13.2
+            case "$(uname -m)" in
+              x86_64) arch=amd64; sops_sha=154dfe4cd70554bdd82b98e4cd4acf191d43d01ead6f00a73477aa44c4ac42ef ;;
+              aarch64) arch=arm64; sops_sha=78abf2e15c86250a1553ae6f53aba96be6b2a8126f160b1534959add3467ad76 ;;
+              *)
+                echo "::error::No pinned SOPS binary for runner architecture $(uname -m)"
+                exit 1
+                ;;
+            esac
+            sops="$RUNNER_TEMP/sops"
+            curl -sfLo "$sops" "https://github.com/getsops/sops/releases/download/${sops_version}/sops-${sops_version}.linux.${arch}"
+            echo "$sops_sha  $sops" | sha256sum --check --quiet
+            chmod +x "$sops"
+            if extracted=$("$sops" decrypt --extract '["ci"]["github_settings_read_token"]' secrets/ci.yaml) \
+              && [ -n "$extracted" ] \
+              && [[ "$extracted" != *$'\n'* ]] \
+              && [[ "$extracted" != *$'\r'* ]]; then
+              value="$extracted"
+              used_fallback=false
+            else
+              echo "::warning::ci.github_settings_read_token is not a readable non-empty single-line string in secrets/ci.yaml; using the workflow token"
+            fi
+          else
+            echo "::warning::SOPS_AGE_KEY or secrets/ci.yaml is unavailable; using the workflow token"
+          fi
+
+          if [ -z "$value" ] || [[ "$value" == *$'\n'* ]] || [[ "$value" == *$'\r'* ]]; then
+            echo "::error::Resolved GitHub settings token must be non-empty and single-line"
+            exit 1
+          fi
+          echo "::add-mask::$value"
+          if [ "$used_fallback" = true ]; then
+            echo "ci.github_settings_read_token is not readable from secrets/ci.yaml; the GitHub settings gate will fail on settings the workflow token cannot see."
+          fi
+          unset SOPS_AGE_KEY FALLBACK_TOKEN
+          cd "$RUNNER_TEMP/standards-cli"
+          GH_TOKEN="$value" "$RUNNER_TEMP/standards-bin/bun" \
+            package/src/cli.ts github --check --dir "$GITHUB_WORKSPACE"
+
+  # Keep the stable required-check name while making both independent gates
+  # mandatory. `always()` ensures a failed or cancelled dependency cannot turn
+  # this required check into a skipped success.
+  check:
+    if: always()
+    needs:
+      - quality
+      - github-settings
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all standards gates
+        env:
+          GITHUB_SETTINGS_RESULT: ${{ needs.github-settings.result }}
+          QUALITY_RESULT: ${{ needs.quality.result }}
+        run: |
+          if [ "$QUALITY_RESULT" != success ] || [ "$GITHUB_SETTINGS_RESULT" != success ]; then
+            echo "::error::Standards gates did not all succeed (quality=$QUALITY_RESULT, github-settings=$GITHUB_SETTINGS_RESULT)"
+            exit 1
+          fi

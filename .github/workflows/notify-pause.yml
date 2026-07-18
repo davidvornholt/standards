@@ -34,7 +34,9 @@ permissions:
 jobs:
   notify:
     if: github.event.label.name == 'needs-clarification'
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    # SOPS_AGE_KEY is available here, so this job must never share the
+    # configurable runner pool used by unprivileged quality code.
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout encrypted CI secrets
         uses: actions/checkout@v7

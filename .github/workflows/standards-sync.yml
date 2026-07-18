@@ -29,13 +29,15 @@ concurrency:
   group: standards-sync
   cancel-in-progress: false
 
+# Every job uses a fresh GitHub-hosted runner because sync eventually resolves
+# SOPS_AGE_KEY. CI_RUNNER is reserved for the unprivileged Standards quality job.
 jobs:
   # Cheap preflight: job-level `if:` expressions cannot read repository files,
   # so this job surfaces the checked-in policy for the gate below. A missing
   # file means the defaults (auto-sync on); an unparseable one fails this job
   # loudly — and with it the gated sync — rather than guessing a default.
   policy:
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     outputs:
       auto-sync: ${{ steps.read.outputs.auto-sync }}
       present: ${{ steps.read.outputs.present }}
@@ -87,7 +89,7 @@ jobs:
     # Manual dispatch always runs — it is a deliberate act; only the scheduled
     # cadence is gated on the checked-in opt-out.
     if: github.event_name == 'workflow_dispatch' || needs.policy.outputs.auto-sync != 'false'
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -103,9 +105,9 @@ jobs:
       # A consumer can receive this canonical workflow before upgrading its
       # repo-owned package manifest. Fail before sync instead of letting an
       # older CLI mirror the base without generating the canonical policy.
-      - name: Require Dependabot-aware standards CLI
+      - name: Require compatible standards CLI
         env:
-          MINIMUM_STANDARDS_VERSION: "0.10.1"
+          MINIMUM_STANDARDS_VERSION: "0.10.2"
         run: |
           package_path=node_modules/@davidvornholt/standards/package.json
           installed_version=$(jq -er '.version | select(type == "string")' "$package_path")
@@ -115,7 +117,7 @@ jobs:
           fi
           lowest_version=$(printf '%s\n%s\n' "$MINIMUM_STANDARDS_VERSION" "$installed_version" | sort -V | head -n 1)
           if [ "$lowest_version" != "$MINIMUM_STANDARDS_VERSION" ]; then
-            echo "::error::Dependabot composition requires @davidvornholt/standards >= $MINIMUM_STANDARDS_VERSION; upgrade package.json and bun.lock before accepting this workflow"
+            echo "::error::The canonical workflows require @davidvornholt/standards >= $MINIMUM_STANDARDS_VERSION; upgrade package.json and bun.lock before accepting this workflow"
             exit 1
           fi
 
