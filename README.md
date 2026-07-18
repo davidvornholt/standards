@@ -78,7 +78,7 @@ bun standards github --apply  # converge the live repo (needs admin gh auth)
 bun standards help            # list commands and options
 ```
 
-The `Standards sync` workflow also runs `sync` weekly and opens a PR when upstream has moved, so you never have to remember to pull. The PR is validated by the required `Standards` gate like any other change; set `ci.standards_sync_token` in the encrypted `secrets/ci.yaml` (repository-scoped fine-grained PAT with Pull requests write) so the opened PR triggers that gate automatically. Without the PAT, the workflow token can create the PR only when repository or organization policy permits GitHub Actions to do so, and a maintainer must approve the queued workflow runs; when policy blocks PR creation, the pushed sync branch remains without a PR.
+The `Standards sync` workflow also runs `sync` weekly and opens a PR when upstream has moved, so you never have to remember to pull. The PR is validated by the required `Standards` gate like any other change; set `ci.standards_sync_token` in the encrypted `secrets/ci.yaml` (repository-scoped fine-grained PAT with Contents read + Pull requests write) so the opened PR triggers that gate automatically. Without the PAT, the workflow token can create the PR only when repository or organization policy permits GitHub Actions to do so, and a maintainer must approve the queued workflow runs; when policy blocks PR creation, the pushed sync branch remains without a PR.
 
 ### Track main or pin a version
 

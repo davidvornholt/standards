@@ -144,12 +144,12 @@ jobs:
 
       # The PR-opening token comes from the repo's encrypted CI secrets
       # (ci.standards_sync_token in secrets/ci.yaml, a fine-grained PAT with
-      # pull-requests write), decrypted with the single SOPS_AGE_KEY bootstrap
-      # Actions secret. The PAT is only resolved after the cheap no-change
-      # check. PRs opened with it trigger the required Standards gate
-      # automatically. Without it, the workflow token can create a PR only
-      # when repository or organization policy allows Actions to do so; the
-      # resulting workflow runs wait for maintainer approval.
+      # Contents read + Pull requests write), decrypted with the single
+      # SOPS_AGE_KEY bootstrap Actions secret. The PAT is only resolved after
+      # the cheap no-change check. PRs opened with it trigger the required
+      # Standards gate automatically. Without it, the workflow token can create
+      # a PR only when repository or organization policy allows Actions to do
+      # so; the resulting workflow runs wait for maintainer approval.
       - name: Resolve sync PR token
         if: steps.mirror.outputs.changed == 'true'
         id: sync-token

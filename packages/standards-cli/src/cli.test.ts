@@ -131,6 +131,18 @@ const snapshotTree = (
   }
   return snapshot;
 };
+const readProductionGithubFiles = (): ReadonlyArray<{
+  readonly content: string;
+  readonly path: string;
+}> =>
+  ['.github/workflows', '.github/actions'].flatMap((root) =>
+    Object.entries(snapshotTree(join(ACTUAL_UPSTREAM, root))).map(
+      ([path, content]) => ({
+        content: Buffer.from(content, 'base64').toString('utf8'),
+        path: `${root}/${path}`,
+      }),
+    ),
+  );
 
 const runExecutable = (
   executable: string,
@@ -157,7 +169,7 @@ const runExecutable = (
 const run = (cwd: string, args: ReadonlyArray<string>): RunResult =>
   runExecutable('bun', cwd, [ENGINE, ...args]);
 
-const yamlRunScript = (path: string, stepName: string): string => {
+const yamlStep = (path: string, stepName: string): string => {
   const lines = readFileSync(path, 'utf8').split('\n');
   const stepIndex = lines.findIndex(
     (line) => line.trim() === `- name: ${stepName}`,
@@ -165,9 +177,20 @@ const yamlRunScript = (path: string, stepName: string): string => {
   if (stepIndex === -1) {
     throw new Error(`YAML step not found: ${stepName}`);
   }
-  const runIndex = lines.findIndex(
-    (line, index) => index > stepIndex && line.trim() === 'run: |',
-  );
+  const stepIndent = (lines[stepIndex] ?? '').search(NON_WHITESPACE);
+  const stepLines = [lines[stepIndex] ?? ''];
+  for (let index = stepIndex + 1; index < lines.length; index += 1) {
+    const line = lines[index] ?? '';
+    if (line.length > 0 && line.search(NON_WHITESPACE) <= stepIndent) {
+      break;
+    }
+    stepLines.push(line);
+  }
+  return stepLines.join('\n').trimEnd();
+};
+const yamlRunScript = (path: string, stepName: string): string => {
+  const lines = yamlStep(path, stepName).split('\n');
+  const runIndex = lines.findIndex((line) => line.trim() === 'run: |');
   if (runIndex === -1) {
     throw new Error(`YAML run script not found: ${stepName}`);
   }
@@ -1623,6 +1646,14 @@ describe('canonical SOPS secret action', () => {
 
   it('is the only owner of the SOPS pin and serves all three workflows', () => {
     const action = readFileSync(SOPS_ACTION, 'utf8');
+    const canonicalActionPath = '.github/actions/sops-secret/action.yml';
+    const productionFiles = readProductionGithubFiles();
+    const versionOwners = productionFiles
+      .filter(({ content }) => content.match(SOPS_VERSION_ASSIGNMENT) !== null)
+      .map(({ path }) => path);
+    const checksumOwners = productionFiles
+      .filter(({ content }) => content.match(SOPS_CHECKSUM_ASSIGNMENT) !== null)
+      .map(({ path }) => path);
     const workflows = [
       readFileSync(SYNC_WORKFLOW, 'utf8'),
       readFileSync(STANDARDS_WORKFLOW, 'utf8'),
@@ -1630,15 +1661,39 @@ describe('canonical SOPS secret action', () => {
     ];
     expect(action.match(SOPS_VERSION_ASSIGNMENT)).toHaveLength(1);
     expect(action.match(SOPS_CHECKSUM_ASSIGNMENT)).toHaveLength(2);
+    expect(versionOwners).toEqual([canonicalActionPath]);
+    expect(checksumOwners).toEqual([canonicalActionPath]);
     for (const workflow of workflows) {
       expect(workflow).toContain('uses: ./.github/actions/sops-secret');
-      expect(workflow.match(SOPS_VERSION_ASSIGNMENT)).toBeNull();
-      expect(workflow.match(SOPS_CHECKSUM_ASSIGNMENT)).toBeNull();
     }
     const syncManifest = JSON.parse(
       readFileSync(join(ACTUAL_UPSTREAM, 'sync-standards.json'), 'utf8'),
     ) as { readonly paths: ReadonlyArray<string> };
     expect(syncManifest.paths).toContain('.github/actions/sops-secret');
+  });
+});
+
+describe('canonical SOPS missing-key modes', () => {
+  it('uses one validated fallback record when the requested key is absent', () => {
+    const actionRun = runSopsAction({
+      sopsOutput: JSON.stringify({ ci: {} }),
+    });
+
+    expect(actionRun.result.status).toBe(0);
+    expect(actionRun.environment).toBe('GH_TOKEN=workflow-token\n');
+    expect(actionRun.output).toBe('used-fallback=true\n');
+    expect(actionRun.curlCalled).toBe(true);
+  });
+
+  it('fails without exported records when a required key is absent', () => {
+    const actionRun = runSopsAction({
+      failureMode: 'fail',
+      sopsOutput: JSON.stringify({ ci: {} }),
+    });
+
+    expect(actionRun.result.status).toBe(1);
+    expect(actionRun.environment).toBe('');
+    expect(actionRun.output).toBe('');
   });
 });
 
@@ -1657,15 +1712,14 @@ describe('standards sync workflow ordering', () => {
     const workflow = readFileSync(SYNC_WORKFLOW, 'utf8');
     const detectIndex = workflow.indexOf('- name: Detect mirror changes');
     const resolveIndex = workflow.indexOf('- name: Resolve sync PR token');
+    const resolveStep = yamlStep(SYNC_WORKFLOW, 'Resolve sync PR token');
 
     expect(result.status).toBe(0);
     expect(readFileSync(outputPath, 'utf8')).toBe('changed=false\n');
     expect(result.stdout).toContain('Already in sync');
     expect(detectIndex).toBeGreaterThan(-1);
     expect(resolveIndex).toBeGreaterThan(detectIndex);
-    expect(workflow.slice(resolveIndex)).toContain(
-      "if: steps.mirror.outputs.changed == 'true'",
-    );
+    expect(resolveStep).toContain("if: steps.mirror.outputs.changed == 'true'");
   });
 });
 
