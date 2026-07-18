@@ -55,7 +55,7 @@ A non-empty `skippedLenses` is a partial fan-out: rerun those lenses before disp
 Every finding gets exactly one disposition, judged against the scope contract:
 
 - **fix-now**: material under the threat model AND inside the intent. The bar: a maintainer would block the merge over it.
-- **defer**: real but outside the intent or below materiality. File a self-contained GitHub issue — evidence, concrete failure scenario, suggested verification, link to the PR. Deferral is the default for real-but-adjacent findings; "reproducible" is not "material".
+- **defer**: real but outside the intent or below materiality. File a self-contained GitHub issue — evidence, concrete failure scenario, suggested verification, link to the PR — labeled `deferred-finding`. Deferral is the default for real-but-adjacent findings; "reproducible" is not "material".
 - **discard**: refuted, speculative, or conflicting with a registry decision. Append discards with durable value (deliberate policy or architecture choices, accepted risks) to `.agents/review/decisions.md`; summarize the rest in the review body.
 - **needs-clarification**: pause and ask the user, with a decision brief per question: what the diff currently does, each option's concrete consequences (who breaks, what it costs), and a recommendation with reasoning.
 

@@ -1,12 +1,13 @@
 name: Notify pause
 
-# A review-fix cycle pauses by posting a decision brief on the PR and applying
-# the `needs-clarification` label. The agent posts with the repo owner's own
+# An agent pause is a question posted as a comment plus the
+# `needs-clarification` label: review-fix cycles pause on pull requests, and
+# fix-poller runs pause on issues. The agent posts with the repo owner's own
 # account, and GitHub never notifies you of your own activity — so this
 # workflow is the doorbell: on the label event it pushes a phone notification
-# through ntfy with a deep link to the paused PR. The label is the trigger on
-# purpose: the ping fires off the durable state transition, not off anything
-# harness-specific the agent has to remember.
+# through ntfy with a deep link to the paused PR or issue. The label is the
+# trigger on purpose: the ping fires off the durable state transition, not off
+# anything harness-specific the agent has to remember.
 #
 # The topic URL is a secret (the topic name is its only access control) and
 # therefore lives where all work-plane secrets live: as `ci.ntfy_topic_url` in
@@ -17,8 +18,9 @@ name: Notify pause
 # `pull_request_target` instead of `pull_request` so the run has secrets even
 # when the labeled PR comes from a fork. That event is safe here because the
 # checkout is the BASE ref (never PR code) and nothing from the PR is
-# executed — untrusted input (the PR title) only ever passes through an env
-# var into curl's request body.
+# executed — untrusted input (the PR or issue title) only ever passes through
+# an env var into curl's request body. `issues` events always run in the base
+# repository context, so the same reasoning covers them trivially.
 #
 # Every missing precondition fails the run loudly instead of no-oping: a
 # doorbell that silently swallows a pause defeats its purpose, and the red
@@ -26,6 +28,8 @@ name: Notify pause
 
 on:
   pull_request_target:
+    types: [labeled]
+  issues:
     types: [labeled]
 
 permissions:
@@ -57,15 +61,15 @@ jobs:
 
       - name: Push a notification
         env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
+          PAUSE_TITLE: ${{ github.event.pull_request.title || github.event.issue.title }}
+          PAUSE_URL: ${{ github.event.pull_request.html_url || github.event.issue.html_url }}
           REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PAUSE_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
         run: |
           curl -sf \
-            -H "X-Title: ${REPO}#${PR_NUMBER} needs clarification" \
-            -H "X-Click: ${PR_URL}" \
+            -H "X-Title: ${REPO}#${PAUSE_NUMBER} needs clarification" \
+            -H "X-Click: ${PAUSE_URL}" \
             -H "X-Priority: high" \
             -H "X-Tags: question" \
-            --data "$PR_TITLE" \
+            --data "$PAUSE_TITLE" \
             "$NTFY_TOPIC_URL"

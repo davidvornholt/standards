@@ -1564,8 +1564,21 @@ describe('packed artifact distribution', () => {
     );
     expect(installation.sourceProfile.stderr).toBe('');
     expect(installation.sourceProfile.status).toBe(0);
-
     const { consumer } = installation;
+    const installedSettingsParser = runExecutable('bun', consumer, [
+      '-e',
+      [
+        `import { loadGithubSettings } from ${JSON.stringify(join(consumer, 'node_modules/@davidvornholt/standards/src/github-settings.ts'))};`,
+        'const loaded = loadGithubSettings(',
+        '  JSON.stringify({ repository: {}, rulesets: [], labels: [{ name: "approved-for-fix", color: "0e8a16", description: "Approved" }] }),',
+        '  JSON.stringify({ repository: {}, rulesets: [], labels: [] }),',
+        ');',
+        'if (loaded.merged?.labels[0]?.name !== "approved-for-fix" || loaded.problems.length !== 0) process.exit(1);',
+      ].join('\n'),
+    ]);
+    expect(installedSettingsParser.stderr).toBe('');
+    expect(installedSettingsParser.status).toBe(0);
+
     const { up, url } = buildGitUpstream();
     const command = (name: 'check' | 'dependabot'): RunResult =>
       runExecutable('bun', consumer, [
@@ -2004,6 +2017,7 @@ describe('standards sync workflow policy', () => {
   it.each([
     '0.10.2',
     '0.11.0',
+    '0.12.0',
   ])('accepts installed CLI version %s without a policy file', (version) => {
     expect(runWorkflowVersionGuard(version).status).toBe(0);
   });
@@ -2238,5 +2252,66 @@ describe('path safety', () => {
     expect(result.stderr).toContain(
       'managed path must be a normalized repository-relative path',
     );
+  });
+});
+
+describe('poller', () => {
+  it('requires --config', () => {
+    const consumer = mkTmp('poller-');
+    const result = run(consumer, ['poller']);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('--config <path> is required');
+  });
+
+  it('rejects poller flags on other commands', () => {
+    const consumer = mkTmp('poller-');
+    const result = run(consumer, ['check', '--config', 'x.json']);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      '--config is only valid with the poller command',
+    );
+  });
+
+  it('rejects the removed imperative --install option', () => {
+    const consumer = mkTmp('poller-');
+    const result = run(consumer, ['poller', '--install', '--config', 'x.json']);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Unknown option: --install');
+  });
+
+  it('fails loudly on an invalid config file', () => {
+    const consumer = mkTmp('poller-');
+    writeFileSync(
+      join(consumer, 'poller.json'),
+      '{"repos":[],"model":"gpt-5.6-sol","reasoningEffort":"high"}',
+    );
+    const result = run(consumer, [
+      'poller',
+      '--config',
+      join(consumer, 'poller.json'),
+    ]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      'poller config "repos" must list at least one repository',
+    );
+  });
+
+  it('prints systemd units sized from the config without touching the host', () => {
+    const consumer = mkTmp('poller-');
+    const configPath = join(consumer, 'poller.json');
+    writeFileSync(
+      configPath,
+      '{"repos":["owner/repo"],"model":"gpt-5.6-sol","reasoningEffort":"high"}',
+    );
+    const result = run(consumer, [
+      'poller',
+      '--print-units',
+      '--config',
+      configPath,
+    ]);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('standards-poller.service');
+    expect(result.stdout).toContain(`poller --config "${configPath}"`);
+    expect(result.stdout).toContain('TimeoutStartSec=270min');
   });
 });
