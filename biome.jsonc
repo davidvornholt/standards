@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.5.3/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.5.2/schema.json",
   // Repo-owned wrapper. Extends the canonical strict base; add repo-specific
   // overrides here. Never edit biome.base.jsonc locally — it is synced.
   "extends": ["./biome.base.jsonc"],
@@ -8,8 +8,15 @@
   // never loaded as a nested config or linted as this repo's source.
   // Claude workflow scripts are a sandboxed DSL dialect (ambient orchestration
   // globals, top-level return) that Biome's ES module parser rejects; the
-  // Workflow harness validates them at run time.
+  // Workflow harness validates them at run time. Claude agent worktrees are
+  // full checkouts with their own root biome.jsonc, which the scanner would
+  // reject as a nested root.
   "files": {
-    "includes": ["**", "!!**/template", "!.claude/workflows"]
+    "includes": [
+      "**",
+      "!!**/template",
+      "!.claude/workflows",
+      "!.claude/worktrees"
+    ]
   }
 }

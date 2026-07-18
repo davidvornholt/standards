@@ -42,7 +42,7 @@ jobs:
       ref: ${{ steps.read.outputs.ref }}
     steps:
       - name: Checkout policy file
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           sparse-checkout: sync-standards.local.json
           sparse-checkout-cone-mode: false
@@ -90,7 +90,7 @@ jobs:
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -101,12 +101,11 @@ jobs:
         run: bun install --frozen-lockfile
 
       # A consumer can receive this canonical workflow before upgrading its
-      # repo-owned package manifest. Fail before sync when a policy-aware CLI
-      # is required instead of silently letting an older CLI ignore the file.
-      - name: Require policy-aware standards CLI
-        if: needs.policy.outputs.present == 'true'
+      # repo-owned package manifest. Fail before sync instead of letting an
+      # older CLI mirror the base without generating the canonical policy.
+      - name: Require Dependabot-aware standards CLI
         env:
-          MINIMUM_STANDARDS_VERSION: "0.7.0"
+          MINIMUM_STANDARDS_VERSION: "0.10.0"
         run: |
           package_path=node_modules/@davidvornholt/standards/package.json
           installed_version=$(jq -er '.version | select(type == "string")' "$package_path")
@@ -116,7 +115,7 @@ jobs:
           fi
           lowest_version=$(printf '%s\n%s\n' "$MINIMUM_STANDARDS_VERSION" "$installed_version" | sort -V | head -n 1)
           if [ "$lowest_version" != "$MINIMUM_STANDARDS_VERSION" ]; then
-            echo "::error::sync-standards.local.json requires @davidvornholt/standards >= $MINIMUM_STANDARDS_VERSION; upgrade package.json and bun.lock before accepting this workflow"
+            echo "::error::Dependabot composition requires @davidvornholt/standards >= $MINIMUM_STANDARDS_VERSION; upgrade package.json and bun.lock before accepting this workflow"
             exit 1
           fi
 

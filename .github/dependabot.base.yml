@@ -1,0 +1,27 @@
+# Canonical Dependabot baseline, synced read-only from davidvornholt/standards.
+# `bun standards sync` (or `bun standards dependabot --write`) composes this
+# file with the repo-owned .github/dependabot.local.yml into the generated
+# .github/dependabot.yml. Template-wide version holds live here so adding or
+# lifting one is a single upstream change that reaches every consumer on its
+# next sync; never hand-edit holds downstream.
+version: 2
+updates:
+  - package-ecosystem: "bun"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    ignore:
+      # Not a temporary hold: biome.base.jsonc is authored against the exact
+      # pinned Biome version, so consumers never self-bump it. Upgrades happen
+      # in the standards template and roll out through sync. Current pin
+      # context: 2.5.3 and 2.5.4 panic at runtime in consumer repos, so the
+      # template pins 2.5.2.
+      - dependency-name: "@biomejs/biome"
+      # Temporary hold: Next.js does not support TypeScript releases above
+      # 7.0.x. Lift here when Next declares support.
+      - dependency-name: "typescript"
+        versions: [">7.0.2"]
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
