@@ -6,16 +6,18 @@
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import process from 'node:process';
-import { isRecord } from './github-settings-parse';
 
 const TOKEN_ENV = 'STANDARDS_POLLER_GIT_TOKEN';
 const CREDENTIAL_HELPER = `!f() { echo username=x-access-token; echo "password=$${TOKEN_ENV}"; }; f`;
 const MS_PER_SECOND = 1000;
 const GIT_TIMEOUT_SECONDS = 600;
 const GIT_TIMEOUT_MS = GIT_TIMEOUT_SECONDS * MS_PER_SECOND;
+const fetchRefspec = '+refs/heads/*:refs/heads/*';
+
+export const githubRepoUrl = (repo: string): string =>
+  `https://github.com/${repo}.git`;
 
 export type Workspace = {
   readonly dir: string;
@@ -23,7 +25,10 @@ export type Workspace = {
   readonly cleanup: () => void;
 };
 
-const git = (args: ReadonlyArray<string>, token: string | null): string =>
+export const runGit = (
+  args: ReadonlyArray<string>,
+  token: string | null,
+): string =>
   execFileSync('git', [...args], {
     encoding: 'utf8',
     timeout: GIT_TIMEOUT_MS,
@@ -41,7 +46,7 @@ const authedGit = (
   args: ReadonlyArray<string>,
   token: string | null,
 ): string =>
-  git(
+  runGit(
     [
       '-C',
       cloneDir,
@@ -65,7 +70,7 @@ export const ensureCacheClone = (
   const cloneDir = join(cacheDir, `${repo}.git`);
   if (!existsSync(cloneDir)) {
     mkdirSync(cacheDir, { recursive: true });
-    git(
+    runGit(
       [
         '-c',
         'credential.helper=',
@@ -73,23 +78,25 @@ export const ensureCacheClone = (
         `credential.helper=${CREDENTIAL_HELPER}`,
         'clone',
         '--bare',
-        `https://github.com/${repo}.git`,
+        githubRepoUrl(repo),
         cloneDir,
       ],
       token,
     );
-    git(
-      [
-        '-C',
-        cloneDir,
-        'config',
-        'remote.origin.fetch',
-        '+refs/heads/*:refs/heads/*',
-      ],
+    runGit(
+      ['-C', cloneDir, 'config', 'remote.origin.fetch', fetchRefspec],
       null,
     );
   }
-  authedGit(cloneDir, ['fetch', '--prune', 'origin'], token);
+  runGit(
+    ['-C', cloneDir, 'remote', 'set-url', 'origin', githubRepoUrl(repo)],
+    null,
+  );
+  authedGit(
+    cloneDir,
+    ['fetch', '--prune', githubRepoUrl(repo), fetchRefspec],
+    token,
+  );
   return cloneDir;
 };
 
@@ -102,20 +109,23 @@ export const createWorktree = (
   workDir: string,
 ): Workspace => {
   try {
-    git(['-C', cloneDir, 'worktree', 'remove', '--force', workDir], null);
+    runGit(['-C', cloneDir, 'worktree', 'remove', '--force', workDir], null);
   } catch {
     rmSync(workDir, { recursive: true, force: true });
-    git(['-C', cloneDir, 'worktree', 'prune'], null);
+    runGit(['-C', cloneDir, 'worktree', 'prune'], null);
   }
-  const baseSha = git(['-C', cloneDir, 'rev-parse', startRef], null).trim();
-  git(['-C', cloneDir, 'worktree', 'add', '--detach', workDir, baseSha], null);
-  git(['-C', workDir, 'checkout', '-B', branch, baseSha], null);
+  const baseSha = runGit(['-C', cloneDir, 'rev-parse', startRef], null).trim();
+  runGit(
+    ['-C', cloneDir, 'worktree', 'add', '--detach', workDir, baseSha],
+    null,
+  );
+  runGit(['-C', workDir, 'checkout', '-B', branch, baseSha], null);
   const cleanup = (): void => {
     try {
-      git(['-C', cloneDir, 'worktree', 'remove', '--force', workDir], null);
+      runGit(['-C', cloneDir, 'worktree', 'remove', '--force', workDir], null);
     } catch {
       rmSync(workDir, { recursive: true, force: true });
-      git(['-C', cloneDir, 'worktree', 'prune'], null);
+      runGit(['-C', cloneDir, 'worktree', 'prune'], null);
     }
   };
   return { dir: workDir, baseSha, cleanup };
@@ -125,11 +135,11 @@ export const mergeBase = (
   cloneDir: string,
   refA: string,
   refB: string,
-): string => git(['-C', cloneDir, 'merge-base', refA, refB], null).trim();
+): string => runGit(['-C', cloneDir, 'merge-base', refA, refB], null).trim();
 
 export const commitCount = (workDir: string, baseSha: string): number =>
   Number.parseInt(
-    git(['-C', workDir, 'rev-list', '--count', `${baseSha}..HEAD`], null),
+    runGit(['-C', workDir, 'rev-list', '--count', `${baseSha}..HEAD`], null),
     10,
   );
 
@@ -137,49 +147,34 @@ export const changedPaths = (
   workDir: string,
   baseSha: string,
 ): ReadonlyArray<string> =>
-  git(['-C', workDir, 'diff', '--name-only', baseSha, 'HEAD'], null)
+  runGit(['-C', workDir, 'diff', '--name-only', baseSha, 'HEAD'], null)
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
 
-// Poller-owned fix branches (`poller/*`) are force-pushed — the poller is
-// their only writer, and a retry legitimately rewrites them. Review jobs push
-// a human's PR branch and must stay fast-forward: if the branch moved while
-// the job ran, the push fails and the job fails loudly instead of clobbering.
+// Review branches are fast-forward-only. New poller-owned fix branches use an
+// explicit "expected absent" lease, so a pre-existing ref is never overwritten.
 export const pushBranch = (
   workDir: string,
-  branch: string,
-  token: string | null,
-  options: { readonly force: boolean },
+  options: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly token: string | null;
+    readonly expectedRemoteSha?: string;
+  },
 ): void => {
   authedGit(
     workDir,
     [
       'push',
-      ...(options.force ? ['--force'] : []),
-      'origin',
-      `HEAD:refs/heads/${branch}`,
+      ...(options.expectedRemoteSha === undefined
+        ? []
+        : [
+            `--force-with-lease=refs/heads/${options.branch}:${options.expectedRemoteSha}`,
+          ]),
+      githubRepoUrl(options.repo),
+      `HEAD:refs/heads/${options.branch}`,
     ],
-    token,
+    options.token,
   );
-};
-
-// Canonical files in a consumer checkout, from its sync lock. A repository
-// without a lock (the standards source repo itself, or a non-consumer) simply
-// contributes no locked paths to the forbidden set.
-export const lockedPathsOf = async (
-  workDir: string,
-): Promise<ReadonlyArray<string>> => {
-  const lockPath = join(workDir, 'sync-standards.lock');
-  if (!existsSync(lockPath)) {
-    return [];
-  }
-  try {
-    const parsed = JSON.parse(await readFile(lockPath, 'utf8')) as unknown;
-    return isRecord(parsed) && isRecord(parsed.files)
-      ? Object.keys(parsed.files)
-      : [];
-  } catch {
-    return [];
-  }
 };

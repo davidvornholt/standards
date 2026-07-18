@@ -8,6 +8,7 @@ import { isNonEmptyString, isRecord } from './github-settings-parse';
 export type PullRequest = {
   readonly number: number;
   readonly title: string;
+  readonly body: string;
   readonly headRef: string;
   readonly headSha: string;
   readonly headRepo: string;
@@ -16,9 +17,7 @@ export type PullRequest = {
   readonly draft: boolean;
 };
 
-const HTTP_UNPROCESSABLE = 422;
-
-const findOpenPullRequestForHead = async (
+export const findOpenPullRequestForHead = async (
   token: string | null,
   repo: string,
   head: string,
@@ -38,9 +37,6 @@ const findOpenPullRequestForHead = async (
     : null;
 };
 
-// A retry after a crash between push and label release finds the PR already
-// open; GitHub answers 422. Reusing that PR is the correct completion of the
-// interrupted job, not an error.
 export const createDraftPullRequest = async (
   token: string | null,
   repo: string,
@@ -65,17 +61,24 @@ export const createDraftPullRequest = async (
   ) {
     return response.body.number;
   }
-  if (response.status === HTTP_UNPROCESSABLE) {
-    const existing = await findOpenPullRequestForHead(
-      token,
-      repo,
-      options.head,
-    );
-    if (existing !== null) {
-      return existing;
-    }
-  }
   throw new Error(apiError(`create draft PR in ${repo}`, response));
+};
+
+export const updatePullRequest = async (
+  token: string | null,
+  repo: string,
+  prNumber: number,
+  options: { readonly title: string; readonly body: string },
+): Promise<void> => {
+  const response = await request(
+    token,
+    'PATCH',
+    `/repos/${repo}/pulls/${prNumber}`,
+    options,
+  );
+  if (response.status !== HTTP_OK) {
+    throw new Error(apiError(`update ${repo}#${prNumber}`, response));
+  }
 };
 
 export const getPullRequest = async (
@@ -104,6 +107,7 @@ export const getPullRequest = async (
   return {
     number: prNumber,
     title: isNonEmptyString(body.title) ? body.title : '',
+    body: isNonEmptyString(body.body) ? body.body : '',
     headRef: isNonEmptyString(body.head.ref) ? body.head.ref : '',
     headSha: isNonEmptyString(body.head.sha) ? body.head.sha : '',
     headRepo: isNonEmptyString(headRepo.full_name) ? headRepo.full_name : '',

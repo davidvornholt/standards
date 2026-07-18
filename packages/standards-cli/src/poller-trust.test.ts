@@ -2,11 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import process from 'node:process';
 import { HTTP_OK } from './github-api';
 import { installApi } from './github-commands-test-support';
-import {
-  answerState,
-  approvalProblem,
-  type TrustContext,
-} from './poller-trust';
+import { answerState, type TrustContext } from './poller-trust';
 
 const originalFetch = globalThis.fetch;
 const HTTP_NOT_FOUND = 404;
@@ -31,13 +27,6 @@ afterEach(() => {
   process.env.GH_TOKEN = undefined;
 });
 
-const labeledEvent = (actor: string, createdAt: string): unknown => ({
-  event: 'labeled',
-  label: { name: 'approved-for-fix' },
-  actor: { login: actor },
-  created_at: createdAt,
-});
-
 const comment = (author: string, body: string): unknown => {
   commentId += 1;
   return {
@@ -47,47 +36,6 @@ const comment = (author: string, body: string): unknown => {
     created_at: '2026-07-18T09:00:00Z',
   };
 };
-
-describe('approvalProblem', () => {
-  it('accepts a label applied by an admin', async () => {
-    installApi([
-      {
-        status: HTTP_OK,
-        body: [labeledEvent('david', '2026-07-18T08:00:00Z')],
-      },
-      { status: HTTP_OK, body: { role_name: 'admin' } },
-    ]);
-    expect(await approvalProblem(context(), 'approved-for-fix')).toBeNull();
-  });
-
-  it('rejects a label applied by a write-role collaborator', async () => {
-    installApi([
-      {
-        status: HTTP_OK,
-        body: [labeledEvent('drive-by', '2026-07-18T08:00:00Z')],
-      },
-      { status: HTTP_OK, body: { role_name: 'write' } },
-    ]);
-    const problem = await approvalProblem(context(), 'approved-for-fix');
-    expect(problem).toContain('drive-by');
-    expect(problem).toContain('only admin or maintain');
-  });
-
-  it('trusts the most recent label event, not the first', async () => {
-    installApi([
-      {
-        status: HTTP_OK,
-        body: [
-          labeledEvent('david', '2026-07-18T08:00:00Z'),
-          labeledEvent('drive-by', '2026-07-18T09:00:00Z'),
-        ],
-      },
-      { status: HTTP_OK, body: { role_name: 'none' } },
-    ]);
-    const problem = await approvalProblem(context(), 'approved-for-fix');
-    expect(problem).toContain('drive-by');
-  });
-});
 
 describe('answerState', () => {
   const question = (): unknown =>

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import {
   branchNameForIssue,
+  changesWorkspaceQualityScripts,
   forbiddenDiffPaths,
   isTrustedRole,
 } from './poller-protocol';
@@ -37,13 +38,40 @@ describe('forbiddenDiffPaths', () => {
     ]);
   });
 
-  it('flags root quality-gate wiring but not workspace package manifests', () => {
+  it('flags root quality-gate wiring while package manifests need content comparison', () => {
     expect(
       forbiddenDiffPaths(
         ['biome.jsonc', 'turbo.json', 'package.json', 'apps/web/package.json'],
         [],
       ),
     ).toEqual(['biome.jsonc', 'turbo.json', 'package.json']);
+  });
+
+  it('detects workspace quality-script rewrites but permits dependency edits', () => {
+    const before = JSON.stringify({
+      scripts: { test: 'bun test', dev: 'vite' },
+      dependencies: { react: '1' },
+    });
+    expect(
+      changesWorkspaceQualityScripts(
+        'apps/web/package.json',
+        before,
+        JSON.stringify({
+          scripts: { test: 'true', dev: 'vite' },
+          dependencies: { react: '1' },
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      changesWorkspaceQualityScripts(
+        'apps/web/package.json',
+        before,
+        JSON.stringify({
+          scripts: { test: 'bun test', dev: 'vite' },
+          dependencies: { react: '2' },
+        }),
+      ),
+    ).toBe(false);
   });
 
   it('passes ordinary source changes', () => {
@@ -73,6 +101,8 @@ describe('trust roles', () => {
 describe('branchNameForIssue', () => {
   it('derives a stable branch name', () => {
     const issueNumber = 41;
-    expect(branchNameForIssue(issueNumber)).toBe('poller/fix-issue-41');
+    expect(branchNameForIssue(issueNumber, 'abcdef1234567890')).toBe(
+      'poller/fix-issue-41-abcdef123456',
+    );
   });
 });

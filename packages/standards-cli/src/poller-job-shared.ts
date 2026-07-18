@@ -2,6 +2,7 @@
 // transitions are identical state-machine moves, parameterized only by which
 // approval/progress/failure labels the job family uses.
 
+import { type ApprovalBinding, readApprovalBinding } from './poller-approval';
 import type { PollerConfig } from './poller-config';
 import { addLabels, createComment, removeLabel } from './poller-github-write';
 import {
@@ -9,7 +10,7 @@ import {
   NEEDS_CLARIFICATION,
   QUESTION_MARKER,
 } from './poller-protocol';
-import { answerState, approvalProblem, type RoleCache } from './poller-trust';
+import { answerState, type RoleCache } from './poller-trust';
 
 export type JobDeps = {
   readonly config: PollerConfig;
@@ -34,7 +35,11 @@ const FAILURE_SNIPPET_LIMIT = 1500;
 export type JobPreamble =
   | { readonly kind: 'rejected' }
   | { readonly kind: 'waiting' }
-  | { readonly kind: 'go'; readonly answers: ReadonlyArray<string> };
+  | {
+      readonly kind: 'go';
+      readonly answers: ReadonlyArray<string>;
+      readonly approval: ApprovalBinding;
+    };
 
 // The shared front half of every job: verify the approval's actor, then
 // resolve the question/answer state. Both job families make exactly these
@@ -43,6 +48,7 @@ export const jobPreamble = async (
   deps: JobDeps,
   item: { readonly number: number; readonly labels: ReadonlyArray<string> },
   labels: JobLabels,
+  target: string,
 ): Promise<JobPreamble> => {
   const trust = {
     token: deps.token,
@@ -50,25 +56,31 @@ export const jobPreamble = async (
     issueNumber: item.number,
     roleCache: deps.roleCache,
   };
-  const trustProblem = await approvalProblem(trust, labels.approved);
-  if (trustProblem !== null) {
+  const approval = await readApprovalBinding(trust, labels.approved, target);
+  if (typeof approval === 'string') {
     await removeLabel(deps.token, deps.repo, item.number, labels.approved);
     await createComment(
       deps.token,
       deps.repo,
       item.number,
-      `${FAILURE_MARKER}\nApproval not honored: ${trustProblem}`,
+      `${FAILURE_MARKER}\nApproval not honored: ${approval}`,
     );
     return { kind: 'rejected' };
   }
   const answers = await answerState(trust);
-  if (item.labels.includes(NEEDS_CLARIFICATION)) {
-    if (answers.waiting) {
-      return { kind: 'waiting' };
+  if (answers.waiting) {
+    if (!item.labels.includes(NEEDS_CLARIFICATION)) {
+      await addLabels(deps.token, deps.repo, item.number, [
+        NEEDS_CLARIFICATION,
+      ]);
     }
+    await removeLabel(deps.token, deps.repo, item.number, labels.inProgress);
+    return { kind: 'waiting' };
+  }
+  if (item.labels.includes(NEEDS_CLARIFICATION)) {
     await removeLabel(deps.token, deps.repo, item.number, NEEDS_CLARIFICATION);
   }
-  return { kind: 'go', answers: answers.answers };
+  return { kind: 'go', answers: answers.answers, approval };
 };
 
 export const failJob = async (

@@ -5,15 +5,12 @@
 // never holds credentials.
 
 import { join } from 'node:path';
+import { prRevision } from './poller-approval';
+import { acquireClaim } from './poller-claim';
 import { runCodex } from './poller-codex';
-import type { IssueItem } from './poller-github';
-import {
-  createPullRequestReview,
-  getPullRequest,
-  markPullRequestReady,
-  type PullRequest,
-} from './poller-github-pulls';
-import { addLabels, createIssue } from './poller-github-write';
+import { getIssue, type IssueItem } from './poller-github';
+import { getPullRequest } from './poller-github-pulls';
+import { addLabels } from './poller-github-write';
 import {
   askQuestion,
   failJob,
@@ -21,26 +18,22 @@ import {
   type JobLabels,
   type JobResult,
   jobPreamble,
-  releaseLabels,
 } from './poller-job-shared';
 import { readReviewOutcome } from './poller-outcome';
 import { reviewPrompt } from './poller-prompts';
 import {
   APPROVED_FOR_REVIEW,
-  DEFERRED_FINDING,
-  forbiddenDiffPaths,
   REVIEW_FAILED,
   REVIEW_IN_PROGRESS,
-  type ReviewOutcome,
 } from './poller-protocol';
 import {
-  changedPaths,
-  commitCount,
+  finishReviewedJob,
+  validateReviewClaim,
+} from './poller-review-publication';
+import {
   createWorktree,
   ensureCacheClone,
-  lockedPathsOf,
   mergeBase,
-  pushBranch,
 } from './poller-workspace';
 
 const REVIEW_LABELS: JobLabels = {
@@ -49,55 +42,19 @@ const REVIEW_LABELS: JobLabels = {
   failed: REVIEW_FAILED,
 };
 
-const finishReviewedJob = async (
-  deps: JobDeps,
-  pr: PullRequest,
-  workDir: string,
-  outcome: ReviewOutcome,
-): Promise<string> => {
-  const commits = commitCount(workDir, pr.headSha);
-  if (commits > 0) {
-    const forbidden = forbiddenDiffPaths(
-      changedPaths(workDir, pr.headSha),
-      await lockedPathsOf(workDir),
-    );
-    if (forbidden.length > 0) {
-      await failJob(
-        deps,
-        REVIEW_LABELS,
-        pr.number,
-        `review fixes modified protected paths:\n${forbidden.map((path) => `- ${path}`).join('\n')}`,
-      );
-      return `PR #${pr.number}: failed (protected paths)`;
-    }
-    pushBranch(workDir, pr.headRef, deps.token, { force: false });
-  }
-  await createPullRequestReview(
-    deps.token,
-    deps.repo,
-    pr.number,
-    `${outcome.report ?? ''}\n\n---\n${commits} fix commit(s) pushed by the automated review run.`,
-  );
-  const deferred = outcome.deferred ?? [];
-  for (const finding of deferred) {
-    // biome-ignore lint/performance/noAwaitInLoops: GitHub advises against concurrent write requests (secondary rate limits); mutations run sequentially on purpose.
-    await createIssue(deps.token, deps.repo, {
-      title: finding.title,
-      body: `${finding.body}\n\nDeferred from the automated review of PR #${pr.number}.`,
-      labels: [DEFERRED_FINDING],
-    });
-  }
-  await markPullRequestReady(deps.token, pr.nodeId);
-  await releaseLabels(deps, REVIEW_LABELS, pr.number);
-  return `PR #${pr.number}: reviewed (${commits} fix commit(s), ${deferred.length} deferred issue(s)), marked ready`;
-};
-
 export const runReviewJob = async (
   deps: JobDeps,
   prItem: IssueItem,
 ): Promise<JobResult> => {
   const { config, token, repo } = deps;
-  const preamble = await jobPreamble(deps, prItem, REVIEW_LABELS);
+  const pr = await getPullRequest(token, repo, prItem.number);
+  const currentItem = await getIssue(token, repo, prItem.number);
+  const preamble = await jobPreamble(
+    deps,
+    currentItem,
+    REVIEW_LABELS,
+    prRevision(pr.headSha),
+  );
   if (preamble.kind === 'rejected') {
     return {
       lines: [`PR #${prItem.number}: approval rejected`],
@@ -110,7 +67,6 @@ export const runReviewJob = async (
       ranCodex: false,
     };
   }
-  const pr = await getPullRequest(token, repo, prItem.number);
   // Fork PRs are out of scope: their head branch lives in a repository the
   // poller must not push to, and pushing a same-named branch to the base repo
   // would fake a review. Fail explicitly instead of pretending.
@@ -127,6 +83,17 @@ export const runReviewJob = async (
     };
   }
   await addLabels(token, repo, prItem.number, [REVIEW_IN_PROGRESS]);
+  const claim = await acquireClaim(
+    { token, repo, issueNumber: pr.number },
+    preamble.approval,
+    REVIEW_IN_PROGRESS,
+  );
+  if (claim === null) {
+    return {
+      lines: [`PR #${pr.number}: another poller owns the claim`],
+      ranCodex: false,
+    };
+  }
   const cacheClone = ensureCacheClone(config.cacheDir, repo, token);
   const reviewBase = mergeBase(cacheClone, pr.baseRef, pr.headSha);
   const workspace = createWorktree(
@@ -147,6 +114,7 @@ export const runReviewJob = async (
       }),
       config,
     );
+    await validateReviewClaim(deps, pr.number, claim);
     const outcome = run.succeeded
       ? await readReviewOutcome(workspace.dir)
       : null;
@@ -170,7 +138,14 @@ export const runReviewJob = async (
       await failJob(deps, REVIEW_LABELS, pr.number, outcome.summary);
       return { lines: [`PR #${pr.number}: cannot review`], ranCodex: true };
     }
-    const line = await finishReviewedJob(deps, pr, workspace.dir, outcome);
+    const line = await finishReviewedJob({
+      deps,
+      labels: REVIEW_LABELS,
+      pr,
+      claim,
+      workDir: workspace.dir,
+      outcome,
+    });
     return { lines: [line], ranCodex: true };
   } finally {
     workspace.cleanup();

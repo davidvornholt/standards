@@ -83,7 +83,7 @@ describe('runPollerTick', () => {
         ],
       },
       { body: {} }, // DELETE stale label
-      { status: HTTP_CREATED, body: {} }, // POST release comment
+      { status: HTTP_CREATED, body: { id: 1 } }, // POST release comment
       {
         body: [
           {
@@ -117,6 +117,8 @@ describe('runPollerTick', () => {
       { body: [] }, // approved-for-review
       { body: [issue(REJECTED_ISSUE, ['approved-for-fix'])] },
       { body: { default_branch: 'main' } },
+      { body: issue(REJECTED_ISSUE, ['approved-for-fix']) }, // current issue
+      { body: issue(REJECTED_ISSUE, ['approved-for-fix']) }, // approval presence
       {
         body: [
           {
@@ -129,7 +131,7 @@ describe('runPollerTick', () => {
       },
       { body: { role_name: 'write' } },
       { body: {} }, // DELETE approved-for-fix
-      { status: HTTP_CREATED, body: {} }, // POST explanation comment
+      { status: HTTP_CREATED, body: { id: 1 } }, // POST explanation comment
     ]);
     const report = await runPollerTick(config(), 'test-token', NOW);
     expect(report.problems).toEqual([]);

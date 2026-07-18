@@ -39,7 +39,7 @@ const labelNames = (raw: unknown): ReadonlyArray<string> =>
         .filter((name) => name.length > 0)
     : [];
 
-const parseIssue = (raw: unknown): IssueItem | null => {
+export const parseIssue = (raw: unknown): IssueItem | null => {
   if (!(isRecord(raw) && typeof raw.number === 'number')) {
     return null;
   }
@@ -51,6 +51,23 @@ const parseIssue = (raw: unknown): IssueItem | null => {
     labels: labelNames(raw.labels),
     authorLogin: isRecord(raw.user) ? asString(raw.user.login) : '',
   };
+};
+
+export const getIssue = async (
+  token: string | null,
+  repo: string,
+  issueNumber: number,
+): Promise<IssueItem> => {
+  const response = await request(
+    token,
+    'GET',
+    `/repos/${repo}/issues/${issueNumber}`,
+  );
+  const issue = response.status === HTTP_OK ? parseIssue(response.body) : null;
+  if (issue === null) {
+    throw new Error(apiError(`read ${repo}#${issueNumber}`, response));
+  }
+  return issue;
 };
 
 export const listOpenIssuesWithLabel = async (

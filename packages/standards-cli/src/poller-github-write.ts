@@ -2,6 +2,7 @@
 // read helpers so each module stays a single reviewable concern.
 
 import { apiError, HTTP_CREATED, HTTP_OK, request } from './github-api';
+import { isRecord } from './github-settings-parse';
 
 const HTTP_NOT_FOUND = 404;
 
@@ -68,14 +69,19 @@ export const createComment = async (
   repo: string,
   issueNumber: number,
   body: string,
-): Promise<void> => {
+): Promise<number> => {
   const response = await request(
     token,
     'POST',
     `/repos/${repo}/issues/${issueNumber}/comments`,
     { body },
   );
-  if (response.status !== HTTP_CREATED) {
+  if (
+    response.status !== HTTP_CREATED ||
+    !isRecord(response.body) ||
+    typeof response.body.id !== 'number'
+  ) {
     throw new Error(apiError(`comment on ${repo}#${issueNumber}`, response));
   }
+  return response.body.id;
 };

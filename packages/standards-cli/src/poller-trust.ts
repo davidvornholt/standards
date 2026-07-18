@@ -6,7 +6,6 @@
 import {
   collaboratorRole,
   type IssueComment,
-  lastLabelEvent,
   listIssueComments,
 } from './poller-github';
 import { isTrustedRole, QUESTION_MARKER } from './poller-protocol';
@@ -32,28 +31,6 @@ const cachedRole = async (
   const role = await collaboratorRole(context.token, context.repo, username);
   context.roleCache.set(key, role);
   return role;
-};
-
-// The actor who most recently applied the approval label must hold a trusted
-// role right now. Returns null when trusted; otherwise the reason.
-export const approvalProblem = async (
-  context: TrustContext,
-  label: string,
-): Promise<string | null> => {
-  const event = await lastLabelEvent(
-    context.token,
-    context.repo,
-    context.issueNumber,
-    label,
-  );
-  if (event === null) {
-    return `no "${label}" label event found on ${context.repo}#${context.issueNumber}`;
-  }
-  const role = await cachedRole(context, event.actorLogin);
-  if (!isTrustedRole(role)) {
-    return `"${label}" on ${context.repo}#${context.issueNumber} was applied by ${event.actorLogin} (role: ${role}); only admin or maintain roles may approve automation`;
-  }
-  return null;
 };
 
 export type AnswerState = {

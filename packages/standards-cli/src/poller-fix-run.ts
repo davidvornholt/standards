@@ -3,37 +3,37 @@
 // is written back to GitHub so the next tick (or a human) resumes from there.
 
 import { join } from 'node:path';
+import { issueRevision } from './poller-approval';
+import { acquireClaim } from './poller-claim';
 import { runCodex } from './poller-codex';
-import type { IssueItem } from './poller-github';
-import { createDraftPullRequest } from './poller-github-pulls';
-import { addLabels, createComment } from './poller-github-write';
+import { handleNonFixedOutcome } from './poller-fix-outcome';
+import { localBranchExists, readSealedFixOutput } from './poller-fix-output';
 import {
-  askQuestion,
+  type FixPublication,
+  finishFixedJob,
+  publishFixedOutput,
+  validateFixClaim,
+} from './poller-fix-publication';
+import { getIssue, type IssueItem } from './poller-github';
+import { addLabels } from './poller-github-write';
+import {
   failJob,
   type JobDeps,
   type JobLabels,
   type JobResult,
   jobPreamble,
-  releaseLabels,
 } from './poller-job-shared';
 import { readFixOutcome } from './poller-outcome';
 import { fixPrompt } from './poller-prompts';
 import {
   APPROVED_FOR_FIX,
-  APPROVED_FOR_REVIEW,
   branchNameForIssue,
   FIX_FAILED,
   FIX_IN_PROGRESS,
-  type FixOutcome,
-  forbiddenDiffPaths,
 } from './poller-protocol';
 import {
-  changedPaths,
-  commitCount,
   createWorktree,
   ensureCacheClone,
-  lockedPathsOf,
-  pushBranch,
   type Workspace,
 } from './poller-workspace';
 
@@ -43,82 +43,8 @@ const FIX_LABELS: JobLabels = {
   failed: FIX_FAILED,
 };
 
-type FixJob = {
-  readonly deps: JobDeps;
-  readonly issue: IssueItem;
-  readonly defaultBranch: string;
+type FixJob = FixPublication & {
   readonly workspace: Workspace;
-};
-
-const finishFixedJob = async (
-  job: FixJob,
-  outcome: FixOutcome,
-): Promise<string> => {
-  const { deps, issue, workspace } = job;
-  if (commitCount(workspace.dir, workspace.baseSha) === 0) {
-    await failJob(
-      deps,
-      FIX_LABELS,
-      issue.number,
-      'run reported "fixed" but produced no commits',
-    );
-    return `#${issue.number}: failed (fixed without commits)`;
-  }
-  const forbidden = forbiddenDiffPaths(
-    changedPaths(workspace.dir, workspace.baseSha),
-    await lockedPathsOf(workspace.dir),
-  );
-  if (forbidden.length > 0) {
-    await failJob(
-      deps,
-      FIX_LABELS,
-      issue.number,
-      `the fix modified protected paths, which automation must never do:\n${forbidden.map((path) => `- ${path}`).join('\n')}`,
-    );
-    return `#${issue.number}: failed (protected paths: ${forbidden.join(', ')})`;
-  }
-  const branch = branchNameForIssue(issue.number);
-  pushBranch(workspace.dir, branch, deps.token, { force: true });
-  const prNumber = await createDraftPullRequest(deps.token, deps.repo, {
-    title: outcome.prTitle ?? '',
-    body: outcome.prBody ?? '',
-    head: branch,
-    base: job.defaultBranch,
-  });
-  await createComment(
-    deps.token,
-    deps.repo,
-    issue.number,
-    `Opened draft PR #${prNumber} for this issue. Apply \`${APPROVED_FOR_REVIEW}\` on the PR to run the automated review-fix pass, or review it directly.`,
-  );
-  await releaseLabels(deps, FIX_LABELS, issue.number);
-  return `#${issue.number}: opened draft PR #${prNumber}`;
-};
-
-const dispatchOutcome = async (
-  job: FixJob,
-  outcome: FixOutcome,
-): Promise<string> => {
-  const { deps, issue } = job;
-  if (outcome.status === 'question') {
-    await askQuestion(deps, FIX_LABELS, issue.number, outcome.question ?? '');
-    return `#${issue.number}: asked a question`;
-  }
-  if (outcome.status === 'stale') {
-    await createComment(
-      deps.token,
-      deps.repo,
-      issue.number,
-      `The finding no longer reproduces on ${job.defaultBranch}: ${outcome.summary}\nClosing is left to a maintainer.`,
-    );
-    await releaseLabels(deps, FIX_LABELS, issue.number);
-    return `#${issue.number}: stale, needs human close`;
-  }
-  if (outcome.status === 'cannot-fix') {
-    await failJob(deps, FIX_LABELS, issue.number, outcome.summary);
-    return `#${issue.number}: cannot fix`;
-  }
-  return finishFixedJob(job, outcome);
 };
 
 export const runFixJob = async (
@@ -127,7 +53,13 @@ export const runFixJob = async (
   defaultBranch: string,
 ): Promise<JobResult> => {
   const { config, token, repo } = deps;
-  const preamble = await jobPreamble(deps, issue, FIX_LABELS);
+  const currentIssue = await getIssue(token, repo, issue.number);
+  const preamble = await jobPreamble(
+    deps,
+    currentIssue,
+    FIX_LABELS,
+    issueRevision(currentIssue),
+  );
   if (preamble.kind === 'rejected') {
     return { lines: [`#${issue.number}: approval rejected`], ranCodex: false };
   }
@@ -138,30 +70,72 @@ export const runFixJob = async (
     };
   }
   await addLabels(token, repo, issue.number, [FIX_IN_PROGRESS]);
+  const claim = await acquireClaim(
+    { token, repo, issueNumber: issue.number },
+    preamble.approval,
+    FIX_IN_PROGRESS,
+  );
+  if (claim === null) {
+    return {
+      lines: [`#${issue.number}: another poller owns the claim`],
+      ranCodex: false,
+    };
+  }
   const cacheClone = ensureCacheClone(config.cacheDir, repo, token);
+  const branch = branchNameForIssue(issue.number, claim.approval.id);
+  const sealed = readSealedFixOutput(cacheClone, branch);
+  const resumableJob = {
+    deps,
+    issue: currentIssue,
+    defaultBranch,
+    claim,
+    branch,
+  };
+  if (sealed !== null) {
+    if (
+      sealed.issueNumber !== issue.number ||
+      sealed.approvalId !== claim.approval.id
+    ) {
+      throw new Error(`sealed output on ${branch} has invalid ownership`);
+    }
+    return {
+      lines: [await publishFixedOutput(resumableJob, FIX_LABELS, sealed, null)],
+      ranCodex: false,
+    };
+  }
+  if (localBranchExists(cacheClone, branch)) {
+    throw new Error(
+      `refusing to overwrite ${branch}: it is not valid sealed output for this approval`,
+    );
+  }
   const workspace = createWorktree(
     cacheClone,
     defaultBranch,
-    branchNameForIssue(issue.number),
+    branch,
     join(
       config.cacheDir,
       'work',
       `${repo.replace('/', '--')}-issue-${issue.number}`,
     ),
   );
-  const job: FixJob = { deps, issue, defaultBranch, workspace };
+  const job: FixJob = {
+    ...resumableJob,
+    issue: currentIssue,
+    workspace,
+  };
   try {
     const run = runCodex(
       workspace.dir,
       fixPrompt({
         repo,
         issueNumber: issue.number,
-        title: issue.title,
-        body: issue.body,
+        title: currentIssue.title,
+        body: currentIssue.body,
         answers: preamble.answers,
       }),
       config,
     );
+    await validateFixClaim(job);
     const outcome = run.succeeded ? await readFixOutcome(workspace.dir) : null;
     if (outcome === null) {
       await failJob(
@@ -175,7 +149,11 @@ export const runFixJob = async (
         ranCodex: true,
       };
     }
-    return { lines: [await dispatchOutcome(job, outcome)], ranCodex: true };
+    const nonFixed = await handleNonFixedOutcome(job, FIX_LABELS, outcome);
+    return {
+      lines: [nonFixed ?? (await finishFixedJob(job, FIX_LABELS, outcome))],
+      ranCodex: true,
+    };
   } finally {
     workspace.cleanup();
   }
