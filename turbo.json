@@ -13,7 +13,8 @@
       "outputs": []
     },
     "test": {
-      "outputs": []
+      "outputs": [],
+      "passThroughEnv": ["GH_TOKEN", "GITHUB_TOKEN"]
     }
   }
 }
