@@ -19,85 +19,88 @@ afterEach(cleanupTmpDirs);
 const ciValue = (value: unknown): string =>
   JSON.stringify({ ci: { standards_sync_token: value } });
 
+const INVALID_VALUE_REASON =
+  'ci.standards_sync_token is not a readable non-empty single-line string in secrets/ci.yaml';
+const FINAL_VALUE_ERROR =
+  '::error::Resolved secret value must be non-empty and single-line';
+
 type FallbackScenario = {
   readonly label: string;
   readonly options: SopsActionOptions;
-  readonly curlCalled: boolean;
-  readonly sopsExecuted: boolean;
+  readonly reason: string;
+  readonly failsAt: 'setup' | 'install' | 'resolve';
 };
 
 const FALLBACK_SCENARIOS: ReadonlyArray<FallbackScenario> = [
   {
     label: 'the age key is not configured',
     options: { ageKey: '' },
-    curlCalled: false,
-    sopsExecuted: false,
+    reason: 'SOPS_AGE_KEY is not configured',
+    failsAt: 'setup',
   },
   {
     label: 'the secret file does not exist',
     options: { createSecretFile: false },
-    curlCalled: false,
-    sopsExecuted: false,
+    reason: 'secrets/ci.yaml does not exist',
+    failsAt: 'setup',
   },
   {
     label: 'the runner architecture has no pinned binary',
     options: { unameMachine: 'riscv64' },
-    curlCalled: false,
-    sopsExecuted: false,
+    reason: 'No pinned SOPS binary for runner architecture riscv64',
+    failsAt: 'setup',
   },
   {
     label: 'the SOPS download fails',
     options: { curlStatus: 22 },
-    curlCalled: true,
-    sopsExecuted: false,
+    reason: 'Downloading SOPS v3.13.2 for linux/amd64 failed',
+    failsAt: 'install',
   },
   {
     label: 'the downloaded binary fails checksum verification',
     options: { sha256Status: 1 },
-    curlCalled: true,
-    sopsExecuted: false,
+    reason: 'Downloaded SOPS binary does not match the pinned checksum',
+    failsAt: 'install',
   },
   {
     label: 'decryption fails',
     options: { sopsStatus: 1 },
-    curlCalled: true,
-    sopsExecuted: true,
+    reason: 'Decrypting secrets/ci.yaml with SOPS failed',
+    failsAt: 'resolve',
   },
   {
     label: 'the requested key is absent',
     options: { sopsOutput: ciValue(undefined) },
-    curlCalled: true,
-    sopsExecuted: true,
+    reason: INVALID_VALUE_REASON,
+    failsAt: 'resolve',
   },
   {
     label: 'the decrypted value is empty',
     options: { sopsOutput: ciValue('') },
-    curlCalled: true,
-    sopsExecuted: true,
+    reason: INVALID_VALUE_REASON,
+    failsAt: 'resolve',
   },
   {
     label: 'the decrypted value is multi-line',
     options: { sopsOutput: ciValue('token\nBASH_ENV=/tmp/payload') },
-    curlCalled: true,
-    sopsExecuted: true,
+    reason: INVALID_VALUE_REASON,
+    failsAt: 'resolve',
   },
   {
     label: 'the decrypted value has a carriage return',
     options: { sopsOutput: ciValue('token\rGH_TOKEN=payload') },
-    curlCalled: true,
-    sopsExecuted: true,
+    reason: INVALID_VALUE_REASON,
+    failsAt: 'resolve',
   },
   {
     label: 'the decrypted value is not a string',
     options: { sopsOutput: ciValue({ token: 'value' }) },
-    curlCalled: true,
-    sopsExecuted: true,
+    reason: INVALID_VALUE_REASON,
+    failsAt: 'resolve',
   },
 ];
 
-const rows = FALLBACK_SCENARIOS.map(
-  (scenario) => [scenario.label, scenario] as const,
-);
+const rows = FALLBACK_SCENARIOS.map((s) => [s.label, s] as const);
 
 describe('fallback-eligible failures', () => {
   it.each(rows)('uses the fallback when %s', (_label, scenario) => {
@@ -106,10 +109,11 @@ describe('fallback-eligible failures', () => {
     expect(actionRun.result.status).toBe(0);
     expect(actionRun.environment).toBe('GH_TOKEN=workflow-token\n');
     expect(actionRun.output).toBe('used-fallback=true\n');
-    expect(actionRun.result.stdout).toContain('::warning::');
-    expect(actionRun.result.stdout).toContain('using the configured fallback');
-    expect(actionRun.curlCalled).toBe(scenario.curlCalled);
-    expect(actionRun.sopsExecuted).toBe(scenario.sopsExecuted);
+    expect(actionRun.result.stdout).toContain(
+      `::warning::${scenario.reason}; using the configured fallback`,
+    );
+    expect(actionRun.curlCalled).toBe(scenario.failsAt !== 'setup');
+    expect(actionRun.sopsExecuted).toBe(scenario.failsAt === 'resolve');
   });
 
   it.each(rows)('fails closed in fail mode when %s', (_label, scenario) => {
@@ -122,14 +126,15 @@ describe('fallback-eligible failures', () => {
     expect(actionRun.environment).toBe('');
     expect(actionRun.output).toBe('');
     expect(`${actionRun.result.stdout}${actionRun.result.stderr}`).toContain(
-      '::error::',
+      `::error::${scenario.reason}`,
     );
-    expect(actionRun.sopsExecuted).toBe(scenario.sopsExecuted);
+    expect(actionRun.curlCalled).toBe(scenario.failsAt !== 'setup');
+    expect(actionRun.sopsExecuted).toBe(scenario.failsAt === 'resolve');
   });
 
   it.each([
-    ['fail'],
-    ['fallback'],
+    'fail',
+    'fallback',
   ] as const)('never keeps or executes an unverified binary in %s mode', (failureMode) => {
     const actionRun = runSopsAction({ failureMode, sha256Status: 1 });
 
@@ -138,7 +143,7 @@ describe('fallback-eligible failures', () => {
   });
 });
 
-describe('canonical SOPS secret action', () => {
+describe('canonical SOPS secret action script behavior', () => {
   it('exports a decrypted non-empty single-line string', () => {
     const actionRun = runSopsAction();
 
@@ -185,5 +190,8 @@ describe('caller configuration errors', () => {
     expect(actionRun.result.status).toBe(1);
     expect(actionRun.environment).toBe('');
     expect(actionRun.output).toBe('');
+    expect(`${actionRun.result.stdout}${actionRun.result.stderr}`).toContain(
+      FINAL_VALUE_ERROR,
+    );
   });
 });

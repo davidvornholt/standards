@@ -1573,7 +1573,7 @@ describe('canonical workflow runner boundaries', () => {
   });
 });
 
-describe('canonical SOPS secret action', () => {
+describe('canonical SOPS secret action wiring', () => {
   it('serves workflows that can safely execute the checked-out local action', () => {
     const action = readFileSync(SOPS_ACTION, 'utf8');
     const canonicalActionPath = '.github/actions/sops-secret/action.yml';

@@ -61,6 +61,10 @@ const DEFAULT_OPTIONS = {
 export const createSopsActionRunner =
   (baseEnvironment: Readonly<Record<string, string | undefined>>) =>
   (options: SopsActionOptions = {}): SopsActionRun => {
+    const basePath = baseEnvironment.PATH;
+    if (basePath === undefined) {
+      throw new Error('base environment must define PATH for the shim prefix');
+    }
     const resolved = { ...DEFAULT_OPTIONS, ...options };
     const fixture = mkTmp('sops-action-');
     const bin = join(fixture, 'bin');
@@ -74,6 +78,7 @@ export const createSopsActionRunner =
     const outputPath = join(fixture, 'github-output');
     shim(fixture, 'bin/uname', [
       '#!/usr/bin/env bash',
+      'set -euo pipefail',
       `printf '%s\\n' "$FAKE_UNAME_MACHINE"`,
     ]);
     shim(fixture, 'bin/curl', [
@@ -87,10 +92,14 @@ export const createSopsActionRunner =
     ]);
     shim(fixture, 'bin/sha256sum', [
       '#!/usr/bin/env bash',
+      'set -euo pipefail',
+      // Consume the piped checksum line so the writer never sees SIGPIPE.
+      'cat > /dev/null',
       'exit "$FAKE_SHA256_STATUS"',
     ]);
     shim(fixture, 'fake-sops', [
       '#!/usr/bin/env bash',
+      'set -euo pipefail',
       'printf executed > "$SOPS_MARKER"',
       'if [ "$FAKE_SOPS_STATUS" -ne 0 ]; then',
       '  exit "$FAKE_SOPS_STATUS"',
@@ -120,7 +129,7 @@ export const createSopsActionRunner =
         FAKE_UNAME_MACHINE: resolved.unameMachine,
         GITHUB_ENV: environmentPath,
         GITHUB_OUTPUT: outputPath,
-        PATH: `${bin}:${baseEnvironment.PATH ?? ''}`,
+        PATH: `${bin}:${basePath}`,
         RUNNER_TEMP: runnerTemp,
         SOPS_AGE_KEY: resolved.ageKey,
         SOPS_ENV_NAME: resolved.envName,
