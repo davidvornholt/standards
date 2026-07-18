@@ -89,8 +89,8 @@ const diffRules = (
 // Some ruleset fields — bypass_actors in particular — are only included in
 // API responses for admin viewers. A declared key that is absent on the live
 // side is unverifiable for this token, not drift: the same policy as
-// repository merge settings, so a non-admin CI token does not fail the gate
-// on state it cannot see.
+// repository merge settings, so callers can fail with a targeted
+// missing-visibility message instead of a bogus value mismatch.
 export const diffRuleset = (
   declared: Readonly<Record<string, unknown>>,
   live: Readonly<Record<string, unknown>>,
@@ -150,9 +150,9 @@ export const diffRulesets = (
 };
 
 // Repo merge settings are only visible to admin tokens; report invisible keys
-// as unverifiable instead of drifted so a non-admin CI token does not fail the
-// gate, while still surfacing that only a local admin check gives full
-// coverage.
+// as unverifiable instead of drifted so callers fail the gate with a
+// missing-visibility message that names the token fix, not a bogus value
+// mismatch.
 export const diffRepositorySettings = (
   declared: Readonly<Record<string, unknown>>,
   live: Readonly<Record<string, unknown>>,
