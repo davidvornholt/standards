@@ -6,7 +6,9 @@ import {
   apiError,
   fetchLiveRulesets,
   fetchMergeSettingsViaGraphql,
+  HTTP_FORBIDDEN,
   HTTP_OK,
+  HTTP_UNAUTHORIZED,
   request,
   resolveGithubRepo,
   resolveToken,
@@ -18,7 +20,11 @@ import {
 } from './github-command-shared';
 import { diffRepositorySettings, diffRulesets } from './github-diff';
 import { diffLabels, fetchLiveLabels } from './github-labels';
+import { GithubListResponseError } from './github-paginate';
 import { type GithubSettings, isRecord } from './github-settings-parse';
+
+const LABEL_VISIBILITY_PROBLEM =
+  'declared labels not visible to this token, so the gate cannot verify them. In CI, use a valid ci.github_settings_read_token from secrets/ci.yaml with read-only "Issues" access (or "Pull requests" read); locally use a token with one of those permissions';
 
 const repositoryDrift = async (
   token: string | null,
@@ -100,6 +106,12 @@ export const collectLiveDrift = async (
       ...labelDrift,
     ];
   } catch (error) {
+    if (
+      error instanceof GithubListResponseError &&
+      (error.status === HTTP_UNAUTHORIZED || error.status === HTTP_FORBIDDEN)
+    ) {
+      return [LABEL_VISIBILITY_PROBLEM];
+    }
     return [
       `GitHub API unreachable: ${error instanceof Error ? error.message : String(error)}`,
     ];
