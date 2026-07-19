@@ -13,25 +13,9 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
-import {
-  cp,
-  mkdir,
-  readdir,
-  readFile,
-  rm,
-  stat,
-  writeFile,
-} from 'node:fs/promises';
+import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import {
-  dirname,
-  isAbsolute,
-  join,
-  posix,
-  relative,
-  resolve,
-  sep,
-} from 'node:path';
+import { dirname, isAbsolute, join, posix, resolve } from 'node:path';
 import process from 'node:process';
 import {
   composeDependabot,
@@ -44,6 +28,10 @@ import { CANONICAL_SETTINGS_FILE, LOCAL_SETTINGS_FILE } from './github-api';
 import { runGithubApply, runGithubCheck } from './github-commands';
 import { loadGithubSettings } from './github-settings';
 import { isNonEmptyString, isRecord } from './github-settings-parse';
+import {
+  findManagedFilesContainingBiomeDirectiveToken,
+  listManagedFiles,
+} from './managed-files';
 import { runPollerCommand } from './poller-commands';
 import { collectStructureProblems } from './structure-check';
 import type { StructureProfile } from './structure-profile';
@@ -56,17 +44,6 @@ const HASH_PREVIEW_LENGTH = 12;
 
 const GITHUB_PREFIX = 'github:';
 const SKIP_GITHUB_CHECK_ENV = 'STANDARDS_SKIP_GITHUB_CHECK';
-
-// Never mirrored, even under a managed directory path: build output, VCS
-// metadata, and installed dependencies would otherwise pollute the lock when
-// syncing from a working tree that has them.
-const IGNORED_DIRS = new Set([
-  'node_modules',
-  '.git',
-  '.turbo',
-  'dist',
-  '.next',
-]);
 
 type Manifest = {
   readonly upstream: string;
@@ -112,8 +89,6 @@ type CliOptions = {
 
 const sha256 = (buf: Buffer): string =>
   createHash('sha256').update(buf).digest('hex');
-
-const toPosix = (p: string): string => p.split(sep).join('/');
 
 const assertSafeRelativePath = (path: string, label: string): void => {
   // POSIX semantics on every platform: managed paths are repository-relative
@@ -244,38 +219,6 @@ const resolveSource = (src: string, ref: string | undefined): Source => {
   return { dir, sha, cleanup };
 };
 
-// Recursively collect files under `abs`, keyed by their POSIX path relative to
-// `base`. Missing paths are skipped so a manifest entry with no files is inert.
-const walk = async (
-  abs: string,
-  base: string,
-  out: Map<string, string>,
-): Promise<void> => {
-  const info = await stat(abs).catch(() => null);
-  if (info === null) {
-    return;
-  }
-  if (info.isDirectory()) {
-    const entries = await readdir(abs);
-    await Promise.all(
-      entries
-        .filter((entry) => !IGNORED_DIRS.has(entry))
-        .map((entry) => walk(join(abs, entry), base, out)),
-    );
-    return;
-  }
-  out.set(toPosix(relative(base, abs)), abs);
-};
-
-const listManaged = async (
-  dir: string,
-  paths: ReadonlyArray<string>,
-): Promise<Map<string, string>> => {
-  const out = new Map<string, string>();
-  await Promise.all(paths.map((p) => walk(join(dir, p), dir, out)));
-  return out;
-};
-
 const isUnder = (a: string, b: string): boolean =>
   a === b || a.startsWith(`${b}/`);
 
@@ -325,7 +268,7 @@ const mirror = async ({
   for (const rel of Object.keys(previous)) {
     assertSafeRelativePath(rel, 'sync-standards.lock file');
   }
-  const upstream = await listManaged(srcDir, manifest.paths);
+  const upstream = await listManagedFiles(srcDir, manifest.paths);
   const next: Record<string, string> = {};
   const created: Array<string> = [];
   const updated: Array<string> = [];
@@ -400,14 +343,12 @@ const reportMirror = (result: MirrorResult, dryRun: boolean): void => {
   }
 };
 
-const seedTargets = async (
+const seedTargets = (
   srcDir: string,
   seedDir: string,
-): Promise<Map<string, string>> => {
+): Promise<ReadonlyMap<string, string>> => {
   const root = join(srcDir, seedDir);
-  const out = new Map<string, string>();
-  await walk(root, root, out);
-  return out;
+  return listManagedFiles(root, ['.']);
 };
 
 const runInit = async (
@@ -505,6 +446,7 @@ const runCheck = async (consumer: string): Promise<boolean> => {
   for (const rel of Object.keys(lock.files)) {
     assertSafeRelativePath(rel, 'sync-standards.lock file');
   }
+  const lockedFiles = await listManagedFiles(consumer, Object.keys(lock.files));
   const results = await Promise.all(
     Object.entries(lock.files).map(async ([rel, hash]) => {
       const dest = join(consumer, rel);
@@ -519,6 +461,8 @@ const runCheck = async (consumer: string): Promise<boolean> => {
     }),
   );
   const problems = results.filter((p): p is string => p !== null);
+  const directiveFiles =
+    await findManagedFilesContainingBiomeDirectiveToken(lockedFiles);
   if (problems.length > 0) {
     console.error(
       `standards: ${problems.length} canonical file(s) drifted from the last synced state:`,
@@ -527,12 +471,22 @@ const runCheck = async (consumer: string): Promise<boolean> => {
     console.error(
       'These files are read-only. Restore them with `bun standards sync`, or move your change upstream.',
     );
-    return false;
   }
-  console.log(
-    `standards: ${Object.keys(lock.files).length} canonical file(s) match the last synced state`,
-  );
-  return true;
+  if (directiveFiles.length > 0) {
+    console.error(
+      `standards: ${directiveFiles.length} canonical file(s) contain the forbidden inline Biome directive token:`,
+    );
+    console.error(directiveFiles.map((path) => `  - ${path}`).join('\n'));
+    console.error(
+      'Canonical synced files must remain compatible with consumer lint configurations.',
+    );
+  }
+  if (problems.length === 0) {
+    console.log(
+      `standards: ${Object.keys(lock.files).length} canonical file(s) match the last synced state`,
+    );
+  }
+  return problems.length === 0 && directiveFiles.length === 0;
 };
 
 const readTextIfPresent = async (path: string): Promise<string | null> =>
@@ -624,7 +578,7 @@ const prepareProspectiveDependabot = async (
   consumer: string,
   localSeed: string | null,
 ): Promise<ProspectiveDependabot> => {
-  const incoming = await listManaged(srcDir, manifest.paths);
+  const incoming = await listManagedFiles(srcDir, manifest.paths);
   const basePath = incoming.get(DEPENDABOT_BASE_FILE);
   if (basePath === undefined) {
     throw new Error(

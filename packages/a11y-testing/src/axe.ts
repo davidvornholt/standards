@@ -1,3 +1,4 @@
+import process from 'node:process';
 import AxeBuilder from '@axe-core/playwright';
 import type { Page } from '@playwright/test';
 
@@ -72,9 +73,11 @@ const waitForStreamedDom = async (page: Page): Promise<void> => {
     },
   );
   if (!settled) {
-    // biome-ignore lint/suspicious/noConsole: deliberate test-runner diagnostic so a starved quiescence wait is visible instead of resurfacing as a random Axe flake.
-    console.warn(
-      `Axe scan of ${page.url()} proceeded after the ${structuralSettleDeadlineMilliseconds}ms DOM quiescence deadline; results may reflect a still-mutating page.`,
+    // Written to stderr directly: a console call would need an inline
+    // suppression, and suppressions in synced sources break consumer gates
+    // that disable the suppressed rule.
+    process.stderr.write(
+      `Axe scan of ${page.url()} proceeded after the ${structuralSettleDeadlineMilliseconds}ms DOM quiescence deadline; results may reflect a still-mutating page.\n`,
     );
   }
 };

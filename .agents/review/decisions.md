@@ -26,7 +26,7 @@ Under the frozen non-hostile-consumer threat model, the installed `@davidvornhol
 
 ## TOOLING-001: Root-owned Biome pin
 
-`@biomejs/biome` is pinned only at the repository root (and `template/package.json` for consumers); workspaces deliberately do not declare it. Workspace lint scripts and tests resolve Biome through root-hoisted resolution, and a missing install fails fast with a resolution error. Reviews must not request per-workspace `@biomejs/biome` declarations; the pin moves with the root/template dependency-hold policy.
+`@biomejs/biome` is pinned only at the repository root (and `template/package.json` for consumers); workspaces deliberately do not declare it. Workspace lint scripts resolve the root-hoisted Biome executable, while `packages/standards-cli/src/template-biome.test.ts` invokes that executable by its root path; a missing install fails at invocation. Reviews must not request per-workspace `@biomejs/biome` declarations; the pin moves with the root/template dependency-hold policy.
 
 ## GITHUB-SETTINGS-001: One read-only settings PAT
 

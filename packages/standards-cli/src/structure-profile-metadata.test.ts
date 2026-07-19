@@ -8,7 +8,7 @@ const baseManifest = (
   overrides: Record<string, unknown> = {},
 ): Record<string, unknown> => ({
   name: '@davidvornholt/standards',
-  version: '0.8.0',
+  version: '0.11.1',
   bin: { standards: 'src/cli.ts' },
   ...overrides,
 });

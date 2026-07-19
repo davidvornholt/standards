@@ -107,7 +107,7 @@ jobs:
       # older CLI mirror a settings declaration it cannot parse.
       - name: Require label-aware standards CLI
         env:
-          MINIMUM_STANDARDS_VERSION: "0.11.0"
+          MINIMUM_STANDARDS_VERSION: "0.11.1"
         run: |
           package_path=node_modules/@davidvornholt/standards/package.json
           installed_version=$(jq -er '.version | select(type == "string")' "$package_path")

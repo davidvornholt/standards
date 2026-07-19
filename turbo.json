@@ -15,6 +15,43 @@
     "test": {
       "outputs": [],
       "passThroughEnv": ["GH_TOKEN", "GITHUB_TOKEN"]
+    },
+    "@davidvornholt/standards#test": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/sync-standards.json",
+        "$TURBO_ROOT$/AGENTS.md",
+        "$TURBO_ROOT$/CLAUDE.md",
+        "$TURBO_ROOT$/.agents/skills/database/**",
+        "$TURBO_ROOT$/.agents/skills/declarative-infra/**",
+        "$TURBO_ROOT$/.agents/skills/frontend-design/**",
+        "$TURBO_ROOT$/.agents/skills/nextjs/**",
+        "$TURBO_ROOT$/.agents/skills/review/**",
+        "$TURBO_ROOT$/.agents/skills/review-fix/**",
+        "$TURBO_ROOT$/.agents/skills/standards-sync/**",
+        "$TURBO_ROOT$/.agents/skills/ux-ui/**",
+        "$TURBO_ROOT$/.claude/agents/reviewer.md",
+        "$TURBO_ROOT$/.claude/workflows/review-pass.js",
+        "$TURBO_ROOT$/.codex/agents/reviewer.toml",
+        "$TURBO_ROOT$/biome.base.jsonc",
+        "$TURBO_ROOT$/.github/settings.json",
+        "$TURBO_ROOT$/.github/dependabot.base.yml",
+        "$TURBO_ROOT$/.github/actions/sops-secret/action.yml",
+        "$TURBO_ROOT$/packages/typescript-config/README.md",
+        "$TURBO_ROOT$/packages/typescript-config/*.json",
+        "$TURBO_ROOT$/packages/typescript-config/*.ts",
+        "$TURBO_ROOT$/packages/a11y-testing/README.md",
+        "$TURBO_ROOT$/packages/a11y-testing/package.json",
+        "$TURBO_ROOT$/packages/a11y-testing/tsconfig.json",
+        "$TURBO_ROOT$/packages/a11y-testing/src/**",
+        "$TURBO_ROOT$/.github/workflows/**",
+        "$TURBO_ROOT$/template/**",
+        "$TURBO_ROOT$/package.json",
+        "$TURBO_ROOT$/AGENTS.local.md",
+        "$TURBO_ROOT$/turbo.json"
+      ],
+      "outputs": [],
+      "passThroughEnv": ["GH_TOKEN", "GITHUB_TOKEN"]
     }
   }
 }
