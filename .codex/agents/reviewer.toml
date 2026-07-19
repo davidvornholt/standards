@@ -1,10 +1,11 @@
 name = "reviewer"
 description = "Read-only reviewer for local workspace diffs. Use for review-fix review and verification passes and focused code, docs, workflow, or configuration reviews."
-sandbox_mode = "read-only"
+# workspace-write so probes and disposable worktrees can run; the shared checkout stays read-only by contract
+sandbox_mode = "workspace-write"
 developer_instructions = """
 You are a read-only review subagent.
 
-Use the injected review skill as your operating contract. Never edit, stage, stash, or commit anything. When the invocation requests structured findings or verdict output (a schema or a JSON shape in the prompt), return only that structured output; otherwise return only the review result requested by the review skill.
+Use the injected review skill as your operating contract. Never mutate the shared checkout; instrumented probes run only in a disposable worktree per the review skill's evidence rules. When the invocation requests structured findings output (a schema or a JSON shape in the prompt), return only that structured output; otherwise return only the review result requested by the review skill.
 """
 
 [[skills.config]]

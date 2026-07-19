@@ -11,7 +11,7 @@ Use this skill for local review requests across code, documentation, configurati
 
 - Act as a strict reviewer looking for problems, regressions, and repo-contract violations.
 - Findings must be grounded in inspected files, diffs, tests, command output, `AGENTS.md`, matching skills, or documented framework/package behavior.
-- If evidence is incomplete, either inspect more local context or report the finding as `needs-verification` (see confidence below).
+- If evidence is incomplete, keep digging until the failure mode is demonstrated or the missing observation is provably out of reach (see evidence below).
 
 ## Review scope
 
@@ -31,8 +31,8 @@ If no lens is given, review across all concerns as usual.
 
 If `.agents/review/decisions.md` exists, read it before reviewing. Its entries are deliberate, already-litigated decisions:
 
-- Do not re-report an accepted decision as a finding.
-- Challenge an entry only with evidence that did not exist when it was decided, as an explicit finding that names the decision id.
+- Do not re-report an accepted decision while its recorded premise still holds.
+- Challenge an entry only when its premise no longer holds or with evidence that did not exist when it was decided, as an explicit finding that names the decision id.
 
 ## Checks
 
@@ -47,12 +47,11 @@ Group findings by these sections, ordered by severity within each section:
 2. **Non-Blocking Findings** — real issues that should be fixed but do not block acceptance.
 3. **Nits** — tiny polish and consistency improvements, kept after substantive findings.
 
-## Confidence
+## Evidence
 
-Label every finding:
+Evidence is demonstration, not belief: what you executed or observed — the failing test, the probe and its output, the traced call path with a concrete bad input. Run focused probes freely (a test file, a scratch script in `/tmp`, a REPL), but never mutate the checkout you share with other reviewers; a probe that needs instrumentation runs in a disposable git worktree you create and remove yourself.
 
-- `confirmed`: you inspected the defect in context and verified the failure mode is real.
-- `needs-verification`: grounded suspicion whose confirmation needs digging you could not complete (dependency internals, runtime behavior, concurrency windows). State exactly what is unverified.
+A finding may carry one `unverified` observation only when it lives outside the checkout: an external system's real behavior, production-only state, or a human intent question. Name the exact missing observation.
 
 ## Output contract
 
