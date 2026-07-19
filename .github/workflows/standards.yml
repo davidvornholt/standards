@@ -115,12 +115,15 @@ jobs:
           STANDARDS_SKIP_GITHUB_CHECK: "true"
         run: bun run check
 
-  # The admin-read PAT is isolated from all repository-controlled executable
+  # The settings-read PAT is isolated from all repository-controlled executable
   # code. The checkout contains only declarative settings inputs and the
   # encrypted token source; the CLI is a published, checksum-pinned artifact
   # installed under RUNNER_TEMP from direct, checksum-pinned release URLs.
   github-settings:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
     steps:
       - name: Checkout settings inputs
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -171,9 +174,9 @@ jobs:
 
       # GitHub hides ruleset bypass actors from the workflow token, so this
       # resolves a repository-scoped fine-grained PAT with read-only
-      # Administration access. Missing secret state deliberately falls back to
-      # the workflow token so the settings check fails closed with its normal
-      # actionable visibility error.
+      # Administration and Issues access. Missing secret state deliberately
+      # falls back to the workflow token, which can read labels but still fails
+      # closed on settings hidden without Administration access.
       - name: Check GitHub settings
         env:
           FALLBACK_TOKEN: ${{ github.token }}
