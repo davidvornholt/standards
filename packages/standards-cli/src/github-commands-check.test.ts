@@ -96,6 +96,41 @@ describe('runGithubCheck', () => {
     ]);
   });
 
+  it('checks repository settings, rulesets, and labels in one run', async () => {
+    const labels = [
+      {
+        color: '0e8a16',
+        description: 'Approved for automated work',
+        name: 'approved-for-fix',
+      },
+    ];
+    const calls = installApi([
+      { body: labels },
+      { body: liveRepository(false, true) },
+      { body: [liveRulesetSummary()] },
+      {
+        body: {
+          enforcement: 'active',
+          id: 7,
+          name: 'Protect main',
+          rules: [],
+          target: 'branch',
+        },
+      },
+    ]);
+
+    expect(await runGithubCheck(consumer({ labels, optOut: false }))).toBe(
+      true,
+    );
+    expect(calls.map(({ method, path }) => ({ method, path }))).toEqual([
+      { method: 'GET', path: '/repos/owner/repo/labels' },
+      { method: 'GET', path: '/repos/owner/repo' },
+      { method: 'GET', path: '/repos/owner/repo/rulesets' },
+      { method: 'GET', path: '/repos/owner/repo/rulesets/7' },
+    ]);
+    expect(output.errors).toEqual([]);
+  });
+
   it('prints the opt-out notice before origin and network failures', async () => {
     expect(await runGithubCheck(consumer({ origin: false }))).toBe(false);
     expect(output.logs).toEqual([OPT_OUT_NOTICE]);
