@@ -41,15 +41,26 @@ const consumer = (options?: Parameters<typeof createConsumer>[0]): string => {
 
 describe('runGithubCheck fail-closed visibility', () => {
   it.each([
-    HTTP_UNAUTHORIZED,
-    HTTP_FORBIDDEN,
-  ])('names the label-read credential fix after an API denial', async (status) => {
+    {
+      message: 'Bad credentials',
+      status: HTTP_UNAUTHORIZED,
+    },
+    {
+      message: 'Resource not accessible by personal access token',
+      status: HTTP_FORBIDDEN,
+    },
+    {
+      message: 'Resource not accessible by integration',
+      status: HTTP_FORBIDDEN,
+    },
+  ])('names the label-read credential fix after $status $message', async ({
+    message,
+    status,
+  }) => {
     const calls = installApi([
       {
         status,
-        body: {
-          message: 'Resource not accessible by personal access token',
-        },
+        body: { message },
       },
     ]);
 

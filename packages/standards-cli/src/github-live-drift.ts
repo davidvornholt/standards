@@ -25,14 +25,18 @@ import { type GithubSettings, isRecord } from './github-settings-parse';
 
 const LABEL_VISIBILITY_PROBLEM =
   'declared labels not visible to this token, so the gate cannot verify them. In CI, use a valid ci.github_settings_read_token from secrets/ci.yaml with read-only "Issues" access (or "Pull requests" read); locally use a token with one of those permissions';
-const PAT_PERMISSION_DENIAL_MESSAGE =
-  'Resource not accessible by personal access token';
+const PERMISSION_DENIAL_MESSAGES: ReadonlySet<string> = new Set([
+  'Resource not accessible by integration',
+  'Resource not accessible by personal access token',
+]);
 
 const isLabelPermissionDenial = (error: unknown): boolean =>
   error instanceof GithubListResponseError &&
-  (error.status === HTTP_UNAUTHORIZED || error.status === HTTP_FORBIDDEN) &&
-  isRecord(error.responseBody) &&
-  error.responseBody.message === PAT_PERMISSION_DENIAL_MESSAGE;
+  (error.status === HTTP_UNAUTHORIZED ||
+    (error.status === HTTP_FORBIDDEN &&
+      isRecord(error.responseBody) &&
+      typeof error.responseBody.message === 'string' &&
+      PERMISSION_DENIAL_MESSAGES.has(error.responseBody.message)));
 
 const repositoryDrift = async (
   token: string | null,
