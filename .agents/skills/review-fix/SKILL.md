@@ -25,7 +25,7 @@ If subagent tooling is unavailable, stop and report that blocker.
 2. The cycle runs on a PR in a repo you control. For uncommitted work: commit on a feature branch, push, `gh pr create --draft`. For a third-party contribution: run the cycle on a PR inside your fork and open the upstream PR only after the report.
 3. The cycle runs in its own git worktree — it owns that checkout for gate runs and worker commits. Remove the worktree when the cycle ends.
 4. The PR is a draft while the cycle owns it; posting the report flips it to ready for review.
-5. Run the deterministic gate (root `bun run check:fix`), fix and commit what it reports, BEFORE the review pass. Mechanical issues belong to the gate: it finds every instance at once; a reviewer finds a stochastic subset.
+5. Run the deterministic gate, fix and commit what it reports, BEFORE the review pass. Mechanical issues belong to the gate: it finds every instance at once; a reviewer finds a stochastic subset.
 6. Read `.agents/review/decisions.md` (if present); pass its content to every reviewer.
 
 ## Scope contract
