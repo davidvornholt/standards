@@ -99,7 +99,7 @@ Every CLI release already creates a `vX.Y.Z` tag and GitHub Release, so released
 
 Version 0.7.0 is an intentional hard cutover: `sync-standards.local.json` is the only cadence and ref policy source. The canonical workflow and CLI no longer read `STANDARDS_AUTO_SYNC` or `STANDARDS_SYNC_REF`; leaving those Actions variables configured has no effect.
 
-Upgrade `@davidvornholt/standards` and `bun.lock` to 0.7.0 or newer, create `sync-standards.local.json` with any required opt-out or pin, and accept the canonical workflow update in the same consumer PR. The 0.7 workflow fails before syncing with an actionable error if a policy file is present but the installed CLI is older than 0.7.0. The 0.10 workflows superseded that conditional guard with an unconditional minimum so every sync used an artifact compatible with Dependabot composition and the isolated GitHub settings gate; the current 0.11 workflow retains the unconditional guard and raises the minimum to 0.11.0.
+Upgrade `@davidvornholt/standards` and `bun.lock` to 0.7.0 or newer, create `sync-standards.local.json` with any required opt-out or pin, and accept the canonical workflow update in the same consumer PR. The 0.7 workflow fails before syncing with an actionable error if a policy file is present but the installed CLI is older than 0.7.0. The 0.10 workflows superseded that conditional guard with an unconditional minimum so every sync used an artifact compatible with Dependabot composition and the isolated GitHub settings gate; the current 0.11 workflow retains the unconditional guard and raises the minimum to 0.11.1.
 
 ### Breaking migration to 0.10.2
 
@@ -108,6 +108,10 @@ Version 0.10.2 isolates the GitHub settings credential from repository-controlle
 ### Breaking migration to 0.10.1
 
 Version 0.10.1 makes `.github/dependabot.yml` a generated file. It is no longer seeded and repo-owned: `init` and `sync` compose it from the synced `.github/dependabot.base.yml` and the optional repo-owned `.github/dependabot.local.yml`, overwriting whatever is there, and `check` fails while the generated file does not match its sources. CLI 0.10.1 requires the selected content ref to include the canonical `.github/dependabot.base.yml` and rejects older refs before changing any consumer file. Before running `init` or `sync` with 0.10.1, move supported customizations out of your old hand-maintained `dependabot.yml` into `.github/dependabot.local.yml` — new ecosystems as new update blocks, private registries as top-level definitions and per-update references, and extra version holds by repeating the canonical target with only `ignore` and/or `registries`. Matching canonical blocks deliberately reject labels, groups, cooldowns, pull-request limits, and other policy additions. Template-wide holds (Biome, TypeScript) now arrive through the canonical base, so delete local copies of them rather than duplicating the entries.
+
+### Migration to 0.11.1
+
+Version 0.11.1 makes `standards check` reject the raw token formed by `biome-` + `ignore` anywhere in lock-backed canonical files. Upgrade `@davidvornholt/standards` and `bun.lock` to 0.11.1 before accepting or running the canonical sync workflow; its unconditional version guard refuses older installations that do not enforce this consumer lint-compatibility contract.
 
 ### Breaking migration to 0.11.0
 

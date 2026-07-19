@@ -203,7 +203,7 @@ const runWorkflowVersionGuard = (version: string): RunResult => {
       '-c',
       workflowRunScript('Require label-aware standards CLI'),
     ],
-    { MINIMUM_STANDARDS_VERSION: '0.11.0' },
+    { MINIMUM_STANDARDS_VERSION: '0.11.1' },
   );
 };
 
@@ -1392,6 +1392,45 @@ describe('packed artifact content ref cutover', () => {
   });
 });
 
+describe('packed artifact token contract', () => {
+  it('enforces the canonical token contract from a consumer lock', () => {
+    const { consumer: runner } = installPackedCli();
+    const upstream = buildUpstream();
+    write(
+      upstream,
+      'managed/a.txt',
+      `documentation containing ${['biome', 'ignore'].join('-')}\n`,
+    );
+    const consumer = mkTmp('sync-cons-');
+    expect(
+      runExecutable('bun', runner, [
+        'standards',
+        'init',
+        '--from',
+        upstream,
+        '--dir',
+        consumer,
+      ]).status,
+    ).toBe(0);
+
+    const check = runExecutable('bun', runner, [
+      'standards',
+      'check',
+      '--dir',
+      consumer,
+    ]);
+
+    expect(check.status).toBe(1);
+    expect(check.stdout).toContain(
+      'canonical file(s) match the last synced state',
+    );
+    expect(check.stderr).toContain(
+      'canonical file(s) contain the forbidden inline Biome directive token',
+    );
+    expect(check.stderr).toContain('managed/a.txt');
+  });
+});
+
 describe('packed artifact distribution', () => {
   it('ships the Dependabot contract and honors the workflow sync pin', () => {
     const packageManifest = JSON.parse(
@@ -1751,21 +1790,23 @@ describe('standards sync workflow policy', () => {
     '0.10.1',
     '0.10.2',
     '0.10.0-beta.1',
+    '0.11.0',
   ])('rejects installed CLI version %s without a policy file', (version) => {
     const result = runWorkflowVersionGuard(version);
     expect(result.status).toBe(1);
     expect(`${result.stdout}${result.stderr}`).toContain('::error::');
   });
 
-  it('makes the 0.11.0 guard unconditional', () => {
+  it('makes the 0.11.1 guard unconditional', () => {
     const workflow = readFileSync(SYNC_WORKFLOW, 'utf8');
+    expect(workflow).toContain('MINIMUM_STANDARDS_VERSION: "0.11.1"');
     expect(workflow).not.toContain(
       "if: needs.policy.outputs.present == 'true'",
     );
   });
 
   it.each([
-    '0.11.0',
+    '0.11.1',
     '0.12.0',
   ])('accepts installed CLI version %s without a policy file', (version) => {
     expect(runWorkflowVersionGuard(version).status).toBe(0);
