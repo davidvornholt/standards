@@ -104,8 +104,9 @@ jobs:
 
       # A consumer can receive this canonical workflow before upgrading its
       # repo-owned package manifest. Fail before sync instead of letting an
-      # older CLI mirror a settings declaration it cannot parse.
-      - name: Require label-aware standards CLI
+      # older CLI mirror canonical files without enforcing their lock-backed
+      # managed-file contract.
+      - name: Require compatible standards CLI
         env:
           MINIMUM_STANDARDS_VERSION: "0.11.1"
         run: |
@@ -117,7 +118,7 @@ jobs:
           fi
           lowest_version=$(printf '%s\n%s\n' "$MINIMUM_STANDARDS_VERSION" "$installed_version" | sort -V | head -n 1)
           if [ "$lowest_version" != "$MINIMUM_STANDARDS_VERSION" ]; then
-            echo "::error::Canonical GitHub labels require @davidvornholt/standards >= $MINIMUM_STANDARDS_VERSION; upgrade package.json and bun.lock before accepting this workflow"
+            echo "::error::Canonical managed-file checks require @davidvornholt/standards >= $MINIMUM_STANDARDS_VERSION; upgrade package.json and bun.lock before accepting this workflow"
             exit 1
           fi
 

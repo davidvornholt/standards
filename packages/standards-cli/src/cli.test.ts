@@ -43,6 +43,10 @@ const SOPS_VERSION_ASSIGNMENT = /version=v\d+\.\d+\.\d+/gu;
 const SOPS_CHECKSUM_ASSIGNMENT = /sha=[a-f0-9]{64}/gu;
 const ACTIONLINT_ASSET_PATTERN =
   /actionlint_\$\{version\}_linux_\$\{arch\}\.tar\.gz/u;
+const PINNED_STANDARDS_VERSION_PATTERN =
+  /standards_version=(?<version>\d+\.\d+\.\d+)/u;
+const MINIMUM_STANDARDS_VERSION_PATTERN =
+  /MINIMUM_STANDARDS_VERSION: "(?<version>\d+\.\d+\.\d+)"/u;
 const STD_PATHS: ReadonlyArray<string> = [
   'sync-standards.json',
   '.github/dependabot.base.yml',
@@ -201,7 +205,7 @@ const runWorkflowVersionGuard = (version: string): RunResult => {
       '-euo',
       'pipefail',
       '-c',
-      workflowRunScript('Require label-aware standards CLI'),
+      workflowRunScript('Require compatible standards CLI'),
     ],
     { MINIMUM_STANDARDS_VERSION: '0.11.1' },
   );
@@ -1545,7 +1549,10 @@ describe('canonical standards workflow security boundaries', () => {
     );
     expect(installStep).toContain('bun_version=1.3.14');
     expect(installStep.match(/bun_sha=[a-f0-9]{64}/gu)).toHaveLength(2);
-    expect(installStep).toContain('standards_version=0.11.0');
+    expect(installStep).toContain('standards_version=0.11.1');
+    expect(installStep).toContain(
+      'standards_sha=b89fb444148dd1a54d8d7248e79213400c48658cd8d91c4d7403afb825f5c269dd3f0acade726a326f9302c31c70e1651087a74bbbc8f2c93b498d1afd9403a5',
+    );
     expect(installStep).toContain('yaml_version=2.9.0');
     expect(installStep.match(/sha=[a-f0-9]{128}/gu)).toHaveLength(2);
     expect(installStep).toContain('sha512sum --check --quiet');
@@ -1559,6 +1566,22 @@ describe('canonical standards workflow security boundaries', () => {
     expect(settingsStep).toContain(`[[ "$extracted" != *$'\\n'* ]]`);
     expect(settingsStep).toContain(`[[ "$extracted" != *$'\\r'* ]]`);
     expect(settingsStep).toContain('unset SOPS_AGE_KEY FALLBACK_TOKEN');
+  });
+
+  it('pins the isolated settings checker to the sync workflow minimum', () => {
+    const installStep = yamlStep(
+      STANDARDS_WORKFLOW,
+      'Install pinned settings checker',
+    );
+    const syncWorkflow = readFileSync(SYNC_WORKFLOW, 'utf8');
+    const pinnedVersion = installStep.match(PINNED_STANDARDS_VERSION_PATTERN)
+      ?.groups?.version;
+    const minimumVersion = syncWorkflow.match(MINIMUM_STANDARDS_VERSION_PATTERN)
+      ?.groups?.version;
+
+    expect(pinnedVersion).toBeDefined();
+    expect(minimumVersion).toBeDefined();
+    expect(pinnedVersion).toBe(minimumVersion);
   });
 
   it('grants label reads only to the isolated settings job', () => {
