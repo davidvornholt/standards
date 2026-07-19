@@ -37,70 +37,11 @@ rm -rf "$d"
 
 ## Working with secrets files
 
-`just secrets edit <target>` opens a target in the SOPS editor; `just secrets updatekeys <target>` rewraps it after recipient changes; `updatekeys-all` rewraps every existing target. The repo-owned `secrets.just` module (adjust the target map per repo):
+The root `justfile` and the `secrets.just` module are canonical synced files — consumers receive and update them via `bun standards sync`, and local edits are drift. `just secrets edit <target>` opens a target in the SOPS editor; `just secrets updatekeys <target>` rewraps it after recipient changes; `just secrets updatekeys-all` rewraps every existing target. A target name resolves to `infra/hosts/<target>/secrets.yaml` when that host directory exists and to `secrets/<target>.yaml` otherwise (`dev`, `ci`, `pr-preview`, …), so no per-repo target map exists. Repo-specific recipes and modules (infra workflows, deploy helpers) live in a repo-owned `local.just`, which the canonical justfile imports when present.
 
-```just
-# Create an age key for SOPS (if missing) and print its recipient public key
-age-create key_file="${HOME}/.config/sops/age/keys.txt":
-    @if [ -f "{{key_file}}" ] && grep -q '^AGE-SECRET-KEY-' "{{key_file}}"; then \
-      printf 'Existing age key: %s\n' "{{key_file}}"; \
-    elif [ -e "{{key_file}}" ]; then \
-      printf 'Refusing to overwrite existing non-age key file: %s\n' "{{key_file}}" >&2; \
-      exit 1; \
-    else \
-      mkdir -p "$(dirname "{{key_file}}")"; \
-      umask 077; \
-      if command -v age-keygen >/dev/null 2>&1; then \
-        output="$(age-keygen -o "{{key_file}}" 2>&1)" || { printf '%s\n' "$output" >&2; exit 1; }; \
-      else \
-        output="$(nix --extra-experimental-features 'nix-command flakes' shell nixpkgs#age -c age-keygen -o "{{key_file}}" 2>&1)" || { printf '%s\n' "$output" >&2; exit 1; }; \
-      fi; \
-    fi; \
-    just secrets age-recipient "{{key_file}}"
+## Derived dev env files
 
-# Print the SOPS recipient public key for an age key file
-age-recipient key_file="${HOME}/.config/sops/age/keys.txt":
-    @if [ ! -f "{{key_file}}" ]; then \
-      printf 'No age key file found at %s\n' "{{key_file}}" >&2; \
-      exit 1; \
-    fi; \
-    if grep -m1 '^# public key: age1' "{{key_file}}" >/dev/null; then \
-      grep -m1 '^# public key: age1' "{{key_file}}" | sed 's/^# public key: //'; \
-    elif command -v age-keygen >/dev/null 2>&1; then \
-      age-keygen -y "{{key_file}}"; \
-    else \
-      nix --extra-experimental-features 'nix-command flakes' shell nixpkgs#age -c age-keygen -y "{{key_file}}"; \
-    fi
-
-# Open a secrets target (dev|ci) in the SOPS editor
-edit target: (_sops target)
-
-# Rewrap a secrets target (dev|ci) for the current recipients
-updatekeys target: (_sops target "updatekeys")
-
-# Rewrap every existing secrets target for the current recipients
-updatekeys-all:
-    @for target in dev ci; do \
-      if [ -f "secrets/$target.yaml" ]; then \
-        just secrets updatekeys "$target"; \
-      fi; \
-    done
-
-# Run sops (or the nix-provided sops) against a target's file
-_sops target *args:
-    @case "{{target}}" in \
-      dev) file='secrets/dev.yaml' ;; \
-      ci) file='secrets/ci.yaml' ;; \
-      *) printf 'Unknown secrets target: %s\n' "{{target}}" >&2; exit 1 ;; \
-    esac; \
-    if command -v sops >/dev/null 2>&1; then \
-      sops {{args}} "$file"; \
-    else \
-      nix --extra-experimental-features 'nix-command flakes' run nixpkgs#sops -- {{args}} "$file"; \
-    fi
-```
-
-Wire it from the root `justfile` with `mod secrets 'secrets.just'`.
+`secrets/dev.yaml` is keyed by workspace group and workspace (`apps.<name>`, `packages.<name>`), each mapping env keys to string values — the shape mirrored in `secrets/dev.example.yaml`. `just dev-env-generate` (the canonical recipe for `bun standards dev-env`) decrypts it and writes each declared workspace's `<group>/<name>/.env.local` with owner-only permissions and a do-not-edit header; `just dev-refresh` edits dev secrets and regenerates in one step. The command gathers all problems before writing anything: it fails when a declared workspace has no `package.json` and refuses to write any `.env.local` that git would not ignore.
 
 ## GitHub Actions wiring
 

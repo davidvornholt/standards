@@ -24,6 +24,7 @@ import {
   DEPENDABOT_LOCAL_FILE,
 } from './dependabot-compose';
 import { inspectDependabot } from './dependabot-inspect';
+import { runDevEnv } from './dev-env';
 import { CANONICAL_SETTINGS_FILE, LOCAL_SETTINGS_FILE } from './github-api';
 import { runGithubApply, runGithubCheck } from './github-commands';
 import { loadGithubSettings } from './github-settings';
@@ -66,6 +67,7 @@ type Source = {
 type Command =
   | 'check'
   | 'dependabot'
+  | 'dev-env'
   | 'doctor'
   | 'github'
   | 'help'
@@ -736,6 +738,7 @@ Commands:
   doctor      Validate extension seams only
   structure   Validate monorepo structure rules only
   dependabot  Verify (--check) or regenerate (--write) the composed .github/dependabot.yml
+  dev-env     Write each workspace's generated .env.local from the SOPS-encrypted secrets/dev.yaml
   github      Compare (--check) or converge (--apply) live GitHub settings
   poller      Run one fix-poller tick over the configured repositories (host automation)
   help        Show this help
@@ -756,6 +759,7 @@ const commandFromArg = (arg: string): Command => {
   if (
     arg === 'check' ||
     arg === 'dependabot' ||
+    arg === 'dev-env' ||
     arg === 'doctor' ||
     arg === 'github' ||
     arg === 'help' ||
@@ -1108,7 +1112,13 @@ const runSyncCommand = async (
 
 // Commands whose success is reported through the exit code.
 const runGateCommand = (
-  command: 'check' | 'dependabot' | 'doctor' | 'github' | 'structure',
+  command:
+    | 'check'
+    | 'dependabot'
+    | 'dev-env'
+    | 'doctor'
+    | 'github'
+    | 'structure',
   consumer: string,
   apply: boolean,
   profile: StructureProfile,
@@ -1118,6 +1128,9 @@ const runGateCommand = (
   }
   if (command === 'dependabot') {
     return runDependabotCheck(consumer);
+  }
+  if (command === 'dev-env') {
+    return runDevEnv(consumer);
   }
   if (command === 'doctor') {
     return runDoctor(consumer);

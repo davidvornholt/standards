@@ -10,6 +10,7 @@ standards doctor
 standards structure
 standards dependabot --check
 standards dependabot --write
+standards dev-env
 standards github --check
 standards github --apply
 standards poller --config <path>
@@ -17,6 +18,8 @@ standards poller --print-units --config <path>
 ```
 
 `dependabot --write` regenerates the composed `.github/dependabot.yml` from the canonical `.github/dependabot.base.yml` and the optional repo-owned `.github/dependabot.local.yml`; `init` and `sync` do the same automatically. `dependabot --check` verifies the generated file still matches its sources, and `doctor`/`check` include the same verification. The overlay is deliberately lean and additive only: new update blocks for repo-specific ecosystems, top-level private registry definitions, and `ignore` or `registries` entries appended by repeating a canonical block's normalized target. Matching blocks cannot add labels, groups, cooldowns, pull-request limits, or other policy.
+
+`dev-env` decrypts the SOPS-encrypted `secrets/dev.yaml` — keyed by workspace group and workspace (`apps.<name>`, `packages.<name>`), each mapping env keys to string values — and writes every declared workspace's `.env.local` with owner-only permissions and a do-not-edit header. Validation gathers all problems before writing anything: unsupported top-level keys, non-string values, declared workspaces without a `package.json`, and target files git would not ignore (verified with `git check-ignore`, failing closed). The canonical `justfile` exposes the command as `just dev-env-generate`, and `just dev-refresh` chains a `just secrets edit dev` session into regeneration.
 
 `check` also rejects the raw token formed by `biome-` + `ignore` anywhere in lock-listed canonical files. The intentionally blunt policy keeps synced sources compatible with consumer Biome configurations without invoking Biome or maintaining language-aware comment parsing.
 

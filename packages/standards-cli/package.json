@@ -1,6 +1,6 @@
 {
   "name": "@davidvornholt/standards",
-  "version": "0.11.1",
+  "version": "0.12.0",
   "description": "Bootstrap, synchronize, and validate davidvornholt/standards consumers",
   "license": "MIT",
   "repository": {
@@ -24,6 +24,9 @@
     "src/dependabot-compose.ts",
     "src/dependabot-inspect.ts",
     "src/dependabot-update.ts",
+    "src/dev-env-document.ts",
+    "src/dev-env-dotenv.ts",
+    "src/dev-env.ts",
     "src/github-api.ts",
     "src/github-apply.ts",
     "src/github-command-shared.ts",
