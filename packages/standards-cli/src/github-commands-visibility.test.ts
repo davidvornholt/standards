@@ -76,6 +76,38 @@ describe('runGithubCheck fail-closed visibility', () => {
     expect(errors).not.toContain('GitHub API unreachable');
   });
 
+  it.each([
+    'API rate limit exceeded for test-token',
+    'You have exceeded a secondary rate limit. Please wait a few minutes before you try again.',
+  ])('preserves the API cause for a non-permission 403', async (message) => {
+    const calls = installApi([
+      {
+        status: HTTP_FORBIDDEN,
+        body: { message },
+      },
+    ]);
+
+    expect(
+      await runGithubCheck(
+        consumer({
+          labels: [
+            {
+              color: '0e8a16',
+              description: 'Approved for automated work',
+              name: 'approved-for-fix',
+            },
+          ],
+          optOut: false,
+        }),
+      ),
+    ).toBe(false);
+    expect(calls.map(({ path }) => path)).toEqual(['/repos/owner/repo/labels']);
+    const errors = output.errors.join('\n');
+    expect(errors).toContain(message);
+    expect(errors).not.toContain('declared labels not visible to this token');
+    expect(errors).not.toContain('read-only "Issues" access');
+  });
+
   it('fails when repository settings are invisible over REST and GraphQL', async () => {
     installApi([
       { body: JSON.parse('{"private":false}') },

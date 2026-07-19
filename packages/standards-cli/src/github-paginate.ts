@@ -10,11 +10,13 @@ const PAGE_SIZE = 100;
 const MAX_PAGES = 30;
 
 export class GithubListResponseError extends Error {
+  readonly responseBody: unknown;
   readonly status: number;
 
   constructor(context: string, response: ApiResponse) {
     super(apiError(context, response));
     this.name = 'GithubListResponseError';
+    this.responseBody = response.body;
     this.status = response.status;
   }
 }
