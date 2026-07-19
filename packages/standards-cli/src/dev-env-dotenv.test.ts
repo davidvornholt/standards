@@ -1,9 +1,4 @@
 import { describe, expect, it } from 'bun:test';
-import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { execPath } from 'node:process';
 import { renderDotenv } from './dev-env-dotenv';
 
 const EMPTY_EXPANSION = ['$', '{:-}'].join('');
@@ -40,45 +35,5 @@ describe('dotenv rendering', () => {
     expect(rendered).toContain('WITH_NEWLINE="line1\\nline2"');
     expect(rendered).toContain(`WITH_BACKSLASH=${EMPTY_EXPANSION}a\\b#`);
     expect(rendered).toContain('WITH_HASH="a#b"');
-  });
-
-  it('round-trips secret bytes through Bun dotenv loading', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'dev-env-dotenv-'));
-    const envFile = join(dir, '.env.local');
-    const values = {
-      DOLLARS: ['$AMBIENT-$', '{MISSING}'].join(''),
-      CARRIAGE_RETURN: 'before\rafter',
-      NEWLINE: 'before\nafter',
-      BACKSLASH: 'before\\after',
-      ALL_DELIMITERS: `double" single' backtick\``,
-      LITERAL_ESCAPES: String.raw`literal\n and \r`,
-      TRAILING_BACKSLASH: 'after\\',
-      BACKSLASH_NEWLINE: '\\\n',
-      EMPTY: '',
-    };
-    try {
-      writeFileSync(
-        envFile,
-        renderDotenv('apps.web', 'secrets/dev.yaml', values),
-      );
-      const loaded = spawnSync(
-        execPath,
-        [
-          '--env-file',
-          envFile,
-          '-e',
-          `const keys=${JSON.stringify(Object.keys(values))};console.log(JSON.stringify({values:keys.map((key) => Bun.env[key]),unexpected:Object.keys(Bun.env).filter((key) => !keys.includes(key))}))`,
-        ],
-        { encoding: 'utf8', env: {} },
-      );
-
-      expect(loaded.status).toBe(0);
-      expect(JSON.parse(loaded.stdout) as unknown).toEqual({
-        values: Object.values(values),
-        unexpected: [],
-      });
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
   });
 });

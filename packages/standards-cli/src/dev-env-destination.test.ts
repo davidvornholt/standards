@@ -100,4 +100,29 @@ describe('dev env destination safety', () => {
       cleanup(consumer);
     }
   });
+
+  it('gathers raw and normalized duplicates alongside unsafe destinations', async () => {
+    const consumer = buildConsumer();
+    try {
+      symlinkSync('../../README.md', join(consumer, 'apps/web/.env.local'));
+      const result = await writeDevEnvFiles(consumer, [
+        { rel: 'apps/web/.env.local', content: 'FIRST=1\n' },
+        { rel: 'apps/web/.env.local', content: 'SECOND=1\n' },
+        { rel: 'apps/web/../web/.env.local', content: 'THIRD=1\n' },
+      ]);
+
+      expect(result).toEqual({
+        ok: false,
+        problems: [
+          'apps/web/.env.local is declared more than once',
+          'apps/web/../web/.env.local resolves to the same destination as apps/web/.env.local',
+          'apps/web/.env.local must be absent or a regular file, not a symlink or other file type',
+          'apps/web/.env.local must be absent or a regular file, not a symlink or other file type',
+          'apps/web/../web/.env.local must be absent or a regular file, not a symlink or other file type',
+        ],
+      });
+    } finally {
+      cleanup(consumer);
+    }
+  });
 });

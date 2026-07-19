@@ -25,6 +25,7 @@
     "src/dependabot-inspect.ts",
     "src/dependabot-update.ts",
     "src/dev-env-document.ts",
+    "src/dev-env-destination-duplicates.ts",
     "src/dev-env-destination.ts",
     "src/dev-env-dotenv-value.ts",
     "src/dev-env-dotenv.ts",

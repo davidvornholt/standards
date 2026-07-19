@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Stats } from 'node:fs';
 import { lstat, realpath } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { duplicateDestinationProblems } from './dev-env-destination-duplicates';
 
 export type DevEnvWrite = {
   readonly rel: string;
@@ -107,6 +108,7 @@ export const preflightDevEnvDestinations = async (
 ): Promise<PreflightResult> => {
   const root = resolve(consumer);
   const realRoot = await realpath(root);
+  const duplicates = duplicateDestinationProblems(root, writes);
   const checked = await Promise.all(
     writes.map(async (write) => {
       try {
@@ -120,17 +122,6 @@ export const preflightDevEnvDestinations = async (
   const destinations = checked.filter(
     (item): item is DevEnvDestination => typeof item !== 'string',
   );
-  const duplicates = destinations.flatMap((destination, index) => {
-    const firstIndex = destinations.findIndex(
-      ({ dest }) => dest === destination.dest,
-    );
-    const first = destinations[firstIndex];
-    return firstIndex < index && first !== undefined
-      ? [
-          `${destination.write.rel} resolves to the same destination as ${first.write.rel}`,
-        ]
-      : [];
-  });
   const problems = [
     ...duplicates,
     ...checked.filter((item): item is string => typeof item === 'string'),
