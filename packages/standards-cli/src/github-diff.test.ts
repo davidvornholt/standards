@@ -26,7 +26,7 @@ const liveRuleset = (
       type: 'pull_request',
       parameters: {
         required_approving_review_count: 0,
-        allowed_merge_methods: ['squash', 'rebase'],
+        allowed_merge_methods: ['squash'],
         some_future_github_default: true,
       },
     },
@@ -46,7 +46,7 @@ const declaredRuleset: Record<string, unknown> = {
       type: 'pull_request',
       parameters: {
         required_approving_review_count: 0,
-        allowed_merge_methods: ['squash', 'rebase'],
+        allowed_merge_methods: ['squash'],
       },
     },
   ],
@@ -106,7 +106,7 @@ describe('diffRuleset', () => {
           type: 'pull_request',
           parameters: {
             required_approving_review_count: 1,
-            allowed_merge_methods: ['squash', 'rebase'],
+            allowed_merge_methods: ['squash'],
           },
         },
         { type: 'creation' },

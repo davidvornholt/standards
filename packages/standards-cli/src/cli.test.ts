@@ -47,6 +47,7 @@ const PINNED_STANDARDS_VERSION_PATTERN =
   /standards_version=(?<version>\d+\.\d+\.\d+)/u;
 const MINIMUM_STANDARDS_VERSION_PATTERN =
   /MINIMUM_STANDARDS_VERSION: "(?<version>\d+\.\d+\.\d+)"/u;
+const MAJOR_ACTION_REF = /^[^@\s]+@v\d+$/u;
 const STD_PATHS: ReadonlyArray<string> = [
   'sync-standards.json',
   '.github/dependabot.base.yml',
@@ -189,6 +190,60 @@ const canonicalWorkflowPaths = (): ReadonlyArray<string> => {
       path.startsWith('.github/workflows/') &&
       path.endsWith('.yml'),
   );
+};
+
+const productionWorkflowPaths = (
+  workflowDirectory = join(ACTUAL_UPSTREAM, '.github/workflows'),
+): ReadonlyArray<string> =>
+  readdirSync(workflowDirectory, {
+    withFileTypes: true,
+  })
+    .filter(
+      (entry) =>
+        entry.isFile() &&
+        (entry.name.endsWith('.yml') || entry.name.endsWith('.yaml')),
+    )
+    .map((entry) => join(workflowDirectory, entry.name));
+
+const externalActionUses = (path: string): ReadonlyArray<string> =>
+  Object.values(yamlJobs(path)).flatMap((job) => {
+    const jobUses =
+      typeof job.uses === 'string' && !job.uses.startsWith('./')
+        ? [job.uses]
+        : [];
+    const { steps } = job;
+    if (!Array.isArray(steps)) {
+      return jobUses;
+    }
+    return [
+      ...jobUses,
+      ...steps.flatMap((step) => {
+        if (
+          typeof step !== 'object' ||
+          step === null ||
+          !('uses' in step) ||
+          typeof step.uses !== 'string' ||
+          step.uses.startsWith('./')
+        ) {
+          return [];
+        }
+        return [step.uses];
+      }),
+    ];
+  });
+
+const workflowTriggerNames = (path: string): ReadonlyArray<string> => {
+  const parsedWorkflow: unknown = parseYaml(readFileSync(path, 'utf8'));
+  if (
+    typeof parsedWorkflow !== 'object' ||
+    parsedWorkflow === null ||
+    !('on' in parsedWorkflow) ||
+    typeof parsedWorkflow.on !== 'object' ||
+    parsedWorkflow.on === null
+  ) {
+    throw new Error(`${path} must declare event triggers`);
+  }
+  return Object.keys(parsedWorkflow.on);
 };
 
 const runWorkflowVersionGuard = (version: string): RunResult => {
@@ -1526,6 +1581,95 @@ describe('packed artifact distribution', () => {
 });
 
 describe('canonical standards workflow security boundaries', () => {
+  it('declares squash as the only supported merge method at both enforcement layers', () => {
+    const declaration = JSON.parse(
+      readFileSync(join(ACTUAL_UPSTREAM, '.github/settings.json'), 'utf8'),
+    ) as {
+      readonly repository: Readonly<Record<string, unknown>>;
+      readonly rulesets: ReadonlyArray<Readonly<Record<string, unknown>>>;
+    };
+    const protectMain = declaration.rulesets.find(
+      (ruleset) => ruleset.name === 'Protect main',
+    );
+    const rules = Array.isArray(protectMain?.rules)
+      ? protectMain.rules.filter(
+          (rule): rule is Readonly<Record<string, unknown>> =>
+            typeof rule === 'object' && rule !== null,
+        )
+      : [];
+    const pullRequest = rules.find((rule) => rule.type === 'pull_request');
+
+    expect(declaration.repository).toMatchObject({
+      allow_merge_commit: false,
+      allow_rebase_merge: false,
+      allow_squash_merge: true,
+    });
+    expect(pullRequest?.parameters).toMatchObject({
+      allowed_merge_methods: ['squash'],
+    });
+  });
+
+  it('uses major-version tags for every external action in every production workflow', () => {
+    const uses = productionWorkflowPaths().flatMap(externalActionUses);
+
+    expect(uses.length).toBeGreaterThan(0);
+    for (const use of uses) {
+      expect(use).toMatch(MAJOR_ACTION_REF);
+    }
+  });
+
+  it.each([
+    [
+      'full-SHA step-level action',
+      [
+        'jobs:',
+        '  fixture:',
+        '    runs-on: ubuntu-latest',
+        '    steps:',
+        '      - uses: owner/action@0123456789abcdef0123456789abcdef01234567',
+        '',
+      ].join('\n'),
+    ],
+    [
+      'branch-pinned job-level reusable workflow',
+      [
+        'jobs:',
+        '  fixture:',
+        '    uses: owner/repo/.github/workflows/check.yml@main',
+        '',
+      ].join('\n'),
+    ],
+  ])('detects a non-major-tag %s', (_label, workflow) => {
+    const fixture = mkTmp('workflow-action-version-policy-');
+    const path = join(fixture, 'fixture.yml');
+    write(fixture, 'fixture.yml', workflow);
+
+    expect(externalActionUses(path)).toHaveLength(1);
+    expect(externalActionUses(path)[0]).not.toMatch(MAJOR_ACTION_REF);
+  });
+
+  it('includes .yaml workflows in the production action-version ratchet', () => {
+    const fixture = mkTmp('workflow-action-version-policy-yaml-');
+    write(
+      fixture,
+      'release.yaml',
+      [
+        'jobs:',
+        '  publish:',
+        '    runs-on: ubuntu-latest',
+        '    steps:',
+        '      - uses: owner/action@main',
+        '',
+      ].join('\n'),
+    );
+
+    const uses = productionWorkflowPaths(fixture).flatMap(externalActionUses);
+    expect(uses).toEqual(['owner/action@main']);
+    expect(uses[0]).not.toMatch(MAJOR_ACTION_REF);
+  });
+});
+
+describe('canonical standards workflow settings security', () => {
   it('isolates the settings-read token from repository-controlled executable code', () => {
     const workflow = readFileSync(STANDARDS_WORKFLOW, 'utf8');
     const installStep = yamlStep(
@@ -1544,9 +1688,6 @@ describe('canonical standards workflow security boundaries', () => {
     expect(workflow).toContain('secrets/ci.yaml');
     expect(workflow).toContain('sparse-checkout-cone-mode: false');
     expect(workflow).toContain('persist-credentials: false');
-    expect(workflow).toContain(
-      'actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0',
-    );
     expect(installStep).toContain('bun_version=1.3.14');
     expect(installStep.match(/bun_sha=[a-f0-9]{64}/gu)).toHaveLength(2);
     expect(installStep).toContain('standards_version=0.11.1');
@@ -1713,7 +1854,7 @@ describe('canonical SOPS secret action wiring', () => {
 });
 
 describe('standards sync workflow ordering', () => {
-  it('stops a clean mirror before token resolution', () => {
+  it('detects a clean mirror without opening a pull request', () => {
     const fixture = mkTmp('sync-clean-');
     const outputPath = join(mkTmp('sync-output-'), 'github-output');
     expect(runExecutable('git', fixture, ['init', '--quiet']).status).toBe(0);
@@ -1724,27 +1865,58 @@ describe('standards sync workflow ordering', () => {
       ['-euo', 'pipefail', '-c', workflowRunScript('Detect mirror changes')],
       { GITHUB_OUTPUT: outputPath },
     );
-    const workflow = readFileSync(SYNC_WORKFLOW, 'utf8');
-    const detectIndex = workflow.indexOf('- name: Detect mirror changes');
-    const resolveIndex = workflow.indexOf('- name: Resolve sync PR token');
-    const resolveStep = yamlStep(SYNC_WORKFLOW, 'Resolve sync PR token');
-    const parsedResolveStep: unknown = parseYaml(resolveStep);
-    if (
-      !Array.isArray(parsedResolveStep) ||
-      parsedResolveStep.length !== 1 ||
-      typeof parsedResolveStep[0] !== 'object' ||
-      parsedResolveStep[0] === null
-    ) {
-      throw new Error('Resolve sync PR token must parse as one YAML step');
-    }
-    const resolveGuard = (parsedResolveStep[0] as Record<string, unknown>).if;
 
     expect(result.status).toBe(0);
     expect(readFileSync(outputPath, 'utf8')).toBe('changed=false\n');
     expect(result.stdout).toContain('Already in sync');
-    expect(detectIndex).toBeGreaterThan(-1);
-    expect(resolveIndex).toBeGreaterThan(detectIndex);
-    expect(resolveGuard).toBe("steps.mirror.outputs.changed == 'true'");
+  });
+
+  it('resolves the token from the trusted action before sync and never executes post-sync action content', () => {
+    const jobs = yamlJobs(SYNC_WORKFLOW);
+    const { steps } = jobs.sync;
+    if (!Array.isArray(steps)) {
+      throw new Error('Standards sync job must contain steps');
+    }
+    const stepNames = steps.map((step) =>
+      typeof step === 'object' && step !== null && 'name' in step
+        ? step.name
+        : null,
+    );
+    const resolveIndex = stepNames.indexOf('Resolve sync PR token');
+    const syncIndex = stepNames.indexOf('Sync canonical files from upstream');
+    const localActionIndexes = steps.flatMap((step, index) =>
+      typeof step === 'object' &&
+      step !== null &&
+      'uses' in step &&
+      step.uses === './.github/actions/sops-secret'
+        ? [index]
+        : [],
+    );
+    const syncScript = workflowRunScript('Sync canonical files from upstream');
+
+    expect(resolveIndex).toBeGreaterThan(-1);
+    expect(syncIndex).toBeGreaterThan(resolveIndex);
+    expect(localActionIndexes).toEqual([resolveIndex]);
+    expect(localActionIndexes.every((index) => index < syncIndex)).toBe(true);
+    expect(
+      syncScript.match(/env -u GH_TOKEN bun standards sync/gu),
+    ).toHaveLength(2);
+  });
+
+  it('orders generated migration guidance before merge', () => {
+    const openPullRequest = workflowRunScript(
+      'Open a pull request if the mirror changed',
+    );
+    const applyIndex = openPullRequest.indexOf('bun standards github --apply');
+    const mergeIndex = openPullRequest.indexOf(
+      'Merge only after every required check passes',
+    );
+
+    expect(openPullRequest).toContain('allow_merge_commit');
+    expect(openPullRequest).toContain('allow_rebase_merge');
+    expect(openPullRequest).toContain('allow_squash_merge');
+    expect(applyIndex).toBeGreaterThan(-1);
+    expect(mergeIndex).toBeGreaterThan(applyIndex);
   });
 });
 
@@ -1788,7 +1960,7 @@ describe('standards sync workflow policy', () => {
     );
   });
 
-  it('emits a validated opt-out and pin while manual dispatch stays enabled', () => {
+  it('emits a validated scheduled-run opt-out and pin', () => {
     const { result, output } = runPolicyPreflight(
       '{ "autoSync": false, "ref": "v0.7.0" }\n',
     );
@@ -1797,9 +1969,6 @@ describe('standards sync workflow policy', () => {
     expect(output).toContain('auto-sync=false');
     expect(output).toContain('present=true');
     expect(output).toContain('ref=v0.7.0');
-    expect(readFileSync(SYNC_WORKFLOW, 'utf8')).toContain(
-      "if: github.event_name == 'workflow_dispatch' || needs.policy.outputs.auto-sync != 'false'",
-    );
   });
 
   it.each([
@@ -1848,6 +2017,39 @@ describe('standards sync workflow policy', () => {
     '0.12.0',
   ])('accepts installed CLI version %s without a policy file', (version) => {
     expect(runWorkflowVersionGuard(version).status).toBe(0);
+  });
+});
+
+describe('standards sync workflow trigger policy', () => {
+  it('allows only the weekly schedule trigger', () => {
+    expect(workflowTriggerNames(SYNC_WORKFLOW)).toEqual(['schedule']);
+  });
+
+  it.each([
+    'push',
+    'pull_request_target',
+    'workflow_dispatch',
+    'workflow_call',
+  ])('detects unsafe alternative trigger %s', (trigger) => {
+    const fixture = mkTmp('workflow-trigger-policy-');
+    const path = join(fixture, 'standards-sync.yml');
+    write(
+      fixture,
+      'standards-sync.yml',
+      [
+        'on:',
+        '  schedule:',
+        '    - cron: "0 6 * * 1"',
+        `  ${trigger}:`,
+        'jobs:',
+        '  sync:',
+        '    runs-on: ubuntu-latest',
+        '',
+      ].join('\n'),
+    );
+
+    expect(workflowTriggerNames(path)).toEqual(['schedule', trigger]);
+    expect(workflowTriggerNames(path)).not.toEqual(['schedule']);
   });
 });
 

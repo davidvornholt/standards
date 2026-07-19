@@ -984,8 +984,8 @@ const runGithubCheckGate = (consumer: string): Promise<boolean> => {
 // standards-sync workflow it configures — versioned and reviewable, unlike
 // repository Actions variables. All fields are optional; a missing file means
 // the defaults (track main, weekly auto-sync on).
-//   autoSync  false skips the scheduled workflow run; manual dispatch and
-//             local CLI runs are deliberate acts and always proceed.
+//   autoSync  false skips the scheduled workflow run; local CLI runs remain
+//             the deliberate sync path.
 //   ref       tag, branch, or full commit sha to sync from instead of main.
 const POLICY_FILE = 'sync-standards.local.json';
 const LINE_BREAK = /[\r\n]/u;
