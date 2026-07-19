@@ -23,3 +23,7 @@ The fix poller and its approved Codex runs may share one host service identity a
 ## RELEASE-001: Installed manifest version asserts CLI capability
 
 Under the frozen non-hostile-consumer threat model, the installed `@davidvornholt/standards` manifest version plus the frozen lockfile is the capability assertion. The consumer already controls that dependency and executes its code, so extra package-name, bin, or capability probes do not establish official identity; defending against a falsely versioned or malicious substitution is out of scope.
+
+## TOOLING-001: Root-owned Biome pin
+
+`@biomejs/biome` is pinned only at the repository root (and `template/package.json` for consumers); workspaces deliberately do not declare it. Workspace lint scripts and tests resolve Biome through root-hoisted resolution, and a missing install fails fast with a resolution error. Reviews must not request per-workspace `@biomejs/biome` declarations; the pin moves with the root/template dependency-hold policy.

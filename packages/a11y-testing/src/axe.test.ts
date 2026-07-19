@@ -4,6 +4,13 @@ import { join } from 'node:path';
 import process from 'node:process';
 
 const packageRoot = join(import.meta.dir, '..');
+// The launcher path and its native binary resolve from already-installed files
+// via local filesystem lookups — no package-manager invocation, bunx cache, or network.
+const biomeLauncherPath = globalThis.Bun.resolveSync(
+  '@biomejs/biome/bin/biome',
+  import.meta.dir,
+);
+// Last-resort guard against subprocess stalls on contended runners.
 const subprocessTestTimeoutMilliseconds = 60_000;
 
 describe('Axe helper consumer lint compatibility', () => {
@@ -13,9 +20,7 @@ describe('Axe helper consumer lint compatibility', () => {
       const result = spawnSync(
         process.execPath,
         [
-          'x',
-          '--no-install',
-          'biome',
+          biomeLauncherPath,
           'check',
           '--error-on-warnings',
           '--config-path',
