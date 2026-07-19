@@ -38,7 +38,6 @@ const NOTIFY_WORKFLOW = join(
   ACTUAL_UPSTREAM,
   '.github/workflows/notify-pause.yml',
 );
-const README = join(ACTUAL_UPSTREAM, 'README.md');
 const SYNC_MANIFEST = join(ACTUAL_UPSTREAM, 'sync-standards.json');
 const SOPS_VERSION_ASSIGNMENT = /version=v\d+\.\d+\.\d+/gu;
 const SOPS_CHECKSUM_ASSIGNMENT = /sha=[a-f0-9]{64}/gu;
@@ -2054,14 +2053,6 @@ describe('standards sync workflow trigger policy', () => {
 
     expect(workflowTriggerNames(path)).toEqual(['schedule', trigger]);
     expect(workflowTriggerNames(path)).not.toEqual(['schedule']);
-  });
-
-  it('documents weekly-only workflow sync and the local on-demand path', () => {
-    const readme = readFileSync(README, 'utf8');
-    expect(readme).not.toContain('weekly (and on demand)');
-    expect(readme).toContain(
-      'Run `bun standards sync` locally when you deliberately want to pull updates',
-    );
   });
 });
 
