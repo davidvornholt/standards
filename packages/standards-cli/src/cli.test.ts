@@ -192,24 +192,38 @@ const canonicalWorkflowPaths = (): ReadonlyArray<string> => {
   );
 };
 
+const productionWorkflowPaths = (): ReadonlyArray<string> =>
+  readdirSync(join(ACTUAL_UPSTREAM, '.github/workflows'), {
+    withFileTypes: true,
+  })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.yml'))
+    .map((entry) => join(ACTUAL_UPSTREAM, '.github/workflows', entry.name));
+
 const externalActionUses = (path: string): ReadonlyArray<string> =>
   Object.values(yamlJobs(path)).flatMap((job) => {
+    const jobUses =
+      typeof job.uses === 'string' && !job.uses.startsWith('./')
+        ? [job.uses]
+        : [];
     const { steps } = job;
     if (!Array.isArray(steps)) {
-      return [];
+      return jobUses;
     }
-    return steps.flatMap((step) => {
-      if (
-        typeof step !== 'object' ||
-        step === null ||
-        !('uses' in step) ||
-        typeof step.uses !== 'string' ||
-        step.uses.startsWith('./')
-      ) {
-        return [];
-      }
-      return [step.uses];
-    });
+    return [
+      ...jobUses,
+      ...steps.flatMap((step) => {
+        if (
+          typeof step !== 'object' ||
+          step === null ||
+          !('uses' in step) ||
+          typeof step.uses !== 'string' ||
+          step.uses.startsWith('./')
+        ) {
+          return [];
+        }
+        return [step.uses];
+      }),
+    ];
   });
 
 const runWorkflowVersionGuard = (version: string): RunResult => {
@@ -1575,21 +1589,43 @@ describe('canonical standards workflow security boundaries', () => {
     });
   });
 
-  it('pins every external action in secret-bearing canonical workflows to a full commit', () => {
-    const uses = [
-      ...externalActionUses(SYNC_WORKFLOW),
-      ...externalActionUses(NOTIFY_WORKFLOW),
-    ];
+  it('pins every external action in every production workflow to a full commit', () => {
+    const uses = productionWorkflowPaths().flatMap(externalActionUses);
 
-    expect(uses).toEqual([
-      'actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0',
-      'actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0',
-      'oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6',
-      'actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0',
-    ]);
+    expect(uses.length).toBeGreaterThan(0);
     for (const use of uses) {
       expect(use).toMatch(FULL_COMMIT_ACTION_REF);
     }
+  });
+
+  it.each([
+    [
+      'step-level action',
+      [
+        'jobs:',
+        '  fixture:',
+        '    runs-on: ubuntu-latest',
+        '    steps:',
+        '      - uses: owner/action@v1',
+        '',
+      ].join('\n'),
+    ],
+    [
+      'job-level reusable workflow',
+      [
+        'jobs:',
+        '  fixture:',
+        '    uses: owner/repo/.github/workflows/check.yml@main',
+        '',
+      ].join('\n'),
+    ],
+  ])('detects an unpinned %s', (_label, workflow) => {
+    const fixture = mkTmp('workflow-action-pin-');
+    const path = join(fixture, 'fixture.yml');
+    write(fixture, 'fixture.yml', workflow);
+
+    expect(externalActionUses(path)).toHaveLength(1);
+    expect(externalActionUses(path)[0]).not.toMatch(FULL_COMMIT_ACTION_REF);
   });
 });
 
@@ -1829,6 +1865,22 @@ describe('standards sync workflow ordering', () => {
       syncScript.match(/env -u GH_TOKEN bun standards sync/gu),
     ).toHaveLength(2);
   });
+
+  it('orders generated migration guidance before merge', () => {
+    const openPullRequest = workflowRunScript(
+      'Open a pull request if the mirror changed',
+    );
+    const applyIndex = openPullRequest.indexOf('bun standards github --apply');
+    const mergeIndex = openPullRequest.indexOf(
+      'Merge only after every required check passes',
+    );
+
+    expect(openPullRequest).toContain('allow_merge_commit');
+    expect(openPullRequest).toContain('allow_rebase_merge');
+    expect(openPullRequest).toContain('allow_squash_merge');
+    expect(applyIndex).toBeGreaterThan(-1);
+    expect(mergeIndex).toBeGreaterThan(applyIndex);
+  });
 });
 
 describe('standards sync workflow policy', () => {
@@ -1871,7 +1923,7 @@ describe('standards sync workflow policy', () => {
     );
   });
 
-  it('emits a validated opt-out and pin while manual dispatch stays enabled', () => {
+  it('emits a validated scheduled-run opt-out and pin', () => {
     const { result, output } = runPolicyPreflight(
       '{ "autoSync": false, "ref": "v0.7.0" }\n',
     );
@@ -1880,9 +1932,6 @@ describe('standards sync workflow policy', () => {
     expect(output).toContain('auto-sync=false');
     expect(output).toContain('present=true');
     expect(output).toContain('ref=v0.7.0');
-    expect(readFileSync(SYNC_WORKFLOW, 'utf8')).toContain(
-      "if: github.event_name == 'workflow_dispatch' || needs.policy.outputs.auto-sync != 'false'",
-    );
   });
 
   it.each([
@@ -1931,6 +1980,39 @@ describe('standards sync workflow policy', () => {
     '0.12.0',
   ])('accepts installed CLI version %s without a policy file', (version) => {
     expect(runWorkflowVersionGuard(version).status).toBe(0);
+  });
+});
+
+describe('standards sync workflow trigger policy', () => {
+  it.each([
+    ['schedule on the default branch', 'schedule', 'refs/heads/main', true],
+    [
+      'manual dispatch on the default branch',
+      'workflow_dispatch',
+      'refs/heads/main',
+      false,
+    ],
+    [
+      'manual dispatch on a non-default branch',
+      'workflow_dispatch',
+      'refs/heads/feature',
+      false,
+    ],
+  ])('allows a secret-bearing run for %s: %s', (_label, eventName, ref, expected) => {
+    const parsed: unknown = parseYaml(readFileSync(SYNC_WORKFLOW, 'utf8'));
+    if (
+      typeof parsed !== 'object' ||
+      parsed === null ||
+      !('on' in parsed) ||
+      typeof parsed.on !== 'object' ||
+      parsed.on === null
+    ) {
+      throw new Error('Standards sync workflow must declare event triggers');
+    }
+    const eventIsConfigured = eventName in parsed.on;
+    const isDefaultBranch = ref === 'refs/heads/main';
+
+    expect(eventIsConfigured && isDefaultBranch).toBe(expected);
   });
 });
 

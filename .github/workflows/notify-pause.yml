@@ -71,5 +71,5 @@ jobs:
             -H "X-Click: ${PAUSE_URL}" \
             -H "X-Priority: high" \
             -H "X-Tags: question" \
-            --data "$PAUSE_TITLE" \
+            --data-raw "$PAUSE_TITLE" \
             "$NTFY_TOPIC_URL"

@@ -90,10 +90,16 @@ Setup is host-level, not per repo: every repo already carries the protocol (the 
 
 Tracking `main` weekly is the default and the recommended mode for repos whose owner also follows this template. Consumers that want to control *when* standards change instead — typical for repos you adopt these standards into but don't co-evolve with this one — get both levers in a small checked-in policy file, `sync-standards.local.json`, owned by the consumer repo (the canonical workflow file is read-only, but the policy next to it is versioned and reviewable like any other configuration). Both fields are optional:
 
-- **`"autoSync": false`** — skip the weekly scheduled run. Manual `workflow_dispatch` (and `bun standards sync` locally) still works and becomes the deliberate way to pull updates.
+- **`"autoSync": false`** — skip the weekly scheduled run. Run `bun standards sync` locally when you deliberately want to pull updates; the secret-bearing sync workflow is schedule-only so an arbitrary branch or tag cannot supply the workflow code that receives consumer credentials.
 - **`"ref": "v0.7.0"`** — a non-empty single-line tag, branch, or full commit sha to sync from instead of `main`. The workflow and the CLI (`init`/`sync` without an explicit `--ref`) both honor it, so scheduled and local syncs share one policy source.
 
 Every CLI release already creates a `vX.Y.Z` tag and GitHub Release, so released versions are natural pin points — no separate content-release process exists or is needed. A pinned repo updates by moving the pin (or running `sync --ref <newer>`) and reviewing the resulting PR like a dependency upgrade. The lock always records the exact upstream commit synced, so `check` works identically in both modes.
+
+### Breaking migration to squash-only merging
+
+The canonical GitHub settings now own `allow_merge_commit`, `allow_rebase_merge`, and `allow_squash_merge`, and enforce squash as the only merge method in the default-branch ruleset. A consumer whose repo-owned `.github/settings.local.json` previously declared any of those three repository keys must remove only those keys during the hard cutover; preserving them would be an attempted override of newly canonical policy.
+
+After the standards-sync pull request opens, check out its branch, remove those local keys if present, and run `bun standards github --apply` with admin auth from that branch before merging. Commit and push any local-seam cleanup, then wait for or rerun the isolated GitHub settings gate. Merge the sync pull request only after every required check passes. The live settings must converge before merge because the new declaration deliberately makes its own pull request fail closed on the old merge policy.
 
 ### Breaking migration to 0.7.0
 
