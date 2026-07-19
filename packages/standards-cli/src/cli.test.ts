@@ -43,6 +43,8 @@ const SOPS_VERSION_ASSIGNMENT = /version=v\d+\.\d+\.\d+/gu;
 const SOPS_CHECKSUM_ASSIGNMENT = /sha=[a-f0-9]{64}/gu;
 const ACTIONLINT_ASSET_PATTERN =
   /actionlint_\$\{version\}_linux_\$\{arch\}\.tar\.gz/u;
+const JUST_ASSET_PATTERN =
+  /just-\$\{version\}-\$\{arch\}-unknown-linux-musl\.tar\.gz/u;
 const PINNED_STANDARDS_VERSION_PATTERN =
   /standards_version=(?<version>\d+\.\d+\.\d+)/u;
 const MINIMUM_STANDARDS_VERSION_PATTERN =
@@ -1748,6 +1750,17 @@ describe('canonical standards workflow settings security', () => {
     expect(lintStep).toContain('sha256sum --check --quiet');
     expect(lintStep).not.toContain('download-actionlint.bash');
     expect(lintStep).not.toContain(' latest ');
+  });
+
+  it('pins and verifies architecture-specific just release assets', () => {
+    const justStep = yamlStep(STANDARDS_WORKFLOW, 'Install pinned just');
+    expect(justStep).toContain('version=1.57.0');
+    expect(justStep.match(SOPS_CHECKSUM_ASSIGNMENT)).toHaveLength(2);
+    expect(justStep).toMatch(JUST_ASSET_PATTERN);
+    expect(justStep).toContain('sha256sum --check --quiet');
+    expect(justStep).toContain('GITHUB_PATH');
+    expect(justStep).not.toContain('setup-just');
+    expect(justStep).not.toContain(' latest ');
   });
 
   it('keeps the required check name fail-closed over both isolated jobs', () => {
