@@ -15,10 +15,10 @@ inputs:
     description: Environment variable to export for later workflow steps
     required: true
   fallback-value:
-    description: Value to export when fallback mode handles an unavailable secret
+    description: Value to export when fallback mode handles an unresolvable secret
     required: false
   failure-mode:
-    description: Whether an unavailable or invalid secret fails or uses fallback-value
+    description: Whether an unresolvable secret (missing key or file, SOPS setup failure, decrypt or validation failure) fails or uses fallback-value
     required: false
     default: fail
 
@@ -52,37 +52,42 @@ runs:
           exit 1
         fi
 
-        use_fallback=false
+        reason=""
         if [ -z "$SOPS_AGE_KEY" ]; then
           reason="SOPS_AGE_KEY is not configured"
-          use_fallback=true
         elif [ ! -f "$SOPS_SECRET_FILE" ]; then
           reason="$SOPS_SECRET_FILE does not exist"
-          use_fallback=true
         else
           version=v3.13.2
           case "$(uname -m)" in
             x86_64) arch=amd64 sha=154dfe4cd70554bdd82b98e4cd4acf191d43d01ead6f00a73477aa44c4ac42ef ;;
             aarch64) arch=arm64 sha=78abf2e15c86250a1553ae6f53aba96be6b2a8126f160b1534959add3467ad76 ;;
-            *)
-              echo "::error::No pinned SOPS binary for runner architecture $(uname -m)"
-              exit 1
-              ;;
+            *) reason="No pinned SOPS binary for runner architecture $(uname -m)" ;;
           esac
           sops="$RUNNER_TEMP/sops"
-          curl -sfLo "$sops" "https://github.com/getsops/sops/releases/download/${version}/sops-${version}.linux.${arch}"
-          echo "$sha  $sops" | sha256sum --check --quiet
-          chmod +x "$sops"
-          if decrypted_json=$("$sops" decrypt --output-type json "$SOPS_SECRET_FILE") \
-            && extracted=$(jq -er --arg key "$SOPS_SECRET_KEY" '.ci[$key] | select(type == "string" and length > 0 and (contains("\n") | not) and (contains("\r") | not))' <<< "$decrypted_json"); then
-            value="$extracted"
-          else
-            reason="ci.$SOPS_SECRET_KEY is not a readable non-empty single-line string in $SOPS_SECRET_FILE"
-            use_fallback=true
+          if [ -z "$reason" ] && ! curl -sfLo "$sops" "https://github.com/getsops/sops/releases/download/${version}/sops-${version}.linux.${arch}"; then
+            rm -f "$sops"
+            reason="Downloading SOPS ${version} for linux/${arch} failed"
+          fi
+          if [ -z "$reason" ] && ! echo "$sha  $sops" | sha256sum --check --quiet; then
+            rm -f "$sops"
+            reason="Downloaded SOPS binary does not match the pinned checksum"
+          fi
+          if [ -z "$reason" ]; then
+            chmod +x "$sops"
+            if ! decrypted_json=$("$sops" decrypt --output-type json "$SOPS_SECRET_FILE"); then
+              reason="Decrypting $SOPS_SECRET_FILE with SOPS failed"
+            elif extracted=$(jq -er --arg key "$SOPS_SECRET_KEY" '.ci[$key] | select(type == "string" and length > 0 and (contains("\n") | not) and (contains("\r") | not))' <<< "$decrypted_json"); then
+              value="$extracted"
+            else
+              reason="ci.$SOPS_SECRET_KEY is not a readable non-empty single-line string in $SOPS_SECRET_FILE"
+            fi
           fi
         fi
 
-        if [ "$use_fallback" = true ]; then
+        use_fallback=false
+        if [ -n "$reason" ]; then
+          use_fallback=true
           if [ "$SOPS_FAILURE_MODE" = fail ]; then
             echo "::error::$reason"
             exit 1
@@ -95,6 +100,6 @@ runs:
           exit 1
         fi
 
-        echo "::add-mask::$value"
+        printf '%s\n' "::add-mask::$value"
         printf '%s=%s\n' "$SOPS_ENV_NAME" "$value" >> "$GITHUB_ENV"
         printf 'used-fallback=%s\n' "$use_fallback" >> "$GITHUB_OUTPUT"
