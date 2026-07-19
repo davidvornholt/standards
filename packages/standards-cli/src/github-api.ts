@@ -21,6 +21,8 @@ const GITHUB_REMOTE_PATTERN =
 export const HTTP_OK = 200;
 export const HTTP_CREATED = 201;
 export const HTTP_NO_CONTENT = 204;
+export const HTTP_UNAUTHORIZED = 401;
+export const HTTP_FORBIDDEN = 403;
 
 export const CANONICAL_SETTINGS_FILE = '.github/settings.json';
 export const LOCAL_SETTINGS_FILE = '.github/settings.local.json';

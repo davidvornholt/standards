@@ -1522,7 +1522,7 @@ describe('packed artifact distribution', () => {
 });
 
 describe('canonical standards workflow security boundaries', () => {
-  it('isolates the admin-read token from repository-controlled executable code', () => {
+  it('isolates the settings-read token from repository-controlled executable code', () => {
     const workflow = readFileSync(STANDARDS_WORKFLOW, 'utf8');
     const installStep = yamlStep(
       STANDARDS_WORKFLOW,
@@ -1559,6 +1559,21 @@ describe('canonical standards workflow security boundaries', () => {
     expect(settingsStep).toContain(`[[ "$extracted" != *$'\\n'* ]]`);
     expect(settingsStep).toContain(`[[ "$extracted" != *$'\\r'* ]]`);
     expect(settingsStep).toContain('unset SOPS_AGE_KEY FALLBACK_TOKEN');
+  });
+
+  it('grants label reads only to the isolated settings job', () => {
+    const parsedWorkflow = parseYaml(
+      readFileSync(STANDARDS_WORKFLOW, 'utf8'),
+    ) as { readonly permissions?: unknown };
+    const jobs = yamlJobs(STANDARDS_WORKFLOW);
+
+    expect(parsedWorkflow.permissions).toEqual({ contents: 'read' });
+    expect(jobs.quality.permissions).toBeUndefined();
+    expect(jobs.check.permissions).toBeUndefined();
+    expect(jobs['github-settings'].permissions).toEqual({
+      contents: 'read',
+      issues: 'read',
+    });
   });
 
   it('pins and verifies architecture-specific actionlint release assets', () => {

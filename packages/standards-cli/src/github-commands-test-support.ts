@@ -11,16 +11,24 @@ export const OPT_OUT_NOTICE =
 // distinguishes plan-gated stripping from skipping repository settings.
 const canonical = JSON.parse(
   '{"repository":{"allow_auto_merge":true,"delete_branch_on_merge":true},"rulesets":[{"name":"Protect main","target":"branch","enforcement":"active","rules":[]}]}',
-) as unknown;
+) as Readonly<Record<string, unknown>>;
 
 export const createConsumer = (
-  options: { readonly optOut?: boolean; readonly origin?: boolean } = {},
+  options: {
+    readonly labels?: ReadonlyArray<{
+      readonly color: string;
+      readonly description: string;
+      readonly name: string;
+    }>;
+    readonly optOut?: boolean;
+    readonly origin?: boolean;
+  } = {},
 ): string => {
   const consumer = mkdtempSync(join(tmpdir(), 'github-commands-'));
   mkdirSync(join(consumer, '.github'));
   writeFileSync(
     join(consumer, '.github/settings.json'),
-    JSON.stringify(canonical),
+    JSON.stringify({ ...canonical, labels: options.labels ?? [] }),
   );
   writeFileSync(
     join(consumer, '.github/settings.local.json'),

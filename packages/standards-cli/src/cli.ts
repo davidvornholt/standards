@@ -967,7 +967,7 @@ const runCheckCommand = async (consumer: string): Promise<boolean> => {
 };
 
 // The canonical workflow sets this only for its unprivileged quality job,
-// where a separate isolated job runs the same live check with the admin-read
+// where a separate isolated job runs the same live check with the settings-read
 // token. Absent that exact workflow seam, local and explicit checks remain
 // fail-closed.
 const runGithubCheckGate = (consumer: string): Promise<boolean> => {

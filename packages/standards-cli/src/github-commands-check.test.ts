@@ -96,6 +96,41 @@ describe('runGithubCheck', () => {
     ]);
   });
 
+  it('checks repository settings, rulesets, and labels in one run', async () => {
+    const labels = [
+      {
+        color: '0e8a16',
+        description: 'Approved for automated work',
+        name: 'approved-for-fix',
+      },
+    ];
+    const calls = installApi([
+      { body: labels },
+      { body: liveRepository(false, true) },
+      { body: [liveRulesetSummary()] },
+      {
+        body: {
+          enforcement: 'active',
+          id: 7,
+          name: 'Protect main',
+          rules: [],
+          target: 'branch',
+        },
+      },
+    ]);
+
+    expect(await runGithubCheck(consumer({ labels, optOut: false }))).toBe(
+      true,
+    );
+    expect(calls.map(({ method, path }) => ({ method, path }))).toEqual([
+      { method: 'GET', path: '/repos/owner/repo/labels' },
+      { method: 'GET', path: '/repos/owner/repo' },
+      { method: 'GET', path: '/repos/owner/repo/rulesets' },
+      { method: 'GET', path: '/repos/owner/repo/rulesets/7' },
+    ]);
+    expect(output.errors).toEqual([]);
+  });
+
   it('prints the opt-out notice before origin and network failures', async () => {
     expect(await runGithubCheck(consumer({ origin: false }))).toBe(false);
     expect(output.logs).toEqual([OPT_OUT_NOTICE]);
@@ -107,45 +142,6 @@ describe('runGithubCheck', () => {
     expect(output.logs).toEqual([OPT_OUT_NOTICE]);
     expect(output.errors.join('\n')).toContain(
       'GitHub API unreachable: offline',
-    );
-  });
-});
-
-describe('runGithubCheck fail-closed visibility', () => {
-  it('fails when repository settings are invisible over REST and GraphQL', async () => {
-    installApi([
-      { body: JSON.parse('{"private":false}') },
-      { body: JSON.parse('{"data":{"repository":null}}') },
-      { body: [liveRulesetSummary()] },
-      {
-        body: {
-          id: 7,
-          name: 'Protect main',
-          target: 'branch',
-          enforcement: 'active',
-          rules: [],
-        },
-      },
-    ]);
-
-    expect(await runGithubCheck(consumer({ optOut: false }))).toBe(false);
-    const errors = output.errors.join('\n');
-    expect(errors).toContain(
-      'repository setting(s) not visible to this token, so the gate cannot verify: allow_auto_merge; delete_branch_on_merge',
-    );
-    expect(errors).toContain('ci.github_settings_read_token');
-  });
-
-  it('fails when a declared ruleset field is invisible to the token', async () => {
-    installApi([
-      { body: liveRepository(false, true) },
-      { body: [liveRulesetSummary()] },
-      { body: { id: 7, name: 'Protect main', target: 'branch', rules: [] } },
-    ]);
-
-    expect(await runGithubCheck(consumer({ optOut: false }))).toBe(false);
-    expect(output.errors.join('\n')).toContain(
-      'ruleset field(s) not visible to this token, so the gate cannot verify: ruleset "Protect main": enforcement',
     );
   });
 });

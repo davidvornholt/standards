@@ -1,8 +1,8 @@
 // Live issue-label reading, drift, and convergence. Labels are an additive
 // floor: every declared label must exist with the declared color and
 // description; undeclared live labels (GitHub defaults, ad-hoc triage labels)
-// are ignored. Any token that can read the repository can verify labels, so
-// unlike merge settings there are no unverifiable states.
+// are ignored. Private-repository reads require Issues read (or Pull requests
+// read), and an API denial fails the settings check closed.
 
 import { apiError, HTTP_CREATED, HTTP_OK, request } from './github-api';
 import { labelIdentity } from './github-label-identity';

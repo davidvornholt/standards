@@ -27,3 +27,7 @@ Under the frozen non-hostile-consumer threat model, the installed `@davidvornhol
 ## TOOLING-001: Root-owned Biome pin
 
 `@biomejs/biome` is pinned only at the repository root (and `template/package.json` for consumers); workspaces deliberately do not declare it. Workspace lint scripts resolve the root-hoisted Biome executable, while `packages/standards-cli/src/template-biome.test.ts` invokes that executable by its root path; a missing install fails at invocation. Reviews must not request per-workspace `@biomejs/biome` declarations; the pin moves with the root/template dependency-hold policy.
+
+## GITHUB-SETTINGS-001: One read-only settings PAT
+
+The isolated GitHub settings job uses one repository-scoped fine-grained PAT with read-only Administration and Issues access. Issues read exposes private issue content beyond the declared-label metadata the checker needs, but that read-only expansion is an accepted tradeoff to keep one credential route instead of adding a second token-selection mechanism. The acceptance depends on the PAT remaining repository-scoped, SOPS-encrypted, isolated from repository-controlled executable code, and free of write permissions. A private-repository probe on PR #94 confirmed that an Administration-plus-Metadata PAT can read merge settings through GraphQL but receives `FORBIDDEN` for `repository.labels`, so GraphQL does not provide a Metadata-only label path; revisit this decision if GitHub changes that permission boundary.
