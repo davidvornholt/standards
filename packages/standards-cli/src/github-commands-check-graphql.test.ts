@@ -55,7 +55,7 @@ describe('runGithubCheck GraphQL merge-settings fallback', () => {
       { body: restHidden },
       {
         body: JSON.parse(
-          '{"data":{"repository":{"autoMergeAllowed":true,"deleteBranchOnMerge":true}}}',
+          '{"data":{"repository":{"autoMergeAllowed":true,"mergeCommitAllowed":false,"rebaseMergeAllowed":false,"squashMergeAllowed":true,"deleteBranchOnMerge":true}}}',
         ),
       },
       { body: [liveRulesetSummary()] },
@@ -74,7 +74,7 @@ describe('runGithubCheck GraphQL merge-settings fallback', () => {
       { body: restHidden },
       {
         body: JSON.parse(
-          '{"data":{"repository":{"autoMergeAllowed":false,"deleteBranchOnMerge":true}}}',
+          '{"data":{"repository":{"autoMergeAllowed":false,"mergeCommitAllowed":false,"rebaseMergeAllowed":false,"squashMergeAllowed":true,"deleteBranchOnMerge":true}}}',
         ),
       },
       { body: [liveRulesetSummary()] },

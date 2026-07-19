@@ -138,7 +138,7 @@ describe('runGithubCheck fail-closed visibility', () => {
     expect(await runGithubCheck(consumer({ optOut: false }))).toBe(false);
     const errors = output.errors.join('\n');
     expect(errors).toContain(
-      'repository setting(s) not visible to this token, so the gate cannot verify: allow_auto_merge; delete_branch_on_merge',
+      'repository setting(s) not visible to this token, so the gate cannot verify: allow_auto_merge; allow_merge_commit; allow_rebase_merge; allow_squash_merge; delete_branch_on_merge',
     );
     expect(errors).toContain('ci.github_settings_read_token');
   });

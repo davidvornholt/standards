@@ -7,10 +7,11 @@ import { HTTP_OK } from './github-api';
 export const OPT_OUT_NOTICE =
   'standards github: rulesets are declared unenforceable on this GitHub plan (.github/settings.local.json "rulesetEnforcement"); the default branch is NOT protected, and plan-gated repository settings ("allow_auto_merge") are skipped. After upgrading the plan, remove the declaration, then run `bun standards github --apply`.';
 
-// allow_auto_merge is plan-gated; delete_branch_on_merge is not, so the pair
-// distinguishes plan-gated stripping from skipping repository settings.
+// allow_auto_merge is plan-gated; the remaining merge settings are not, so
+// this declaration distinguishes plan-gated stripping from skipping all
+// repository settings.
 const canonical = JSON.parse(
-  '{"repository":{"allow_auto_merge":true,"delete_branch_on_merge":true},"rulesets":[{"name":"Protect main","target":"branch","enforcement":"active","rules":[]}]}',
+  '{"repository":{"allow_auto_merge":true,"allow_merge_commit":false,"allow_rebase_merge":false,"allow_squash_merge":true,"delete_branch_on_merge":true},"rulesets":[{"name":"Protect main","target":"branch","enforcement":"active","rules":[]}]}',
 ) as Readonly<Record<string, unknown>>;
 
 export const createConsumer = (
@@ -66,7 +67,7 @@ export const liveRepository = (
   deleteBranchOnMerge = true,
 ): Readonly<Record<string, unknown>> =>
   JSON.parse(
-    `{"private":${String(isPrivate)},"allow_auto_merge":${String(allowAutoMerge)},"delete_branch_on_merge":${String(deleteBranchOnMerge)}}`,
+    `{"private":${String(isPrivate)},"allow_auto_merge":${String(allowAutoMerge)},"allow_merge_commit":false,"allow_rebase_merge":false,"allow_squash_merge":true,"delete_branch_on_merge":${String(deleteBranchOnMerge)}}`,
   ) as Readonly<Record<string, unknown>>;
 
 export const declaredPatchBody = (
@@ -74,8 +75,8 @@ export const declaredPatchBody = (
 ): Readonly<Record<string, unknown>> =>
   JSON.parse(
     withPlanGated
-      ? '{"allow_auto_merge":true,"delete_branch_on_merge":true}'
-      : '{"delete_branch_on_merge":true}',
+      ? '{"allow_auto_merge":true,"allow_merge_commit":false,"allow_rebase_merge":false,"allow_squash_merge":true,"delete_branch_on_merge":true}'
+      : '{"allow_merge_commit":false,"allow_rebase_merge":false,"allow_squash_merge":true,"delete_branch_on_merge":true}',
   ) as Readonly<Record<string, unknown>>;
 
 export const liveRulesetSummary = (): Readonly<Record<string, unknown>> =>

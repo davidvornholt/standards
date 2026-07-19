@@ -47,6 +47,7 @@ const PINNED_STANDARDS_VERSION_PATTERN =
   /standards_version=(?<version>\d+\.\d+\.\d+)/u;
 const MINIMUM_STANDARDS_VERSION_PATTERN =
   /MINIMUM_STANDARDS_VERSION: "(?<version>\d+\.\d+\.\d+)"/u;
+const FULL_COMMIT_ACTION_REF = /^[^@\s]+@[a-f0-9]{40}$/u;
 const STD_PATHS: ReadonlyArray<string> = [
   'sync-standards.json',
   '.github/dependabot.base.yml',
@@ -190,6 +191,26 @@ const canonicalWorkflowPaths = (): ReadonlyArray<string> => {
       path.endsWith('.yml'),
   );
 };
+
+const externalActionUses = (path: string): ReadonlyArray<string> =>
+  Object.values(yamlJobs(path)).flatMap((job) => {
+    const { steps } = job;
+    if (!Array.isArray(steps)) {
+      return [];
+    }
+    return steps.flatMap((step) => {
+      if (
+        typeof step !== 'object' ||
+        step === null ||
+        !('uses' in step) ||
+        typeof step.uses !== 'string' ||
+        step.uses.startsWith('./')
+      ) {
+        return [];
+      }
+      return [step.uses];
+    });
+  });
 
 const runWorkflowVersionGuard = (version: string): RunResult => {
   const fixture = mkTmp('sync-version-');
@@ -1526,6 +1547,53 @@ describe('packed artifact distribution', () => {
 });
 
 describe('canonical standards workflow security boundaries', () => {
+  it('declares squash as the only supported merge method at both enforcement layers', () => {
+    const declaration = JSON.parse(
+      readFileSync(join(ACTUAL_UPSTREAM, '.github/settings.json'), 'utf8'),
+    ) as {
+      readonly repository: Readonly<Record<string, unknown>>;
+      readonly rulesets: ReadonlyArray<Readonly<Record<string, unknown>>>;
+    };
+    const protectMain = declaration.rulesets.find(
+      (ruleset) => ruleset.name === 'Protect main',
+    );
+    const rules = Array.isArray(protectMain?.rules)
+      ? protectMain.rules.filter(
+          (rule): rule is Readonly<Record<string, unknown>> =>
+            typeof rule === 'object' && rule !== null,
+        )
+      : [];
+    const pullRequest = rules.find((rule) => rule.type === 'pull_request');
+
+    expect(declaration.repository).toMatchObject({
+      allow_merge_commit: false,
+      allow_rebase_merge: false,
+      allow_squash_merge: true,
+    });
+    expect(pullRequest?.parameters).toMatchObject({
+      allowed_merge_methods: ['squash'],
+    });
+  });
+
+  it('pins every external action in secret-bearing canonical workflows to a full commit', () => {
+    const uses = [
+      ...externalActionUses(SYNC_WORKFLOW),
+      ...externalActionUses(NOTIFY_WORKFLOW),
+    ];
+
+    expect(uses).toEqual([
+      'actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0',
+      'actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0',
+      'oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6',
+      'actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0',
+    ]);
+    for (const use of uses) {
+      expect(use).toMatch(FULL_COMMIT_ACTION_REF);
+    }
+  });
+});
+
+describe('canonical standards workflow settings security', () => {
   it('isolates the settings-read token from repository-controlled executable code', () => {
     const workflow = readFileSync(STANDARDS_WORKFLOW, 'utf8');
     const installStep = yamlStep(
@@ -1713,7 +1781,7 @@ describe('canonical SOPS secret action wiring', () => {
 });
 
 describe('standards sync workflow ordering', () => {
-  it('stops a clean mirror before token resolution', () => {
+  it('detects a clean mirror without opening a pull request', () => {
     const fixture = mkTmp('sync-clean-');
     const outputPath = join(mkTmp('sync-output-'), 'github-output');
     expect(runExecutable('git', fixture, ['init', '--quiet']).status).toBe(0);
@@ -1724,27 +1792,42 @@ describe('standards sync workflow ordering', () => {
       ['-euo', 'pipefail', '-c', workflowRunScript('Detect mirror changes')],
       { GITHUB_OUTPUT: outputPath },
     );
-    const workflow = readFileSync(SYNC_WORKFLOW, 'utf8');
-    const detectIndex = workflow.indexOf('- name: Detect mirror changes');
-    const resolveIndex = workflow.indexOf('- name: Resolve sync PR token');
-    const resolveStep = yamlStep(SYNC_WORKFLOW, 'Resolve sync PR token');
-    const parsedResolveStep: unknown = parseYaml(resolveStep);
-    if (
-      !Array.isArray(parsedResolveStep) ||
-      parsedResolveStep.length !== 1 ||
-      typeof parsedResolveStep[0] !== 'object' ||
-      parsedResolveStep[0] === null
-    ) {
-      throw new Error('Resolve sync PR token must parse as one YAML step');
-    }
-    const resolveGuard = (parsedResolveStep[0] as Record<string, unknown>).if;
 
     expect(result.status).toBe(0);
     expect(readFileSync(outputPath, 'utf8')).toBe('changed=false\n');
     expect(result.stdout).toContain('Already in sync');
-    expect(detectIndex).toBeGreaterThan(-1);
-    expect(resolveIndex).toBeGreaterThan(detectIndex);
-    expect(resolveGuard).toBe("steps.mirror.outputs.changed == 'true'");
+  });
+
+  it('resolves the token from the trusted action before sync and never executes post-sync action content', () => {
+    const jobs = yamlJobs(SYNC_WORKFLOW);
+    const { steps } = jobs.sync;
+    if (!Array.isArray(steps)) {
+      throw new Error('Standards sync job must contain steps');
+    }
+    const stepNames = steps.map((step) =>
+      typeof step === 'object' && step !== null && 'name' in step
+        ? step.name
+        : null,
+    );
+    const resolveIndex = stepNames.indexOf('Resolve sync PR token');
+    const syncIndex = stepNames.indexOf('Sync canonical files from upstream');
+    const localActionIndexes = steps.flatMap((step, index) =>
+      typeof step === 'object' &&
+      step !== null &&
+      'uses' in step &&
+      step.uses === './.github/actions/sops-secret'
+        ? [index]
+        : [],
+    );
+    const syncScript = workflowRunScript('Sync canonical files from upstream');
+
+    expect(resolveIndex).toBeGreaterThan(-1);
+    expect(syncIndex).toBeGreaterThan(resolveIndex);
+    expect(localActionIndexes).toEqual([resolveIndex]);
+    expect(localActionIndexes.every((index) => index < syncIndex)).toBe(true);
+    expect(
+      syncScript.match(/env -u GH_TOKEN bun standards sync/gu),
+    ).toHaveLength(2);
   });
 });
 
