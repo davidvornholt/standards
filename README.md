@@ -135,7 +135,7 @@ The version in `packages/standards-cli/package.json` is the release declaration.
 
 ### Known limitation
 
-`check` detects **local tampering** with canonical files, not that **upstream has moved on**. Nothing local encodes "the template changed"; a repo only learns of upstream changes by running `sync`. The `Standards sync` workflow closes this for repos tracking `main`: it runs `sync` weekly (and on demand) and opens a PR when the mirror changes, so upstream updates surface as reviewable PRs instead of silent drift. A repo pinned to a ref has opted out of that signal by design — staying current becomes its own responsibility, like any pinned dependency.
+`check` detects **local tampering** with canonical files, not that **upstream has moved on**. Nothing local encodes "the template changed"; a repo only learns of upstream changes by running `sync`. The `Standards sync` workflow closes this for repos tracking `main`: it runs `sync` weekly and opens a PR when the mirror changes, so upstream updates surface as reviewable PRs instead of silent drift. Run `bun standards sync` locally for an on-demand update. A repo pinned to a ref has opted out of the weekly signal by design — staying current becomes its own responsibility, like any pinned dependency.
 
 ## Non-goals
 

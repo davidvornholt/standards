@@ -38,6 +38,7 @@ const NOTIFY_WORKFLOW = join(
   ACTUAL_UPSTREAM,
   '.github/workflows/notify-pause.yml',
 );
+const README = join(ACTUAL_UPSTREAM, 'README.md');
 const SYNC_MANIFEST = join(ACTUAL_UPSTREAM, 'sync-standards.json');
 const SOPS_VERSION_ASSIGNMENT = /version=v\d+\.\d+\.\d+/gu;
 const SOPS_CHECKSUM_ASSIGNMENT = /sha=[a-f0-9]{64}/gu;
@@ -192,12 +193,18 @@ const canonicalWorkflowPaths = (): ReadonlyArray<string> => {
   );
 };
 
-const productionWorkflowPaths = (): ReadonlyArray<string> =>
-  readdirSync(join(ACTUAL_UPSTREAM, '.github/workflows'), {
+const productionWorkflowPaths = (
+  workflowDirectory = join(ACTUAL_UPSTREAM, '.github/workflows'),
+): ReadonlyArray<string> =>
+  readdirSync(workflowDirectory, {
     withFileTypes: true,
   })
-    .filter((entry) => entry.isFile() && entry.name.endsWith('.yml'))
-    .map((entry) => join(ACTUAL_UPSTREAM, '.github/workflows', entry.name));
+    .filter(
+      (entry) =>
+        entry.isFile() &&
+        (entry.name.endsWith('.yml') || entry.name.endsWith('.yaml')),
+    )
+    .map((entry) => join(workflowDirectory, entry.name));
 
 const externalActionUses = (path: string): ReadonlyArray<string> =>
   Object.values(yamlJobs(path)).flatMap((job) => {
@@ -225,6 +232,20 @@ const externalActionUses = (path: string): ReadonlyArray<string> =>
       }),
     ];
   });
+
+const workflowTriggerNames = (path: string): ReadonlyArray<string> => {
+  const parsedWorkflow: unknown = parseYaml(readFileSync(path, 'utf8'));
+  if (
+    typeof parsedWorkflow !== 'object' ||
+    parsedWorkflow === null ||
+    !('on' in parsedWorkflow) ||
+    typeof parsedWorkflow.on !== 'object' ||
+    parsedWorkflow.on === null
+  ) {
+    throw new Error(`${path} must declare event triggers`);
+  }
+  return Object.keys(parsedWorkflow.on);
+};
 
 const runWorkflowVersionGuard = (version: string): RunResult => {
   const fixture = mkTmp('sync-version-');
@@ -1627,6 +1648,26 @@ describe('canonical standards workflow security boundaries', () => {
     expect(externalActionUses(path)).toHaveLength(1);
     expect(externalActionUses(path)[0]).not.toMatch(FULL_COMMIT_ACTION_REF);
   });
+
+  it('includes .yaml workflows in the production action-pin ratchet', () => {
+    const fixture = mkTmp('workflow-action-pin-yaml-');
+    write(
+      fixture,
+      'release.yaml',
+      [
+        'jobs:',
+        '  publish:',
+        '    runs-on: ubuntu-latest',
+        '    steps:',
+        '      - uses: owner/action@v1',
+        '',
+      ].join('\n'),
+    );
+
+    const uses = productionWorkflowPaths(fixture).flatMap(externalActionUses);
+    expect(uses).toEqual(['owner/action@v1']);
+    expect(uses[0]).not.toMatch(FULL_COMMIT_ACTION_REF);
+  });
 });
 
 describe('canonical standards workflow settings security', () => {
@@ -1984,35 +2025,43 @@ describe('standards sync workflow policy', () => {
 });
 
 describe('standards sync workflow trigger policy', () => {
-  it.each([
-    ['schedule on the default branch', 'schedule', 'refs/heads/main', true],
-    [
-      'manual dispatch on the default branch',
-      'workflow_dispatch',
-      'refs/heads/main',
-      false,
-    ],
-    [
-      'manual dispatch on a non-default branch',
-      'workflow_dispatch',
-      'refs/heads/feature',
-      false,
-    ],
-  ])('allows a secret-bearing run for %s: %s', (_label, eventName, ref, expected) => {
-    const parsed: unknown = parseYaml(readFileSync(SYNC_WORKFLOW, 'utf8'));
-    if (
-      typeof parsed !== 'object' ||
-      parsed === null ||
-      !('on' in parsed) ||
-      typeof parsed.on !== 'object' ||
-      parsed.on === null
-    ) {
-      throw new Error('Standards sync workflow must declare event triggers');
-    }
-    const eventIsConfigured = eventName in parsed.on;
-    const isDefaultBranch = ref === 'refs/heads/main';
+  it('allows only the weekly schedule trigger', () => {
+    expect(workflowTriggerNames(SYNC_WORKFLOW)).toEqual(['schedule']);
+  });
 
-    expect(eventIsConfigured && isDefaultBranch).toBe(expected);
+  it.each([
+    'push',
+    'pull_request_target',
+    'workflow_dispatch',
+    'workflow_call',
+  ])('detects unsafe alternative trigger %s', (trigger) => {
+    const fixture = mkTmp('workflow-trigger-policy-');
+    const path = join(fixture, 'standards-sync.yml');
+    write(
+      fixture,
+      'standards-sync.yml',
+      [
+        'on:',
+        '  schedule:',
+        '    - cron: "0 6 * * 1"',
+        `  ${trigger}:`,
+        'jobs:',
+        '  sync:',
+        '    runs-on: ubuntu-latest',
+        '',
+      ].join('\n'),
+    );
+
+    expect(workflowTriggerNames(path)).toEqual(['schedule', trigger]);
+    expect(workflowTriggerNames(path)).not.toEqual(['schedule']);
+  });
+
+  it('documents weekly-only workflow sync and the local on-demand path', () => {
+    const readme = readFileSync(README, 'utf8');
+    expect(readme).not.toContain('weekly (and on demand)');
+    expect(readme).toContain(
+      'Run `bun standards sync` locally when you deliberately want to pull updates',
+    );
   });
 });
 
