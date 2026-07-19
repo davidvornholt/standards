@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import { parseDevEnvDocument } from './dev-env-document';
 
+const INVALID_ENTRY_COUNT = 6;
+
 describe('dev env document', () => {
   it('parses workspace-group keyed env values', () => {
     const document = parseDevEnvDocument(
@@ -50,6 +52,32 @@ describe('dev env document', () => {
     ]);
     expect(document.targets).toEqual([
       { group: 'apps', workspace: 'web', env: { NAME: 'ok' } },
+    ]);
+  });
+
+  it('rejects path-like workspace names and non-portable env names together', () => {
+    const document = parseDevEnvDocument(
+      {
+        apps: {
+          '..': { OK: 'yes' },
+          'nested/name': { OK: 'yes' },
+          '/absolute': { OK: 'yes' },
+          'with space': { OK: 'yes' },
+          web: { 'BAD=NAME': 'x', 'BAD\nINJECTED': 'x', _VALID: '' },
+        },
+      },
+      'secrets/dev.yaml',
+    );
+
+    expect(document.problems).toHaveLength(INVALID_ENTRY_COUNT);
+    expect(document.problems.join('\n')).toContain('apps...');
+    expect(document.problems.join('\n')).toContain('apps.nested/name');
+    expect(document.problems.join('\n')).toContain('apps./absolute');
+    expect(document.problems.join('\n')).toContain('apps.with space');
+    expect(document.problems.join('\n')).toContain('BAD=NAME');
+    expect(document.problems.join('\n')).toContain('BAD\\nINJECTED');
+    expect(document.targets).toEqual([
+      { group: 'apps', workspace: 'web', env: { _VALID: '' } },
     ]);
   });
 });

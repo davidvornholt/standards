@@ -1,20 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import {
-  mkdirSync,
-  mkdtempSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { planDevEnvWrites, writeDevEnvFile } from './dev-env';
+import { planDevEnvWrites } from './dev-env';
 
-const OWNER_ONLY_FILE_MODE = 0o600;
-// Reduces st_mode to its permission bits without bitwise operators.
-const PERMISSION_BITS_MODULUS = 0o1000;
+const INVALID_WORKSPACE_COUNT = 4;
 
 const buildConsumer = (options?: {
   readonly gitignore?: string | null;
@@ -45,7 +36,7 @@ describe('dev env plan', () => {
       expect(plan.writes.map((write) => write.rel)).toEqual([
         'apps/web/.env.local',
       ]);
-      expect(plan.writes[0]?.content).toContain('AUTH_SECRET=dev-secret');
+      expect(plan.writes[0]?.content).toContain('AUTH_SECRET="dev-secret"');
     } finally {
       cleanup(consumer);
     }
@@ -105,26 +96,21 @@ describe('dev env plan', () => {
       cleanup(consumer);
     }
   });
-});
 
-describe('dev env writes', () => {
-  it('writes owner-only files and overwrites previous generations', async () => {
+  it('does not plan path-like workspace names', () => {
     const consumer = buildConsumer();
     try {
-      const dest = join(consumer, 'apps/web/.env.local');
-      await writeDevEnvFile(consumer, {
-        rel: 'apps/web/.env.local',
-        content: 'STALE=1\n',
-      });
-      await writeDevEnvFile(consumer, {
-        rel: 'apps/web/.env.local',
-        content: 'FRESH=1\n',
+      const plan = planDevEnvWrites(consumer, {
+        apps: {
+          '..': { OK: 'yes' },
+          'nested/name': { OK: 'yes' },
+          '/absolute': { OK: 'yes' },
+          'with space': { OK: 'yes' },
+        },
       });
 
-      expect(await readFile(dest, 'utf8')).toBe('FRESH=1\n');
-      expect(statSync(dest).mode % PERMISSION_BITS_MODULUS).toBe(
-        OWNER_ONLY_FILE_MODE,
-      );
+      expect(plan.writes).toEqual([]);
+      expect(plan.problems).toHaveLength(INVALID_WORKSPACE_COUNT);
     } finally {
       cleanup(consumer);
     }

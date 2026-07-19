@@ -1,13 +1,15 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { chmod, mkdir, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
+import {
+  type DevEnvWrite,
+  devEnvDestinationProblems,
+} from './dev-env-destination';
 import { parseDevEnvDocument } from './dev-env-document';
 import { renderDotenv } from './dev-env-dotenv';
+import { writeDevEnvFiles } from './dev-env-transaction';
 
 export const DEV_SECRETS_FILE = 'secrets/dev.yaml';
-
-const OWNER_ONLY_FILE_MODE = 0o600;
 
 const SOPS_ARGS = ['--decrypt', '--output-type', 'json', DEV_SECRETS_FILE];
 
@@ -77,11 +79,6 @@ const gitIgnoreProblem = (consumer: string, rel: string): string | null => {
   return `cannot verify ${rel} is gitignored (git check-ignore exited ${result.status})`;
 };
 
-export type DevEnvWrite = {
-  readonly rel: string;
-  readonly content: string;
-};
-
 export type DevEnvPlan = {
   readonly writes: ReadonlyArray<DevEnvWrite>;
   readonly problems: ReadonlyArray<string>;
@@ -120,17 +117,6 @@ export const planDevEnvWrites = (
   return { writes, problems };
 };
 
-export const writeDevEnvFile = async (
-  consumer: string,
-  write: DevEnvWrite,
-): Promise<void> => {
-  const dest = join(consumer, write.rel);
-  await mkdir(dirname(dest), { recursive: true });
-  await writeFile(dest, write.content, { mode: OWNER_ONLY_FILE_MODE });
-  // The mode option only applies on creation; chmod covers regeneration.
-  await chmod(dest, OWNER_ONLY_FILE_MODE);
-};
-
 export const runDevEnv = async (consumer: string): Promise<boolean> => {
   if (!existsSync(join(consumer, DEV_SECRETS_FILE))) {
     console.error(
@@ -144,14 +130,23 @@ export const runDevEnv = async (consumer: string): Promise<boolean> => {
     return false;
   }
   const plan = planDevEnvWrites(consumer, decrypted.value);
-  if (plan.problems.length > 0) {
-    console.error(`standards dev-env: ${plan.problems.length} problem(s):`);
-    console.error(plan.problems.map((problem) => `  - ${problem}`).join('\n'));
+  const problems = [
+    ...plan.problems,
+    ...(await devEnvDestinationProblems(consumer, plan.writes)),
+  ];
+  if (problems.length > 0) {
+    console.error(`standards dev-env: ${problems.length} problem(s):`);
+    console.error(problems.map((problem) => `  - ${problem}`).join('\n'));
     return false;
   }
-  await Promise.all(
-    plan.writes.map((write) => writeDevEnvFile(consumer, write)),
-  );
+  const generated = await writeDevEnvFiles(consumer, plan.writes);
+  if (!generated.ok) {
+    console.error('standards dev-env: generation failed:');
+    console.error(
+      generated.problems.map((problem) => `  - ${problem}`).join('\n'),
+    );
+    return false;
+  }
   for (const write of plan.writes) {
     console.log(`  wrote ${write.rel}`);
   }

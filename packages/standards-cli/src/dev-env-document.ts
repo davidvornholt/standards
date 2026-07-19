@@ -18,6 +18,13 @@ export type DevEnvDocument = {
 };
 
 const WORKSPACE_GROUPS: ReadonlyArray<string> = ['apps', 'packages'];
+const PORTABLE_ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u;
+const WORKSPACE_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
+
+type ParsedWorkspaces = {
+  readonly targets: ReadonlyArray<DevEnvTarget>;
+  readonly problems: ReadonlyArray<string>;
+};
 
 const parseWorkspaceEnv = (
   label: string,
@@ -26,13 +33,47 @@ const parseWorkspaceEnv = (
   const problems: Array<string> = [];
   const entries: Array<readonly [string, string]> = [];
   for (const [key, value] of Object.entries(raw)) {
-    if (typeof value === 'string') {
-      entries.push([key, value]);
-    } else {
+    const portableName = PORTABLE_ENV_NAME.test(key);
+    if (!portableName) {
+      problems.push(
+        `${label} env key ${JSON.stringify(key)} must be a portable environment variable name`,
+      );
+    }
+    if (typeof value !== 'string') {
       problems.push(`${label}.${key} must be a string value`);
+    } else if (portableName) {
+      entries.push([key, value]);
     }
   }
   return { env: Object.fromEntries(entries), problems };
+};
+
+const parseWorkspaces = (
+  source: string,
+  group: string,
+  workspaces: Record<string, unknown>,
+): ParsedWorkspaces => {
+  const problems: Array<string> = [];
+  const targets: Array<DevEnvTarget> = [];
+  for (const [workspace, env] of Object.entries(workspaces)) {
+    if (!WORKSPACE_NAME.test(workspace)) {
+      problems.push(
+        `${source} ${JSON.stringify(`${group}.${workspace}`)} workspace name must be one kebab-case path segment`,
+      );
+    } else if (isRecord(env)) {
+      const parsed = parseWorkspaceEnv(
+        `${source} "${group}.${workspace}"`,
+        env,
+      );
+      problems.push(...parsed.problems);
+      targets.push({ group, workspace, env: parsed.env });
+    } else {
+      problems.push(
+        `${source} "${group}.${workspace}" must map env keys to string values`,
+      );
+    }
+  }
+  return { targets, problems };
 };
 
 export const parseDevEnvDocument = (
@@ -53,20 +94,9 @@ export const parseDevEnvDocument = (
         `${source} top-level key "${group}" must be "apps" or "packages"`,
       );
     } else if (isRecord(workspaces)) {
-      for (const [workspace, env] of Object.entries(workspaces)) {
-        if (isRecord(env)) {
-          const parsed = parseWorkspaceEnv(
-            `${source} "${group}.${workspace}"`,
-            env,
-          );
-          problems.push(...parsed.problems);
-          targets.push({ group, workspace, env: parsed.env });
-        } else {
-          problems.push(
-            `${source} "${group}.${workspace}" must map env keys to string values`,
-          );
-        }
-      }
+      const parsed = parseWorkspaces(source, group, workspaces);
+      problems.push(...parsed.problems);
+      targets.push(...parsed.targets);
     } else {
       problems.push(
         `${source} "${group}" must map workspace names to env objects`,

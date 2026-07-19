@@ -1,17 +1,15 @@
 import type { EnvValues } from './dev-env-document';
 
-// Values every dotenv parser reads identically with or without quotes stay
-// plain; everything else is double-quoted with escaped backslashes, newlines,
-// and quotes.
-const PLAIN_DOTENV_VALUE = /^[A-Za-z0-9_./:@%+=,-]*$/u;
-
-const quoteDotenvValue = (value: string): string =>
-  PLAIN_DOTENV_VALUE.test(value)
-    ? value
-    : `"${value
-        .replaceAll('\\', '\\\\')
-        .replaceAll('\n', '\\n')
-        .replaceAll('"', '\\"')}"`;
+// Bun expands `$NAME` in dotenv values. A supported quote delimiter plus an
+// escaped dollar preserves secret bytes while the control-character escapes
+// round-trip through Bun's dotenv parser.
+const quoteDotenvValue = (value: string): string => {
+  const delimiter = value.includes('"') ? '`' : '"';
+  return `${delimiter}${value
+    .replaceAll('\r', '\\r')
+    .replaceAll('\n', '\\n')
+    .replaceAll('$', '\\$')}${delimiter}`;
+};
 
 export const renderDotenv = (
   sourcePath: string,

@@ -238,7 +238,6 @@
       "includes": [
         "scripts/**",
         "packages/standards-cli/src/cli.ts",
-        "packages/standards-cli/src/dev-env.ts",
         "packages/standards-cli/src/github-api.ts",
         "packages/standards-cli/src/github-commands.ts",
         "packages/standards-cli/src/poller-codex.ts",
@@ -253,6 +252,18 @@
           },
           "style": {
             "noProcessEnv": "off"
+          }
+        }
+      }
+    },
+    {
+      // CLI output is the user interface; dev-env does not read process
+      // environment variables directly.
+      "includes": ["packages/standards-cli/src/dev-env.ts"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noConsole": "off"
           }
         }
       }
