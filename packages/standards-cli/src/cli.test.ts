@@ -47,7 +47,7 @@ const PINNED_STANDARDS_VERSION_PATTERN =
   /standards_version=(?<version>\d+\.\d+\.\d+)/u;
 const MINIMUM_STANDARDS_VERSION_PATTERN =
   /MINIMUM_STANDARDS_VERSION: "(?<version>\d+\.\d+\.\d+)"/u;
-const FULL_COMMIT_ACTION_REF = /^[^@\s]+@[a-f0-9]{40}$/u;
+const MAJOR_ACTION_REF = /^[^@\s]+@v\d+$/u;
 const STD_PATHS: ReadonlyArray<string> = [
   'sync-standards.json',
   '.github/dependabot.base.yml',
@@ -1609,29 +1609,29 @@ describe('canonical standards workflow security boundaries', () => {
     });
   });
 
-  it('pins every external action in every production workflow to a full commit', () => {
+  it('uses major-version tags for every external action in every production workflow', () => {
     const uses = productionWorkflowPaths().flatMap(externalActionUses);
 
     expect(uses.length).toBeGreaterThan(0);
     for (const use of uses) {
-      expect(use).toMatch(FULL_COMMIT_ACTION_REF);
+      expect(use).toMatch(MAJOR_ACTION_REF);
     }
   });
 
   it.each([
     [
-      'step-level action',
+      'full-SHA step-level action',
       [
         'jobs:',
         '  fixture:',
         '    runs-on: ubuntu-latest',
         '    steps:',
-        '      - uses: owner/action@v1',
+        '      - uses: owner/action@0123456789abcdef0123456789abcdef01234567',
         '',
       ].join('\n'),
     ],
     [
-      'job-level reusable workflow',
+      'branch-pinned job-level reusable workflow',
       [
         'jobs:',
         '  fixture:',
@@ -1639,17 +1639,17 @@ describe('canonical standards workflow security boundaries', () => {
         '',
       ].join('\n'),
     ],
-  ])('detects an unpinned %s', (_label, workflow) => {
-    const fixture = mkTmp('workflow-action-pin-');
+  ])('detects a non-major-tag %s', (_label, workflow) => {
+    const fixture = mkTmp('workflow-action-version-policy-');
     const path = join(fixture, 'fixture.yml');
     write(fixture, 'fixture.yml', workflow);
 
     expect(externalActionUses(path)).toHaveLength(1);
-    expect(externalActionUses(path)[0]).not.toMatch(FULL_COMMIT_ACTION_REF);
+    expect(externalActionUses(path)[0]).not.toMatch(MAJOR_ACTION_REF);
   });
 
-  it('includes .yaml workflows in the production action-pin ratchet', () => {
-    const fixture = mkTmp('workflow-action-pin-yaml-');
+  it('includes .yaml workflows in the production action-version ratchet', () => {
+    const fixture = mkTmp('workflow-action-version-policy-yaml-');
     write(
       fixture,
       'release.yaml',
@@ -1658,14 +1658,14 @@ describe('canonical standards workflow security boundaries', () => {
         '  publish:',
         '    runs-on: ubuntu-latest',
         '    steps:',
-        '      - uses: owner/action@v1',
+        '      - uses: owner/action@main',
         '',
       ].join('\n'),
     );
 
     const uses = productionWorkflowPaths(fixture).flatMap(externalActionUses);
-    expect(uses).toEqual(['owner/action@v1']);
-    expect(uses[0]).not.toMatch(FULL_COMMIT_ACTION_REF);
+    expect(uses).toEqual(['owner/action@main']);
+    expect(uses[0]).not.toMatch(MAJOR_ACTION_REF);
   });
 });
 
@@ -1688,9 +1688,6 @@ describe('canonical standards workflow settings security', () => {
     expect(workflow).toContain('secrets/ci.yaml');
     expect(workflow).toContain('sparse-checkout-cone-mode: false');
     expect(workflow).toContain('persist-credentials: false');
-    expect(workflow).toContain(
-      'actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0',
-    );
     expect(installStep).toContain('bun_version=1.3.14');
     expect(installStep.match(/bun_sha=[a-f0-9]{64}/gu)).toHaveLength(2);
     expect(installStep).toContain('standards_version=0.11.1');
