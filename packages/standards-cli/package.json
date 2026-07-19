@@ -36,6 +36,7 @@
     "src/github-settings-merge.ts",
     "src/github-settings-parse.ts",
     "src/github-settings.ts",
+    "src/managed-files.ts",
     "src/poller-approval.ts",
     "src/poller-claim.ts",
     "src/poller-codex.ts",

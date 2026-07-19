@@ -60,7 +60,7 @@ Before generating code, inspect the `description` frontmatter for every local sk
 
 ## Linting
 
-- Fix lint findings in the code. Never resolve them by downgrading or disabling rules globally, and never suppress with `biome-ignore` without a stated reason.
+- Fix lint findings in the code. Never resolve them by downgrading or disabling rules globally, and never add an inline Biome suppression without a stated reason.
 - Per-file overrides are the escape hatch of last resort: scope them to the narrowest paths and the specific rule that genuinely cannot apply.
 
 ## Configuration and secrets

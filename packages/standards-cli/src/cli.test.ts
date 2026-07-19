@@ -505,6 +505,27 @@ describe('check', () => {
     );
   });
 
+  it('checks the raw Biome directive contract from the consumer lock', () => {
+    const up = buildUpstream();
+    write(
+      up,
+      'managed/a.txt',
+      `documentation containing ${['biome', 'ignore'].join('-')}\n`,
+    );
+    const { consumer } = initConsumer(up);
+
+    const check = run(consumer, ['check', '--dir', consumer]);
+
+    expect(check.status).toBe(1);
+    expect(check.stdout).toContain(
+      'canonical file(s) match the last synced state',
+    );
+    expect(check.stderr).toContain(
+      'canonical file(s) contain the forbidden inline Biome directive token',
+    );
+    expect(check.stderr).toContain('managed/a.txt');
+  });
+
   it('fails and reports modified when a managed file is edited', () => {
     const { consumer } = initConsumer(buildUpstream());
     write(consumer, 'managed/a.txt', 'tampered\n');

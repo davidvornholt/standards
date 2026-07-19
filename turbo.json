@@ -15,6 +15,11 @@
     "test": {
       "outputs": [],
       "passThroughEnv": ["GH_TOKEN", "GITHUB_TOKEN"]
+    },
+    "@davidvornholt/standards#test": {
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/**"],
+      "outputs": [],
+      "passThroughEnv": ["GH_TOKEN", "GITHUB_TOKEN"]
     }
   }
 }
