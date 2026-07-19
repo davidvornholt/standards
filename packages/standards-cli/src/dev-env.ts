@@ -147,6 +147,14 @@ export const runDevEnv = async (consumer: string): Promise<boolean> => {
     );
     return false;
   }
+  if (generated.warnings.length > 0) {
+    console.error(
+      `standards dev-env: generated files with ${generated.warnings.length} cleanup warning(s):`,
+    );
+    console.error(
+      generated.warnings.map((warning) => `  - ${warning}`).join('\n'),
+    );
+  }
   for (const write of plan.writes) {
     console.log(`  wrote ${write.rel}`);
   }

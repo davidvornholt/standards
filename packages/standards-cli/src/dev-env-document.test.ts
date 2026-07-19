@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { parseDevEnvDocument } from './dev-env-document';
 
-const INVALID_ENTRY_COUNT = 6;
+const INVALID_ENTRY_COUNT = 9;
 
 describe('dev env document', () => {
   it('parses workspace-group keyed env values', () => {
@@ -59,8 +59,8 @@ describe('dev env document', () => {
     const document = parseDevEnvDocument(
       {
         apps: {
-          '..': { OK: 'yes' },
-          'nested/name': { OK: 'yes' },
+          '..': { 'BAD=NAME': 42 },
+          'nested/name': 'not-an-env-object',
           '/absolute': { OK: 'yes' },
           'with space': { OK: 'yes' },
           web: { 'BAD=NAME': 'x', 'BAD\nINJECTED': 'x', _VALID: '' },
@@ -76,8 +76,28 @@ describe('dev env document', () => {
     expect(document.problems.join('\n')).toContain('apps.with space');
     expect(document.problems.join('\n')).toContain('BAD=NAME');
     expect(document.problems.join('\n')).toContain('BAD\\nINJECTED');
+    expect(document.problems.join('\n')).toContain(
+      '"apps.nested/name" must map env keys to string values',
+    );
+    expect(document.problems.join('\n')).toContain(
+      '"apps...".BAD=NAME must be a string value',
+    );
     expect(document.targets).toEqual([
       { group: 'apps', workspace: 'web', env: { _VALID: '' } },
+    ]);
+  });
+
+  it('rejects values Bun dotenv cannot represent without changing bytes', () => {
+    const document = parseDevEnvDocument(
+      { apps: { web: { VALID: '\\\n', INVALID: '\\\r' } } },
+      'secrets/dev.yaml',
+    );
+
+    expect(document.problems).toEqual([
+      'secrets/dev.yaml "apps.web".INVALID cannot be represented losslessly in Bun dotenv syntax',
+    ]);
+    expect(document.targets).toEqual([
+      { group: 'apps', workspace: 'web', env: { VALID: '\\\n' } },
     ]);
   });
 });

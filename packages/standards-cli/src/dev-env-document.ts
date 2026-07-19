@@ -2,6 +2,8 @@
 // `packages.<name>` map env keys to string values — the shape mirrored in
 // secrets/dev.example.yaml. Parsing gathers every problem instead of failing
 // on the first one so a malformed document is repaired in one pass.
+
+import { encodeBunDotenvValue } from './dev-env-dotenv-value';
 import { isRecord } from './github-settings-parse';
 
 export type EnvValues = Readonly<Record<string, string>>;
@@ -41,6 +43,10 @@ const parseWorkspaceEnv = (
     }
     if (typeof value !== 'string') {
       problems.push(`${label}.${key} must be a string value`);
+    } else if (encodeBunDotenvValue(value) === null) {
+      problems.push(
+        `${label}.${key} cannot be represented losslessly in Bun dotenv syntax`,
+      );
     } else if (portableName) {
       entries.push([key, value]);
     }
@@ -56,17 +62,21 @@ const parseWorkspaces = (
   const problems: Array<string> = [];
   const targets: Array<DevEnvTarget> = [];
   for (const [workspace, env] of Object.entries(workspaces)) {
-    if (!WORKSPACE_NAME.test(workspace)) {
+    const validWorkspace = WORKSPACE_NAME.test(workspace);
+    if (!validWorkspace) {
       problems.push(
         `${source} ${JSON.stringify(`${group}.${workspace}`)} workspace name must be one kebab-case path segment`,
       );
-    } else if (isRecord(env)) {
+    }
+    if (isRecord(env)) {
       const parsed = parseWorkspaceEnv(
         `${source} "${group}.${workspace}"`,
         env,
       );
       problems.push(...parsed.problems);
-      targets.push({ group, workspace, env: parsed.env });
+      if (validWorkspace) {
+        targets.push({ group, workspace, env: parsed.env });
+      }
     } else {
       problems.push(
         `${source} "${group}.${workspace}" must map env keys to string values`,

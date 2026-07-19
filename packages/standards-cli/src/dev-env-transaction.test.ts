@@ -52,7 +52,7 @@ describe('dev env transaction', () => {
         { rel: 'packages/db/.env.local', content: 'DB=1\n' },
       ]);
 
-      expect(result).toEqual({ ok: true });
+      expect(result).toEqual({ ok: true, warnings: [] });
       expect(readFileSync(existing, 'utf8')).toBe('NEW=1\n');
       expect(statSync(existing).mode % PERMISSION_BITS_MODULUS).toBe(
         OWNER_ONLY_FILE_MODE,
@@ -151,6 +151,40 @@ describe('dev env transaction', () => {
       expect(existsSync(join(consumer, 'apps/web/.env.local'))).toBe(false);
       expect(existsSync(join(consumer, 'apps/api/.env.local'))).toBe(false);
       expect(artifacts(consumer)).toEqual([]);
+    } finally {
+      cleanup(consumer);
+    }
+  });
+});
+
+describe('dev env transaction cleanup', () => {
+  it('reports cleanup failure as a warning after a completed commit', async () => {
+    const consumer = buildConsumer();
+    try {
+      const dest = join(consumer, 'apps/web/.env.local');
+      writeFileSync(dest, 'OLD=1\n');
+      chmodSync(dest, DEFAULT_FILE_MODE);
+
+      const result = await writeDevEnvFiles(
+        consumer,
+        [{ rel: 'apps/web/.env.local', content: 'NEW=1\n' }],
+        {
+          beforeCleanup: () => {
+            throw new Error('induced cleanup failure');
+          },
+        },
+      );
+
+      expect(result).toEqual({
+        ok: true,
+        warnings: [
+          'generation committed but cleanup failed: induced cleanup failure',
+        ],
+      });
+      expect(readFileSync(dest, 'utf8')).toBe('NEW=1\n');
+      expect(statSync(dest).mode % PERMISSION_BITS_MODULUS).toBe(
+        OWNER_ONLY_FILE_MODE,
+      );
     } finally {
       cleanup(consumer);
     }

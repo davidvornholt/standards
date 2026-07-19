@@ -80,4 +80,24 @@ describe('dev env destination safety', () => {
       cleanup(consumer);
     }
   });
+
+  it('rejects different paths that resolve to one destination', async () => {
+    const consumer = buildConsumer();
+    try {
+      const result = await writeDevEnvFiles(consumer, [
+        { rel: 'apps/web/.env.local', content: 'FIRST=1\n' },
+        { rel: 'apps/web/../web/.env.local', content: 'SECOND=1\n' },
+      ]);
+
+      expect(result).toEqual({
+        ok: false,
+        problems: [
+          'apps/web/../web/.env.local resolves to the same destination as apps/web/.env.local',
+        ],
+      });
+      expect(readdirSync(join(consumer, 'apps/web'))).toEqual([]);
+    } finally {
+      cleanup(consumer);
+    }
+  });
 });

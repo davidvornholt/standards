@@ -1,23 +1,37 @@
-import { link, open, rename, rm } from 'node:fs/promises';
+import { link, open, rename } from 'node:fs/promises';
 import {
   type DevEnvDestination,
   type DevEnvWrite,
+  devEnvParentProblem,
   devEnvStatOrNull,
   preflightDevEnvDestinations,
 } from './dev-env-destination';
+import {
+  cleanupDevEnvArtifacts,
+  rollbackDevEnvFiles,
+} from './dev-env-transaction-recovery';
 
 const OWNER_ONLY_FILE_MODE = 0o600;
 
 export type DevEnvTransactionHooks = {
   readonly beforeStage?: (index: number) => void | Promise<void>;
   readonly beforeCommit?: (index: number) => void | Promise<void>;
+  readonly beforeCleanup?: () => void | Promise<void>;
 };
 
 export type DevEnvTransactionResult =
-  | { readonly ok: true }
+  | { readonly ok: true; readonly warnings: ReadonlyArray<string> }
   | { readonly ok: false; readonly problems: ReadonlyArray<string> };
 
+const requireParent = async (destination: DevEnvDestination): Promise<void> => {
+  const problem = await devEnvParentProblem(destination);
+  if (problem !== null) {
+    throw new Error(problem);
+  }
+};
+
 const stage = async (destination: DevEnvDestination): Promise<void> => {
+  await requireParent(destination);
   const file = await open(destination.temp, 'wx', OWNER_ONLY_FILE_MODE);
   try {
     await file.chmod(OWNER_ONLY_FILE_MODE);
@@ -42,40 +56,6 @@ const unchanged = async (destination: DevEnvDestination): Promise<boolean> => {
   );
 };
 
-const rollbackOne = async (destination: DevEnvDestination): Promise<void> => {
-  if (destination.committed) {
-    await rm(destination.dest, { force: true });
-  }
-  if (destination.backupCreated) {
-    await rename(destination.backup, destination.dest);
-  }
-};
-
-const rollback = async (
-  destinations: ReadonlyArray<DevEnvDestination>,
-): Promise<void> => {
-  const outcomes = await Promise.allSettled(
-    destinations.map((destination) => rollbackOne(destination)),
-  );
-  const failures = outcomes.flatMap((outcome) =>
-    outcome.status === 'rejected' ? [outcome.reason] : [],
-  );
-  if (failures.length > 0) {
-    throw new AggregateError(failures, 'could not restore every destination');
-  }
-};
-
-const cleanup = async (
-  destinations: ReadonlyArray<DevEnvDestination>,
-): Promise<void> => {
-  await Promise.all(
-    destinations.flatMap((destination) => [
-      rm(destination.temp, { force: true }),
-      rm(destination.backup, { force: true }),
-    ]),
-  );
-};
-
 const stageAll = async (
   destinations: ReadonlyArray<DevEnvDestination>,
   hooks: DevEnvTransactionHooks,
@@ -91,13 +71,16 @@ const stageAll = async (
 };
 
 const commitOne = async (destination: DevEnvDestination): Promise<void> => {
+  await requireParent(destination);
   if (!(await unchanged(destination))) {
     throw new Error(`${destination.write.rel} changed after preflight`);
   }
   if (destination.previous !== null) {
+    await requireParent(destination);
     await link(destination.dest, destination.backup);
     destination.backupCreated = true;
   }
+  await requireParent(destination);
   await rename(destination.temp, destination.dest);
   destination.committed = true;
 };
@@ -123,19 +106,19 @@ const recoverFailure = async (
   destinations: ReadonlyArray<DevEnvDestination>,
   error: unknown,
 ): Promise<DevEnvTransactionResult> => {
-  try {
-    await rollback(destinations);
-    await cleanup(destinations);
-    return { ok: false, problems: [problemMessage(error)] };
-  } catch (rollbackError) {
-    return {
-      ok: false,
-      problems: [
-        problemMessage(error),
-        `rollback failed: ${problemMessage(rollbackError)}`,
-      ],
-    };
-  }
+  const rollbackProblems = await rollbackDevEnvFiles(destinations);
+  const cleanupProblems = await cleanupDevEnvArtifacts(
+    destinations,
+    rollbackProblems.length > 0,
+  );
+  return {
+    ok: false,
+    problems: [
+      problemMessage(error),
+      ...rollbackProblems.map((problem) => `rollback failed: ${problem}`),
+      ...cleanupProblems.map((problem) => `cleanup failed: ${problem}`),
+    ],
+  };
 };
 
 export const writeDevEnvFiles = async (
@@ -153,17 +136,17 @@ export const writeDevEnvFiles = async (
   } catch (error) {
     return recoverFailure(checked.destinations, error);
   }
+  let cleanupProblems: ReadonlyArray<string>;
   try {
-    await cleanup(checked.destinations);
-    return { ok: true };
+    await hooks.beforeCleanup?.();
+    cleanupProblems = await cleanupDevEnvArtifacts(checked.destinations, false);
   } catch (error) {
-    return {
-      ok: false,
-      problems: [
-        `generation committed but temporary-file cleanup failed: ${problemMessage(
-          error,
-        )}`,
-      ],
-    };
+    cleanupProblems = [problemMessage(error)];
   }
+  return {
+    ok: true,
+    warnings: cleanupProblems.map(
+      (problem) => `generation committed but cleanup failed: ${problem}`,
+    ),
+  };
 };
