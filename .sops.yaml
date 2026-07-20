@@ -1,9 +1,9 @@
 keys:
   # Standalone age identity at ~/.config/sops/age/keys.txt.
-  - &david_z890_fedora age1gxzu2f027zu227f4wyf4jh5sw0w495482qfzv5flmfyjvgzxm3ys8p9muz
+  - &david-z890-fedora age1gxzu2f027zu227f4wyf4jh5sw0w495482qfzv5flmfyjvgzxm3ys8p9muz
 
   # Standalone age identity on david-debian.
-  - &david_debian age1j4lkxpdweugkfz900u023kx8p6k7yuhdp8jmxthj0qse3w6ahfesyqnj96
+  - &david-debian age1j4lkxpdweugkfz900u023kx8p6k7yuhdp8jmxthj0qse3w6ahfesyqnj96
 
   # GitHub Actions CI recipient (private key: SOPS_AGE_KEY Actions secret).
   - &github_actions_ci age1myr35w6m52zp32gywzws2y3s3w8uxkjtgduzjw63e2g5c0znz9usydhgvl
@@ -12,12 +12,12 @@ creation_rules:
   - path_regex: secrets/dev\.yaml$
     key_groups:
       - age:
-          - *david_z890_fedora
-          - *david_debian
+          - *david-z890-fedora
+          - *david-debian
 
   - path_regex: secrets/ci\.yaml$
     key_groups:
       - age:
-          - *david_z890_fedora
-          - *david_debian
+          - *david-z890-fedora
+          - *david-debian
           - *github_actions_ci
