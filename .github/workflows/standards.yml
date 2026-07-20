@@ -86,6 +86,14 @@ jobs:
           tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
           "$RUNNER_TEMP/actionlint" -color
 
+      # The canonical justfile and secrets.just are gate-tested: the source
+      # repository's CLI suite spawns `just` against them, and one uniform file
+      # serves every repo (see the Postgres note above).
+      - name: Install just
+        uses: extractions/setup-just@v4
+        with:
+          just-version: "1.57.0"
+
       - name: Detect browser a11y suite
         id: a11y
         run: |

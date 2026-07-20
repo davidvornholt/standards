@@ -17,6 +17,8 @@
     ".claude/workflows/review-pass.js",
     ".codex/agents/reviewer.toml",
     "biome.base.jsonc",
+    "justfile",
+    "secrets.just",
     ".github/settings.json",
     ".github/dependabot.base.yml",
     ".github/actions/sops-secret",

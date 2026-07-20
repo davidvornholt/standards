@@ -257,12 +257,28 @@
       }
     },
     {
+      // CLI output is the user interface; dev-env does not read process
+      // environment variables directly.
+      "includes": ["packages/standards-cli/src/dev-env.ts"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noConsole": "off"
+          }
+        }
+      }
+    },
+    {
       // GitHub API wire format is snake_case; these tests declare literals
       // that mirror real API payloads and declared-settings JSON. The SOPS
       // action harness additionally composes UPPER_SNAKE process environment
-      // variables and snake_case decrypted-secret keys.
+      // variables and snake_case decrypted-secret keys, and the dev-env tests
+      // declare UPPER_SNAKE dotenv keys.
       "includes": [
         "packages/standards-cli/src/cli.test.ts",
+        "packages/standards-cli/src/dev-env-document.test.ts",
+        "packages/standards-cli/src/dev-env-dotenv.test.ts",
+        "packages/standards-cli/src/dev-env.test.ts",
         "packages/standards-cli/src/github-diff.test.ts",
         "packages/standards-cli/src/github-settings.test.ts",
         "packages/standards-cli/src/poller-tick.test.ts",

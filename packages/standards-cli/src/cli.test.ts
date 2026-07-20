@@ -1750,6 +1750,12 @@ describe('canonical standards workflow settings security', () => {
     expect(lintStep).not.toContain(' latest ');
   });
 
+  it('installs a version-pinned just for the canonical justfile gate tests', () => {
+    const workflow = readFileSync(STANDARDS_WORKFLOW, 'utf8');
+    expect(workflow).toContain('uses: extractions/setup-just@v4');
+    expect(workflow).toContain('just-version: "1.57.0"');
+  });
+
   it('keeps the required check name fail-closed over both isolated jobs', () => {
     const workflow = readFileSync(STANDARDS_WORKFLOW, 'utf8');
     expect(workflow).toContain('  quality:');

@@ -57,6 +57,7 @@ Before generating code, inspect the `description` frontmatter for every local sk
 ## Workspace scripts
 
 - Operational scripts belong to the owning workspace. Put the real command in that workspace's `package.json`, and keep root scripts minimal: the quality gates plus narrowly useful filtered Turbo convenience aliases.
+- Operator workflows that span the repo rather than one workspace — secrets management, derived dev env generation — live in the canonical root `justfile`. Repo-specific recipes and modules belong in a repo-owned `local.just`, which the canonical justfile imports when present.
 
 ## Linting
 
@@ -68,6 +69,7 @@ Before generating code, inspect the `description` frontmatter for every local sk
 - Secret values live only in SOPS-encrypted YAML targets.
 - Non-secret configuration lives in plain config next to its consumer. A value is secret if leaking it enables impersonation, data access, or cost; otherwise it is configuration.
 - Each workspace under `apps/*` or `packages/*` maintains a `README.md` documenting every configuration value and secret it consumes — requiredness, behavior, defaults. Mirror the secret shape in the matching `*.example.yaml` (`secrets/dev.example.yaml`, `secrets/ci.example.yaml`, `infra/hosts/<host>/secrets.example.yaml`).
+- Dev secrets in `secrets/dev.yaml` are keyed by workspace (`apps.<name>`, `packages.<name>`); `just dev-env-generate` derives each workspace's generated `.env.local` from them. Never edit generated env files by hand.
 
 ## TypeScript standards
 

@@ -30,29 +30,55 @@ age-recipient key_file="${HOME}/.config/sops/age/keys.txt":
       nix --extra-experimental-features 'nix-command flakes' shell nixpkgs#age -c age-keygen -y "{{key_file}}"; \
     fi
 
-# Open a secrets target (dev|ci) in the SOPS editor
+# Open a secrets target (dev, ci, or an infra host name) in the SOPS editor
 edit target: (_sops target)
 
-# Rewrap a secrets target (dev|ci) for the current recipients
+# Rewrap a secrets target for the current recipients
 updatekeys target: (_sops target "updatekeys")
 
 # Rewrap every existing secrets target for the current recipients
 updatekeys-all:
-    @for target in dev ci; do \
-      if [ -f "secrets/$target.yaml" ]; then \
-        just secrets updatekeys "$target"; \
-      fi; \
-    done
+    @status=0; \
+    for file in secrets/*.yaml infra/hosts/*/secrets.yaml; do \
+      case "$file" in *.example.yaml) continue ;; esac; \
+      [ -f "$file" ] || continue; \
+      if ! just secrets _sops-file "$file" updatekeys; then status=1; fi; \
+    done; \
+    exit "$status"
 
-# Run sops (or the nix-provided sops) against a target's file
-_sops target *args:
-    @case "{{target}}" in \
-      dev) file='secrets/dev.yaml' ;; \
-      ci) file='secrets/ci.yaml' ;; \
-      *) printf 'Unknown secrets target: %s\n' "{{target}}" >&2; exit 1 ;; \
+# Resolve a target name to its secrets file and run sops against it. A target
+# is `infra/hosts/<target>/secrets.yaml` when that host directory exists and
+# `secrets/<target>.yaml` otherwise; unresolved names still map to
+# secrets/<target>.yaml so sops can create new targets from the repo-owned
+# .sops.yaml creation rules. Target names start with an ASCII letter or digit
+# and otherwise contain only letters, digits, dots, underscores, or hyphens.
+_sops target mode="":
+    @target={{ quote(target) }}; mode={{ quote(mode) }}; \
+    case "$target" in \
+      ''|[!A-Za-z0-9]*|*[!A-Za-z0-9._-]*) \
+        printf 'Invalid secrets target: expected one safe path segment\n' >&2; \
+        exit 1; \
+        ;; \
     esac; \
-    if command -v sops >/dev/null 2>&1; then \
-      sops {{args}} "$file"; \
+    case "$mode" in \
+      ''|updatekeys) ;; \
+      *) printf 'Invalid SOPS mode\n' >&2; exit 1 ;; \
+    esac; \
+    if [ -d "infra/hosts/$target" ]; then \
+      just secrets _sops-file "infra/hosts/$target/secrets.yaml" "$mode"; \
     else \
-      nix --extra-experimental-features 'nix-command flakes' run nixpkgs#sops -- {{args}} "$file"; \
+      just secrets _sops-file "secrets/$target.yaml" "$mode"; \
+    fi
+
+# Run sops (or the nix-provided sops) against a secrets file
+_sops-file file mode="":
+    @file={{ quote(file) }}; mode={{ quote(mode) }}; \
+    if command -v sops >/dev/null 2>&1; then \
+      if [ -n "$mode" ]; then sops "$mode" "$file"; else sops "$file"; fi; \
+    else \
+      if [ -n "$mode" ]; then \
+        nix --extra-experimental-features 'nix-command flakes' run nixpkgs#sops -- "$mode" "$file"; \
+      else \
+        nix --extra-experimental-features 'nix-command flakes' run nixpkgs#sops -- "$file"; \
+      fi; \
     fi
