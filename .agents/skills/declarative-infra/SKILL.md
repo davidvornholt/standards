@@ -9,6 +9,7 @@ description: Operating contract for declarative infrastructure (NixOS hosts, Ope
 
 - Infrastructure has exactly one home per host: an `infra/` directory in the repo the host serves, or — usually when one host serves apps from several repos — a dedicated infra repo. If this repo is not that home, make infrastructure changes (virtual hosts, databases, DNS, buckets) in the home repo.
 - Apply changes by pushing to GitHub and letting trusted main-branch automation converge. Never run `deploy-rs`, `tofu apply`, or `nixos-rebuild switch` by hand; direct mutation is for emergencies only, and must be flagged when used.
+- App services run as Podman `oci-containers` with digest-pinned images, published only through Caddy; hosts never run Docker. Wiring details live in `references/bootstrap.md`.
 
 ## Changing existing infrastructure
 
