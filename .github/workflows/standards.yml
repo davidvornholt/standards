@@ -88,28 +88,11 @@ jobs:
 
       # The canonical justfile and secrets.just are gate-tested: the source
       # repository's CLI suite spawns `just` against them, and one uniform file
-      # serves every repo (see the Postgres note above). Installed like
-      # actionlint, Bun, and sops — a checksum-pinned direct release download,
-      # never a third-party setup action.
-      - name: Install pinned just
-        run: |
-          set -euo pipefail
-          version=1.57.0
-          case "$(uname -m)" in
-            x86_64) arch=x86_64; sha=45b548094283cb9739af8f13273b8cddeee869f5b4ef2bb631b1f311cb566155 ;;
-            aarch64) arch=aarch64; sha=f225044a81adea6e0b3a8b9370aaf374e6af76c8735ae263ac993df55fd137ec ;;
-            *)
-              echo "::error::No pinned just binary for runner architecture $(uname -m)"
-              exit 1
-              ;;
-          esac
-          archive="$RUNNER_TEMP/just.tar.gz"
-          just_root="$RUNNER_TEMP/just-bin"
-          curl -sfLo "$archive" "https://github.com/casey/just/releases/download/${version}/just-${version}-${arch}-unknown-linux-musl.tar.gz"
-          echo "$sha  $archive" | sha256sum --check --quiet
-          mkdir "$just_root"
-          tar -xzf "$archive" -C "$just_root" just
-          echo "$just_root" >> "$GITHUB_PATH"
+      # serves every repo (see the Postgres note above).
+      - name: Install just
+        uses: extractions/setup-just@v4
+        with:
+          just-version: "1.57.0"
 
       - name: Detect browser a11y suite
         id: a11y
