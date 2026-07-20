@@ -202,6 +202,8 @@ In `hosts/<name>/configuration.nix`: `networking.hostName`, `networking.domain`,
 
 Host-specific services (containers, jobs) live under the repo's own option namespace (`<repo>.apps.*`) in `modules/apps/`, gated behind `enable` options. They consume the profile: publish through Caddy virtual hosts, run on Podman with digest-pinned images, peer-auth to their database as their own system user, read secrets from SOPS paths.
 
+A host serving a web app also carries PR preview environments as a default part of adoption — wire them alongside the app module per `pr-previews.md`.
+
 ## Secrets (SOPS + age)
 
 Identities, recipients, `.sops.yaml` authoring, the `secrets.just` module, and CI wiring — read `secrets.md`. Host-specific on top of that:
