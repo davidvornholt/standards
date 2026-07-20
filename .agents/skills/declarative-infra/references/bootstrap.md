@@ -4,6 +4,8 @@ How to stand up the home for genuinely new infrastructure: a dedicated repo, or 
 
 Reuse is copying: instantiate this reference material inline and adapt it to the host. Do not create or depend on shared infrastructure flakes or modules across repos — improvements to the patterns belong upstream in this skill.
 
+A dedicated infra repo is a full standards consumer like any other repo: bootstrap it with `standards init` before laying out the infrastructure, which brings the SOPS secrets workflow, the quality and drift gates, GitHub settings enforcement, Dependabot composition, and the review skills. There is no partial consumer profile — the synced TypeScript payload is deliberately carried inert rather than forking the contract per repo class. Nix and OpenTofu update blocks go in `.github/dependabot.local.yml`.
+
 ## Layout
 
 ```
