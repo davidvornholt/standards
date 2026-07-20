@@ -37,7 +37,7 @@ rm -rf "$d"
 
 ## Working with secrets files
 
-The root `justfile` and the `secrets.just` module are canonical synced files — consumers receive and update them via `bun standards sync`, and local edits are drift. `just secrets edit <target>` opens a target in the SOPS editor; `just secrets updatekeys <target>` rewraps it after recipient changes; `just secrets updatekeys-all` rewraps every existing target. A target name resolves to `infra/hosts/<target>/secrets.yaml` when that host directory exists and to `secrets/<target>.yaml` otherwise (`dev`, `ci`, `pr-preview`, …), so no per-repo target map exists. Repo-specific recipes and modules (infra workflows, deploy helpers) live in a repo-owned `local.just`, which the canonical justfile imports when present.
+The root `justfile` and the `secrets.just` module are canonical synced files — consumers receive and update them via `bun standards sync`, and local edits are drift. `just secrets edit <target>` opens a target in the SOPS editor; `just secrets updatekeys <target>` rewraps it after recipient changes; `just secrets updatekeys-all` rewraps every existing target. A target name resolves to `infra/hosts/<target>/secrets.yaml` when that host directory exists (`prod-1`; naming convention in `bootstrap.md`) and to `secrets/<target>.yaml` otherwise (`dev`, `ci`, `pr-preview`, …), so no per-repo target map exists. Repo-specific recipes and modules (infra workflows, deploy helpers) live in a repo-owned `local.just`, which the canonical justfile imports when present.
 
 ## Derived dev env files
 
