@@ -1,10 +1,6 @@
-// GitHub broker bootstrap via the App manifest flow: serve a localhost page
-// that posts the pre-filled manifest to GitHub, the user clicks "Create
-// GitHub App" once, GitHub redirects back with a temporary code, and the
-// manifest conversion endpoint returns the App credentials — no secret is
-// ever displayed or pasted. The App is the broker's GitHub root: workflows
-// and creds commands mint short-lived, per-repo installation tokens from it.
-
+// Bootstrap the broker's GitHub root through the App manifest browser flow;
+// conversion credentials never need to be displayed or pasted.
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { openInBrowser } from './creds-browser';
@@ -12,16 +8,14 @@ import {
   type GithubBrokerApp,
   readBrokerStore,
   resolveBrokerPath,
-  writeBrokerStore,
+  updateBrokerStore,
 } from './creds-store';
 import { HTTP_CREATED, HTTP_OK, request } from './github-api';
 import { isRecord } from './github-settings-parse';
 
-// Ten minutes: enough for the one browser click, short enough to fail loudly.
 const LOGIN_TIMEOUT_MS = 600_000;
-
-// Root-credential ceiling: everything the broker may ever delegate. Actual
-// grants are narrowed per installation token at mint time.
+const MANIFEST_STATE_BYTES = 32;
+const HTTP_BAD_REQUEST = 400;
 const DEFAULT_PERMISSIONS = {
   administration: 'write',
   actions: 'write',
@@ -31,7 +25,6 @@ const DEFAULT_PERMISSIONS = {
   secrets: 'write',
   workflows: 'write',
 } as const;
-
 export const buildAppManifest = (
   name: string,
   redirectUrl: string,
@@ -44,17 +37,43 @@ export const buildAppManifest = (
   default_permissions: DEFAULT_PERMISSIONS,
   default_events: [],
 });
-
 const escapeAttribute = (value: string): string =>
   value
     .replaceAll('&', '&amp;')
     .replaceAll('"', '&quot;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;');
-
-export const manifestFormHtml = (action: string, manifest: string): string =>
-  `<!doctype html><html><body><form id="m" action="${escapeAttribute(action)}" method="post"><input type="hidden" name="manifest" value="${escapeAttribute(manifest)}"><noscript><button type="submit">Create GitHub App</button></noscript></form><script>document.getElementById("m").submit()</script></body></html>`;
-
+export const createManifestState = (): {
+  readonly value: string;
+  readonly accept: (candidate: string | null) => boolean;
+} => {
+  const expected = randomBytes(MANIFEST_STATE_BYTES);
+  let available = true;
+  return {
+    value: expected.toString('hex'),
+    accept: (candidate) => {
+      const received =
+        candidate === null ? Buffer.alloc(0) : Buffer.from(candidate, 'hex');
+      const matches =
+        available &&
+        received.length === expected.length &&
+        timingSafeEqual(received, expected);
+      if (matches) {
+        available = false;
+      }
+      return matches;
+    },
+  };
+};
+export const manifestFormHtml = (
+  action: string,
+  manifest: string,
+  state: string,
+): string => {
+  const target = new URL(action);
+  target.searchParams.set('state', state);
+  return `<!doctype html><html><body><form id="m" action="${escapeAttribute(target.href)}" method="post"><input type="hidden" name="manifest" value="${escapeAttribute(manifest)}"><noscript><button type="submit">Create GitHub App</button></noscript></form><script>document.getElementById("m").submit()</script></body></html>`;
+};
 export const parseConversion = (body: unknown): GithubBrokerApp | null =>
   isRecord(body) &&
   typeof body.id === 'number' &&
@@ -72,29 +91,36 @@ export const parseConversion = (body: unknown): GithubBrokerApp | null =>
     : null;
 
 const waitForCode = (
-  formHtml: (port: number) => string,
-): Promise<{ readonly code: string; readonly port: number }> =>
+  formHtml: (port: number, state: string) => string,
+): Promise<string> =>
   new Promise((resolvePromise, rejectPromise) => {
+    const state = createManifestState();
     const server = createServer((incoming, response) => {
       const url = new URL(incoming.url ?? '/', 'http://127.0.0.1');
       if (url.pathname === '/callback') {
         const code = url.searchParams.get('code');
-        response.writeHead(HTTP_OK, { 'content-type': 'text/html' });
-        response.end(
-          '<!doctype html><html><body>App created. You can close this tab and return to the terminal.</body></html>',
-        );
-        if (code !== null) {
+        if (code !== null && state.accept(url.searchParams.get('state'))) {
+          response.writeHead(HTTP_OK, { 'content-type': 'text/html' });
+          response.end(
+            '<!doctype html><html><body>App created. You can close this tab and return to the terminal.</body></html>',
+          );
           clearTimeout(timeout);
           server.close();
-          resolvePromise({
-            code,
-            port: (server.address() as AddressInfo).port,
+          resolvePromise(code);
+        } else {
+          response.writeHead(HTTP_BAD_REQUEST, {
+            'content-type': 'text/plain',
           });
+          response.end(
+            'This callback does not match the GitHub App login request.',
+          );
         }
         return;
       }
       response.writeHead(HTTP_OK, { 'content-type': 'text/html' });
-      response.end(formHtml((server.address() as AddressInfo).port));
+      response.end(
+        formHtml((server.address() as AddressInfo).port, state.value),
+      );
     });
     const timeout = setTimeout(() => {
       server.close();
@@ -109,7 +135,6 @@ const waitForCode = (
       openInBrowser(url);
     });
   });
-
 export const runCredsLoginGithub = async (options: {
   readonly name: string | undefined;
   readonly org: string | undefined;
@@ -127,12 +152,13 @@ export const runCredsLoginGithub = async (options: {
       ? 'https://github.com/settings/apps/new'
       : `https://github.com/organizations/${options.org}/settings/apps/new`;
   const name = options.name ?? 'standards-broker';
-  const { code } = await waitForCode((port) =>
+  const code = await waitForCode((port, state) =>
     manifestFormHtml(
       action,
       JSON.stringify(
         buildAppManifest(name, `http://127.0.0.1:${port}/callback`),
       ),
+      state,
     ),
   );
   const conversion = await request(
@@ -153,7 +179,14 @@ export const runCredsLoginGithub = async (options: {
     );
     return false;
   }
-  await writeBrokerStore(storePath, { ...store, github: app });
+  await updateBrokerStore(storePath, (current) => {
+    if (current.github !== null) {
+      throw new Error(
+        `a broker GitHub App was configured while login was in progress (${current.github.htmlUrl}); the newly created App ${app.htmlUrl} was not stored and should be deleted`,
+      );
+    }
+    return { ...current, github: app };
+  });
   console.log(
     `standards creds: created GitHub App ${app.slug} (${app.htmlUrl})`,
   );

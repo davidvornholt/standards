@@ -1,19 +1,11 @@
-// Machine-global broker credentials for `standards creds`: the GitHub App and
-// per-account Cloudflare bootstrap tokens that mint everything else. The store
-// lives outside every repository as a plaintext 0600 file — the same trust
-// level as the personal age identity at ~/.config/sops/age/keys.txt, which
-// unlocks the same secrets; encrypting one to a key beside the other would be
-// theater. Losing the file is cheap: re-run the login commands and revoke the
-// old credentials.
-
-import { chmodSync, existsSync, statSync } from 'node:fs';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { existsSync, statSync } from 'node:fs';
+import { mkdir, open, readFile, rename, rmdir, unlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import process from 'node:process';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { isNonEmptyString, isRecord } from './github-settings-parse';
-
 export type GithubBrokerApp = {
   readonly appId: number;
   readonly slug: string;
@@ -21,36 +13,26 @@ export type GithubBrokerApp = {
   readonly clientId: string;
   readonly privateKey: string;
 };
-
 export type CloudflareBrokerAccount = {
   readonly accountId: string;
   readonly token: string;
 };
-
 export type BrokerStore = {
   readonly github: GithubBrokerApp | null;
   readonly cloudflare: ReadonlyArray<CloudflareBrokerAccount>;
 };
-
 export const EMPTY_BROKER_STORE: BrokerStore = { github: null, cloudflare: [] };
-
 const OWNER_ONLY_FILE_MODE = 0o600;
 const OWNER_ONLY_DIR_MODE = 0o700;
-const PERMISSION_MASK = 0o777;
-const GROUP_OTHER_MASK = 0o077;
+const FILE_MODE_MODULUS = 0o1000;
+const GROUP_OTHER_MODULUS = 0o100;
 const OCTAL_RADIX = 8;
-
-export type BrokerFileMode = {
-  readonly exists: boolean;
-  readonly problem: string | null;
-};
-
-export const inspectBrokerFileMode = (path: string): BrokerFileMode => {
+const LOCK_RETRY_MS = 25;
+const LOCK_TIMEOUT_MS = 10_000;
+export const inspectBrokerFileMode = (path: string) => {
   try {
-    // biome-ignore lint/suspicious/noBitwiseOperators: POSIX permission bits are a bitmask.
-    const mode = statSync(path).mode & PERMISSION_MASK;
-    // biome-ignore lint/suspicious/noBitwiseOperators: POSIX permission bits are a bitmask.
-    const groupOther = mode & GROUP_OTHER_MASK;
+    const mode = statSync(path).mode % FILE_MODE_MODULUS;
+    const groupOther = mode % GROUP_OTHER_MODULUS;
     return {
       exists: true,
       problem:
@@ -62,15 +44,12 @@ export const inspectBrokerFileMode = (path: string): BrokerFileMode => {
     return { exists: false, problem: null };
   }
 };
-
 export const resolveBrokerPath = (): string =>
   process.env.STANDARDS_BROKER_FILE ??
   join(
     process.env.XDG_CONFIG_HOME ?? join(homedir(), '.config'),
-    'standards',
-    'broker.yaml',
+    'standards/broker.yaml',
   );
-
 const parseGithub = (raw: unknown, path: string): GithubBrokerApp | null => {
   if (raw === undefined || raw === null) {
     return null;
@@ -87,7 +66,7 @@ const parseGithub = (raw: unknown, path: string): GithubBrokerApp | null => {
     )
   ) {
     throw new Error(
-      `${path}: "github" must carry app_id, slug, html_url, client_id, and private_key; re-run \`standards creds login github\``,
+      `${path}: invalid "github" credentials; re-run \`standards creds login github\``,
     );
   }
   return {
@@ -98,7 +77,6 @@ const parseGithub = (raw: unknown, path: string): GithubBrokerApp | null => {
     privateKey: raw.private_key,
   };
 };
-
 const parseCloudflare = (
   raw: unknown,
   path: string,
@@ -118,18 +96,16 @@ const parseCloudflare = (
       )
     ) {
       throw new Error(
-        `${path}: each "cloudflare" entry must carry account_id and token; re-run \`standards creds login cloudflare\``,
+        `${path}: invalid "cloudflare" credentials; re-run \`standards creds login cloudflare\``,
       );
     }
     return { accountId: entry.account_id, token: entry.token };
   });
 };
-
 export const readBrokerStore = async (path: string): Promise<BrokerStore> => {
-  if (!existsSync(path)) {
-    return EMPTY_BROKER_STORE;
-  }
-  const raw = parseYaml(await readFile(path, 'utf8')) as unknown;
+  const raw = existsSync(path)
+    ? (parseYaml(await readFile(path, 'utf8')) as unknown)
+    : null;
   if (raw === null || raw === undefined) {
     return EMPTY_BROKER_STORE;
   }
@@ -141,37 +117,84 @@ export const readBrokerStore = async (path: string): Promise<BrokerStore> => {
     cloudflare: parseCloudflare(raw.cloudflare, path),
   };
 };
-
-export const writeBrokerStore = async (
+export const updateBrokerStore = async (
+  path: string,
+  update: (store: BrokerStore) => BrokerStore | Promise<BrokerStore>,
+): Promise<void> =>
+  withBrokerLock(path, async () => {
+    const store = await update(await readBrokerStore(path));
+    await writeBrokerStoreUnlocked(path, store);
+  });
+const storeDocument = (store: BrokerStore): unknown => ({
+  ...(store.github === null
+    ? {}
+    : {
+        github: {
+          app_id: store.github.appId,
+          slug: store.github.slug,
+          html_url: store.github.htmlUrl,
+          client_id: store.github.clientId,
+          private_key: store.github.privateKey,
+        },
+      }),
+  ...(store.cloudflare.length === 0
+    ? {}
+    : {
+        cloudflare: store.cloudflare.map((account) => ({
+          account_id: account.accountId,
+          token: account.token,
+        })),
+      }),
+});
+const writeBrokerStoreUnlocked = async (
   path: string,
   store: BrokerStore,
 ): Promise<void> => {
-  const document = {
-    ...(store.github === null
-      ? {}
-      : {
-          github: {
-            app_id: store.github.appId,
-            slug: store.github.slug,
-            html_url: store.github.htmlUrl,
-            client_id: store.github.clientId,
-            private_key: store.github.privateKey,
-          },
-        }),
-    ...(store.cloudflare.length === 0
-      ? {}
-      : {
-          cloudflare: store.cloudflare.map((account) => ({
-            account_id: account.accountId,
-            token: account.token,
-          })),
-        }),
-  };
+  const parent = dirname(path);
+  await mkdir(parent, { recursive: true, mode: OWNER_ONLY_DIR_MODE });
+  const temporary = join(parent, `.${basename(path)}.${randomUUID()}.tmp`);
+  const handle = await open(temporary, 'wx', OWNER_ONLY_FILE_MODE);
+  try {
+    try {
+      await handle.writeFile(stringifyYaml(storeDocument(store)), 'utf8');
+      await handle.chmod(OWNER_ONLY_FILE_MODE);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await rename(temporary, path);
+  } finally {
+    await unlink(temporary).catch(() => undefined);
+  }
+};
+const withBrokerLock = async <T>(
+  path: string,
+  operation: () => Promise<T>,
+): Promise<T> => {
+  const lockPath = `${path}.lock`;
   await mkdir(dirname(path), { recursive: true, mode: OWNER_ONLY_DIR_MODE });
-  await writeFile(path, stringifyYaml(document), {
-    mode: OWNER_ONLY_FILE_MODE,
-  });
-  // writeFile applies the mode only on creation; an existing file keeps its
-  // permissions, so tighten explicitly on every save.
-  chmodSync(path, OWNER_ONLY_FILE_MODE);
+  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  for (;;) {
+    try {
+      // biome-ignore lint/performance/noAwaitInLoops: lock retries must be sequential.
+      await mkdir(lockPath, { mode: OWNER_ONLY_DIR_MODE });
+      break;
+    } catch (error) {
+      if (!(isRecord(error) && error.code === 'EEXIST')) {
+        throw error;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(
+          `timed out waiting for ${lockPath}; if no standards creds process is running, remove this stale lock directory`,
+          { cause: error },
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS));
+    }
+  }
+  try {
+    return await operation();
+  } finally {
+    await rmdir(lockPath);
+  }
 };

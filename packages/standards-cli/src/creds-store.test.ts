@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  type BrokerStore,
   EMPTY_BROKER_STORE,
   inspectBrokerFileMode,
   readBrokerStore,
-  writeBrokerStore,
+  updateBrokerStore,
 } from './creds-store';
 
 const dirs: Array<string> = [];
@@ -23,6 +24,7 @@ afterEach(() => {
 });
 
 const ACCOUNT_ID_LENGTH = 32;
+const LOCK_COMPETITION_MS = 10;
 
 const APP = {
   appId: 42,
@@ -31,6 +33,13 @@ const APP = {
   clientId: 'Iv1.abc',
   privateKey:
     '-----BEGIN RSA PRIVATE KEY-----\nkey\n-----END RSA PRIVATE KEY-----\n',
+};
+
+const replaceStore = async (
+  path: string,
+  store: BrokerStore,
+): Promise<void> => {
+  await updateBrokerStore(path, () => store);
 };
 
 describe('broker store', () => {
@@ -48,7 +57,7 @@ describe('broker store', () => {
         { accountId: 'a'.repeat(ACCOUNT_ID_LENGTH), token: 'cfat_secret' },
       ],
     };
-    await writeBrokerStore(path, store);
+    await replaceStore(path, store);
     expect(inspectBrokerFileMode(path)).toEqual({
       exists: true,
       problem: null,
@@ -58,9 +67,9 @@ describe('broker store', () => {
 
   it('tightens permissions when overwriting an existing broader file', async () => {
     const path = storePath();
-    await writeBrokerStore(path, EMPTY_BROKER_STORE);
+    await replaceStore(path, EMPTY_BROKER_STORE);
     writeFileSync(path, 'github:\n', { mode: 0o644 });
-    await writeBrokerStore(path, { ...EMPTY_BROKER_STORE, github: APP });
+    await replaceStore(path, { ...EMPTY_BROKER_STORE, github: APP });
     expect(inspectBrokerFileMode(path)).toEqual({
       exists: true,
       problem: null,
@@ -69,7 +78,7 @@ describe('broker store', () => {
 
   it('rejects a malformed github section with a login hint', async () => {
     const path = storePath();
-    await writeBrokerStore(path, EMPTY_BROKER_STORE);
+    await replaceStore(path, EMPTY_BROKER_STORE);
     writeFileSync(path, 'github:\n  app_id: "not-a-number"\n');
     expect(readBrokerStore(path)).rejects.toThrow(
       'standards creds login github',
@@ -78,10 +87,59 @@ describe('broker store', () => {
 
   it('rejects a malformed cloudflare entry with a login hint', async () => {
     const path = storePath();
-    await writeBrokerStore(path, EMPTY_BROKER_STORE);
+    await replaceStore(path, EMPTY_BROKER_STORE);
     writeFileSync(path, 'cloudflare:\n  - account_id: abc\n');
     expect(readBrokerStore(path)).rejects.toThrow(
       'standards creds login cloudflare',
     );
+  });
+
+  it('serializes concurrent updates without losing either provider', async () => {
+    const path = storePath();
+    let releaseFirst = (): void => undefined;
+    let markEntered = (): void => undefined;
+    const entered = new Promise<void>((resolve) => {
+      markEntered = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const github = updateBrokerStore(path, async (store) => {
+      markEntered();
+      await release;
+      return { ...store, github: APP };
+    });
+    await entered;
+    const cloudflare = updateBrokerStore(path, (store) => ({
+      ...store,
+      cloudflare: [
+        ...store.cloudflare,
+        { accountId: 'a'.repeat(ACCOUNT_ID_LENGTH), token: 'cfat_secret' },
+      ],
+    }));
+    await new Promise((resolve) => setTimeout(resolve, LOCK_COMPETITION_MS));
+    releaseFirst();
+    await Promise.all([github, cloudflare]);
+    expect(await readBrokerStore(path)).toEqual({
+      github: APP,
+      cloudflare: [
+        { accountId: 'a'.repeat(ACCOUNT_ID_LENGTH), token: 'cfat_secret' },
+      ],
+    });
+  });
+
+  it('leaves the prior atomic file intact when an update is interrupted', async () => {
+    const path = storePath();
+    await replaceStore(path, { ...EMPTY_BROKER_STORE, github: APP });
+    await expect(
+      updateBrokerStore(path, () => {
+        throw new Error('simulated interruption');
+      }),
+    ).rejects.toThrow('simulated interruption');
+    expect(await readBrokerStore(path)).toEqual({
+      github: APP,
+      cloudflare: [],
+    });
+    expect(readdirSync(join(path, '..'))).toEqual(['broker.yaml']);
   });
 });

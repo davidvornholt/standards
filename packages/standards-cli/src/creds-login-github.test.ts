@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'bun:test';
 import {
   buildAppManifest,
+  createManifestState,
   manifestFormHtml,
   parseConversion,
 } from './creds-login-github';
+
+const MANIFEST_STATE_HEX_LENGTH = 64;
 
 describe('GitHub App manifest flow', () => {
   it('builds a manifest with an inactive webhook and the localhost redirect', () => {
@@ -28,10 +31,26 @@ describe('GitHub App manifest flow', () => {
     const html = manifestFormHtml(
       'https://github.com/settings/apps/new',
       '{"name":"a","url":"https://x?y=1&z=2"}',
+      'one-time-state',
     );
     expect(html).toContain('&quot;name&quot;');
     expect(html).toContain('&amp;z=2');
+    expect(html).toContain(
+      'action="https://github.com/settings/apps/new?state=one-time-state"',
+    );
     expect(html).not.toContain('value="{"');
+  });
+
+  it('accepts only the matching manifest state once', () => {
+    const state = createManifestState();
+    const other = createManifestState();
+    expect(state.value).not.toBe(other.value);
+    expect(state.value).toHaveLength(MANIFEST_STATE_HEX_LENGTH);
+    expect(state.accept(null)).toBe(false);
+    expect(state.accept('')).toBe(false);
+    expect(state.accept(other.value)).toBe(false);
+    expect(state.accept(state.value)).toBe(true);
+    expect(state.accept(state.value)).toBe(false);
   });
 
   it('parses a manifest conversion into broker app credentials', () => {
