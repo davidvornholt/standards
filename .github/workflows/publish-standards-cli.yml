@@ -13,6 +13,11 @@ on:
 permissions:
   contents: read
 
+env:
+  BUN_VERSION: 1.3.14
+  PACKAGE_NAME: "@davidvornholt/standards"
+  PACKAGE_PATH: packages/standards-cli/package.json
+
 concurrency:
   group: publish-standards-cli
   cancel-in-progress: false
@@ -55,7 +60,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Setup Node for npm trusted publishing
         uses: actions/setup-node@v7
@@ -64,11 +69,11 @@ jobs:
           package-manager-cache: false
           registry-url: https://registry.npmjs.org
 
+      - name: Install release dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+
       - name: Determine release state
         id: release
-        env:
-          PACKAGE_NAME: "@davidvornholt/standards"
-          PACKAGE_PATH: packages/standards-cli/package.json
         run: |
           name="$(jq -er '.name | select(type == "string")' "$PACKAGE_PATH")"
           if [[ "$name" != "$PACKAGE_NAME" ]]; then
@@ -88,13 +93,6 @@ jobs:
             "https://registry.npmjs.org/$encoded_name")"
           latest="$(jq -er '.["dist-tags"].latest' <<<"$metadata")"
 
-          if ! bun -e \
-            'if (Bun.semver.order(process.argv[1], process.argv[2]) < 0) process.exit(1)' \
-            "$version" "$latest"; then
-            echo "::error::Manifest version $version is behind npm latest $latest"
-            exit 1
-          fi
-
           npm_version="$(npm --version)"
           if ! bun -e \
             'if (Bun.semver.order(process.argv[1], "11.5.1") < 0) process.exit(1)' \
@@ -105,10 +103,21 @@ jobs:
 
           if jq -e --arg version "$version" '.versions[$version] != null' \
             <<<"$metadata" >/dev/null; then
-            publish=false
+            exact_version_exists=true
           else
-            publish=true
+            exact_version_exists=false
           fi
+          release_action="$(node \
+            packages/standards-cli/scripts/release-recovery.ts \
+            npm-state "$version" "$latest" "$exact_version_exists")"
+          case "$release_action" in
+            publish) publish=true ;;
+            recover) publish=false ;;
+            *)
+              echo "::error::Unexpected npm release action: $release_action"
+              exit 1
+              ;;
+          esac
 
           {
             echo "version=$version"
@@ -147,9 +156,53 @@ jobs:
           --tag latest
           --registry=https://registry.npmjs.org
 
+      - name: Verify existing package provenance
+        if: steps.release.outputs.publish == 'false'
+        env:
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          audit_dir="$RUNNER_TEMP/standards-cli-provenance-audit"
+          npm install \
+            --prefix "$audit_dir" \
+            --ignore-scripts \
+            --save-exact \
+            --registry=https://registry.npmjs.org \
+            "$PACKAGE_NAME@$VERSION"
+          npm audit signatures --prefix "$audit_dir"
+          package_path="node_modules/$PACKAGE_NAME"
+          installed_version="$(jq -er --arg path "$package_path" \
+            '.packages[$path].version | select(type == "string")' \
+            "$audit_dir/package-lock.json")"
+          if [[ "$installed_version" != "$VERSION" ]]; then
+            echo "::error::Installed $PACKAGE_NAME version $installed_version, expected $VERSION"
+            exit 1
+          fi
+          installed_integrity="$(jq -er --arg path "$package_path" \
+            '.packages[$path].integrity | select(type == "string")' \
+            "$audit_dir/package-lock.json")"
+
+          encoded_name="${PACKAGE_NAME/@/%40}"
+          encoded_name="${encoded_name//\//%2F}"
+          attestations_file="$RUNNER_TEMP/standards-cli-attestations.json"
+          curl --fail --silent --show-error \
+            "https://registry.npmjs.org/-/npm/v1/attestations/$encoded_name@$VERSION" \
+            >"$attestations_file"
+          node packages/standards-cli/scripts/release-recovery.ts \
+            provenance \
+            "$attestations_file" \
+            "$PACKAGE_NAME" \
+            "$VERSION" \
+            "$GITHUB_REPOSITORY" \
+            "$GITHUB_SERVER_URL" \
+            "$GITHUB_WORKFLOW_REF" \
+            "$RELEASE_SHA" \
+            "$installed_integrity" \
+            "$RUNNER_TEMP/standards-cli-sigstore-tuf"
+
   release:
     needs: publish
-    if: needs.publish.outputs.publish == 'true'
+    if: needs.publish.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -162,37 +215,48 @@ jobs:
           persist-credentials: false
           ref: ${{ needs.publish.outputs.sha }}
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
       - name: Reconcile GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_SHA: ${{ needs.publish.outputs.sha }}
           RELEASE_TAG: ${{ needs.publish.outputs.tag }}
         run: |
+          release_state=missing
+          tag_sha=
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             is_draft="$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)"
             if [[ "$is_draft" == "true" ]]; then
-              echo "::error::$RELEASE_TAG already exists as a draft release"
-              exit 1
+              release_state=draft
+            else
+              release_state=published
+              git fetch --force origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+              tag_sha="$(git rev-list -n 1 "$RELEASE_TAG")"
             fi
+          elif git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" \
+            >/dev/null 2>&1; then
+            release_state=tag-only
             git fetch --force origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
             tag_sha="$(git rev-list -n 1 "$RELEASE_TAG")"
-            if [[ "$tag_sha" != "$RELEASE_SHA" ]]; then
-              echo "::error::$RELEASE_TAG points to $tag_sha, expected $RELEASE_SHA"
-              exit 1
-            fi
-            echo "$RELEASE_TAG already exists at the tested commit"
-            exit 0
           fi
 
-          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" \
-            >/dev/null 2>&1; then
-            git fetch --force origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
-            tag_sha="$(git rev-list -n 1 "$RELEASE_TAG")"
-            if [[ "$tag_sha" != "$RELEASE_SHA" ]]; then
-              echo "::error::$RELEASE_TAG points to $tag_sha, expected $RELEASE_SHA"
+          action="$(bun packages/standards-cli/scripts/release-recovery.ts \
+            github-state "$release_state" "$tag_sha" "$RELEASE_SHA")"
+          case "$action" in
+            none)
+              echo "$RELEASE_TAG already exists at the tested commit"
+              exit 0
+              ;;
+            create) ;;
+            *)
+              echo "::error::Unexpected release reconciliation action: $action"
               exit 1
-            fi
-          fi
+              ;;
+          esac
 
           gh release create "$RELEASE_TAG" \
             --generate-notes \
