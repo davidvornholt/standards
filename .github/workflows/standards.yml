@@ -124,6 +124,7 @@ jobs:
         run: bun run check
 
   nix-discovery:
+    if: github.repository == 'davidvornholt/standards'
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
@@ -142,6 +143,7 @@ jobs:
 
   nix:
     name: Nix (${{ matrix.system }})
+    if: github.repository == 'davidvornholt/standards'
     needs: nix-discovery
     strategy:
       fail-fast: false
@@ -275,7 +277,8 @@ jobs:
 
   # Keep the stable required-check name while making all independent gates
   # mandatory. `always()` ensures a failed or cancelled dependency cannot turn
-  # this required check into a skipped success.
+  # this required check into a skipped success. The source repository owns the
+  # Nix release gate; every consumer must skip both source-only jobs.
   check:
     if: always()
     needs:
@@ -288,11 +291,28 @@ jobs:
       - name: Require all standards gates
         env:
           GITHUB_SETTINGS_RESULT: ${{ needs.github-settings.result }}
+          IS_SOURCE_REPOSITORY: ${{ github.repository == 'davidvornholt/standards' }}
           NIX_DISCOVERY_RESULT: ${{ needs.nix-discovery.result }}
           NIX_RESULT: ${{ needs.nix.result }}
           QUALITY_RESULT: ${{ needs.quality.result }}
         run: |
-          if [ "$QUALITY_RESULT" != success ] || [ "$GITHUB_SETTINGS_RESULT" != success ] || [ "$NIX_DISCOVERY_RESULT" != success ] || [ "$NIX_RESULT" != success ]; then
+          case "$IS_SOURCE_REPOSITORY" in
+            true)
+              expected_nix_result=success
+              ;;
+            false)
+              expected_nix_result=skipped
+              ;;
+            *)
+              echo "::error::Unexpected source-repository mode (is-source-repository=$IS_SOURCE_REPOSITORY)"
+              exit 1
+              ;;
+          esac
+          if [ "$QUALITY_RESULT" != success ] || [ "$GITHUB_SETTINGS_RESULT" != success ]; then
             echo "::error::Standards gates did not all succeed (quality=$QUALITY_RESULT, github-settings=$GITHUB_SETTINGS_RESULT, nix-discovery=$NIX_DISCOVERY_RESULT, nix=$NIX_RESULT)"
+            exit 1
+          fi
+          if [ "$NIX_DISCOVERY_RESULT" != "$expected_nix_result" ] || [ "$NIX_RESULT" != "$expected_nix_result" ]; then
+            echo "::error::Nix gates did not match the repository mode (is-source-repository=$IS_SOURCE_REPOSITORY, expected=$expected_nix_result, nix-discovery=$NIX_DISCOVERY_RESULT, nix=$NIX_RESULT)"
             exit 1
           fi
