@@ -31,6 +31,8 @@ Options:
   --permissions <list>  Comma-separated Cloudflare permission group names
   --account <id>        Cloudflare account when more than one is configured
   --ttl-days <n>        Token lifetime in days (default: 90)
+  --bucket <name>       Scope a Cloudflare token to one R2 bucket (default jurisdiction)
+  --s3                  Store the derived R2 S3 credential pair (<key>.access_key_id, <key>.secret_access_key) instead of the raw token
   --org <org>           Create the GitHub App under an organization
   --name <name>         GitHub App name (default: ${BROKER_IDENTITY_NAME})
 
@@ -45,6 +47,8 @@ type CredsFlags = {
   permissions: string | undefined;
   account: string | undefined;
   ttlDays: number | undefined;
+  bucket: string | undefined;
+  s3: boolean;
   org: string | undefined;
   name: string | undefined;
   readonly words: Array<string>;
@@ -76,6 +80,8 @@ const parseCredsArgs = (argv: ReadonlyArray<string>): CredsFlags => {
     permissions: undefined,
     account: undefined,
     ttlDays: undefined,
+    bucket: undefined,
+    s3: false,
     org: undefined,
     name: undefined,
     words: [],
@@ -96,6 +102,9 @@ const parseCredsArgs = (argv: ReadonlyArray<string>): CredsFlags => {
     '--ttl-days': (value) => {
       flags.ttlDays = parseTtlDays(value);
     },
+    '--bucket': (value) => {
+      flags.bucket = value;
+    },
     '--org': (value) => {
       flags.org = value;
     },
@@ -106,7 +115,9 @@ const parseCredsArgs = (argv: ReadonlyArray<string>): CredsFlags => {
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index] ?? '';
     const setter = setters[arg];
-    if (setter !== undefined) {
+    if (arg === '--s3') {
+      flags.s3 = true;
+    } else if (setter !== undefined) {
       setter(flagValue(argv, index));
       index += 1;
     } else if (arg.startsWith('--')) {

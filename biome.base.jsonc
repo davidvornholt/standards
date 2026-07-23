@@ -190,6 +190,7 @@
       "includes": [
         "**/*.test.ts",
         "**/*.test.tsx",
+        "packages/standards-cli/src/creds-add-test-support.ts",
         "packages/standards-cli/src/creds-plan-run-test-support.ts"
       ],
       "linter": {
@@ -314,7 +315,6 @@
       // Provider wire formats (GitHub App manifests, Cloudflare token
       // policies) and the persisted broker-store YAML shape are snake_case.
       "includes": [
-        "packages/standards-cli/src/creds-add.ts",
         "packages/standards-cli/src/creds-cloudflare.ts",
         "packages/standards-cli/src/creds-cloudflare-api.ts",
         "packages/standards-cli/src/creds-login-github-manifest.ts",

@@ -8,6 +8,7 @@
 import type { CloudflareToken, TokenPolicy } from './creds-cloudflare-api';
 import type { TokenCondition } from './creds-cloudflare-condition';
 import { parseTokenName } from './creds-naming';
+import { type DestinationFormat, destinationFormatOf } from './creds-r2';
 
 const DEFAULT_RENEW_WITHIN_DAYS = 30;
 const DAY_MS = 86_400_000;
@@ -32,6 +33,7 @@ export type PlannedAction =
       readonly name: string;
       readonly target: string;
       readonly key: string;
+      readonly format: DestinationFormat;
       readonly policies: ReadonlyArray<TokenPolicy>;
       readonly condition: TokenCondition | null;
       readonly replacementExpiresOn: string;
@@ -69,7 +71,11 @@ const dispositionOf = (
       finding: `${token.name} (${accountId}/${token.id}) has status ${token.status}; it is not healthy and will not be mutated automatically`,
     };
   }
-  if (!input.keysByTarget.get(ref.target)?.has(ref.key)) {
+  const format = destinationFormatOf(
+    input.keysByTarget.get(ref.target),
+    ref.key,
+  );
+  if (format === 'absent') {
     return {
       kind: 'action',
       action: {
@@ -77,6 +83,12 @@ const dispositionOf = (
         kind: 'revoke',
         reason: `secret ${ref.target}:${ref.key} no longer exists`,
       },
+    };
+  }
+  if (format === 'partial') {
+    return {
+      kind: 'finding',
+      finding: `${token.name} maps to an incomplete S3 credential pair at ${ref.target}:${ref.key} (expected both access_key_id and secret_access_key); it will not be mutated automatically`,
     };
   }
   if (!token.condition.supported) {
@@ -118,6 +130,7 @@ const dispositionOf = (
       kind: 'renew',
       target: ref.target,
       key: ref.key,
+      format,
       policies: token.policies,
       condition: token.condition.value,
       replacementExpiresOn: new Date(

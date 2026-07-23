@@ -119,6 +119,8 @@ describe('creds add pagination safety', () => {
         permissions: 'Workers Scripts Write',
         account: ACCOUNT,
         ttlDays: 90,
+        bucket: undefined,
+        s3: false,
       }),
     ).toBe(false);
     expect(pages).toEqual([1, 2]);

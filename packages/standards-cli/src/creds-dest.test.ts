@@ -16,7 +16,7 @@ import {
   resolveContext,
   resolveTargetRel,
 } from './creds-dest';
-import { setSopsValue } from './creds-sops';
+import { setSopsValues } from './creds-sops';
 
 const dirs: Array<string> = [];
 afterEach(() => {
@@ -107,7 +107,9 @@ describe('credential destinations', () => {
     expect(resolveTargetRel(consumer, 'ci')).toBeNull();
     expect(await resolveContext(consumer, 'ci:ci.token')).toBeNull();
     expect(
-      setSopsValue(consumer, 'secrets/ci.yaml', 'ci.token', 'new'),
+      setSopsValues(consumer, 'secrets/ci.yaml', [
+        { path: 'ci.token', value: 'new' },
+      ]),
     ).toEqual({
       ok: false,
       problem: 'unsafe encrypted secrets target secrets/ci.yaml',
