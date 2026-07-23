@@ -91,7 +91,7 @@ describe('credential destinations', () => {
     );
   });
 
-  it('rejects a flat target symlink before command or SOPS mutation', async () => {
+  it('discovers but cannot directly resolve a flat target symlink', async () => {
     const root = mkdtempSync(join(tmpdir(), 'creds-dest-link-'));
     dirs.push(root);
     const consumer = join(root, 'consumer');
@@ -101,6 +101,9 @@ describe('credential destinations', () => {
     writeFileSync(outside, 'ci:\n  token: outside\nsops: {}\n');
     symlinkSync(outside, join(consumer, 'secrets', 'ci.yaml'));
 
+    expect(listSecretsTargets(consumer)).toEqual([
+      { target: 'ci', rel: 'secrets/ci.yaml' },
+    ]);
     expect(resolveTargetRel(consumer, 'ci')).toBeNull();
     expect(await resolveContext(consumer, 'ci:ci.token')).toBeNull();
     expect(
@@ -112,7 +115,7 @@ describe('credential destinations', () => {
     expect(readFileSync(outside, 'utf8')).toContain('token: outside');
   });
 
-  it('rejects a symlinked host directory and omits it from listing', () => {
+  it('discovers but cannot directly resolve a symlinked host directory', () => {
     const root = mkdtempSync(join(tmpdir(), 'creds-host-link-'));
     dirs.push(root);
     const consumer = join(root, 'consumer');
@@ -126,6 +129,8 @@ describe('credential destinations', () => {
     symlinkSync(outsideHost, join(consumer, 'infra', 'hosts', 'prod'), 'dir');
 
     expect(resolveTargetRel(consumer, 'prod')).toBeNull();
-    expect(listSecretsTargets(consumer)).toEqual([]);
+    expect(listSecretsTargets(consumer)).toEqual([
+      { target: 'prod', rel: 'infra/hosts/prod/secrets.yaml' },
+    ]);
   });
 });

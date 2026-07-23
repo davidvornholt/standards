@@ -2,7 +2,7 @@
 // `standards creds add`. Untrusted paths are rejected before any SOPS or
 // provider operation can run.
 
-import { readdirSync } from 'node:fs';
+import { lstatSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { isContainedSopsPath, parseSopsKeyPath } from './creds-sops-structure';
 import {
@@ -74,6 +74,17 @@ const listDir = (consumer: string, rel: string): ReadonlyArray<string> => {
     return [];
   }
 };
+const isHostTargetCandidate = (consumer: string, name: string): boolean => {
+  const rel = `infra/hosts/${name}`;
+  if (isContainedSopsPath(consumer, rel, 'directory')) {
+    return listDir(consumer, rel).includes('secrets.yaml');
+  }
+  try {
+    return lstatSync(join(consumer, rel)).isSymbolicLink();
+  } catch {
+    return false;
+  }
+};
 
 export const listSecretsTargets = (
   consumer: string,
@@ -84,18 +95,10 @@ export const listSecretsTargets = (
       target: name.slice(0, -'.yaml'.length),
       rel: `secrets/${name}`,
     }))
-    .filter(
-      ({ target, rel }) =>
-        SAFE_TARGET.test(target) && isContainedSopsPath(consumer, rel, 'file'),
-    );
+    .filter(({ target }) => SAFE_TARGET.test(target));
   const hosts = listDir(consumer, 'infra/hosts')
     .filter(
-      (name) =>
-        SAFE_TARGET.test(name) &&
-        isContainedSopsPath(consumer, `infra/hosts/${name}`, 'directory'),
-    )
-    .filter((name) =>
-      isContainedSopsPath(consumer, `infra/hosts/${name}/secrets.yaml`, 'file'),
+      (name) => SAFE_TARGET.test(name) && isHostTargetCandidate(consumer, name),
     )
     .map((name) => ({
       target: name,
