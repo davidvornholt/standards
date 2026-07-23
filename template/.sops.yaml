@@ -3,7 +3,11 @@
 # has key-management helpers), then encrypt secrets/*.yaml. This file is
 # seeded once and never synced.
 keys:
+  # Personal identity at ~/.config/sops/age/keys.txt. Rename the anchor so it
+  # identifies person and machine — the hostname verbatim when it already
+  # encodes the owner, otherwise prefixed with the person.
   - &primary age1replacewithyourpersonalagerecipientpublickeyxxxxxxxxxxxxxxxxxx
+  # GitHub Actions CI recipient (private key: SOPS_AGE_KEY Actions secret).
   - &ci age1replacewithyourgithubactionscirecipientpublickeyxxxxxxxxxxxxxxxxxxx
 creation_rules:
   - path_regex: secrets/dev\.yaml$

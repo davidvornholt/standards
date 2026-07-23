@@ -6,23 +6,23 @@ Standalone setup for a repo that needs encrypted secrets — CI tokens, app cred
 
 - Personal identities are standalone age keys at `~/.config/sops/age/keys.txt`, one per person and machine. Create with `just secrets age-create`; never overwrite an existing key.
 - Automation recipients (CI, PR preview) are purpose-specific keypairs, one per repo — a leaked runner key must not unlock other repos. The private key lives only in the consumer's secret store (for GitHub Actions: the `SOPS_AGE_KEY` secret). Losing one is recoverable: personal identities re-encrypt to a replacement via `updatekeys`.
-- `.sops.yaml` lists recipients as named anchors, each with a comment stating what it is. Every creation rule includes all personal identities; automation recipients go only on the files that automation reads:
+- `.sops.yaml` lists recipients as named anchors, each with a comment stating what it is. Name each anchor so it identifies the identity on its own — the person and machine for personal identities, the purpose for automation recipients. Use the machine's hostname verbatim when it already encodes the owner (e.g. `&dana-fw13-nixos`); prefix the person only when it does not (e.g. `&alice-work-laptop`). Every creation rule includes all personal identities; automation recipients go only on the files that automation reads:
 
 ```yaml
 keys:
   # Standalone age identity at ~/.config/sops/age/keys.txt.
-  - &owner_machine age1...
+  - &dana-fw13-nixos age1...
   # GitHub Actions CI recipient (private key: SOPS_AGE_KEY Actions secret).
   - &github_actions_ci age1...
 creation_rules:
   - path_regex: secrets/dev\.yaml$
     key_groups:
       - age:
-          - *owner_machine
+          - *dana-fw13-nixos
   - path_regex: secrets/ci\.yaml$
     key_groups:
       - age:
-          - *owner_machine
+          - *dana-fw13-nixos
           - *github_actions_ci
 ```
 

@@ -87,6 +87,34 @@ Review-fix cycles defer real-but-adjacent findings as `deferred-finding` issues,
 
 Setup is host-level, not per repo: every repo already carries the protocol (the labels ship in the declared GitHub settings via `github --apply`; the workflow and skills are synced). The polling host's infrastructure repository owns the service identity, writable HOME, PATH, token environment, lingering, and systemd deployment. Authenticate that identity for `codex`, provide a fine-grained PAT with issues/PRs/contents write on the watched repos, write a config file listing the repos plus the Codex model and reasoning effort, and adapt `standards poller --print-units --config <path>` into the host's declarative service and timer. The poller removes its direct GitHub token variables before launching Codex, but the approved run shares the service identity and can read its other ambient credentials and logged-in tool state; that visibility is an accepted risk, not credential isolation. One poller serves all your repos; see the CLI README for the full config schema and trust model.
 
+### Package the poller with Nix
+
+Each release exposes `packages.<system>.standards-cli` and `packages.<system>.default` for `x86_64-linux` and `aarch64-linux`. The package derives the CLI version from `packages/standards-cli/package.json`, derives Bun from the root `packageManager` and CLI engine declarations, and creates the complete production dependency closure with a filtered frozen install from `bun.lock`; consumers do not repeat any of those versions or dependencies. Its `bin` directory contains `standards`, `bun`, and `bunx`, and the `standards` wrapper prepends that directory to `PATH` so poller subprocesses inherit the same standards-owned Bun runtime.
+
+Pin a released tag and, when the consumer already owns nixpkgs, make the standards input follow it:
+
+```nix
+inputs.standards = {
+  url = "github:davidvornholt/standards/v0.13.0";
+  inputs.nixpkgs.follows = "nixpkgs";
+};
+
+# In the NixOS module receiving `inputs` through specialArgs:
+let
+  standardsCli = inputs.standards.packages.${pkgs.system}.standards-cli;
+in
+{
+  systemd.user.services.standards-poller.serviceConfig.ExecStart =
+    "${standardsCli}/bin/standards poller --config ${pollerConfig}";
+  systemd.user.services.standards-poller.path = [
+    standardsCli
+    pkgs.codex
+    pkgs.gitMinimal
+    pkgs.nix
+  ];
+}
+```
+
 ### Track main or pin a version
 
 Tracking `main` weekly is the default and the recommended mode for repos whose owner also follows this template. Consumers that want to control *when* standards change instead — typical for repos you adopt these standards into but don't co-evolve with this one — get both levers in a small checked-in policy file, `sync-standards.local.json`, owned by the consumer repo (the canonical workflow file is read-only, but the policy next to it is versioned and reviewable like any other configuration). Both fields are optional:
@@ -95,6 +123,10 @@ Tracking `main` weekly is the default and the recommended mode for repos whose o
 - **`"ref": "v0.7.0"`** — a non-empty single-line tag, branch, or full commit sha to sync from instead of `main`. The workflow and the CLI (`init`/`sync` without an explicit `--ref`) both honor it, so scheduled and local syncs share one policy source.
 
 Every CLI release already creates a `vX.Y.Z` tag and GitHub Release, so released versions are natural pin points — no separate content-release process exists or is needed. A pinned repo updates by moving the pin (or running `sync --ref <newer>`) and reviewing the resulting PR like a dependency upgrade. The lock always records the exact upstream commit synced, so `check` works identically in both modes.
+
+### Migration to 0.13.0
+
+Version 0.13.0 adds the standards-owned Nix package for host-side CLI and poller use. Infrastructure consumers should replace locally assembled Bun, standards CLI, and dependency derivations with the released `packages.<system>.standards-cli` output; the package includes the authoritative Bun runtime and lock-derived production dependency closure. This is a packaging ownership move only: npm consumers and the standards sync contract are unchanged.
 
 ### Breaking migration to squash-only merging
 
