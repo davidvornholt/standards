@@ -51,9 +51,11 @@ Host directories are named `<env>-<index>` (`prod-1`), even when the repo has a 
       inherit (nixpkgs) lib;
       pkgs = nixpkgs.legacyPackages.${system};
       treefmtEval = treefmt-nix.lib.evalModule pkgs ./treefmt.nix;
+      webImage = builtins.getEnv "WEB_IMAGE"; # empty only for non-deploy evaluation
     in {
       nixosConfigurations.prod-1 = lib.nixosSystem {
         inherit system;
+        specialArgs = { inherit webImage; };
         modules = [
           disko.nixosModules.disko
           sops-nix.nixosModules.sops
@@ -82,7 +84,7 @@ Host directories are named `<env>-<index>` (`prod-1`), even when the repo has a 
 }
 ```
 
-Build-time parameters (image digests, preview lists) enter via `specialArgs` from environment variables in the deploy workflow, with safe fallbacks so plain `nix flake check` evaluates without them.
+Build-time parameters (image digests, preview lists) enter via `specialArgs` from environment variables in the deploy workflow. Name the full-reference variable once per app (`WEB_IMAGE` above), let non-deploy evaluation use an empty fallback, and make the exact-main-SHA deploy gate reject an empty or non-`^ghcr\.io/...@sha256:[0-9a-f]{64}$` value before mutation. The workflow derives `WEB_IMAGE` only as `imageRepository@digest` from its gated checkout's enriched `images.json`; app modules consume the `webImage` argument and do not parse another manifest or define a fallback production digest. Cross-repo bumps and readback follow `image-promotion.md`.
 
 ## Server profile
 
