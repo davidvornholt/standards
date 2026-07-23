@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, statSync } from 'node:fs';
-import { mkdir, open, readFile, rename, rmdir, unlink } from 'node:fs/promises';
+import { mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import process from 'node:process';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
+import { withBrokerLock } from './creds-store-lock';
 import { isNonEmptyString, isRecord } from './github-settings-parse';
 export type GithubBrokerApp = {
   readonly appId: number;
@@ -26,8 +27,6 @@ const OWNER_ONLY_DIR_MODE = 0o700;
 const FILE_MODE_MODULUS = 0o1000;
 const GROUP_OTHER_MODULUS = 0o100;
 const OCTAL_RADIX = 8;
-const LOCK_RETRY_MS = 25;
-const LOCK_TIMEOUT_MS = 10_000;
 export const inspectBrokerFileMode = (path: string) => {
   try {
     const mode = statSync(path).mode % FILE_MODE_MODULUS;
@@ -168,33 +167,5 @@ const writeBrokerStoreUnlocked = async (
     await sync(parent);
   } finally {
     await unlink(temporary).catch(() => undefined);
-  }
-};
-const withBrokerLock = async <T>(
-  path: string,
-  operation: () => Promise<T>,
-): Promise<T> => {
-  const lockPath = `${path}.lock`;
-  await mkdir(dirname(path), { recursive: true, mode: OWNER_ONLY_DIR_MODE });
-  const deadline = Date.now() + LOCK_TIMEOUT_MS;
-  for (;;) {
-    try {
-      // biome-ignore lint/performance/noAwaitInLoops: lock retries must be sequential.
-      await mkdir(lockPath, { mode: OWNER_ONLY_DIR_MODE });
-      break;
-    } catch (error) {
-      if (!(isRecord(error) && error.code === 'EEXIST')) {
-        throw error;
-      }
-      if (Date.now() >= deadline) {
-        throw new Error(`lock timeout: ${lockPath}`, { cause: error });
-      }
-      await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS));
-    }
-  }
-  try {
-    return await operation();
-  } finally {
-    await rmdir(lockPath);
   }
 };

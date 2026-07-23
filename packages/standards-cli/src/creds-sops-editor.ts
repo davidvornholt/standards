@@ -134,7 +134,14 @@ export const applySopsEditorChanges = (
   }
   const document = parseDocument(text);
   for (const [index, change] of changes.entries()) {
-    document.setIn(paths[index] ?? [], change.value);
+    const path = paths[index];
+    if (path === undefined) {
+      // paths is derived index-aligned from changes; a miss is a programming
+      // error, and the old `?? []` fallback would have replaced the document
+      // root — the most destructive possible default.
+      throw new Error(`SOPS change path misalignment at index ${index}`);
+    }
+    document.setIn(path, change.value);
   }
   return document.toString();
 };

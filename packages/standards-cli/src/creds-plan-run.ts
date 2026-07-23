@@ -116,7 +116,7 @@ const applyAction = async (
   const verified = verifyStoredValue(consumer, rel, action.key, value);
   if (verified.ok && !verified.matches) {
     const problem = written.ok
-      ? `${action.name}: stored SOPS value does not match replacement`
+      ? `${action.name}: ${rel} at ${action.key} now holds a value matching neither the old nor the replacement token; repair the stored value manually`
       : `${action.name}: ${written.problem}`;
     return cleanupReplacement(account, replacementId, action.tokenId, problem);
   }

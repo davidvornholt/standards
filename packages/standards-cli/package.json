@@ -41,6 +41,7 @@
     "src/creds-sops-editor.ts",
     "src/creds-sops-structure.ts",
     "src/creds-store.ts",
+    "src/creds-store-lock.ts",
     "src/dependabot-compose-input.ts",
     "src/dependabot-compose.ts",
     "src/dependabot-inspect.ts",

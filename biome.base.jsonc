@@ -187,7 +187,11 @@
       // configuration-dependent behavior, and fixtures contain literal dummy
       // tokens that trip entropy-based secret detection. Biome also does not
       // resolve Bun's virtual `bun:test` module.
-      "includes": ["**/*.test.ts", "**/*.test.tsx"],
+      "includes": [
+        "**/*.test.ts",
+        "**/*.test.tsx",
+        "packages/standards-cli/src/creds-plan-run-test-support.ts"
+      ],
       "linter": {
         "rules": {
           "correctness": {
