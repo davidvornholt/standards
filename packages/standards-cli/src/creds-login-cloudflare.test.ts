@@ -1,5 +1,14 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { verifyCloudflareBootstrapAuthority } from './creds-login-cloudflare';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import process from 'node:process';
+import {
+  cloudflareBootstrapInstructions,
+  verifyCloudflareBootstrapAuthority,
+} from './creds-login-cloudflare';
+import { BROKER_IDENTITY_NAME } from './creds-naming';
 
 const ACCOUNT_ID_LENGTH = 32;
 const HTTP_BAD_REQUEST = 400;
@@ -8,6 +17,7 @@ const ACCOUNT = 'a'.repeat(ACCOUNT_ID_LENGTH);
 const TOKEN = 'cfat_bootstrap_secret';
 const originalFetch = globalThis.fetch;
 const calls: Array<string> = [];
+const temporaryDirectories: Array<string> = [];
 
 const response = (result: unknown, status = 200): Response =>
   new Response(
@@ -40,10 +50,13 @@ const tokenListResponse = (
 afterEach(() => {
   globalThis.fetch = originalFetch;
   calls.length = 0;
+  for (const directory of temporaryDirectories.splice(0)) {
+    rmSync(directory, { force: true, recursive: true });
+  }
 });
 
 describe('Cloudflare bootstrap authority', () => {
-  it('requires both active verification and token-list authority', async () => {
+  it('rejects an empty token list', async () => {
     globalThis.fetch = ((input: string | URL | Request) => {
       const url = String(input);
       calls.push(url);
@@ -55,32 +68,48 @@ describe('Cloudflare bootstrap authority', () => {
     }) as typeof fetch;
 
     expect(await verifyCloudflareBootstrapAuthority(ACCOUNT, TOKEN)).toEqual({
-      ok: true,
-      value: { tokenName: null },
+      ok: false,
+      problem:
+        'the verified token was not found in the complete account token list',
     });
-    expect(calls).toHaveLength(2);
-    expect(calls[1]).toContain(
-      `/accounts/${ACCOUNT}/tokens?include_expired=true&page=1&per_page=50`,
-    );
   });
 
-  it('reports the pasted token name for the recommendation check', async () => {
+  it.each([
+    BROKER_IDENTITY_NAME,
+    'my-safe-bootstrap-token',
+  ])('accepts a matched safe token named %s', async (name) => {
+    globalThis.fetch = ((input: string | URL | Request) =>
+      Promise.resolve(
+        String(input).endsWith('/verify')
+          ? response({ id: 'bootstrap', status: 'active' })
+          : tokenListResponse([{ id: 'bootstrap', name }]),
+      )) as typeof fetch;
+
+    expect(await verifyCloudflareBootstrapAuthority(ACCOUNT, TOKEN)).toEqual({
+      ok: true,
+      value: { tokenName: name },
+    });
+  });
+
+  it('rejects a token-list entry with a different id', async () => {
     globalThis.fetch = ((input: string | URL | Request) =>
       Promise.resolve(
         String(input).endsWith('/verify')
           ? response({ id: 'bootstrap', status: 'active' })
           : tokenListResponse([
-              { id: 'other', name: 'unrelated' },
-              { id: 'bootstrap', name: 'my-token' },
+              { id: 'different', name: BROKER_IDENTITY_NAME },
             ]),
       )) as typeof fetch;
 
     expect(await verifyCloudflareBootstrapAuthority(ACCOUNT, TOKEN)).toEqual({
-      ok: true,
-      value: { tokenName: 'my-token' },
+      ok: false,
+      problem:
+        'the verified token was not found in the complete account token list',
     });
   });
+});
 
+describe('Cloudflare bootstrap authority rejection', () => {
   it('rejects a bootstrap token named inside the minted namespace', async () => {
     globalThis.fetch = ((input: string | URL | Request) =>
       Promise.resolve(
@@ -125,4 +154,47 @@ describe('Cloudflare bootstrap authority', () => {
     });
     expect(calls).toHaveLength(1);
   });
+
+  it('does not mutate the broker store when verification omits the id', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'creds-login-cloudflare-'));
+    temporaryDirectories.push(directory);
+    const brokerPath = join(directory, 'broker.yaml');
+    const moduleUrl = new URL('./creds-login-cloudflare.ts', import.meta.url)
+      .href;
+    const script = `globalThis.fetch = (input) => Promise.resolve(String(input).endsWith('/verify')
+      ? Response.json({ success: true, errors: [], result: { status: 'active' } })
+      : Response.json({ success: true, errors: [], result: [], result_info: { page: 1, per_page: 50, count: 0, total_count: 0 } }));
+      const { runCredsLoginCloudflare } = await import(${JSON.stringify(moduleUrl)});
+      const ok = await runCredsLoginCloudflare({ account: ${JSON.stringify(ACCOUNT)} });
+      process.exitCode = ok ? 0 : 1;`;
+    const run = spawnSync(process.execPath, ['-e', script], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        // biome-ignore lint/style/useNamingConvention: Process environment keys are uppercase.
+        PATH: '',
+        // biome-ignore lint/style/useNamingConvention: Process environment keys are uppercase.
+        STANDARDS_BROKER_FILE: brokerPath,
+      },
+      input: `${TOKEN}\n`,
+    });
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain(
+      'token verification returned no valid token id',
+    );
+    expect(existsSync(brokerPath)).toBe(false);
+  });
+});
+
+it('prints the complete Create additional tokens template sequence', () => {
+  const tokensUrl = `https://dash.cloudflare.com/${ACCOUNT}/api-tokens`;
+  expect(cloudflareBootstrapInstructions(tokensUrl)).toEqual([
+    'Create the bootstrap token (one time for this account):',
+    `  1. Open ${tokensUrl}`,
+    '  2. Select Create Token',
+    '  3. Find Create additional tokens and select Use template',
+    `  4. Name it ${BROKER_IDENTITY_NAME}`,
+    '  5. Keep exactly one permission: Account / Account API Tokens / Edit',
+    '  6. Continue to summary, create the token, and copy the value',
+  ]);
 });

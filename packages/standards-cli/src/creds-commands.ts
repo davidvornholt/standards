@@ -5,6 +5,7 @@ import { runCredsAddGithub } from './creds-add-github';
 import { listPermissionGroups } from './creds-cloudflare';
 import { runCredsLoginCloudflare } from './creds-login-cloudflare';
 import { runCredsLoginGithub } from './creds-login-github';
+import { BROKER_IDENTITY_NAME } from './creds-naming';
 import { runCredsPlan } from './creds-plan-run';
 import {
   inspectBrokerFileMode,
@@ -31,7 +32,7 @@ Options:
   --account <id>        Cloudflare account when more than one is configured
   --ttl-days <n>        Token lifetime in days (default: 90)
   --org <org>           Create the GitHub App under an organization
-  --name <name>         GitHub App name (default: standards-broker)
+  --name <name>         GitHub App name (default: ${BROKER_IDENTITY_NAME})
 
 Secret values are written directly into SOPS-encrypted targets and never printed.`;
 const DAY_MS = 86_400_000;

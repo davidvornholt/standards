@@ -21,7 +21,7 @@ const ACCOUNT_ID_PATTERN = /^[0-9a-f]{32}$/u;
 export const verifyCloudflareBootstrapAuthority = async (
   accountId: string,
   token: string,
-): Promise<CfResult<{ readonly tokenName: string | null }>> => {
+): Promise<CfResult<{ readonly tokenName: string }>> => {
   const verified = await verifyAccountToken(accountId, token);
   if (!verified.ok) {
     return {
@@ -43,14 +43,33 @@ export const verifyCloudflareBootstrapAuthority = async (
     };
   }
   const own = listed.value.find((entry) => entry.id === verified.value.id);
-  if (own !== undefined && isInMintedNamespace(own.name)) {
+  if (own === undefined) {
+    return {
+      ok: false,
+      problem:
+        'the verified token was not found in the complete account token list',
+    };
+  }
+  if (isInMintedNamespace(own.name)) {
     return {
       ok: false,
       problem: `the token is named "${own.name}", inside the broker's minted-token namespace — reconciliation would treat it as a minted credential and could revoke it; rename it ${BROKER_IDENTITY_NAME} in the dashboard and re-run login`,
     };
   }
-  return { ok: true, value: { tokenName: own?.name ?? null } };
+  return { ok: true, value: { tokenName: own.name } };
 };
+
+export const cloudflareBootstrapInstructions = (
+  tokensUrl: string,
+): ReadonlyArray<string> => [
+  'Create the bootstrap token (one time for this account):',
+  `  1. Open ${tokensUrl}`,
+  '  2. Select Create Token',
+  '  3. Find Create additional tokens and select Use template',
+  `  4. Name it ${BROKER_IDENTITY_NAME}`,
+  '  5. Keep exactly one permission: Account / Account API Tokens / Edit',
+  '  6. Continue to summary, create the token, and copy the value',
+];
 
 export const runCredsLoginCloudflare = async (options: {
   readonly account: string | undefined;
@@ -75,14 +94,9 @@ export const runCredsLoginCloudflare = async (options: {
     return false;
   }
   const tokensUrl = `https://dash.cloudflare.com/${accountId}/api-tokens`;
-  console.log('Create the bootstrap token (one time for this account):');
-  console.log(`  1. Open ${tokensUrl}`);
-  console.log('  2. Create Token, then Create Custom Token');
-  console.log(`  3. Name it ${BROKER_IDENTITY_NAME}`);
-  console.log(
-    '  4. Grant exactly one permission: Account / Account API Tokens / Edit',
-  );
-  console.log('  5. Continue to summary, create the token, and copy the value');
+  for (const instruction of cloudflareBootstrapInstructions(tokensUrl)) {
+    console.log(instruction);
+  }
   openInBrowser(tokensUrl);
   const token = await promptHidden('Paste the token (input is hidden): ');
   if (token.length === 0) {
@@ -97,11 +111,7 @@ export const runCredsLoginCloudflare = async (options: {
     return false;
   }
   const { tokenName } = verified.value;
-  if (tokenName === null) {
-    console.error(
-      `standards creds: warning — the pasted token was not found in the account token list, so its name could not be confirmed; it should be named ${BROKER_IDENTITY_NAME}`,
-    );
-  } else if (tokenName !== BROKER_IDENTITY_NAME) {
+  if (tokenName !== BROKER_IDENTITY_NAME) {
     console.error(
       `standards creds: warning — the token is named "${tokenName}", not "${BROKER_IDENTITY_NAME}"; rename it in the dashboard so it stays identifiable`,
     );

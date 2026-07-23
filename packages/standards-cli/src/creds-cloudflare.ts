@@ -19,12 +19,12 @@ import {
   cloudflarePaginationProblem,
   decodeCloudflareTokenPage,
 } from './creds-cloudflare-pagination';
-import { isRecord } from './github-settings-parse';
+import { isNonEmptyString, isRecord } from './github-settings-parse';
 
 const PAGE_SIZE = 50;
 
 export type VerifiedToken = {
-  readonly id: string | null;
+  readonly id: string;
   readonly status: string;
 };
 
@@ -41,10 +41,16 @@ export const verifyAccountToken = async (
     return response;
   }
   const result = isRecord(response.value.result) ? response.value.result : {};
+  if (!isNonEmptyString(result.id)) {
+    return {
+      ok: false,
+      problem: 'token verification returned no valid token id',
+    };
+  }
   return {
     ok: true,
     value: {
-      id: typeof result.id === 'string' ? result.id : null,
+      id: result.id,
       status: typeof result.status === 'string' ? result.status : 'unknown',
     },
   };

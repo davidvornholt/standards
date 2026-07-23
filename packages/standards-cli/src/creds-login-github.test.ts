@@ -1,4 +1,5 @@
 import { describe, expect, it, mock, spyOn } from 'bun:test';
+import { runCredsCommand } from './creds-commands';
 import {
   githubInstallMessage,
   startManifestLoginListener,
@@ -10,6 +11,7 @@ import {
   manifestFormHtml,
   parseConversion,
 } from './creds-login-github-manifest';
+import { BROKER_IDENTITY_NAME } from './creds-naming';
 
 const MANIFEST_STATE_HEX_LENGTH = 64;
 const HTTP_BAD_REQUEST = 400;
@@ -19,12 +21,12 @@ const LISTENER_TIMEOUT_MS = 5000;
 const STATE_QUERY = /[?&]state=(?<state>[a-f0-9]+)/u;
 
 describe('GitHub App manifest flow', () => {
-  it('builds a manifest with an inactive webhook and the localhost redirect', () => {
+  it('builds the default manifest and keeps runtime help aligned', async () => {
     const manifest = buildAppManifest(
-      'standards-broker',
+      BROKER_IDENTITY_NAME,
       'http://127.0.0.1:4242/callback',
     );
-    expect(manifest.name).toBe('standards-broker');
+    expect(manifest.name).toBe(BROKER_IDENTITY_NAME);
     expect(manifest.redirect_url).toBe('http://127.0.0.1:4242/callback');
     expect(manifest.public).toBe(false);
     expect(manifest.hook_attributes).toEqual({
@@ -35,6 +37,15 @@ describe('GitHub App manifest flow', () => {
       contents: 'write',
       secrets: 'write',
     });
+    const log = spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      expect(await runCredsCommand(['help'])).toBe(true);
+      expect(log).toHaveBeenCalledWith(
+        expect.stringContaining(`default: ${String(manifest.name)}`),
+      );
+    } finally {
+      log.mockRestore();
+    }
   });
 
   it('escapes the manifest JSON for the hidden form field', () => {
