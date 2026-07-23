@@ -41,7 +41,7 @@ export const verifyAccountToken = async (
     return response;
   }
   const result = isRecord(response.value.result) ? response.value.result : {};
-  if (typeof result.id !== 'string') {
+  if (typeof result.id !== 'string' || result.id.length === 0) {
     return {
       ok: false,
       problem: 'token verification returned no valid token ID',
