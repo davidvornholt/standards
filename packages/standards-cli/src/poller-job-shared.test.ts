@@ -3,12 +3,14 @@ import process from 'node:process';
 import { HTTP_CREATED } from './github-api';
 import { installApi } from './github-commands-test-support';
 import type { PollerConfig } from './poller-config';
-import { jobPreamble, releaseLabels } from './poller-job-shared';
+import { failJob, jobPreamble, releaseLabels } from './poller-job-shared';
 import { QUESTION_MARKER } from './poller-protocol';
 
 const originalFetch = globalThis.fetch;
 const config = {} as PollerConfig;
 const ISSUE_NUMBER = 8;
+const OLD_FAILURE_SNIPPET_LIMIT = 1500;
+const FAILURE_CONTEXT_LINE_COUNT = 50;
 const createdAt = (value: string): Record<string, string> =>
   Object.fromEntries([['created_at', value]]);
 const role = (value: string) => ({
@@ -144,6 +146,34 @@ describe('jobPreamble', () => {
         'issue:approved',
       ),
     ).rejects.toThrow('add needs-clarification');
+  });
+});
+
+describe('failJob', () => {
+  it('preserves actionable diagnostics beyond the old comment limit', async () => {
+    const actionableMarker = 'ACTION REQUIRED: upgrade the Codex CLI';
+    const failure = `codex exec failed (exit status 1):\n${'stderr: worker initialization failed\n'.repeat(FAILURE_CONTEXT_LINE_COUNT)}${actionableMarker}`;
+    expect(failure.length).toBeGreaterThan(OLD_FAILURE_SNIPPET_LIMIT);
+    expect(failure.indexOf(actionableMarker)).toBeGreaterThan(
+      OLD_FAILURE_SNIPPET_LIMIT,
+    );
+    const calls = installApi([
+      { status: HTTP_CREATED, body: { id: 1 } },
+      { body: {} },
+      { body: {} },
+      { body: {} },
+    ]);
+
+    await failJob(deps, labels, ISSUE_NUMBER, failure);
+
+    expect(calls[0]?.body).toEqual({
+      body: expect.stringContaining(actionableMarker),
+    });
+    expect(calls[0]?.body).toEqual({
+      body: expect.stringContaining(
+        'Re-apply `approved-for-fix` after addressing this to retry.',
+      ),
+    });
   });
 });
 

@@ -23,6 +23,7 @@ export type SopsActionOptions = {
   // Deliberately unconstrained so suites can exercise invalid modes.
   readonly failureMode?: string;
   readonly fallbackValue?: string;
+  readonly secretKey?: string;
   readonly sha256Status?: number;
   readonly sopsOutput?: string;
   readonly sopsStatus?: number;
@@ -50,6 +51,7 @@ const DEFAULT_OPTIONS = {
   envName: 'GH_TOKEN',
   failureMode: 'fallback',
   fallbackValue: 'workflow-token',
+  secretKey: 'standards_sync_token',
   sha256Status: 0,
   sopsOutput: JSON.stringify({
     ci: { standards_sync_token: 'resolved-token' },
@@ -137,7 +139,7 @@ export const createSopsActionRunner =
         SOPS_FALLBACK_VALUE: resolved.fallbackValue,
         SOPS_MARKER: sopsMarker,
         SOPS_SECRET_FILE: 'secrets/ci.yaml',
-        SOPS_SECRET_KEY: 'standards_sync_token',
+        SOPS_SECRET_KEY: resolved.secretKey,
       },
     );
     return {

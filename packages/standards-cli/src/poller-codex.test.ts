@@ -15,6 +15,7 @@ import { OUTCOME_DIR } from './poller-protocol';
 
 const dirs: Array<string> = [];
 const EXPECTED_TIMEOUT_MS = 120_000;
+const EXCESSIVE_TRAILING_WHITESPACE_LENGTH = 2001;
 const config = {
   repos: ['owner/repo'],
   model: 'gpt-test',
@@ -77,5 +78,51 @@ describe('runCodex', () => {
     expect(result.succeeded).toBeFalse();
     expect(result.failure).toContain('timed out');
     expect(result.failure).toContain('last process output');
+  });
+
+  it('preserves stderr before trailing whitespace', () => {
+    const workDir = mkdtempSync(join(tmpdir(), 'poller-codex-'));
+    dirs.push(workDir);
+    const result = runCodex(workDir, 'do work', config, () => {
+      const error = new Error('failed') as Error & { stderr: string };
+      error.stderr = `ROOT CAUSE: model requires a newer CLI\n${' '.repeat(
+        EXCESSIVE_TRAILING_WHITESPACE_LENGTH,
+      )}`;
+      throw error;
+    });
+    expect(result.failure).toContain('ROOT CAUSE: model requires a newer CLI');
+  });
+
+  it('replaces the echoed command line with the exit cause', () => {
+    const workDir = mkdtempSync(join(tmpdir(), 'poller-codex-'));
+    dirs.push(workDir);
+    const prompt = 'a very long agent prompt';
+    const result = runCodex(workDir, prompt, config, () => {
+      const error = new Error(
+        `Command failed: codex exec ${prompt}`,
+      ) as Error & { stderr: string; status: number };
+      error.stderr = 'ERROR: model requires a newer CLI';
+      error.status = 1;
+      throw error;
+    });
+    expect(result.succeeded).toBeFalse();
+    expect(result.failure).toContain('exit status 1');
+    expect(result.failure).toContain('ERROR: model requires a newer CLI');
+    expect(result.failure).not.toContain(prompt);
+  });
+
+  it('reports the terminating signal when there is no exit status', () => {
+    const workDir = mkdtempSync(join(tmpdir(), 'poller-codex-'));
+    dirs.push(workDir);
+    const result = runCodex(workDir, 'do work', config, () => {
+      const error = new Error('Command failed: codex exec do work') as Error & {
+        signal: string;
+      };
+      error.signal = 'SIGTERM';
+      throw error;
+    });
+    expect(result.succeeded).toBeFalse();
+    expect(result.failure).toContain('signal SIGTERM');
+    expect(result.failure).not.toContain('do work');
   });
 });

@@ -34,6 +34,16 @@ type CodexExecutor = (
 
 const defaultExecutor: CodexExecutor = execFileSync;
 
+const exitCause = (details: Record<string, unknown>): string => {
+  if (typeof details.status === 'number') {
+    return `exit status ${details.status}`;
+  }
+  if (typeof details.signal === 'string') {
+    return `signal ${details.signal}`;
+  }
+  return 'unknown exit cause';
+};
+
 // Remove the poller's direct GitHub token variables so an approved Codex run
 // cannot trivially bypass the protected-path and trust checks with API writes.
 // The shared service identity is not credential-isolated: auth state and other
@@ -80,14 +90,24 @@ export const runCodex = (
     );
     return { succeeded: true, failure: null };
   } catch (error) {
+    const details: Record<string, unknown> = isRecord(error) ? error : {};
     const stderr =
-      isRecord(error) && typeof error.stderr === 'string'
-        ? error.stderr.slice(-STDERR_SNIPPET_LIMIT)
+      typeof details.stderr === 'string'
+        ? details.stderr.trim().slice(-STDERR_SNIPPET_LIMIT)
         : '';
     const message = error instanceof Error ? error.message : String(error);
+    // Node's "Command failed" message echoes the full command line, and the
+    // prompt embedded in it would push stderr past the failure-comment
+    // snippet limit — report the exit cause instead of the echoed command.
+    const cause = message.startsWith('Command failed')
+      ? exitCause(details)
+      : message;
     return {
       succeeded: false,
-      failure: `codex exec failed: ${message}\n${stderr}`,
+      failure:
+        stderr === ''
+          ? `codex exec failed: ${cause}`
+          : `codex exec failed (${cause}):\n${stderr}`,
     };
   }
 };
