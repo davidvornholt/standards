@@ -1,126 +1,141 @@
-// SOPS integration for `standards creds`. Reading never decrypts: SOPS
-// encrypts values but keeps the key structure plaintext, so the set of
-// (target, dotted key) pairs — the repo side of the reconciliation — comes
-// from parsing the encrypted YAML directly. Writing goes through `sops edit`
-// with a non-interactive editor so plaintext token values never touch argv,
-// stdout, or an unencrypted file outside sops's own temp handling.
+// SOPS reads inspect only plaintext key structure. Writes use a non-
+// interactive editor so values never touch argv, stdout, or an unencrypted
+// file outside SOPS's own temporary-file handling.
 
-import { existsSync, readdirSync, statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
-import { parse as parseYaml } from 'yaml';
-import { SET_PATH_ENV, SET_VALUE_ENV } from './creds-sops-editor';
+import { parseSopsKeyPath } from './creds-dest';
+import {
+  type SopsValueChange as EditorValueChange,
+  inspectSopsStructure,
+  SET_CHANGES_ENV,
+  type SopsShapeFailure,
+  type SopsStructureResult,
+} from './creds-sops-editor';
 import { isRecord } from './github-settings-parse';
 import { runSops } from './sops-exec';
 
-// sops exits 200 when the editor leaves the file unchanged; for a
-// non-interactive value write that means the value was already set.
+export type { SopsValueChange } from './creds-sops-editor';
+
 const SOPS_UNCHANGED_STATUS = 200;
+type ReadFailure =
+  | SopsShapeFailure
+  | {
+      readonly ok: false;
+      readonly kind: 'read-error';
+      readonly problem: string;
+    };
+export type EncryptedKeysReadResult =
+  | { readonly ok: true; readonly keys: ReadonlyArray<string> }
+  | ReadFailure;
+export type SopsScalarDestinationResult =
+  | { readonly ok: true; readonly state: 'absent' | 'scalar' }
+  | ReadFailure
+  | {
+      readonly ok: false;
+      readonly kind: 'collection' | 'blocked-by-scalar';
+      readonly problem: string;
+    };
+export type SopsWriteResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly problem: string };
 
-export type SecretsTarget = { readonly target: string; readonly rel: string };
-
-const isYamlSecrets = (name: string): boolean =>
-  name.endsWith('.yaml') && !name.endsWith('.example.yaml');
-
-const listDir = (dir: string): ReadonlyArray<string> => {
-  try {
-    return readdirSync(dir);
-  } catch {
-    return [];
-  }
-};
-
-// Mirrors the canonical `just secrets` target resolution: `secrets/<t>.yaml`
-// for flat targets, `infra/hosts/<t>/secrets.yaml` for host targets.
-export const listSecretsTargets = (
-  consumer: string,
-): ReadonlyArray<SecretsTarget> => {
-  const flat = listDir(join(consumer, 'secrets'))
-    .filter(isYamlSecrets)
-    .map((name) => ({
-      target: name.slice(0, -'.yaml'.length),
-      rel: `secrets/${name}`,
-    }));
-  const hosts = listDir(join(consumer, 'infra', 'hosts'))
-    .filter((name) =>
-      existsSync(join(consumer, 'infra', 'hosts', name, 'secrets.yaml')),
-    )
-    .map((name) => ({
-      target: name,
-      rel: `infra/hosts/${name}/secrets.yaml`,
-    }));
-  return [...flat, ...hosts].filter((entry) => {
-    try {
-      return statSync(join(consumer, entry.rel)).isFile();
-    } catch {
-      return false;
-    }
-  });
-};
-
-export const resolveTargetRel = (
-  consumer: string,
-  target: string,
-): string | null => {
-  const host = `infra/hosts/${target}/secrets.yaml`;
-  if (existsSync(join(consumer, 'infra', 'hosts', target))) {
-    return host;
-  }
-  const flat = `secrets/${target}.yaml`;
-  return existsSync(join(consumer, flat)) ? flat : null;
-};
-
-const collectLeafPaths = (
-  node: unknown,
-  prefix: ReadonlyArray<string>,
-  into: Array<string>,
-): void => {
-  if (isRecord(node)) {
-    for (const [key, value] of Object.entries(node)) {
-      collectLeafPaths(value, [...prefix, key], into);
-    }
-    return;
-  }
-  if (prefix.length > 0) {
-    into.push(prefix.join('.'));
-  }
-};
-
-// Returns the dotted leaf key paths of a SOPS-encrypted YAML document, or
-// null when the file carries no sops metadata (not encrypted — never treated
-// as broker-relevant).
-export const listEncryptedKeys = (
-  text: string,
-): ReadonlyArray<string> | null => {
-  let parsed: unknown;
-  try {
-    parsed = parseYaml(text);
-  } catch {
-    return null;
-  }
-  if (!(isRecord(parsed) && isRecord(parsed.sops))) {
-    return null;
-  }
-  const keys: Array<string> = [];
-  for (const [key, value] of Object.entries(parsed)) {
-    if (key !== 'sops') {
-      collectLeafPaths(value, [key], keys);
-    }
-  }
-  return keys;
+export const listEncryptedKeys = (text: string): EncryptedKeysReadResult => {
+  const result = inspectSopsStructure(text, true);
+  return result.ok ? { ok: true, keys: result.keys } : result;
 };
 
 export const readEncryptedKeys = async (
   consumer: string,
   rel: string,
-): Promise<ReadonlyArray<string> | null> =>
-  listEncryptedKeys(await readFile(join(consumer, rel), 'utf8'));
+): Promise<EncryptedKeysReadResult> => {
+  try {
+    return listEncryptedKeys(await readFile(join(consumer, rel), 'utf8'));
+  } catch {
+    return {
+      ok: false,
+      kind: 'read-error',
+      problem: `could not read encrypted secrets target ${rel}`,
+    };
+  }
+};
 
-export type SopsWriteResult =
-  | { readonly ok: true }
-  | { readonly ok: false; readonly problem: string };
+const inspectScalar = (
+  structure: SopsStructureResult,
+  dottedPath: string,
+): SopsScalarDestinationResult => {
+  if (!structure.ok) {
+    return structure;
+  }
+  const path = parseSopsKeyPath(dottedPath);
+  if (path === null) {
+    return {
+      ok: false,
+      kind: 'unsupported-shape',
+      problem: `invalid SOPS key path: ${dottedPath}`,
+    };
+  }
+  let node: unknown = structure.root;
+  for (const [index, segment] of path.entries()) {
+    if (!isRecord(node)) {
+      return {
+        ok: false,
+        kind: 'blocked-by-scalar',
+        problem: `SOPS key path is blocked by a scalar: ${dottedPath}`,
+      };
+    }
+    const next = node[segment];
+    if (next === undefined) {
+      return { ok: true, state: 'absent' };
+    }
+    if (index === path.length - 1) {
+      return isRecord(next)
+        ? {
+            ok: false,
+            kind: 'collection',
+            problem: `SOPS key path names a mapping: ${dottedPath}`,
+          }
+        : { ok: true, state: 'scalar' };
+    }
+    node = next;
+  }
+  return { ok: true, state: 'absent' };
+};
+
+export const inspectSopsScalarDestination = async (
+  consumer: string,
+  rel: string,
+  dottedPath: string,
+): Promise<SopsScalarDestinationResult> => {
+  try {
+    const text = await readFile(join(consumer, rel), 'utf8');
+    return inspectScalar(inspectSopsStructure(text, true), dottedPath);
+  } catch {
+    return {
+      ok: false,
+      kind: 'read-error',
+      problem: `could not read encrypted secrets target ${rel}`,
+    };
+  }
+};
+
+export const verifySopsScalarLeaf = async (
+  consumer: string,
+  rel: string,
+  dottedPath: string,
+): Promise<SopsWriteResult> => {
+  const result = await inspectSopsScalarDestination(consumer, rel, dottedPath);
+  return result.ok && result.state === 'scalar'
+    ? { ok: true }
+    : {
+        ok: false,
+        problem: result.ok
+          ? `SOPS write did not create ${dottedPath} in ${rel}`
+          : result.problem,
+      };
+};
 
 const editorCommand = (): string => {
   const editor = fileURLToPath(
@@ -129,26 +144,30 @@ const editorCommand = (): string => {
   return `"${process.execPath}" "${editor}"`;
 };
 
-export const setSopsValue = (
+export const setSopsValues = (
   consumer: string,
   rel: string,
-  dottedPath: string,
-  value: string,
+  changes: ReadonlyArray<EditorValueChange>,
 ): SopsWriteResult => {
   const result = runSops(['edit', rel], consumer, {
-    // biome-ignore lint/style/useNamingConvention: sops's environment contract names the editor variable SOPS_EDITOR.
+    // biome-ignore lint/style/useNamingConvention: sops defines this environment variable.
     SOPS_EDITOR: editorCommand(),
-    [SET_PATH_ENV]: dottedPath,
-    [SET_VALUE_ENV]: value,
+    [SET_CHANGES_ENV]: JSON.stringify(changes),
   });
   if (result.status === 0 || result.status === SOPS_UNCHANGED_STATUS) {
     return { ok: true };
   }
+  const paths = changes.map(({ path }) => path).join(', ');
   const detail = result.errorMessage ?? result.stderr.trim();
   return {
     ok: false,
-    problem: detail
-      ? `could not write ${dottedPath} into ${rel}: ${detail}`
-      : `could not write ${dottedPath} into ${rel}`,
+    problem: `could not write ${paths} into ${rel}${detail ? `: ${detail}` : ''}`,
   };
 };
+
+export const setSopsValue = (
+  consumer: string,
+  rel: string,
+  path: string,
+  value: string,
+): SopsWriteResult => setSopsValues(consumer, rel, [{ path, value }]);
