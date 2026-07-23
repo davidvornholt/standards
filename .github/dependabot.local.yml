@@ -1,0 +1,12 @@
+# Repo-owned Dependabot extension, composed with the canonical
+# .github/dependabot.base.yml into the generated .github/dependabot.yml by
+# `bun standards dependabot --write` (run by the root gate).
+updates:
+  - package-ecosystem: "nix"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      flake-inputs:
+        patterns:
+          - "*"
