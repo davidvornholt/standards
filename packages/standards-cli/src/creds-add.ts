@@ -2,6 +2,7 @@ import { commitCreatedCloudflareToken } from './creds-add-cloudflare-commit';
 import { findManagedDestinationCollision } from './creds-add-collision';
 import { resolveTokenPolicy } from './creds-add-policy';
 import { createAccountToken } from './creds-cloudflare';
+import { cloudflareExpiresOn } from './creds-cloudflare-expiry';
 import { resolveContext, selectAccount } from './creds-dest';
 import { tokenNameOf } from './creds-naming';
 import {
@@ -117,7 +118,7 @@ export const runCredsAddCloudflare = async (
     return false;
   }
   const ttlDays = options.ttlDays ?? DEFAULT_TTL_DAYS;
-  const expiresOn = new Date(Date.now() + ttlDays * DAY_MS).toISOString();
+  const expiresOn = cloudflareExpiresOn(Date.now() + ttlDays * DAY_MS);
   const created = await createAccountToken(account.accountId, account.token, {
     name,
     expiresOn,

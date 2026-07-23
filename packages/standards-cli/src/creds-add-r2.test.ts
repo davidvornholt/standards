@@ -11,6 +11,8 @@ import {
   response,
 } from './creds-add-test-support';
 
+const WHOLE_SECOND_RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/u;
+
 afterEach(cleanupCredsAdd);
 
 describe('creds add cloudflare R2 S3 destinations', () => {
@@ -70,6 +72,11 @@ describe('creds add cloudflare R2 S3 destinations', () => {
         },
       ],
     });
+    const createBody = bodies[0] as {
+      // biome-ignore lint/style/useNamingConvention: Cloudflare's request field is snake_case.
+      readonly expires_on: string;
+    };
+    expect(createBody.expires_on).toMatch(WHOLE_SECOND_RFC3339);
     const secrets = readFileSync(join(consumer, 'secrets', 'ci.yaml'), 'utf8');
     expect(secrets).toContain('access_key_id: replacement');
     expect(secrets).toContain(`secret_access_key: ${sensitiveSha}`);

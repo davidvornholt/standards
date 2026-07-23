@@ -5,6 +5,7 @@
 // lifetime. Secret keys without a brokered token are simply unmanaged — most
 // secrets are — and are never touched. Execution lives in creds-plan-run.ts.
 
+import { cloudflareExpiresOn } from './creds-cloudflare-expiry';
 import { parseTokenName } from './creds-naming';
 import { groupByIntersectingFootprint } from './creds-plan-groups';
 import type {
@@ -105,9 +106,9 @@ const dispositionOf = (
       format,
       policies: token.policies,
       condition: token.condition.value,
-      replacementExpiresOn: new Date(
+      replacementExpiresOn: cloudflareExpiresOn(
         input.now.getTime() + expiry - issued,
-      ).toISOString(),
+      ),
       reason: `expires ${token.expiresOn}`,
     },
   };
