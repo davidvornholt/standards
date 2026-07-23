@@ -19,6 +19,11 @@ const response = (result: unknown, status = 200): Response =>
     { status },
   );
 
+const emptyTokenListResponse = (): Response =>
+  new Response(
+    '{"success":true,"errors":[],"result":[],"result_info":{"page":1,"per_page":50,"count":0,"total_count":0}}',
+  );
+
 afterEach(() => {
   globalThis.fetch = originalFetch;
   calls.length = 0;
@@ -32,7 +37,7 @@ describe('Cloudflare bootstrap authority', () => {
       return Promise.resolve(
         url.endsWith('/verify')
           ? response({ id: 'bootstrap', status: 'active' })
-          : response([]),
+          : emptyTokenListResponse(),
       );
     }) as typeof fetch;
 
@@ -41,7 +46,9 @@ describe('Cloudflare bootstrap authority', () => {
       value: null,
     });
     expect(calls).toHaveLength(2);
-    expect(calls[1]).toContain(`/accounts/${ACCOUNT}/tokens?page=1`);
+    expect(calls[1]).toContain(
+      `/accounts/${ACCOUNT}/tokens?include_expired=true&page=1&per_page=50`,
+    );
   });
 
   it('rejects an active token that cannot list account tokens', async () => {
