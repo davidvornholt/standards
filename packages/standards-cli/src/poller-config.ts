@@ -53,17 +53,21 @@ const parseRepos = (
   raw: unknown,
   problems: Array<string>,
 ): ReadonlyArray<string> => {
-  if (!(Array.isArray(raw) && raw.every((repo) => typeof repo === 'string'))) {
+  if (!Array.isArray(raw)) {
     problems.push('poller config "repos" must be a string array');
     return [];
-  }
-  if (raw.length === 0) {
-    problems.push('poller config "repos" must list at least one repository');
   }
   if (raw.length > MAX_WATCHED_REPOSITORIES) {
     problems.push(
       `poller config "repos" supports at most ${MAX_WATCHED_REPOSITORIES} repositories at the one-minute polling cadence; reduce the list or split it across pollers with independent GitHub API budgets`,
     );
+  }
+  if (!raw.every((repo): repo is string => typeof repo === 'string')) {
+    problems.push('poller config "repos" must be a string array');
+    return [];
+  }
+  if (raw.length === 0) {
+    problems.push('poller config "repos" must list at least one repository');
   }
   for (const repo of raw) {
     if (!REPO_PATTERN.test(repo)) {
