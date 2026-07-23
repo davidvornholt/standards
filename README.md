@@ -95,7 +95,7 @@ Pin a released tag and, when the consumer already owns nixpkgs, make the standar
 
 ```nix
 inputs.standards = {
-  url = "github:davidvornholt/standards/v0.13.0";
+  url = "github:davidvornholt/standards/v0.14.0";
   inputs.nixpkgs.follows = "nixpkgs";
 };
 
