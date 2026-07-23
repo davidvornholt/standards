@@ -151,7 +151,9 @@ describe('Standards sync broker credential contract', () => {
       ),
     ).toBe(true);
   });
+});
 
+describe('Standards sync broker documentation contract', () => {
   it('documents one provisioning command across source-owned guidance', () => {
     const rootReadme = readFileSync(join(ACTUAL_UPSTREAM, 'README.md'), 'utf8');
     const documents = [
@@ -166,5 +168,9 @@ describe('Standards sync broker credential contract', () => {
     }
     expect(rootReadme).toContain('`@davidvornholt/standards` 0.14.0 or newer');
     expect(rootReadme).toContain('`bun.lock`');
+    expect(rootReadme).not.toContain('current 0.12 workflow');
+    expect(rootReadme).toContain(
+      'current broker-credential cutover raises the minimum again to 0.14.0',
+    );
   });
 });

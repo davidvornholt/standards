@@ -142,7 +142,7 @@ After the standards-sync pull request opens, check out its branch, remove those 
 
 Version 0.7.0 is an intentional hard cutover: `sync-standards.local.json` is the only cadence and ref policy source. The canonical workflow and CLI no longer read `STANDARDS_AUTO_SYNC` or `STANDARDS_SYNC_REF`; leaving those Actions variables configured has no effect.
 
-Upgrade `@davidvornholt/standards` and `bun.lock` to 0.7.0 or newer, create `sync-standards.local.json` with any required opt-out or pin, and accept the canonical workflow update in the same consumer PR. The 0.7 workflow fails before syncing with an actionable error if a policy file is present but the installed CLI is older than 0.7.0. The 0.10 workflows superseded that conditional guard with an unconditional minimum so every sync used an artifact compatible with Dependabot composition and the isolated GitHub settings gate; the current 0.12 workflow retains the unconditional guard and raises the minimum to 0.12.0.
+Upgrade `@davidvornholt/standards` and `bun.lock` to 0.7.0 or newer, create `sync-standards.local.json` with any required opt-out or pin, and accept the canonical workflow update in the same consumer PR. The 0.7 workflow fails before syncing with an actionable error if a policy file is present but the installed CLI is older than 0.7.0. The 0.10 workflows superseded that conditional guard with an unconditional minimum so every sync used an artifact compatible with Dependabot composition and the isolated GitHub settings gate. The 0.12 workflow retained that guard and raised its minimum for its earlier ownership and policy cutover; the current broker-credential cutover raises the minimum again to 0.14.0.
 
 ### Breaking migration to 0.10.2
 
