@@ -1,18 +1,22 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+import { spawnSync } from 'node:child_process';
 import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  listSecretsTargets,
   parseDestination,
   resolveContext,
   resolveTargetRel,
 } from './creds-dest';
+import { setSopsValue } from './creds-sops';
 
 const dirs: Array<string> = [];
 afterEach(() => {
@@ -20,6 +24,15 @@ afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+const configureRepo = (consumer: string): void => {
+  spawnSync('git', ['init', '--quiet'], { cwd: consumer });
+  spawnSync(
+    'git',
+    ['remote', 'add', 'origin', 'git@github.com:owner/repository.git'],
+    { cwd: consumer },
+  );
+};
 
 describe('credential destinations', () => {
   it('accepts safe target and dotted-key segments', () => {
@@ -76,5 +89,43 @@ describe('credential destinations', () => {
     expect(readFileSync(victim, 'utf8')).toBe(
       'github:\n  app: old\nsops: {}\n',
     );
+  });
+
+  it('rejects a flat target symlink before command or SOPS mutation', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'creds-dest-link-'));
+    dirs.push(root);
+    const consumer = join(root, 'consumer');
+    const outside = join(root, 'outside.yaml');
+    mkdirSync(join(consumer, 'secrets'), { recursive: true });
+    configureRepo(consumer);
+    writeFileSync(outside, 'ci:\n  token: outside\nsops: {}\n');
+    symlinkSync(outside, join(consumer, 'secrets', 'ci.yaml'));
+
+    expect(resolveTargetRel(consumer, 'ci')).toBeNull();
+    expect(await resolveContext(consumer, 'ci:ci.token')).toBeNull();
+    expect(
+      setSopsValue(consumer, 'secrets/ci.yaml', 'ci.token', 'new'),
+    ).toEqual({
+      ok: false,
+      problem: 'unsafe encrypted secrets target secrets/ci.yaml',
+    });
+    expect(readFileSync(outside, 'utf8')).toContain('token: outside');
+  });
+
+  it('rejects a symlinked host directory and omits it from listing', () => {
+    const root = mkdtempSync(join(tmpdir(), 'creds-host-link-'));
+    dirs.push(root);
+    const consumer = join(root, 'consumer');
+    const outsideHost = join(root, 'outside-host');
+    mkdirSync(join(consumer, 'infra', 'hosts'), { recursive: true });
+    mkdirSync(outsideHost);
+    writeFileSync(
+      join(outsideHost, 'secrets.yaml'),
+      'ci:\n  token: outside\nsops: {}\n',
+    );
+    symlinkSync(outsideHost, join(consumer, 'infra', 'hosts', 'prod'), 'dir');
+
+    expect(resolveTargetRel(consumer, 'prod')).toBeNull();
+    expect(listSecretsTargets(consumer)).toEqual([]);
   });
 });

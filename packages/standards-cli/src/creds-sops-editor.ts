@@ -1,11 +1,13 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import process from 'node:process';
-import { parse, parseDocument } from 'yaml';
+import { parseDocument } from 'yaml';
+import { assertWritableSopsPath } from './creds-dest';
 import {
-  assertWritableSopsPath,
-  isSafeSopsKeySegment,
+  inspectSopsStructure,
   parseSopsKeyPath,
-} from './creds-dest';
+  type SopsShapeFailure,
+  type SopsStructureResult,
+} from './creds-sops-structure';
 import { isRecord } from './github-settings-parse';
 
 export const SET_CHANGES_ENV = 'STANDARDS_SOPS_SET_CHANGES';
@@ -13,96 +15,57 @@ export type SopsValueChange = {
   readonly path: string;
   readonly value: string;
 };
-export type SopsShapeFailure = {
-  readonly ok: false;
-  readonly kind:
-    | 'malformed-yaml'
-    | 'missing-sops-metadata'
-    | 'unsupported-shape';
-  readonly problem: string;
-};
-export type SopsStructureResult =
+export type SopsScalarStructureResult =
+  | { readonly ok: true; readonly state: 'absent' | 'scalar' }
+  | SopsShapeFailure
   | {
-      readonly ok: true;
-      readonly keys: ReadonlyArray<string>;
-      readonly root: Readonly<Record<string, unknown>>;
-    }
-  | SopsShapeFailure;
-const collectLeaves = (
-  node: unknown,
-  prefix: ReadonlyArray<string>,
-  keys: Array<string>,
-  seen: WeakSet<object>,
-): string | null => {
-  if (Array.isArray(node)) {
-    return `arrays are not supported at ${prefix.join('.')}`;
-  }
-  if (!isRecord(node)) {
-    keys.push(prefix.join('.'));
-    return null;
-  }
-  if (seen.has(node)) {
-    return `aliases are not supported at ${prefix.join('.')}`;
-  }
-  seen.add(node);
-  for (const [key, value] of Object.entries(node)) {
-    if (!isSafeSopsKeySegment(key)) {
-      return `unsupported mapping key at ${[...prefix, key].join('.')}`;
-    }
-    const problem = collectLeaves(value, [...prefix, key], keys, seen);
-    if (problem !== null) {
-      return problem;
-    }
-  }
-  return null;
-};
-export const inspectSopsStructure = (
-  text: string,
-  requireMetadata: boolean,
-): SopsStructureResult => {
-  let root: unknown;
-  try {
-    root = parse(text);
-  } catch {
-    return {
-      ok: false,
-      kind: 'malformed-yaml',
-      problem: 'secrets document is malformed YAML',
+      readonly ok: false;
+      readonly kind: 'collection' | 'blocked-by-scalar';
+      readonly problem: string;
     };
+
+export const inspectSopsScalarStructure = (
+  structure: SopsStructureResult,
+  dottedPath: string,
+): SopsScalarStructureResult => {
+  if (!structure.ok) {
+    return structure;
   }
-  if (!isRecord(root)) {
+  const path = parseSopsKeyPath(dottedPath);
+  if (path === null) {
     return {
       ok: false,
       kind: 'unsupported-shape',
-      problem: 'secrets document root must be a mapping',
+      problem: `invalid SOPS key path: ${dottedPath}`,
     };
   }
-  if (requireMetadata && !isRecord(root.sops)) {
-    return {
-      ok: false,
-      kind: 'missing-sops-metadata',
-      problem: 'secrets document has no SOPS metadata',
-    };
-  }
-  const keys: Array<string> = [];
-  const seen = new WeakSet<object>();
-  for (const [key, value] of Object.entries(root)) {
-    if (key !== 'sops') {
-      if (!isSafeSopsKeySegment(key)) {
-        return {
-          ok: false,
-          kind: 'unsupported-shape',
-          problem: `unsupported mapping key at ${key}`,
-        };
-      }
-      const problem = collectLeaves(value, [key], keys, seen);
-      if (problem !== null) {
-        return { ok: false, kind: 'unsupported-shape', problem };
-      }
+  let node: unknown = structure.root;
+  for (const [index, segment] of path.entries()) {
+    if (!isRecord(node)) {
+      return {
+        ok: false,
+        kind: 'blocked-by-scalar',
+        problem: `SOPS key path is blocked by a scalar: ${dottedPath}`,
+      };
     }
+    const next = node[segment];
+    if (next === undefined) {
+      return { ok: true, state: 'absent' };
+    }
+    if (index === path.length - 1) {
+      return isRecord(next)
+        ? {
+            ok: false,
+            kind: 'collection',
+            problem: `SOPS key path names a mapping: ${dottedPath}`,
+          }
+        : { ok: true, state: 'scalar' };
+    }
+    node = next;
   }
-  return { ok: true, keys, root };
+  return { ok: true, state: 'absent' };
 };
+
 const parseChanges = (raw: string): ReadonlyArray<SopsValueChange> => {
   let parsed: unknown;
   try {

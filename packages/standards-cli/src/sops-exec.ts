@@ -20,7 +20,7 @@ export const runSops = (
   const options = {
     cwd,
     encoding: 'utf8' as const,
-    ...(env === undefined ? {} : { env: { ...process.env, ...env } }),
+    env: { ...process.env, ...(env ?? {}) },
   };
   const localSops = spawnSync('sops', [...args], options);
   const result =
