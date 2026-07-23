@@ -19,10 +19,7 @@ afterEach(cleanupTmpDirs);
 const ciValue = (value: unknown): string =>
   JSON.stringify({ ci: { standards_sync_token: value } });
 
-const INVALID_VALUE_REASON =
-  'ci.standards_sync_token is not a readable non-empty single-line string in secrets/ci.yaml';
-const FINAL_VALUE_ERROR =
-  '::error::Resolved secret value must be non-empty and single-line';
+const FINAL_VALUE_ERROR = '::error::Resolved secret value must be non-empty';
 
 type FallbackScenario = {
   readonly label: string;
@@ -71,31 +68,19 @@ const FALLBACK_SCENARIOS: ReadonlyArray<FallbackScenario> = [
   {
     label: 'the requested key is absent',
     options: { sopsOutput: ciValue(undefined) },
-    reason: INVALID_VALUE_REASON,
+    reason: 'ci.standards_sync_token is missing in secrets/ci.yaml',
     failsAt: 'resolve',
   },
   {
     label: 'the decrypted value is empty',
     options: { sopsOutput: ciValue('') },
-    reason: INVALID_VALUE_REASON,
-    failsAt: 'resolve',
-  },
-  {
-    label: 'the decrypted value is multi-line',
-    options: { sopsOutput: ciValue('token\nBASH_ENV=/tmp/payload') },
-    reason: INVALID_VALUE_REASON,
-    failsAt: 'resolve',
-  },
-  {
-    label: 'the decrypted value has a carriage return',
-    options: { sopsOutput: ciValue('token\rGH_TOKEN=payload') },
-    reason: INVALID_VALUE_REASON,
+    reason: 'ci.standards_sync_token is empty in secrets/ci.yaml',
     failsAt: 'resolve',
   },
   {
     label: 'the decrypted value is not a string',
     options: { sopsOutput: ciValue({ token: 'value' }) },
-    reason: INVALID_VALUE_REASON,
+    reason: 'ci.standards_sync_token is not a string in secrets/ci.yaml',
     failsAt: 'resolve',
   },
 ];
@@ -150,7 +135,8 @@ describe('canonical SOPS secret action script behavior', () => {
     expect(actionRun.result.status).toBe(0);
     expect(actionRun.environment).toBe('GH_TOKEN=resolved-token\n');
     expect(actionRun.output).toBe('used-fallback=false\n');
-    expect(actionRun.result.stdout).toContain('::add-mask::resolved-token');
+    expect(actionRun.result.stdout).toBe('::add-mask::resolved-token\n');
+    expect(actionRun.result.stderr).toBe('');
     expect(actionRun.curlCalled).toBe(true);
     expect(actionRun.sopsExecuted).toBe(true);
   });
@@ -181,11 +167,8 @@ describe('caller configuration errors', () => {
     );
   });
 
-  it.each([
-    ['an empty string', ''],
-    ['a line-feed string', 'token\nBASH_ENV=/tmp/payload'],
-  ] as const)('rejects %s as the fallback value before the environment boundary', (_label, fallbackValue) => {
-    const actionRun = runSopsAction({ ageKey: '', fallbackValue });
+  it('rejects an empty fallback value before the environment boundary', () => {
+    const actionRun = runSopsAction({ ageKey: '', fallbackValue: '' });
 
     expect(actionRun.result.status).toBe(1);
     expect(actionRun.environment).toBe('');

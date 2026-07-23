@@ -9,7 +9,7 @@ inputs:
     description: SOPS-encrypted YAML file
     required: true
   secret-key:
-    description: Key to resolve from the decrypted ci mapping
+    description: Direct key or dotted path to resolve from the decrypted ci mapping
     required: true
   env-name:
     description: Environment variable to export for later workflow steps
@@ -52,6 +52,10 @@ runs:
           exit 1
         fi
 
+        decrypted_file=$(mktemp "$RUNNER_TEMP/sops-secret-decrypted.XXXXXX")
+        value_file=$(mktemp "$RUNNER_TEMP/sops-secret-value.XXXXXX")
+        trap 'rm -f "$decrypted_file" "$value_file"' EXIT
+
         reason=""
         if [ -z "$SOPS_AGE_KEY" ]; then
           reason="SOPS_AGE_KEY is not configured"
@@ -75,12 +79,67 @@ runs:
           fi
           if [ -z "$reason" ]; then
             chmod +x "$sops"
-            if ! decrypted_json=$("$sops" decrypt --output-type json "$SOPS_SECRET_FILE"); then
+            if ! "$sops" decrypt --output-type json "$SOPS_SECRET_FILE" > "$decrypted_file"; then
               reason="Decrypting $SOPS_SECRET_FILE with SOPS failed"
-            elif extracted=$(jq -er --arg key "$SOPS_SECRET_KEY" '.ci[$key] | select(type == "string" and length > 0 and (contains("\n") | not) and (contains("\r") | not))' <<< "$decrypted_json"); then
-              value="$extracted"
             else
-              reason="ci.$SOPS_SECRET_KEY is not a readable non-empty single-line string in $SOPS_SECRET_FILE"
+              lookup_filter='
+                def descend($root; $path):
+                  reduce $path[] as $part (
+                    { found: true, value: $root };
+                    if .found and (.value | type) == "object" and (.value | has($part))
+                    then { found: true, value: .value[$part] }
+                    else { found: false, value: null }
+                    end
+                  );
+                def resolve:
+                  if (.ci | type) != "object" then
+                    { status: "missing", value: null }
+                  else
+                    .ci as $ci
+                    | ($key | split(".")) as $path
+                    | ($ci | has($key)) as $has_direct
+                    | descend($ci; $path) as $nested
+                    | if ($path | length) > 1 and $has_direct and $nested.found then
+                        { status: "ambiguous", value: null }
+                      elif $has_direct then
+                        { status: "found", value: $ci[$key] }
+                      elif $nested.found then
+                        { status: "found", value: $nested.value }
+                      else
+                        { status: "missing", value: null }
+                      end
+                    | if .status != "found" then .
+                      elif (.value | type) != "string" then .status = "non-string"
+                      elif .value == "" then .status = "empty"
+                      else .
+                      end
+                  end;
+                resolve
+              '
+              if ! lookup_status=$(jq -r --arg key "$SOPS_SECRET_KEY" "$lookup_filter | .status" "$decrypted_file"); then
+                reason="Resolving ci.$SOPS_SECRET_KEY from $SOPS_SECRET_FILE failed"
+              else
+                case "$lookup_status" in
+                  found)
+                    jq -j --arg key "$SOPS_SECRET_KEY" "$lookup_filter | .value" "$decrypted_file" > "$value_file"
+                    ;;
+                  missing)
+                    reason="ci.$SOPS_SECRET_KEY is missing in $SOPS_SECRET_FILE"
+                    ;;
+                  ambiguous)
+                    reason="ci.$SOPS_SECRET_KEY is ambiguous because both a direct key and nested path exist in $SOPS_SECRET_FILE"
+                    ;;
+                  non-string)
+                    reason="ci.$SOPS_SECRET_KEY is not a string in $SOPS_SECRET_FILE"
+                    ;;
+                  empty)
+                    reason="ci.$SOPS_SECRET_KEY is empty in $SOPS_SECRET_FILE"
+                    ;;
+                  *)
+                    reason="Resolving ci.$SOPS_SECRET_KEY from $SOPS_SECRET_FILE returned an unknown status"
+                    ;;
+                esac
+              fi
             fi
           fi
         fi
@@ -92,14 +151,36 @@ runs:
             echo "::error::$reason"
             exit 1
           fi
-          value="$SOPS_FALLBACK_VALUE"
+          printf '%s' "$SOPS_FALLBACK_VALUE" > "$value_file"
           echo "::warning::$reason; using the configured fallback"
         fi
-        if [ -z "$value" ] || [[ "$value" == *$'\n'* ]] || [[ "$value" == *$'\r'* ]]; then
-          echo "::error::Resolved secret value must be non-empty and single-line"
+        if [ ! -s "$value_file" ]; then
+          echo "::error::Resolved secret value must be non-empty"
           exit 1
         fi
 
-        printf '%s\n' "::add-mask::$value"
-        printf '%s=%s\n' "$SOPS_ENV_NAME" "$value" >> "$GITHUB_ENV"
+        line_break_count=$(LC_ALL=C tr -cd '\r\n' < "$value_file" | wc -c)
+        if [ "$line_break_count" -eq 0 ]; then
+          value=$(< "$value_file")
+          printf '%s\n' "::add-mask::$value"
+          printf '%s=%s\n' "$SOPS_ENV_NAME" "$value" >> "$GITHUB_ENV"
+        else
+          while IFS= read -r line || [ -n "$line" ]; do
+            if [ -n "$line" ]; then
+              escaped_line=${line//'%'/'%25'}
+              escaped_line=${escaped_line//$'\r'/'%0D'}
+              printf '%s\n' "::add-mask::$escaped_line"
+            fi
+          done < "$value_file"
+
+          delimiter=SOPS_SECRET_EOF
+          delimiter_suffix=0
+          while grep -Fqx "$delimiter" "$value_file" || grep -Fqx "$delimiter"$'\r' "$value_file"; do
+            delimiter_suffix=$((delimiter_suffix + 1))
+            delimiter="SOPS_SECRET_EOF_$delimiter_suffix"
+          done
+          printf '%s<<%s\n' "$SOPS_ENV_NAME" "$delimiter" >> "$GITHUB_ENV"
+          cat "$value_file" >> "$GITHUB_ENV"
+          printf '\n%s\n' "$delimiter" >> "$GITHUB_ENV"
+        fi
         printf 'used-fallback=%s\n' "$use_fallback" >> "$GITHUB_OUTPUT"
