@@ -1,7 +1,7 @@
 // Cloudflare account-owned API token operations for `standards creds`: the
 // broker bootstrap token (permission "Account API Tokens Write") verifies
-// itself, lists and mints scoped tokens, rolls their values, and revokes
-// them. Token values returned by create/roll flow only into SOPS writers,
+// itself, lists and mints scoped tokens, and revokes them. Token values
+// returned by create flow only into SOPS writers,
 // never stdout.
 
 import {
@@ -46,20 +46,40 @@ export const listAccountTokens = async (
     const response = await cfRequest(
       token,
       'GET',
-      `/accounts/${accountId}/tokens?page=${page}&per_page=${PAGE_SIZE}`,
+      `/accounts/${accountId}/tokens?include_expired=true&page=${page}&per_page=${PAGE_SIZE}`,
     );
     if (!response.ok) {
       return response;
     }
-    const { result, totalPages } = response.value;
-    if (Array.isArray(result)) {
-      tokens.push(
-        ...result
-          .map(tokenOf)
-          .filter((entry): entry is CloudflareToken => entry !== null),
-      );
+    const { result, resultInfo } = response.value;
+    if (!Array.isArray(result)) {
+      return { ok: false, problem: 'token list returned a non-array result' };
     }
-    if (page >= totalPages) {
+    const pageTokens = result
+      .map(tokenOf)
+      .filter((entry): entry is CloudflareToken => entry !== null);
+    if (pageTokens.length !== result.length) {
+      return { ok: false, problem: 'token list returned a malformed token' };
+    }
+    tokens.push(...pageTokens);
+    if (resultInfo === null) {
+      return {
+        ok: false,
+        problem:
+          'token list returned invalid pagination metadata (expected page, per_page, count, and total_count)',
+      };
+    }
+    if (resultInfo.page !== page || resultInfo.count !== result.length) {
+      return {
+        ok: false,
+        problem: `token list returned inconsistent pagination metadata for page ${page}`,
+      };
+    }
+    if (
+      tokens.length >= resultInfo.totalCount ||
+      result.length < resultInfo.perPage ||
+      result.length === 0
+    ) {
       return { ok: true, value: tokens };
     }
   }
@@ -82,9 +102,16 @@ export const listPermissionGroups = async (
         .filter(isRecord)
         .filter(
           (group): group is Record<string, unknown> & PermissionGroup =>
-            typeof group.id === 'string' && typeof group.name === 'string',
+            typeof group.id === 'string' &&
+            typeof group.name === 'string' &&
+            Array.isArray(group.scopes) &&
+            group.scopes.every((scope) => typeof scope === 'string'),
         )
-        .map((group) => ({ id: group.id, name: group.name }))
+        .map((group) => ({
+          id: group.id,
+          name: group.name,
+          scopes: group.scopes,
+        }))
     : [];
   return { ok: true, value: groups };
 };
@@ -124,29 +151,6 @@ export const createAccountToken = async (
     return { ok: false, problem: 'token creation returned no id and value' };
   }
   return { ok: true, value: { id: result.id, value: result.value } };
-};
-
-export const rollAccountToken = async (
-  accountId: string,
-  token: string,
-  tokenId: string,
-): Promise<CfResult<string>> => {
-  const response = await cfRequest(
-    token,
-    'PUT',
-    `/accounts/${accountId}/tokens/${tokenId}/value`,
-    {},
-  );
-  if (!response.ok) {
-    return response;
-  }
-  const value = isRecord(response.value.result)
-    ? response.value.result.value
-    : response.value.result;
-  if (typeof value !== 'string') {
-    return { ok: false, problem: 'token roll returned no new value' };
-  }
-  return { ok: true, value };
 };
 
 export const deleteAccountToken = async (

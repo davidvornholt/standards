@@ -1,41 +1,30 @@
-// Orchestration for `standards creds plan` and `apply`: gather the SOPS key
-// structure and brokered token lists, compute the plan, and — for apply —
-// revoke orphans and roll expiring tokens, writing rolled values back into
-// their SOPS targets.
-
 import {
-  deleteAccountToken,
-  listAccountTokens,
-  rollAccountToken,
+  createAccountToken as createToken,
+  deleteAccountToken as deleteToken,
+  listAccountTokens as listTokens,
 } from './creds-cloudflare';
+import { listSecretsTargets, resolveTargetRel } from './creds-dest';
 import {
   type AccountToken,
   computeCredsPlan,
   type PlannedAction,
 } from './creds-plan';
 import {
-  listSecretsTargets,
+  inspectSopsScalarDestination as inspectDestination,
   readEncryptedKeys,
-  setSopsValue,
+  verifySopsScalarLeaf as verifyLeaf,
+  setSopsValue as writeValue,
 } from './creds-sops';
 import {
   type BrokerStore,
+  type CloudflareBrokerAccount,
   readBrokerStore,
   resolveBrokerPath,
 } from './creds-store';
 import { resolveGithubRepo } from './github-api';
 
-const gatherRepoState = async (
-  consumer: string,
-  store: BrokerStore,
-): Promise<{
-  readonly keysByTarget: ReadonlyMap<string, ReadonlySet<string>>;
-  readonly relByTarget: ReadonlyMap<string, string>;
-  readonly tokens: ReadonlyArray<AccountToken>;
-  readonly problems: ReadonlyArray<string>;
-}> => {
+const gatherRepoState = async (consumer: string, store: BrokerStore) => {
   const keysByTarget = new Map<string, ReadonlySet<string>>();
-  const relByTarget = new Map<string, string>();
   const targetKeys = await Promise.all(
     listSecretsTargets(consumer).map(async ({ target, rel }) => ({
       target,
@@ -43,18 +32,19 @@ const gatherRepoState = async (
       keys: await readEncryptedKeys(consumer, rel),
     })),
   );
+  const problems: Array<string> = [];
   for (const { target, rel, keys } of targetKeys) {
-    if (keys !== null) {
-      keysByTarget.set(target, new Set(keys));
-      relByTarget.set(target, rel);
+    if (keys.ok) {
+      keysByTarget.set(target, new Set(keys.keys));
+    } else {
+      problems.push(`${rel}: ${keys.problem}`);
     }
   }
   const tokens: Array<AccountToken> = [];
-  const problems: Array<string> = [];
   const listings = await Promise.all(
     store.cloudflare.map(async (account) => ({
       account,
-      listed: await listAccountTokens(account.accountId, account.token),
+      listed: await listTokens(account.accountId, account.token),
     })),
   );
   for (const { account, listed } of listings) {
@@ -69,13 +59,25 @@ const gatherRepoState = async (
       problems.push(`account ${account.accountId}: ${listed.problem}`);
     }
   }
-  return { keysByTarget, relByTarget, tokens, problems };
+  return { keysByTarget, tokens, problems };
+};
+
+const cleanupReplacement = async (
+  account: CloudflareBrokerAccount,
+  replacementId: string,
+  oldId: string,
+  context: string,
+): Promise<string> => {
+  const { accountId, token } = account;
+  const cleanup = await deleteToken(accountId, token, replacementId);
+  return cleanup.ok
+    ? `${context}; deleted replacement ${replacementId} and preserved old token ${oldId}`
+    : `${context}; cleanup of replacement ${replacementId} also failed: ${cleanup.problem}; old token ${oldId} remains active`;
 };
 
 const applyAction = async (
   consumer: string,
   store: BrokerStore,
-  relByTarget: ReadonlyMap<string, string>,
   action: PlannedAction,
 ): Promise<string | null> => {
   const account = store.cloudflare.find(
@@ -84,30 +86,54 @@ const applyAction = async (
   if (account === undefined) {
     return `${action.name}: account ${action.accountId} is not in the broker store`;
   }
+  const { accountId, token: bootstrapToken } = account;
   if (action.kind === 'revoke') {
-    const deleted = await deleteAccountToken(
-      account.accountId,
-      account.token,
+    const deleted = await deleteToken(
+      accountId,
+      bootstrapToken,
       action.tokenId,
     );
     return deleted.ok ? null : `${action.name}: ${deleted.problem}`;
   }
-  const rel = relByTarget.get(action.target);
-  if (rel === undefined) {
+  const rel = resolveTargetRel(consumer, action.target);
+  if (rel === null) {
     return `${action.name}: secrets target ${action.target} not found`;
   }
-  const rolled = await rollAccountToken(
-    account.accountId,
-    account.token,
-    action.tokenId,
-  );
-  if (!rolled.ok) {
-    return `${action.name}: ${rolled.problem}`;
+  const destination = await inspectDestination(consumer, rel, action.key);
+  if (!destination.ok) {
+    return `${action.name}: ${destination.problem}`;
   }
-  const written = setSopsValue(consumer, rel, action.key, rolled.value);
-  return written.ok
+  if (destination.state !== 'scalar') {
+    return `${action.name}: secret ${action.target}:${action.key} disappeared before renewal`;
+  }
+  const replacement = await createToken(accountId, bootstrapToken, {
+    name: action.name,
+    policies: action.policies,
+    expiresOn: action.replacementExpiresOn,
+  });
+  if (!replacement.ok) {
+    return `${action.name}: ${replacement.problem}`;
+  }
+  const { id: replacementId, value } = replacement.value;
+  const written = writeValue(consumer, rel, action.key, value);
+  if (!written.ok) {
+    const problem = `${action.name}: ${written.problem}`;
+    return cleanupReplacement(account, replacementId, action.tokenId, problem);
+  }
+  const verified = await verifyLeaf(consumer, rel, action.key);
+  if (!verified.ok) {
+    const problem = `${action.name}: ${verified.problem}`;
+    return cleanupReplacement(account, replacementId, action.tokenId, problem);
+  }
+  const deleted = await deleteToken(accountId, bootstrapToken, action.tokenId);
+  return deleted.ok
     ? null
-    : `${action.name}: rolled, but ${written.problem}; write the new value manually before the old one expires`;
+    : `${action.name}: replacement ${replacementId} is stored, but old token ${action.tokenId} could not be revoked: ${deleted.problem}`;
+};
+
+const fail = (message: string): false => {
+  console.error(`standards creds: ${message}`);
+  return false;
 };
 
 export const runCredsPlan = async (
@@ -123,14 +149,16 @@ export const runCredsPlan = async (
   }
   const repo = resolveGithubRepo(consumer);
   if (repo === null) {
-    console.error(
-      'standards creds: cannot resolve the GitHub repository from the origin remote',
-    );
-    return false;
+    return fail('cannot resolve the GitHub repository from the origin remote');
   }
   const state = await gatherRepoState(consumer, store);
   for (const problem of state.problems) {
     console.error(`standards creds: ${problem}`);
+  }
+  if (state.problems.length > 0) {
+    return fail(
+      'reconciliation aborted because repository or provider state could not be read safely',
+    );
   }
   const plan = computeCredsPlan({
     repo,
@@ -143,21 +171,25 @@ export const runCredsPlan = async (
       `  ${apply ? '' : 'would '}${action.kind} ${action.name} (${action.reason})`,
     );
   }
+  for (const finding of plan.findings) {
+    console.error(`standards creds: ${finding}`);
+  }
   console.log(
-    `standards creds: ${plan.actions.length} action(s), ${plan.healthy} brokered token(s) healthy`,
+    `standards creds: ${plan.actions.length} action(s), ${plan.findings.length} finding(s), ${plan.healthy} brokered token(s) healthy`,
   );
+  if (plan.findings.length > 0) {
+    return fail('reconciliation aborted until every finding is resolved');
+  }
   if (!apply || plan.actions.length === 0) {
-    return state.problems.length === 0;
+    return true;
   }
   const failures = (
     await Promise.all(
-      plan.actions.map((action) =>
-        applyAction(consumer, store, state.relByTarget, action),
-      ),
+      plan.actions.map((action) => applyAction(consumer, store, action)),
     )
   ).filter((failure): failure is string => failure !== null);
   for (const failure of failures) {
     console.error(`standards creds: ${failure}`);
   }
-  return failures.length === 0 && state.problems.length === 0;
+  return failures.length === 0;
 };
