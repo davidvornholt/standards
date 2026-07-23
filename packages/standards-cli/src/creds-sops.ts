@@ -6,40 +6,38 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
-import { parseSopsKeyPath } from './creds-dest';
 import {
   type SopsValueChange as EditorValueChange,
-  inspectSopsStructure,
+  inspectSopsScalarStructure,
   SET_CHANGES_ENV,
-  type SopsShapeFailure,
-  type SopsStructureResult,
+  type SopsScalarStructureResult,
 } from './creds-sops-editor';
-import { isRecord } from './github-settings-parse';
+import {
+  inspectSopsStructure,
+  isContainedSopsPath,
+  parseSopsKeyPath,
+  type SopsShapeFailure,
+} from './creds-sops-structure';
 import { runSops } from './sops-exec';
 
 export type { SopsValueChange } from './creds-sops-editor';
 
 const SOPS_UNCHANGED_STATUS = 200;
-type ReadFailure =
-  | SopsShapeFailure
-  | {
-      readonly ok: false;
-      readonly kind: 'read-error';
-      readonly problem: string;
-    };
+type ReadError = {
+  readonly ok: false;
+  readonly kind: 'read-error';
+  readonly problem: string;
+};
+type ReadFailure = SopsShapeFailure | ReadError;
 export type EncryptedKeysReadResult =
   | { readonly ok: true; readonly keys: ReadonlyArray<string> }
   | ReadFailure;
-export type SopsScalarDestinationResult =
-  | { readonly ok: true; readonly state: 'absent' | 'scalar' }
-  | ReadFailure
-  | {
-      readonly ok: false;
-      readonly kind: 'collection' | 'blocked-by-scalar';
-      readonly problem: string;
-    };
+export type SopsScalarDestinationResult = SopsScalarStructureResult | ReadError;
 export type SopsWriteResult =
   | { readonly ok: true }
+  | { readonly ok: false; readonly problem: string };
+export type SopsStoredValueVerification =
+  | { readonly ok: true; readonly matches: boolean }
   | { readonly ok: false; readonly problem: string };
 
 export const listEncryptedKeys = (text: string): EncryptedKeysReadResult => {
@@ -51,6 +49,13 @@ export const readEncryptedKeys = async (
   consumer: string,
   rel: string,
 ): Promise<EncryptedKeysReadResult> => {
+  if (!isContainedSopsPath(consumer, rel, 'file')) {
+    return {
+      ok: false,
+      kind: 'read-error',
+      problem: `unsafe encrypted secrets target ${rel}`,
+    };
+  }
   try {
     return listEncryptedKeys(await readFile(join(consumer, rel), 'utf8'));
   } catch {
@@ -62,56 +67,24 @@ export const readEncryptedKeys = async (
   }
 };
 
-const inspectScalar = (
-  structure: SopsStructureResult,
-  dottedPath: string,
-): SopsScalarDestinationResult => {
-  if (!structure.ok) {
-    return structure;
-  }
-  const path = parseSopsKeyPath(dottedPath);
-  if (path === null) {
-    return {
-      ok: false,
-      kind: 'unsupported-shape',
-      problem: `invalid SOPS key path: ${dottedPath}`,
-    };
-  }
-  let node: unknown = structure.root;
-  for (const [index, segment] of path.entries()) {
-    if (!isRecord(node)) {
-      return {
-        ok: false,
-        kind: 'blocked-by-scalar',
-        problem: `SOPS key path is blocked by a scalar: ${dottedPath}`,
-      };
-    }
-    const next = node[segment];
-    if (next === undefined) {
-      return { ok: true, state: 'absent' };
-    }
-    if (index === path.length - 1) {
-      return isRecord(next)
-        ? {
-            ok: false,
-            kind: 'collection',
-            problem: `SOPS key path names a mapping: ${dottedPath}`,
-          }
-        : { ok: true, state: 'scalar' };
-    }
-    node = next;
-  }
-  return { ok: true, state: 'absent' };
-};
-
 export const inspectSopsScalarDestination = async (
   consumer: string,
   rel: string,
   dottedPath: string,
 ): Promise<SopsScalarDestinationResult> => {
+  if (!isContainedSopsPath(consumer, rel, 'file')) {
+    return {
+      ok: false,
+      kind: 'read-error',
+      problem: `unsafe encrypted secrets target ${rel}`,
+    };
+  }
   try {
     const text = await readFile(join(consumer, rel), 'utf8');
-    return inspectScalar(inspectSopsStructure(text, true), dottedPath);
+    return inspectSopsScalarStructure(
+      inspectSopsStructure(text, true),
+      dottedPath,
+    );
   } catch {
     return {
       ok: false,
@@ -144,11 +117,45 @@ const editorCommand = (): string => {
   return `"${process.execPath}" "${editor}"`;
 };
 
+export const verifySopsStoredValue = (
+  consumer: string,
+  rel: string,
+  dottedPath: string,
+  expectedValue: string,
+): SopsStoredValueVerification => {
+  const path = parseSopsKeyPath(dottedPath);
+  const problem = `could not verify stored SOPS value at ${dottedPath} in ${rel}`;
+  if (path === null || !isContainedSopsPath(consumer, rel, 'file')) {
+    return { ok: false, problem };
+  }
+  const extract = path
+    .map((segment) => `[${JSON.stringify(segment)}]`)
+    .join('');
+  const result = runSops(
+    ['decrypt', '--extract', extract, '--output-type', 'json', rel],
+    consumer,
+  );
+  if (result.status !== 0) {
+    return { ok: false, problem };
+  }
+  try {
+    const stored: unknown = JSON.parse(result.stdout);
+    return typeof stored === 'string'
+      ? { ok: true, matches: stored === expectedValue }
+      : { ok: false, problem };
+  } catch {
+    return { ok: false, problem };
+  }
+};
+
 export const setSopsValues = (
   consumer: string,
   rel: string,
   changes: ReadonlyArray<EditorValueChange>,
 ): SopsWriteResult => {
+  if (!isContainedSopsPath(consumer, rel, 'file')) {
+    return { ok: false, problem: `unsafe encrypted secrets target ${rel}` };
+  }
   const result = runSops(['edit', rel], consumer, {
     // biome-ignore lint/style/useNamingConvention: sops defines this environment variable.
     SOPS_EDITOR: editorCommand(),

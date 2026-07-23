@@ -35,6 +35,7 @@
     "src/creds-prompt.ts",
     "src/creds-sops.ts",
     "src/creds-sops-editor.ts",
+    "src/creds-sops-structure.ts",
     "src/creds-store.ts",
     "src/dependabot-compose-input.ts",
     "src/dependabot-compose.ts",
