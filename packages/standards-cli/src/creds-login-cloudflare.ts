@@ -6,15 +6,42 @@
 // scoped, expiring account token minted by `standards creds add`.
 
 import { openInBrowser } from './creds-browser';
-import { verifyAccountToken } from './creds-cloudflare';
+import { listAccountTokens, verifyAccountToken } from './creds-cloudflare';
+import type { CfResult } from './creds-cloudflare-api';
 import { promptHidden, promptLine } from './creds-prompt';
 import {
   readBrokerStore,
   resolveBrokerPath,
-  writeBrokerStore,
+  updateBrokerStore,
 } from './creds-store';
 
 const ACCOUNT_ID_PATTERN = /^[0-9a-f]{32}$/u;
+
+export const verifyCloudflareBootstrapAuthority = async (
+  accountId: string,
+  token: string,
+): Promise<CfResult<null>> => {
+  const verified = await verifyAccountToken(accountId, token);
+  if (!verified.ok) {
+    return {
+      ok: false,
+      problem: `activity verification failed — ${verified.problem}`,
+    };
+  }
+  if (verified.value !== 'active') {
+    return {
+      ok: false,
+      problem: `token status is "${verified.value}", not "active"`,
+    };
+  }
+  const listed = await listAccountTokens(accountId, token);
+  return listed.ok
+    ? { ok: true, value: null }
+    : {
+        ok: false,
+        problem: `token cannot list account API tokens — ${listed.problem}; grant Account / Account API Tokens / Edit`,
+      };
+};
 
 export const runCredsLoginCloudflare = async (options: {
   readonly account: string | undefined;
@@ -52,22 +79,23 @@ export const runCredsLoginCloudflare = async (options: {
     console.error('standards creds: no token entered');
     return false;
   }
-  const verified = await verifyAccountToken(accountId, token);
+  const verified = await verifyCloudflareBootstrapAuthority(accountId, token);
   if (!verified.ok) {
     console.error(
       `standards creds: token verification failed — ${verified.problem}`,
     );
     return false;
   }
-  if (verified.value !== 'active') {
-    console.error(
-      `standards creds: token verified but its status is "${verified.value}", not "active"`,
-    );
-    return false;
-  }
-  await writeBrokerStore(storePath, {
-    ...store,
-    cloudflare: [...store.cloudflare, { accountId, token }],
+  await updateBrokerStore(storePath, (current) => {
+    if (current.cloudflare.some((entry) => entry.accountId === accountId)) {
+      throw new Error(
+        `Cloudflare account ${accountId} was configured while login was in progress; the newly entered token was not stored`,
+      );
+    }
+    return {
+      ...current,
+      cloudflare: [...current.cloudflare, { accountId, token }],
+    };
   });
   console.log(
     `standards creds: Cloudflare account ${accountId} configured; bootstrap token stored in ${storePath}`,
