@@ -1,8 +1,12 @@
 {
+  bunSystemMetadata,
   lib,
   runCommand,
   standardsCli,
 }:
+assert lib.assertMsg (
+  standardsCli.meta.platforms == builtins.attrNames bunSystemMetadata
+) "standards CLI advertised platforms must match the Bun system metadata";
 runCommand "standards-cli-check-${standardsCli.version}"
   {
     nativeBuildInputs = [ standardsCli ];

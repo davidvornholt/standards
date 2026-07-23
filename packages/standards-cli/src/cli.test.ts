@@ -152,6 +152,8 @@ const run = (cwd: string, args: ReadonlyArray<string>): RunResult =>
 
 const workflowRunScript = (stepName: string): string =>
   yamlRunScript(SYNC_WORKFLOW, stepName);
+const githubMatrixExpression = (property: string): string =>
+  `${'$'}{{ matrix.${property} }}`;
 
 const yamlJobs = (path: string): Record<string, WorkflowJob> => {
   const parsedWorkflow: unknown = parseYaml(readFileSync(path, 'utf8'));
@@ -1755,18 +1757,47 @@ describe('canonical standards workflow settings security', () => {
     expect(workflow).toContain('uses: extractions/setup-just@v4');
     expect(workflow).toContain('just-version: "1.57.0"');
   });
+});
 
-  it('keeps the required check name fail-closed over both isolated jobs', () => {
+describe('canonical standards workflow Nix gate', () => {
+  it('builds every Nix system natively and gates on the complete matrix', () => {
+    const jobs = yamlJobs(STANDARDS_WORKFLOW);
+    const nixJob = jobs.nix;
+
+    expect(nixJob['runs-on']).toBe(githubMatrixExpression('runner'));
+    expect(nixJob.strategy).toEqual({
+      'fail-fast': false,
+      matrix: {
+        include: [
+          { runner: 'ubuntu-24.04', system: 'x86_64-linux' },
+          { runner: 'ubuntu-24.04-arm', system: 'aarch64-linux' },
+        ],
+      },
+    });
+    expect(nixJob.steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'Install Nix',
+          uses: 'cachix/install-nix-action@v31',
+        }),
+        expect.objectContaining({
+          name: 'Build Nix check',
+          run: `nix build ".#checks.${githubMatrixExpression('system')}.standards-cli" -L`,
+        }),
+      ]),
+    );
+  });
+
+  it('keeps the required check name fail-closed over every gate', () => {
     const workflow = readFileSync(STANDARDS_WORKFLOW, 'utf8');
+    const jobs = yamlJobs(STANDARDS_WORKFLOW);
     expect(workflow).toContain('  quality:');
     expect(workflow).toContain('  github-settings:');
+    expect(workflow).toContain('  nix:');
     expect(workflow).toContain('  check:');
-    expect(workflow).toContain('    if: always()');
-    expect(workflow).toContain('      - quality');
-    expect(workflow).toContain('      - github-settings');
-    expect(workflow).toContain(
-      'if [ "$QUALITY_RESULT" != success ] || [ "$GITHUB_SETTINGS_RESULT" != success ]; then',
-    );
+    expect(jobs.check.if).toBe('always()');
+    expect(jobs.check.needs).toEqual(['quality', 'github-settings', 'nix']);
+    expect(workflow).toContain('[ "$NIX_RESULT" != success ]');
   });
 });
 
@@ -1810,6 +1841,7 @@ describe('canonical workflow runner boundaries', () => {
       '.github/workflows/standards-sync.yml:sync': 'ubuntu-latest',
       '.github/workflows/standards.yml:check': 'ubuntu-latest',
       '.github/workflows/standards.yml:github-settings': 'ubuntu-latest',
+      '.github/workflows/standards.yml:nix': githubMatrixExpression('runner'),
     });
     expect(fixedRunnerJobDefinitions.join('\n')).not.toContain(
       'vars.CI_RUNNER',

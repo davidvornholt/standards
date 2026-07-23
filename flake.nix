@@ -6,18 +6,19 @@
   outputs =
     { self, nixpkgs }:
     let
-      supportedSystems = [
-        "aarch64-linux"
-        "x86_64-linux"
-      ];
-      forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
+      bunSystemMetadata = import ./nix/bun-system-metadata.nix;
+      systems = builtins.attrNames bunSystemMetadata;
+      forAllSystems = nixpkgs.lib.genAttrs systems;
     in
     {
       packages = forAllSystems (
         system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
-          standardsCli = pkgs.callPackage ./nix/standards-cli.nix { src = self; };
+          standardsCli = pkgs.callPackage ./nix/standards-cli.nix {
+            inherit bunSystemMetadata;
+            src = self;
+          };
         in
         {
           standards-cli = standardsCli;
@@ -33,7 +34,7 @@
         in
         {
           standards-cli = pkgs.callPackage ./nix/standards-cli-check.nix {
-            inherit standardsCli;
+            inherit bunSystemMetadata standardsCli;
           };
         }
       );
