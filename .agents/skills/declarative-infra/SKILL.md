@@ -1,6 +1,6 @@
 ---
 name: declarative-infra
-description: Operating contract for declarative infrastructure (NixOS hosts, OpenTofu stacks). Use when touching host configuration, flakes, secrets or deploy wiring, PR preview environments, or cloud resources (DNS, buckets) — even when the infrastructure's home is another repo — or when a task needs a provider credential or API token (mint it with the credential broker, never by hand).
+description: Operating contract for declarative infrastructure (NixOS hosts, OpenTofu stacks). Use when touching host configuration, flakes, secrets or deploy wiring, PR preview environments, or cloud resources (DNS, buckets) — even when the infrastructure's home is another repo — or when a task needs a provider credential or API token.
 ---
 
 # Declarative infrastructure
