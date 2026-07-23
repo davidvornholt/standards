@@ -139,13 +139,15 @@ const parseDeclarationList = (
   options: ListField,
   problems: Array<string>,
 ): ReadonlyArray<unknown> | null => {
-  const list = raw ?? [];
-  if (!Array.isArray(list)) {
+  if (raw === undefined) {
+    return [];
+  }
+  if (!Array.isArray(raw)) {
     problems.push(`${options.label} "${options.field}" must be an array`);
     return null;
   }
-  problems.push(...options.listProblems(list, options.label));
-  return list;
+  problems.push(...options.listProblems(raw, options.label));
+  return raw;
 };
 
 export const parseSettings = (
@@ -162,7 +164,7 @@ export const parseSettings = (
       problems.push(`${label} has unknown key "${key}"`);
     }
   }
-  const repository = raw.repository ?? {};
+  const repository = 'repository' in raw ? raw.repository : {};
   if (!isRecord(repository)) {
     problems.push(`${label} "repository" must be an object`);
   }
