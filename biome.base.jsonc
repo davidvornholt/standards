@@ -317,7 +317,7 @@
         "packages/standards-cli/src/creds-add.ts",
         "packages/standards-cli/src/creds-cloudflare.ts",
         "packages/standards-cli/src/creds-cloudflare-api.ts",
-        "packages/standards-cli/src/creds-login-github.ts",
+        "packages/standards-cli/src/creds-login-github-manifest.ts",
         "packages/standards-cli/src/creds-store.ts"
       ],
       "linter": {
