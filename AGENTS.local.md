@@ -10,6 +10,10 @@ This is the standards template repo itself — the source of truth for `AGENTS.m
 
 This repository is deliberately not a `standards structure` consumer: the root gate runs the local CLI (`structure --profile source`, then `dependabot --check` or `dependabot --write`, then `github --check`, then the Turbo gate) instead of a recursive `standards check`, and `packages/standards-cli` ships as a published bin-only package with a release SemVer version. The `source` profile in `packages/standards-cli/src/structure-profile.ts` pins exactly these exceptions, and the root `check`/`check:fix` scripts enforce it on this checkout. When the source repository's shape deliberately changes, update the profile and the root scripts in the same change — the gate failing on one without the other is the point.
 
+## Standards CLI bootstrap architecture
+
+`packages/standards-cli` is a deliberate exception to the root Effect standards: use the package's established plain-TypeScript async and error idiom, and keep its runtime dependency surface minimal. The published bin must run through `bunx` before a consumer has installed project dependencies; adding Effect would defeat that bootstrap boundary or split one package into two architectures. Revisit this exception only if the CLI no longer bootstraps dependency-free consumers, its runtime moves to a separately installed package, or that minimal-dependency premise otherwise changes.
+
 ## Dependency version holds
 
 Template-wide dependency holds are declared as `ignore` entries in the canonical `.github/dependabot.base.yml`, each with a comment stating the reason and the lift condition. Never hold a version by closing Dependabot PRs or via `@dependabot ignore` comments — that is invisible per-repo state. When a hold or a held pin changes, update every affected pin (root `package.json`, `template/package.json`, the `biome.base.jsonc` schema URL) and the hold entry in the same change.
