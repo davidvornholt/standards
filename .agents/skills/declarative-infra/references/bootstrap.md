@@ -82,7 +82,7 @@ Host directories are named `<env>-<index>` (`prod-1`), even when the repo has a 
 }
 ```
 
-Build-time parameters (image digests, preview lists) enter via `specialArgs` from environment variables in the deploy workflow, with safe fallbacks so plain `nix flake check` evaluates without them.
+Build-time parameters (image digests, preview lists) enter via `specialArgs` from environment variables in the deploy workflow, with safe fallbacks so plain `nix flake check` evaluates without them. The digests themselves are committed state in `images.json` — the deploy workflow exports them from that file, and cross-repo bumps arrive per `image-promotion.md`.
 
 ## Server profile
 

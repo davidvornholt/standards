@@ -11,6 +11,8 @@ description: Operating contract for declarative infrastructure (NixOS hosts, Ope
 - Apply changes by pushing to GitHub and letting trusted main-branch automation converge. Never run `deploy-rs`, `tofu apply`, or `nixos-rebuild switch` by hand; direct mutation is for emergencies only, and must be flagged when used.
 - PR previews are the one sanctioned exception to state-in-git: the active preview set lives in a host-local desired-state file mutated only by a validated forced SSH command, which converges the same flake that defines production. How previews are shaped stays fully declarative; see `references/pr-previews.md`.
 - App services run as Podman `oci-containers` with digest-pinned images, published only through Caddy; hosts never run Docker. Wiring details live in `references/bootstrap.md`.
+- When the home is a dedicated infra repo, image freshness is automation-owned: the source repo announces new digests via `repository_dispatch`, the home repo bumps its committed pin through its own gates, and a change is deployed only when that pin has merged and converged — see `references/image-promotion.md`.
+- Provider credentials (Cloudflare tokens, GitHub App credentials for cross-repo automation) are minted and rotated by `bun standards creds`, which writes values directly into SOPS targets; do not ask the operator to create tokens by hand for needs the broker covers.
 
 ## Changing existing infrastructure
 

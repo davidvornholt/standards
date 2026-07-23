@@ -49,6 +49,10 @@ The root `justfile` and the `secrets.just` module are canonical synced files —
 - Workflows decrypt at runtime with a version- and checksum-pinned sops, and mask every decrypted value with `::add-mask::` — SOPS output gets no automatic log masking.
 - Plane separation: only `SOPS_AGE_KEY` bootstraps the machinery and stays a native Actions secret; every other CI secret, including workflow PATs like `ci.standards_sync_token` (repository-scoped with Contents read + Pull requests write), lives in SOPS targets and is decrypted at runtime.
 
+## Brokered provider credentials
+
+Cloudflare API tokens and cross-repo GitHub credentials are minted by the credential broker, not created in provider dashboards: `bun standards creds add cloudflare --dest <target>:<dotted.key> --permissions "<Group Name>"` mints a scoped, expiring account token and writes the value straight into the SOPS target (never into the terminal), and `bun standards creds add github --dest <target>:<dotted.key>` places the broker GitHub App's credentials for workflows to mint short-lived installation tokens at runtime. `bun standards creds plan` / `apply` reconcile: deleting the secret key from the SOPS file and applying revokes the provider-side token; tokens near expiry are rolled with the new value written back. Do not ask the operator to create tokens by hand for needs the broker covers; the one-time machine setup is `standards creds login github` and `standards creds login cloudflare`.
+
 ## Rotation
 
-Values rotate by editing the encrypted file; recipients rotate in `.sops.yaml` followed by `updatekeys`. Both land as reviewed commits.
+Values rotate by editing the encrypted file; recipients rotate in `.sops.yaml` followed by `updatekeys`. Both land as reviewed commits. Brokered credentials rotate via `bun standards creds apply` instead, which rolls the provider token and rewrites the SOPS value in one step.
