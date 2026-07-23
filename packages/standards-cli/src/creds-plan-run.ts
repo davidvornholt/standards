@@ -1,9 +1,9 @@
 import {
   createAccountToken as createToken,
   deleteAccountToken as deleteToken,
-  listAccountTokens as listTokens,
 } from './creds-cloudflare';
 import { listSecretsTargets, resolveTargetRel } from './creds-dest';
+import { identifyCloudflareBootstrapAuthority } from './creds-login-cloudflare';
 import {
   type AccountToken,
   computeCredsPlan,
@@ -45,19 +45,24 @@ const gatherRepoState = async (consumer: string, store: BrokerStore) => {
   const listings = await Promise.all(
     store.cloudflare.map(async (account) => ({
       account,
-      listed: await listTokens(account.accountId, account.token),
+      identified: await identifyCloudflareBootstrapAuthority(
+        account.accountId,
+        account.token,
+      ),
     })),
   );
-  for (const { account, listed } of listings) {
-    if (listed.ok) {
+  for (const { account, identified } of listings) {
+    if (identified.ok) {
       tokens.push(
-        ...listed.value.map((token) => ({
-          accountId: account.accountId,
-          token,
-        })),
+        ...identified.value.tokens
+          .filter((token) => token.id !== identified.value.id)
+          .map((token) => ({
+            accountId: account.accountId,
+            token,
+          })),
       );
     } else {
-      problems.push(`account ${account.accountId}: ${listed.problem}`);
+      problems.push(`account ${account.accountId}: ${identified.problem}`);
     }
   }
   return { keysByTarget, tokens, problems };

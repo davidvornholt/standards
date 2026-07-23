@@ -36,7 +36,7 @@ export const planRunRoot = (): string => root;
 
 export const initialize = (
   secrets: string,
-): { consumer: string; events: string } => {
+): { consumer: string; events: string; broker: string } => {
   root = mkdtempSync(join(tmpdir(), 'creds-plan-run-'));
   const consumer = join(root, 'consumer');
   mkdirSync(join(consumer, 'secrets'), { recursive: true });
@@ -54,7 +54,7 @@ export const initialize = (
   writeFileSync(events, '');
   process.env.STANDARDS_BROKER_FILE = broker;
   process.env.PLAN_EVENT_FILE = events;
-  return { consumer, events };
+  return { consumer, events, broker };
 };
 
 export const installSops = (body: string): void => {
@@ -105,10 +105,21 @@ const pageInfo = (count: number): unknown => ({
   total_count: count,
 });
 
-export const stubCloudflare = (target = 'ci'): void => {
+export const stubCloudflare = (
+  target = 'ci',
+  verifiedId: string | null = 'bootstrap',
+): void => {
   globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? 'GET';
+    if (url.endsWith('/verify')) {
+      return Promise.resolve(
+        envelope({
+          ...(verifiedId === null ? {} : { id: verifiedId }),
+          status: 'active',
+        }),
+      );
+    }
     if (method === 'POST') {
       appendFileSync(process.env.PLAN_EVENT_FILE ?? '', 'create\n');
       return Promise.resolve(
@@ -122,7 +133,15 @@ export const stubCloudflare = (target = 'ci'): void => {
       );
       return Promise.resolve(envelope({ id: 'deleted' }));
     }
-    return Promise.resolve(envelope([expiringToken(target)], pageInfo(1)));
+    return Promise.resolve(
+      envelope(
+        [
+          { id: 'bootstrap', name: 'standards-broker', status: 'active' },
+          expiringToken(target),
+        ],
+        pageInfo(2),
+      ),
+    );
   }) as typeof fetch;
 };
 

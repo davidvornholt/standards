@@ -31,6 +31,8 @@ afterEach(() => {
 });
 
 const ACCOUNT_ID_LENGTH = 32;
+const ACCOUNT_A = 'a'.repeat(ACCOUNT_ID_LENGTH);
+const ACCOUNT_B = 'b'.repeat(ACCOUNT_ID_LENGTH);
 const LOCK_COMPETITION_MS = 10;
 
 const APP = {
@@ -60,9 +62,7 @@ describe('broker store', () => {
     const path = storePath();
     const store = {
       github: APP,
-      cloudflare: [
-        { accountId: 'a'.repeat(ACCOUNT_ID_LENGTH), token: 'cfat_secret' },
-      ],
+      cloudflare: [{ accountId: ACCOUNT_A, token: 'cfat_secret' }],
     };
     await replaceStore(path, store);
     expect(inspectBrokerFileMode(path)).toEqual({
@@ -119,6 +119,10 @@ describe('broker store', () => {
 
   it('serializes concurrent updates without losing either provider', async () => {
     const path = storePath();
+    await replaceStore(path, {
+      ...EMPTY_BROKER_STORE,
+      cloudflare: [{ accountId: ACCOUNT_A, token: 'first' }],
+    });
     let releaseFirst = (): void => undefined;
     let markEntered = (): void => undefined;
     const entered = new Promise<void>((resolve) => {
@@ -137,7 +141,7 @@ describe('broker store', () => {
       ...store,
       cloudflare: [
         ...store.cloudflare,
-        { accountId: 'a'.repeat(ACCOUNT_ID_LENGTH), token: 'cfat_secret' },
+        { accountId: ACCOUNT_B, token: 'second' },
       ],
     }));
     await new Promise((resolve) => setTimeout(resolve, LOCK_COMPETITION_MS));
@@ -146,7 +150,8 @@ describe('broker store', () => {
     expect(await readBrokerStore(path)).toEqual({
       github: APP,
       cloudflare: [
-        { accountId: 'a'.repeat(ACCOUNT_ID_LENGTH), token: 'cfat_secret' },
+        { accountId: ACCOUNT_A, token: 'first' },
+        { accountId: ACCOUNT_B, token: 'second' },
       ],
     });
   });

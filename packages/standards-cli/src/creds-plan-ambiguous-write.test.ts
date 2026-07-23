@@ -57,6 +57,15 @@ const initialize = (sopsBody: string): string => {
   globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? 'GET';
+    if (url.endsWith('/verify')) {
+      return Promise.resolve(
+        Response.json({
+          success: true,
+          errors: [],
+          result: { id: 'bootstrap', status: 'active' },
+        }),
+      );
+    }
     if (method === 'POST') {
       return Promise.resolve(
         Response.json({
@@ -77,6 +86,7 @@ const initialize = (sopsBody: string): string => {
         success: true,
         errors: [],
         result: [
+          { id: 'bootstrap', name: 'standards-broker', status: 'active' },
           {
             id: 'old',
             name: 'standards/davidvornholt/example/ci/ci.token',
@@ -100,7 +110,7 @@ const initialize = (sopsBody: string): string => {
           },
         ],
         // biome-ignore lint/style/useNamingConvention: Cloudflare's response field is snake_case.
-        result_info: { page: 1, per_page: 50, count: 1, total_count: 1 },
+        result_info: { page: 1, per_page: 50, count: 2, total_count: 2 },
       }),
     );
   }) as typeof fetch;

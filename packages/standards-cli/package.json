@@ -24,6 +24,7 @@
     "src/creds-add-cloudflare-commit.ts",
     "src/creds-add-github.ts",
     "src/creds-browser.ts",
+    "src/creds-cloudflare-account.ts",
     "src/creds-cloudflare.ts",
     "src/creds-cloudflare-api.ts",
     "src/creds-cloudflare-condition.ts",

@@ -7,7 +7,9 @@
 
 import { openInBrowser } from './creds-browser';
 import { listAccountTokens, verifyAccountToken } from './creds-cloudflare';
-import type { CfResult } from './creds-cloudflare-api';
+import { isCloudflareAccountId } from './creds-cloudflare-account';
+import type { CfResult, CloudflareToken } from './creds-cloudflare-api';
+import { BROKER_IDENTITY_NAME, isInMintedNamespace } from './creds-naming';
 import { promptHidden, promptLine } from './creds-prompt';
 import {
   readBrokerStore,
@@ -15,12 +17,16 @@ import {
   updateBrokerStore,
 } from './creds-store';
 
-const ACCOUNT_ID_PATTERN = /^[0-9a-f]{32}$/u;
+type IdentifiedBootstrapToken = {
+  readonly id: string;
+  readonly name: string;
+  readonly tokens: ReadonlyArray<CloudflareToken>;
+};
 
-export const verifyCloudflareBootstrapAuthority = async (
+export const identifyCloudflareBootstrapAuthority = async (
   accountId: string,
   token: string,
-): Promise<CfResult<null>> => {
+): Promise<CfResult<IdentifiedBootstrapToken>> => {
   const verified = await verifyAccountToken(accountId, token);
   if (!verified.ok) {
     return {
@@ -28,19 +34,50 @@ export const verifyCloudflareBootstrapAuthority = async (
       problem: `activity verification failed — ${verified.problem}`,
     };
   }
-  if (verified.value !== 'active') {
+  if (verified.value.status !== 'active') {
     return {
       ok: false,
-      problem: `token status is "${verified.value}", not "active"`,
+      problem: `token status is "${verified.value.status}", not "active"`,
     };
   }
   const listed = await listAccountTokens(accountId, token);
-  return listed.ok
-    ? { ok: true, value: null }
-    : {
-        ok: false,
-        problem: `token cannot list account API tokens — ${listed.problem}; grant Account / Account API Tokens / Edit`,
-      };
+  if (!listed.ok) {
+    return {
+      ok: false,
+      problem: `token cannot list account API tokens — ${listed.problem}; grant Account / Account API Tokens / Edit`,
+    };
+  }
+  const own = listed.value.find((entry) => entry.id === verified.value.id);
+  if (own === undefined) {
+    return {
+      ok: false,
+      problem: `complete token list did not contain verified token ID ${verified.value.id}`,
+    };
+  }
+  return {
+    ok: true,
+    value: { id: verified.value.id, name: own.name, tokens: listed.value },
+  };
+};
+
+export const verifyCloudflareBootstrapAuthority = async (
+  accountId: string,
+  token: string,
+): Promise<CfResult<{ readonly tokenName: string }>> => {
+  const identified = await identifyCloudflareBootstrapAuthority(
+    accountId,
+    token,
+  );
+  if (!identified.ok) {
+    return identified;
+  }
+  if (isInMintedNamespace(identified.value.name)) {
+    return {
+      ok: false,
+      problem: `the token is named "${identified.value.name}", inside the broker's minted-token namespace — bootstrap credentials must remain distinguishable from minted credentials; rename it ${BROKER_IDENTITY_NAME} in the dashboard and re-run login`,
+    };
+  }
+  return { ok: true, value: { tokenName: identified.value.name } };
 };
 
 export const runCredsLoginCloudflare = async (options: {
@@ -51,9 +88,9 @@ export const runCredsLoginCloudflare = async (options: {
     (await promptLine(
       'Cloudflare account ID (dash.cloudflare.com, account home, "Account ID" in the sidebar): ',
     ));
-  if (!ACCOUNT_ID_PATTERN.test(accountId)) {
+  if (!isCloudflareAccountId(accountId)) {
     console.error(
-      'standards creds: a Cloudflare account ID is 32 hex characters',
+      'standards creds: a Cloudflare account ID is 32 lowercase hexadecimal characters',
     );
     return false;
   }
@@ -69,10 +106,11 @@ export const runCredsLoginCloudflare = async (options: {
   console.log('Create the bootstrap token (one time for this account):');
   console.log(`  1. Open ${tokensUrl}`);
   console.log('  2. Create Token, then Create Custom Token');
+  console.log(`  3. Name it ${BROKER_IDENTITY_NAME}`);
   console.log(
-    '  3. Grant exactly one permission: Account / Account API Tokens / Edit',
+    '  4. Grant exactly one permission: Account / Account API Tokens / Edit',
   );
-  console.log('  4. Continue to summary, create the token, and copy the value');
+  console.log('  5. Continue to summary, create the token, and copy the value');
   openInBrowser(tokensUrl);
   const token = await promptHidden('Paste the token (input is hidden): ');
   if (token.length === 0) {
@@ -85,6 +123,12 @@ export const runCredsLoginCloudflare = async (options: {
       `standards creds: token verification failed — ${verified.problem}`,
     );
     return false;
+  }
+  const { tokenName } = verified.value;
+  if (tokenName !== BROKER_IDENTITY_NAME) {
+    console.error(
+      `standards creds: warning — the token is named "${tokenName}", not "${BROKER_IDENTITY_NAME}"; rename it in the dashboard so it stays identifiable`,
+    );
   }
   await updateBrokerStore(storePath, (current) => {
     if (current.cloudflare.some((entry) => entry.accountId === accountId)) {

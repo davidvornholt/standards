@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'bun:test';
-import { parseTokenName, repoTokenPrefix, tokenNameOf } from './creds-naming';
+import {
+  BROKER_IDENTITY_NAME,
+  isInMintedNamespace,
+  parseTokenName,
+  repoTokenPrefix,
+  tokenNameOf,
+} from './creds-naming';
 
 const REPO = 'davidvornholt/example';
 
@@ -25,6 +31,17 @@ describe('creds token naming', () => {
       parseTokenName(`${repoTokenPrefix(REPO)}only-target`, REPO),
     ).toBeNull();
     expect(parseTokenName(`${repoTokenPrefix(REPO)}ci/`, REPO)).toBeNull();
+  });
+
+  it('keeps the broker identity name outside the minted namespace', () => {
+    expect(isInMintedNamespace(BROKER_IDENTITY_NAME)).toBe(false);
+    expect(
+      isInMintedNamespace(
+        tokenNameOf({ repo: REPO, target: 'ci', key: 'a.b' }),
+      ),
+    ).toBe(true);
+    expect(isInMintedNamespace('standards-broker-2')).toBe(false);
+    expect(isInMintedNamespace('standards/anything')).toBe(true);
   });
 
   it('rejects unsafe segments instead of minting ambiguous names', () => {
