@@ -69,12 +69,6 @@ const dispositionOf = (
       finding: `${token.name} (${accountId}/${token.id}) has status ${token.status}; it is not healthy and will not be mutated automatically`,
     };
   }
-  if (!token.condition.supported) {
-    return {
-      kind: 'finding',
-      finding: `${token.name} has an unsupported condition shape; it will not be mutated automatically`,
-    };
-  }
   if (!input.keysByTarget.get(ref.target)?.has(ref.key)) {
     return {
       kind: 'action',
@@ -83,6 +77,12 @@ const dispositionOf = (
         kind: 'revoke',
         reason: `secret ${ref.target}:${ref.key} no longer exists`,
       },
+    };
+  }
+  if (!token.condition.supported) {
+    return {
+      kind: 'finding',
+      finding: `${token.name} has an unsupported condition shape; it will not be mutated automatically`,
     };
   }
   if (token.expiresOn === null) {
