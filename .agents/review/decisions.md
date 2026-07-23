@@ -24,6 +24,10 @@ The fix poller and its approved Codex runs may share one host service identity a
 
 Under the frozen non-hostile-consumer threat model, the installed `@davidvornholt/standards` manifest version plus the frozen lockfile is the capability assertion. The consumer already controls that dependency and executes its code, so extra package-name, bin, or capability probes do not establish official identity; defending against a falsely versioned or malicious substitution is out of scope.
 
+## RELEASE-002: Standards CLI bootstrap error architecture
+
+`packages/standards-cli` deliberately uses plain TypeScript async code, discriminated result unions, and a minimal runtime dependency surface because its published bin bootstraps dependency-free consumers through `bunx`; adding Effect would either defeat that bootstrap boundary or split the package into two architectures. Reviews may challenge this decision only if the CLI no longer bootstraps dependency-free consumers, its runtime moves to a separately installed package, or the minimal-dependency premise otherwise changes.
+
 ## TOOLING-001: Root-owned Biome pin
 
 `@biomejs/biome` is pinned only at the repository root (and `template/package.json` for consumers); workspaces deliberately do not declare it. Workspace lint scripts resolve the root-hoisted Biome executable, while `packages/standards-cli/src/template-biome.test.ts` invokes that executable by its root path; a missing install fails at invocation. Reviews must not request per-workspace `@biomejs/biome` declarations; the pin moves with the root/template dependency-hold policy.
@@ -35,3 +39,19 @@ The isolated GitHub settings job uses one repository-scoped fine-grained PAT wit
 ## WORKFLOW-ACTIONS-001: Major-version action tags
 
 Production workflows use maintained major-version tags for external actions instead of full commit SHAs. The owner accepts the minimal risk that an upstream tag could be retargeted; reviews must not request immutable action pins unless that risk assessment changes.
+
+## CREDS-CUSTODY-001: Machine-global plaintext broker custody
+
+The broker store is machine-global state outside every repository, so the repository rule requiring secret values in SOPS-encrypted YAML does not govern it. Plaintext `0600` custody shares the same local-account trust root as the plaintext personal age identity at `~/.config/sops/age/keys.txt`; encrypting the store to a recipient whose private key sits beside it was rejected as theater. Store writes must remain crash-atomic and concurrency-safe so interrupted or simultaneous logins cannot corrupt the file or lose one provider's credential. Reopen this decision if the threat model expands beyond the trusted local account, hardware-backed custody becomes part of the design, or the store moves into a repository, sync, or backup boundary.
+
+## CREDS-GITHUB-001: One global broker GitHub App
+
+One machine-global broker GitHub App and its cross-repository compromise radius are accepted for now: a repository that receives the App key can authenticate as that App against its other installations. Installation on selected repositories is the binding boundary, never an instruction to install on all repositories. Per-purpose Apps with narrower permission ceilings are the designed blast-radius reduction and a supported follow-up once the broker gains multi-App custody; they are not required for the initial single-App broker. Reopen this decision if selected-repository installation no longer contains the intended trust domain, unrelated recipients must not share App authority, the App's permission ceiling broadens materially, or multi-App isolation becomes an immediate requirement.
+
+## CREDS-CLOUDFLARE-001: Two-source Cloudflare reconciliation
+
+Cloudflare reconciliation has exactly two sources of truth: the plaintext SOPS key structure in git and the provider token list under deterministic broker names. A third checked-in credential manifest is deliberately rejected. The absence of a desired-policy record means live policy drift is accepted as out of scope while the bootstrap token remains uncompromised; provider policy remains inspectable. A repository rename or transfer changes the deterministic namespace and is a documented human-visible re-mint-and-revoke event, not a reason to add persistent identity. This acceptance does not relax lifecycle invariants: login must functionally prove token-list authority, inactive tokens must not count as healthy, renewal must create a fresh-expiry replacement from the live policy, durably write and verify its value, then revoke the old token, and account-only minting must reject zone-scoped permission groups without a zone resource. Reopen this decision if policy-drift enforcement becomes required, bootstrap-token compromise enters the threat model, renames or transfers must reconcile automatically, or the two sources can no longer identify managed credentials unambiguously.
+
+## STANDARDS-CLI-001: Effect-free bootstrap package
+
+`packages/standards-cli` is deliberately plain TypeScript rather than Effect because its published bin must run through `bunx` before a consumer has installed any project dependencies. The package keeps a minimal runtime dependency surface (currently only `yaml`) and uses its established async/error idiom consistently; the credential broker follows the same package-level exception to the root Effect standards. Do not add Effect merely to align this bootstrap package with application architecture. Reopen this decision if the CLI no longer needs to bootstrap dependency-free consumers, its runtime is split into a separately installed package, or the minimal-dependency premise otherwise changes.

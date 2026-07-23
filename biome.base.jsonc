@@ -187,7 +187,11 @@
       // configuration-dependent behavior, and fixtures contain literal dummy
       // tokens that trip entropy-based secret detection. Biome also does not
       // resolve Bun's virtual `bun:test` module.
-      "includes": ["**/*.test.ts", "**/*.test.tsx"],
+      "includes": [
+        "**/*.test.ts",
+        "**/*.test.tsx",
+        "packages/standards-cli/src/creds-plan-run-test-support.ts"
+      ],
       "linter": {
         "rules": {
           "correctness": {
@@ -238,12 +242,22 @@
       "includes": [
         "scripts/**",
         "packages/standards-cli/src/cli.ts",
+        "packages/standards-cli/src/creds-add.ts",
+        "packages/standards-cli/src/creds-add-github.ts",
+        "packages/standards-cli/src/creds-commands.ts",
+        "packages/standards-cli/src/creds-dest.ts",
+        "packages/standards-cli/src/creds-login-cloudflare.ts",
+        "packages/standards-cli/src/creds-login-github.ts",
+        "packages/standards-cli/src/creds-plan-run.ts",
+        "packages/standards-cli/src/creds-sops-editor.ts",
+        "packages/standards-cli/src/creds-store.ts",
         "packages/standards-cli/src/github-api.ts",
         "packages/standards-cli/src/github-commands.ts",
         "packages/standards-cli/src/poller-codex.ts",
         "packages/standards-cli/src/poller-commands.ts",
         "packages/standards-cli/src/poller-units.ts",
-        "packages/standards-cli/src/poller-workspace.ts"
+        "packages/standards-cli/src/poller-workspace.ts",
+        "packages/standards-cli/src/sops-exec.ts"
       ],
       "linter": {
         "rules": {
@@ -276,6 +290,8 @@
       // declare UPPER_SNAKE dotenv keys.
       "includes": [
         "packages/standards-cli/src/cli.test.ts",
+        "packages/standards-cli/src/creds-cloudflare.test.ts",
+        "packages/standards-cli/src/creds-login-github.test.ts",
         "packages/standards-cli/src/dev-env-document.test.ts",
         "packages/standards-cli/src/dev-env-dotenv.test.ts",
         "packages/standards-cli/src/dev-env.test.ts",
@@ -285,6 +301,24 @@
         "packages/standards-cli/src/poller-trust.test.ts",
         "packages/standards-cli/src/sops-secret-action-test-support.ts",
         "packages/standards-cli/src/sops-secret-action.test.ts"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "useNamingConvention": "off"
+          }
+        }
+      }
+    },
+    {
+      // Provider wire formats (GitHub App manifests, Cloudflare token
+      // policies) and the persisted broker-store YAML shape are snake_case.
+      "includes": [
+        "packages/standards-cli/src/creds-add.ts",
+        "packages/standards-cli/src/creds-cloudflare.ts",
+        "packages/standards-cli/src/creds-cloudflare-api.ts",
+        "packages/standards-cli/src/creds-login-github.ts",
+        "packages/standards-cli/src/creds-store.ts"
       ],
       "linter": {
         "rules": {

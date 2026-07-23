@@ -124,9 +124,9 @@ Tracking `main` weekly is the default and the recommended mode for repos whose o
 
 Every CLI release already creates a `vX.Y.Z` tag and GitHub Release, so released versions are natural pin points — no separate content-release process exists or is needed. A pinned repo updates by moving the pin (or running `sync --ref <newer>`) and reviewing the resulting PR like a dependency upgrade. The lock always records the exact upstream commit synced, so `check` works identically in both modes.
 
-### Migration to 0.13.0
+### Breaking migration to 0.13.0
 
-Version 0.13.0 adds the standards-owned Nix package for host-side CLI and poller use. Infrastructure consumers should replace locally assembled Bun, standards CLI, and dependency derivations with the released `packages.<system>.standards-cli` output; the package includes the authoritative Bun runtime and lock-derived production dependency closure. This is a packaging ownership move only: npm consumers and the standards sync contract are unchanged.
+Version 0.13.0 is an intentional hard ownership cutover for infrastructure consumers adopting the standards-owned Nix package for host-side CLI and poller use. In the same migration, delete every locally assembled Bun, standards CLI, and production-dependency derivation used for those standards-owned pieces, pin a released tag, and use only its `packages.<system>.standards-cli` output; do not retain parallel derivations. The release package is the sole owner of the Bun runtime and lock-derived production dependency closure. This breaking change is limited to infrastructure packaging: npm consumers and standards-sync consumers are unchanged.
 
 ### Breaking migration to squash-only merging
 
