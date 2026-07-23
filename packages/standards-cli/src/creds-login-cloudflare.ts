@@ -54,6 +54,12 @@ export const identifyCloudflareBootstrapAuthority = async (
       problem: `complete token list did not contain verified token ID ${verified.value.id}`,
     };
   }
+  if (own.status !== 'active') {
+    return {
+      ok: false,
+      problem: `the token verified as active but the account token list reports status "${own.status}"; refusing the contradictory provider response`,
+    };
+  }
   return {
     ok: true,
     value: { id: verified.value.id, name: own.name, tokens: listed.value },
@@ -105,12 +111,13 @@ export const runCredsLoginCloudflare = async (options: {
   const tokensUrl = `https://dash.cloudflare.com/${accountId}/api-tokens`;
   console.log('Create the bootstrap token (one time for this account):');
   console.log(`  1. Open ${tokensUrl}`);
-  console.log('  2. Create Token, then Create Custom Token');
-  console.log(`  3. Name it ${BROKER_IDENTITY_NAME}`);
+  console.log('  2. Select Create Token');
+  console.log('  3. Find Create additional tokens and select Use template');
+  console.log(`  4. Name it ${BROKER_IDENTITY_NAME}`);
   console.log(
-    '  4. Grant exactly one permission: Account / Account API Tokens / Edit',
+    '  5. Keep exactly one permission: Account / Account API Tokens / Edit',
   );
-  console.log('  5. Continue to summary, create the token, and copy the value');
+  console.log('  6. Continue to summary, create the token, and copy the value');
   openInBrowser(tokensUrl);
   const token = await promptHidden('Paste the token (input is hidden): ');
   if (token.length === 0) {

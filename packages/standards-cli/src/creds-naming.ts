@@ -11,8 +11,10 @@ const NAME_PREFIX = 'standards';
 // slash, so it can never fall inside the minted namespace below.
 export const BROKER_IDENTITY_NAME = 'standards-broker';
 
-// Reconciliation owns every name under `standards/` (it revokes and renews
-// by parsed name), so hand-made tokens must never be named inside it.
+// The whole `standards/` prefix is reserved for minted tokens, deliberately
+// broader than the names reconciliation parses today: login is the only
+// cheap place to enforce the boundary, and a name that does not parse under
+// the current scheme could become parseable if the scheme ever widens.
 export const isInMintedNamespace = (name: string): boolean =>
   name.startsWith(`${NAME_PREFIX}/`);
 

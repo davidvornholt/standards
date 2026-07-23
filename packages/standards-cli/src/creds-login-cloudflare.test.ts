@@ -20,12 +20,12 @@ const response = (result: unknown, status = 200): Response =>
   );
 
 const tokenListResponse = (
-  tokens: ReadonlyArray<{ id: string; name: string }>,
+  tokens: ReadonlyArray<{ id: string; name: string; status?: string }>,
 ): Response =>
   Response.json({
     success: true,
     errors: [],
-    result: tokens.map((entry) => ({ ...entry, status: 'active' })),
+    result: tokens.map((entry) => ({ status: 'active', ...entry })),
     // biome-ignore lint/style/useNamingConvention: Cloudflare's response field is snake_case.
     result_info: {
       page: 1,
@@ -67,6 +67,7 @@ describe('Cloudflare bootstrap authority', () => {
   it.each([
     ['missing', { status: 'active' }],
     ['non-string', { id: 7, status: 'active' }],
+    ['empty', { id: '', status: 'active' }],
   ])('rejects a %s verification ID', async (_, verifyResult) => {
     globalThis.fetch = ((input: string | URL | Request) =>
       Promise.resolve(
@@ -100,6 +101,22 @@ describe('Cloudflare bootstrap authority', () => {
     expect(await verifyCloudflareBootstrapAuthority(ACCOUNT, TOKEN)).toEqual({
       ok: true,
       value: { tokenName: 'my-token' },
+    });
+  });
+
+  it('rejects a token whose list record contradicts active verification', async () => {
+    globalThis.fetch = ((input: string | URL | Request) =>
+      Promise.resolve(
+        String(input).endsWith('/verify')
+          ? response({ id: 'bootstrap', status: 'active' })
+          : tokenListResponse([
+              { id: 'bootstrap', name: 'my-token', status: 'disabled' },
+            ]),
+      )) as typeof fetch;
+
+    expect(await verifyCloudflareBootstrapAuthority(ACCOUNT, TOKEN)).toEqual({
+      ok: false,
+      problem: expect.stringContaining('contradictory provider response'),
     });
   });
 
