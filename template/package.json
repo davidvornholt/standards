@@ -13,7 +13,7 @@
     "check:fix": "standards check && turbo run lint:fix check-types test build test:a11y"
   },
   "devDependencies": {
-    "@davidvornholt/standards": "0.15.0",
+    "@davidvornholt/standards": "0.15.1",
     "@biomejs/biome": "2.5.2",
     "turbo": "^2.10.4",
     "typescript": "7.0.2"
