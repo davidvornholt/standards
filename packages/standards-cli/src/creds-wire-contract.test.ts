@@ -22,6 +22,7 @@ const ACCOUNT = 'a'.repeat(ACCOUNT_ID_LENGTH);
 const CF = `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT}`;
 const HTTP_OK = 200;
 const HTTP_CREATED = 201;
+const HTTP_NOT_FOUND = 404;
 
 const originalFetch = globalThis.fetch;
 const requests: Array<string> = [];
@@ -62,6 +63,24 @@ describe('provider wire contract', () => {
     expect(requests).toEqual([
       'POST https://api.github.com/app-manifests/code123/conversions',
     ]);
+  });
+
+  it('preserves GitHub manifest conversion errors', async () => {
+    stubFetch(HTTP_NOT_FOUND, { message: 'Not Found' });
+
+    expect(await convertManifestCode('expired')).toEqual({
+      ok: false,
+      problem: 'manifest conversion: HTTP 404 Not Found',
+    });
+  });
+
+  it('rejects manifest conversions missing credentials', async () => {
+    stubFetch(HTTP_CREATED, { id: 1, slug: 's' });
+
+    expect(await convertManifestCode('code123')).toEqual({
+      ok: false,
+      problem: 'unexpected manifest conversion response shape',
+    });
   });
 
   // https://developers.cloudflare.com/api/resources/accounts/subresources/tokens/methods/verify/
