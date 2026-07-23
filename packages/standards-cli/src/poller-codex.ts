@@ -34,6 +34,13 @@ type CodexExecutor = (
 
 const defaultExecutor: CodexExecutor = execFileSync;
 
+type CodexRunOptions = {
+  readonly workDir: string;
+  readonly gitCommonDir: string;
+  readonly prompt: string;
+  readonly config: PollerConfig;
+};
+
 const exitCause = (details: Record<string, unknown>): string => {
   if (typeof details.status === 'number') {
     return `exit status ${details.status}`;
@@ -57,11 +64,10 @@ const agentEnv = (): Record<string, string | undefined> => {
 };
 
 export const runCodex = (
-  workDir: string,
-  prompt: string,
-  config: PollerConfig,
+  options: CodexRunOptions,
   execute: CodexExecutor = defaultExecutor,
 ): CodexRunResult => {
+  const { workDir, gitCommonDir, prompt, config } = options;
   rmSync(join(workDir, OUTCOME_DIR), { recursive: true, force: true });
   try {
     execute(
@@ -72,6 +78,8 @@ export const runCodex = (
         workDir,
         '--sandbox',
         'workspace-write',
+        '--add-dir',
+        gitCommonDir,
         '-c',
         'sandbox_workspace_write.network_access=true',
         '-m',

@@ -16,6 +16,7 @@ import { OUTCOME_DIR } from './poller-protocol';
 const dirs: Array<string> = [];
 const EXPECTED_TIMEOUT_MS = 120_000;
 const EXCESSIVE_TRAILING_WHITESPACE_LENGTH = 2001;
+const GIT_COMMON_DIR = '/tmp/cache/owner/repo.git';
 const config = {
   repos: ['owner/repo'],
   model: 'gpt-test',
@@ -26,6 +27,13 @@ const config = {
   runTimeoutMinutes: 2,
   cacheDir: '/tmp',
 } satisfies PollerConfig;
+
+const runOptions = (workDir: string, prompt = 'do work') => ({
+  workDir,
+  gitCommonDir: GIT_COMMON_DIR,
+  prompt,
+  config,
+});
 
 afterEach(() => {
   for (const dir of dirs.splice(0)) {
@@ -48,20 +56,19 @@ describe('runCodex', () => {
           readonly token: string | undefined;
         }
       | undefined;
-    const result = runCodex(
-      workDir,
-      'do work',
-      config,
-      (_file, args, options) => {
-        captured = {
-          args,
-          timeout: options.timeout,
-          token: options.env.GH_TOKEN,
-        };
-      },
-    );
+    const result = runCodex(runOptions(workDir), (_file, args, options) => {
+      captured = {
+        args,
+        timeout: options.timeout,
+        token: options.env.GH_TOKEN,
+      };
+    });
     expect(result).toEqual({ succeeded: true, failure: null });
-    expect(captured?.args).toContain('--ephemeral');
+    const capturedArgs = captured?.args ?? [];
+    expect(capturedArgs).toContain('--ephemeral');
+    const addDirIndex = capturedArgs.indexOf('--add-dir');
+    expect(addDirIndex).toBeGreaterThan(-1);
+    expect(capturedArgs[addDirIndex + 1]).toBe(GIT_COMMON_DIR);
     expect(captured?.timeout).toBe(EXPECTED_TIMEOUT_MS);
     expect(captured?.token).toBeUndefined();
     expect(existsSync(join(workDir, OUTCOME_DIR))).toBeFalse();
@@ -70,7 +77,7 @@ describe('runCodex', () => {
   it('returns process stderr for failures and timeouts', () => {
     const workDir = mkdtempSync(join(tmpdir(), 'poller-codex-'));
     dirs.push(workDir);
-    const result = runCodex(workDir, 'do work', config, () => {
+    const result = runCodex(runOptions(workDir), () => {
       const error = new Error('timed out') as Error & { stderr: string };
       error.stderr = 'last process output';
       throw error;
@@ -83,7 +90,7 @@ describe('runCodex', () => {
   it('preserves stderr before trailing whitespace', () => {
     const workDir = mkdtempSync(join(tmpdir(), 'poller-codex-'));
     dirs.push(workDir);
-    const result = runCodex(workDir, 'do work', config, () => {
+    const result = runCodex(runOptions(workDir), () => {
       const error = new Error('failed') as Error & { stderr: string };
       error.stderr = `ROOT CAUSE: model requires a newer CLI\n${' '.repeat(
         EXCESSIVE_TRAILING_WHITESPACE_LENGTH,
@@ -97,7 +104,7 @@ describe('runCodex', () => {
     const workDir = mkdtempSync(join(tmpdir(), 'poller-codex-'));
     dirs.push(workDir);
     const prompt = 'a very long agent prompt';
-    const result = runCodex(workDir, prompt, config, () => {
+    const result = runCodex(runOptions(workDir, prompt), () => {
       const error = new Error(
         `Command failed: codex exec ${prompt}`,
       ) as Error & { stderr: string; status: number };
@@ -114,7 +121,7 @@ describe('runCodex', () => {
   it('reports the terminating signal when there is no exit status', () => {
     const workDir = mkdtempSync(join(tmpdir(), 'poller-codex-'));
     dirs.push(workDir);
-    const result = runCodex(workDir, 'do work', config, () => {
+    const result = runCodex(runOptions(workDir), () => {
       const error = new Error('Command failed: codex exec do work') as Error & {
         signal: string;
       };
