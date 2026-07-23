@@ -26,7 +26,7 @@
     },
     "packages/standards-cli": {
       "name": "@davidvornholt/standards",
-      "version": "0.14.0",
+      "version": "0.14.1",
       "bin": {
         "standards": "src/cli.ts",
       },
