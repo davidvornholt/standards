@@ -77,11 +77,18 @@ describe('Cloudflare request IP renewal', () => {
     const consumer = initialize();
     let creationBody: unknown;
     const expires = Date.now() + RENEWAL_WINDOW_DAYS * DAY_MS;
-    globalThis.fetch = ((
-      _input: string | URL | Request,
-      init?: RequestInit,
-    ) => {
+    globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
       const method = init?.method ?? 'GET';
+      if (url.endsWith('/verify')) {
+        return Promise.resolve(
+          Response.json({
+            success: true,
+            errors: [],
+            result: { id: 'bootstrap', status: 'active' },
+          }),
+        );
+      }
       if (method === 'POST') {
         creationBody = JSON.parse(String(init?.body)) as unknown;
         return Promise.resolve(
@@ -102,6 +109,7 @@ describe('Cloudflare request IP renewal', () => {
           success: true,
           errors: [],
           result: [
+            { id: 'bootstrap', name: 'standards-broker', status: 'active' },
             {
               id: 'old',
               name: 'standards/davidvornholt/example/ci/ci.token',
@@ -137,9 +145,9 @@ describe('Cloudflare request IP renewal', () => {
             page: 1,
             // biome-ignore lint/style/useNamingConvention: Cloudflare's pagination field is snake_case.
             per_page: 50,
-            count: 1,
+            count: 2,
             // biome-ignore lint/style/useNamingConvention: Cloudflare's pagination field is snake_case.
-            total_count: 1,
+            total_count: 2,
           },
         }),
       );

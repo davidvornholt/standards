@@ -55,12 +55,19 @@ describe('Cloudflare orphan revocation', () => {
   it('deletes an absent credential with an unknown condition without replacement', async () => {
     const consumer = initialize();
     const methods: Array<string> = [];
-    globalThis.fetch = ((
-      _input: string | URL | Request,
-      init?: RequestInit,
-    ) => {
+    globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
       const method = init?.method ?? 'GET';
       methods.push(method);
+      if (url.endsWith('/verify')) {
+        return Promise.resolve(
+          Response.json({
+            success: true,
+            errors: [],
+            result: { id: 'bootstrap', status: 'active' },
+          }),
+        );
+      }
       if (method === 'DELETE') {
         return Promise.resolve(
           Response.json({ success: true, errors: [], result: {} }),
@@ -80,6 +87,7 @@ describe('Cloudflare orphan revocation', () => {
           success: true,
           errors: [],
           result: [
+            { id: 'bootstrap', name: 'standards-broker', status: 'active' },
             {
               id: 'old',
               name: 'standards/davidvornholt/example/ci/ci.token',
@@ -93,14 +101,69 @@ describe('Cloudflare orphan revocation', () => {
             page: 1,
             // biome-ignore lint/style/useNamingConvention: Cloudflare's pagination field is snake_case.
             per_page: 50,
-            count: 1,
+            count: 2,
             // biome-ignore lint/style/useNamingConvention: Cloudflare's pagination field is snake_case.
-            total_count: 1,
+            total_count: 2,
           },
         }),
       );
     }) as typeof fetch;
     expect(await runCredsPlan(consumer, true)).toBe(true);
-    expect(methods).toEqual(['GET', 'DELETE']);
+    expect(methods).toEqual(['GET', 'GET', 'DELETE']);
+  });
+
+  it('protects the verified bootstrap ID while revoking a minted sibling', async () => {
+    const consumer = initialize();
+    const deletedIds: Array<string> = [];
+    globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+      if (url.endsWith('/verify')) {
+        return Promise.resolve(
+          Response.json({
+            success: true,
+            errors: [],
+            result: { id: 'bootstrap', status: 'active' },
+          }),
+        );
+      }
+      if (method === 'DELETE') {
+        deletedIds.push(url.split('/').at(-1) ?? '');
+        return Promise.resolve(
+          Response.json({ success: true, errors: [], result: {} }),
+        );
+      }
+      const tokens = [
+        {
+          id: 'bootstrap',
+          name: 'standards/davidvornholt/example/ci/root',
+          status: 'active',
+        },
+        {
+          id: 'sibling',
+          name: 'standards/davidvornholt/example/ci/ci.token',
+          status: 'active',
+        },
+      ];
+      return Promise.resolve(
+        Response.json({
+          success: true,
+          errors: [],
+          result: tokens,
+          // biome-ignore lint/style/useNamingConvention: Cloudflare's response field is snake_case.
+          result_info: {
+            page: 1,
+            // biome-ignore lint/style/useNamingConvention: Cloudflare's response field is snake_case.
+            per_page: 50,
+            count: tokens.length,
+            // biome-ignore lint/style/useNamingConvention: Cloudflare's response field is snake_case.
+            total_count: tokens.length,
+          },
+        }),
+      );
+    }) as typeof fetch;
+
+    expect(await runCredsPlan(consumer, true)).toBe(true);
+    expect(deletedIds).toEqual(['sibling']);
   });
 });

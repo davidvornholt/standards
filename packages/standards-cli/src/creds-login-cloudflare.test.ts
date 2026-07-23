@@ -43,7 +43,7 @@ afterEach(() => {
 });
 
 describe('Cloudflare bootstrap authority', () => {
-  it('requires both active verification and token-list authority', async () => {
+  it('rejects a complete token list missing the verified token ID', async () => {
     globalThis.fetch = ((input: string | URL | Request) => {
       const url = String(input);
       calls.push(url);
@@ -55,13 +55,35 @@ describe('Cloudflare bootstrap authority', () => {
     }) as typeof fetch;
 
     expect(await verifyCloudflareBootstrapAuthority(ACCOUNT, TOKEN)).toEqual({
-      ok: true,
-      value: { tokenName: null },
+      ok: false,
+      problem: expect.stringContaining('verified token ID'),
     });
     expect(calls).toHaveLength(2);
     expect(calls[1]).toContain(
       `/accounts/${ACCOUNT}/tokens?include_expired=true&page=1&per_page=50`,
     );
+  });
+
+  it.each([
+    ['missing', { status: 'active' }],
+    ['non-string', { id: 7, status: 'active' }],
+  ])('rejects a %s verification ID', async (_, verifyResult) => {
+    globalThis.fetch = ((input: string | URL | Request) =>
+      Promise.resolve(
+        String(input).endsWith('/verify')
+          ? response(verifyResult)
+          : tokenListResponse([
+              {
+                id: 'unsafe',
+                name: 'standards/davidvornholt/example/ci/ci.token',
+              },
+            ]),
+      )) as typeof fetch;
+
+    expect(await verifyCloudflareBootstrapAuthority(ACCOUNT, TOKEN)).toEqual({
+      ok: false,
+      problem: expect.stringContaining('valid token ID'),
+    });
   });
 
   it('reports the pasted token name for the recommendation check', async () => {
@@ -93,7 +115,7 @@ describe('Cloudflare bootstrap authority', () => {
 
     expect(await verifyCloudflareBootstrapAuthority(ACCOUNT, TOKEN)).toEqual({
       ok: false,
-      problem: expect.stringContaining('could revoke it'),
+      problem: expect.stringContaining('must remain distinguishable'),
     });
   });
 

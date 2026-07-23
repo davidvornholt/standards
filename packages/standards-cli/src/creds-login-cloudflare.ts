@@ -7,7 +7,7 @@
 
 import { openInBrowser } from './creds-browser';
 import { listAccountTokens, verifyAccountToken } from './creds-cloudflare';
-import type { CfResult } from './creds-cloudflare-api';
+import type { CfResult, CloudflareToken } from './creds-cloudflare-api';
 import { BROKER_IDENTITY_NAME, isInMintedNamespace } from './creds-naming';
 import { promptHidden, promptLine } from './creds-prompt';
 import {
@@ -18,10 +18,16 @@ import {
 
 const ACCOUNT_ID_PATTERN = /^[0-9a-f]{32}$/u;
 
-export const verifyCloudflareBootstrapAuthority = async (
+type IdentifiedBootstrapToken = {
+  readonly id: string;
+  readonly name: string;
+  readonly tokens: ReadonlyArray<CloudflareToken>;
+};
+
+export const identifyCloudflareBootstrapAuthority = async (
   accountId: string,
   token: string,
-): Promise<CfResult<{ readonly tokenName: string | null }>> => {
+): Promise<CfResult<IdentifiedBootstrapToken>> => {
   const verified = await verifyAccountToken(accountId, token);
   if (!verified.ok) {
     return {
@@ -43,13 +49,36 @@ export const verifyCloudflareBootstrapAuthority = async (
     };
   }
   const own = listed.value.find((entry) => entry.id === verified.value.id);
-  if (own !== undefined && isInMintedNamespace(own.name)) {
+  if (own === undefined) {
     return {
       ok: false,
-      problem: `the token is named "${own.name}", inside the broker's minted-token namespace — reconciliation would treat it as a minted credential and could revoke it; rename it ${BROKER_IDENTITY_NAME} in the dashboard and re-run login`,
+      problem: `complete token list did not contain verified token ID ${verified.value.id}`,
     };
   }
-  return { ok: true, value: { tokenName: own?.name ?? null } };
+  return {
+    ok: true,
+    value: { id: verified.value.id, name: own.name, tokens: listed.value },
+  };
+};
+
+export const verifyCloudflareBootstrapAuthority = async (
+  accountId: string,
+  token: string,
+): Promise<CfResult<{ readonly tokenName: string }>> => {
+  const identified = await identifyCloudflareBootstrapAuthority(
+    accountId,
+    token,
+  );
+  if (!identified.ok) {
+    return identified;
+  }
+  if (isInMintedNamespace(identified.value.name)) {
+    return {
+      ok: false,
+      problem: `the token is named "${identified.value.name}", inside the broker's minted-token namespace — bootstrap credentials must remain distinguishable from minted credentials; rename it ${BROKER_IDENTITY_NAME} in the dashboard and re-run login`,
+    };
+  }
+  return { ok: true, value: { tokenName: identified.value.name } };
 };
 
 export const runCredsLoginCloudflare = async (options: {
@@ -97,11 +126,7 @@ export const runCredsLoginCloudflare = async (options: {
     return false;
   }
   const { tokenName } = verified.value;
-  if (tokenName === null) {
-    console.error(
-      `standards creds: warning — the pasted token was not found in the account token list, so its name could not be confirmed; it should be named ${BROKER_IDENTITY_NAME}`,
-    );
-  } else if (tokenName !== BROKER_IDENTITY_NAME) {
+  if (tokenName !== BROKER_IDENTITY_NAME) {
     console.error(
       `standards creds: warning — the token is named "${tokenName}", not "${BROKER_IDENTITY_NAME}"; rename it in the dashboard so it stays identifiable`,
     );

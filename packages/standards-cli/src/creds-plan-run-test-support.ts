@@ -105,10 +105,21 @@ const pageInfo = (count: number): unknown => ({
   total_count: count,
 });
 
-export const stubCloudflare = (target = 'ci'): void => {
+export const stubCloudflare = (
+  target = 'ci',
+  verifiedId: string | null = 'bootstrap',
+): void => {
   globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? 'GET';
+    if (url.endsWith('/verify')) {
+      return Promise.resolve(
+        envelope({
+          ...(verifiedId === null ? {} : { id: verifiedId }),
+          status: 'active',
+        }),
+      );
+    }
     if (method === 'POST') {
       appendFileSync(process.env.PLAN_EVENT_FILE ?? '', 'create\n');
       return Promise.resolve(
@@ -122,7 +133,15 @@ export const stubCloudflare = (target = 'ci'): void => {
       );
       return Promise.resolve(envelope({ id: 'deleted' }));
     }
-    return Promise.resolve(envelope([expiringToken(target)], pageInfo(1)));
+    return Promise.resolve(
+      envelope(
+        [
+          { id: 'bootstrap', name: 'standards-broker', status: 'active' },
+          expiringToken(target),
+        ],
+        pageInfo(2),
+      ),
+    );
   }) as typeof fetch;
 };
 

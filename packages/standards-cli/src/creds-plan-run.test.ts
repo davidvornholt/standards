@@ -56,6 +56,16 @@ describe('creds plan/apply safety', () => {
       expect.stringContaining(`unsafe encrypted secrets target ${rel}`),
     );
   });
+  it('aborts without mutation when bootstrap identity cannot be established', async () => {
+    const { consumer, events } = initialize(ENCRYPTED_SECRETS);
+    stubCloudflare('ci', null);
+    const error = spyOn(console, 'error').mockImplementation(() => undefined);
+    expect(await runCredsPlan(consumer, true)).toBe(false);
+    expect(readFileSync(events, 'utf8')).toBe('');
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining('valid token ID'),
+    );
+  });
   it('cleans a replacement and preserves the old token on write failure', async () => {
     const { consumer, events } = initialize(ENCRYPTED_SECRETS);
     installSops(
