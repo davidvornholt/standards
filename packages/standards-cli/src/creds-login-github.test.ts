@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, mock, spyOn } from 'bun:test';
 import {
   buildAppManifest,
   createManifestState,
@@ -6,6 +6,7 @@ import {
   manifestFormHtml,
   parseConversion,
   startManifestLoginListener,
+  waitForCode,
 } from './creds-login-github';
 
 const MANIFEST_STATE_HEX_LENGTH = 64;
@@ -120,6 +121,38 @@ describe('GitHub App manifest listener', () => {
     const output = githubInstallMessage('https://github.com/apps/broker');
     expect(output).toContain('selected repositories');
     expect(output).not.toContain('All repositories');
+  });
+
+  it('prints the exact manual start URL before a no-op opener', async () => {
+    const log = spyOn(console, 'log').mockImplementation(() => undefined);
+    const opener = mock((_url: string) => undefined);
+    try {
+      const code = waitForCode(
+        (_port, state) =>
+          manifestFormHtml(
+            'https://github.com/settings/apps/new',
+            '{"name":"standards-broker"}',
+            state,
+          ),
+        opener,
+      );
+      const startUrl = opener.mock.calls[0]?.[0] ?? '';
+      const start = await fetch(startUrl);
+      const callbackState =
+        (await start.text()).match(STATE_QUERY)?.groups?.state ?? '';
+      const { origin } = new URL(startUrl);
+      const callback = await fetch(
+        `${origin}/callback?code=manual&state=${callbackState}`,
+      );
+      expect(await code).toBe('manual');
+      expect(callback.status).toBe(HTTP_OK);
+      expect(opener).toHaveBeenCalledWith(startUrl);
+      expect(log).toHaveBeenCalledWith(
+        `Open ${startUrl} to create the GitHub App.`,
+      );
+    } finally {
+      log.mockRestore();
+    }
   });
 });
 
