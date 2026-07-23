@@ -130,7 +130,7 @@ Version 0.13.0 is an intentional hard ownership cutover for infrastructure consu
 
 ### Breaking migration to brokered Standards sync credentials
 
-The weekly `Standards sync` workflow now requires the broker GitHub App and fails closed; it no longer accepts a durable repository token or falls back to the workflow token for PR creation. Delete the old scalar sync credential from `secrets/ci.yaml`, install the broker App only on each selected consumer repository, and run `bun standards creds add github --dest ci:ci.broker_app` from that repository. Commit the resulting SOPS-encrypted nested `ci.broker_app.app_id` and `ci.broker_app.private_key` values before accepting the canonical workflow update. Keep `ci.github_settings_read_token` unchanged: it remains the isolated, read-only credential for live repository-settings verification.
+The weekly `Standards sync` workflow now requires `@davidvornholt/standards` 0.14.0 or newer and the broker GitHub App, and fails closed; it no longer accepts a durable repository token or falls back to the workflow token for PR creation. First upgrade the exact CLI dependency and `bun.lock` to at least 0.14.0. Then delete the old scalar sync credential from `secrets/ci.yaml`, install the broker App only on each selected consumer repository, and run `bun standards creds add github --dest ci:ci.broker_app` from that repository. Commit the dependency, lockfile, canonical workflow, and resulting SOPS-encrypted nested `ci.broker_app.app_id` and `ci.broker_app.private_key` values together. Keep `ci.github_settings_read_token` unchanged: it remains the isolated, read-only credential for live repository-settings verification.
 
 ### Breaking migration to squash-only merging
 

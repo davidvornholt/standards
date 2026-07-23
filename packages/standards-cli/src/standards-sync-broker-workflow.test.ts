@@ -17,6 +17,7 @@ const WORKFLOW_PATH = join(
   '.github/workflows/standards-sync.yml',
 );
 const SOURCE_EXAMPLE_PATH = join(ACTUAL_UPSTREAM, 'secrets/ci.example.yaml');
+const SOURCE_SECRETS_PATH = join(ACTUAL_UPSTREAM, 'secrets/ci.yaml');
 const TEMPLATE_EXAMPLE_PATH = join(
   ACTUAL_UPSTREAM,
   'template/secrets/ci.example.yaml',
@@ -46,6 +47,15 @@ const namedStep = (name: string): WorkflowStep => {
 };
 const stepIndex = (name: string): number =>
   steps.findIndex((candidate) => candidate.name === name);
+const brokerAppMapping = (
+  document: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> => {
+  const ci = document.ci as Readonly<Record<string, unknown>>;
+  const brokerEntry = Object.entries(ci).find(
+    ([key]) => key === ['broker', 'app'].join('_'),
+  );
+  return brokerEntry?.[1] as Readonly<Record<string, unknown>>;
+};
 
 describe('Standards sync broker credential contract', () => {
   it('resolves both nested App credentials through the trusted pre-sync action', () => {
@@ -78,11 +88,13 @@ describe('Standards sync broker credential contract', () => {
     expect(mint.with).toEqual({
       'app-id': expression('env.BROKER_APP_ID'),
       'private-key': expression('env.BROKER_APP_PRIVATE_KEY'),
-      owner: expression('github.repository_owner'),
-      repositories: expression('github.event.repository.name'),
       'permission-contents': 'read',
       'permission-pull-requests': 'write',
     });
+    expect(mint.with).not.toHaveProperty('owner');
+    expect(mint.with).not.toHaveProperty('repositories');
+    expect(JSON.stringify(mint.with)).not.toContain('github.event');
+    expect(JSON.stringify(mint.with)).not.toContain('github.repository_owner');
     expect(workflowSource).not.toContain('failure-mode: fallback');
     expect(workflowSource).not.toContain('fallback-value:');
   });
@@ -114,10 +126,7 @@ describe('Standards sync broker credential contract', () => {
     const parsed = parseYaml(source) as {
       readonly ci: Readonly<Record<string, unknown>>;
     };
-    const brokerEntry = Object.entries(parsed.ci).find(
-      ([key]) => key === ['broker', 'app'].join('_'),
-    );
-    const brokerApp = brokerEntry?.[1] as Readonly<Record<string, unknown>>;
+    const brokerApp = brokerAppMapping(parsed);
 
     expect(source).toBe(template);
     expect(workflowSource).not.toContain(OBSOLETE_SYNC_KEY);
@@ -128,17 +137,34 @@ describe('Standards sync broker credential contract', () => {
     ).toBe(true);
   });
 
+  it('tracks both broker App leaves as encrypted source secrets', () => {
+    const encrypted = parseYaml(
+      readFileSync(SOURCE_SECRETS_PATH, 'utf8'),
+    ) as Readonly<Record<string, unknown>>;
+    const brokerApp = brokerAppMapping(encrypted);
+
+    expect(Object.keys(brokerApp).sort()).toEqual(['app_id', 'private_key']);
+    expect(
+      Object.values(brokerApp).every(
+        (value) =>
+          typeof value === 'string' && value.startsWith('ENC[AES256_GCM,'),
+      ),
+    ).toBe(true);
+  });
+
   it('documents one provisioning command across source-owned guidance', () => {
+    const rootReadme = readFileSync(join(ACTUAL_UPSTREAM, 'README.md'), 'utf8');
     const documents = [
-      'README.md',
       'packages/standards-cli/README.md',
       '.agents/skills/standards-sync/SKILL.md',
       '.agents/skills/declarative-infra/references/secrets.md',
     ].map((path) => readFileSync(join(ACTUAL_UPSTREAM, path), 'utf8'));
 
-    for (const document of documents) {
+    for (const document of [rootReadme, ...documents]) {
       expect(document).toContain(BROKER_DESTINATION);
       expect(document).not.toContain(OBSOLETE_SYNC_KEY);
     }
+    expect(rootReadme).toContain('`@davidvornholt/standards` 0.14.0 or newer');
+    expect(rootReadme).toContain('`bun.lock`');
   });
 });

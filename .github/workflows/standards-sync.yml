@@ -105,7 +105,7 @@ jobs:
       # managed-file contract.
       - name: Require compatible standards CLI
         env:
-          MINIMUM_STANDARDS_VERSION: "0.12.0"
+          MINIMUM_STANDARDS_VERSION: "0.14.0"
         run: |
           package_path=node_modules/@davidvornholt/standards/package.json
           installed_version=$(jq -er '.version | select(type == "string")' "$package_path")
@@ -144,8 +144,8 @@ jobs:
         with:
           app-id: ${{ env.BROKER_APP_ID }}
           private-key: ${{ env.BROKER_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
+          # Omitting owner and repositories is the action's exact
+          # current-repository scope; never derive either from event payload.
           permission-contents: read
           permission-pull-requests: write
 
@@ -206,7 +206,7 @@ jobs:
           branch="standards-sync/$(date -u +%Y%m%d%H%M%S)"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git config --local credential.helper '!f() { echo username=x-access-token; echo "password=$GITHUB_TOKEN"; }; f'
+          git config --local credential.helper "!f() { echo username=x-access-token; echo \"password=\$GITHUB_TOKEN\"; }; f"
           git switch -c "$branch"
           git add -A
           git commit -m "chore: sync standards from upstream"
