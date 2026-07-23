@@ -1,58 +1,60 @@
 import { commitCreatedCloudflareToken } from './creds-add-cloudflare-commit';
-import {
-  createAccountToken,
-  listAccountTokens,
-  listPermissionGroups,
-} from './creds-cloudflare';
-import type { PermissionGroup } from './creds-cloudflare-api';
+import { findManagedDestinationCollision } from './creds-add-collision';
+import { resolveTokenPolicy } from './creds-add-policy';
+import { createAccountToken } from './creds-cloudflare';
 import { resolveContext, selectAccount } from './creds-dest';
 import { tokenNameOf } from './creds-naming';
-import { inspectSopsScalarDestination, setSopsValue } from './creds-sops';
+import {
+  DEFAULT_R2_JURISDICTION,
+  type DestinationFormat,
+  destinationWrites,
+  type R2Jurisdiction,
+  s3Endpoint,
+  s3PairPaths,
+} from './creds-r2';
+import {
+  inspectSopsScalarDestination,
+  readEncryptedKeys,
+  setSopsValues,
+} from './creds-sops';
 
 const DEFAULT_TTL_DAYS = 90;
 const DAY_MS = 86_400_000;
-const ACCOUNT_SCOPE = 'com.cloudflare.api.account';
 
-export const unsupportedAccountScopes = (
-  groups: ReadonlyArray<PermissionGroup>,
-): ReadonlyArray<string> =>
-  groups
-    .filter((group) => !group.scopes.includes(ACCOUNT_SCOPE))
-    .map((group) => group.name);
-
-const resolveWantedGroups = (
-  names: ReadonlyArray<string>,
-  available: ReadonlyArray<PermissionGroup>,
-): {
-  readonly selected: ReadonlyArray<PermissionGroup>;
-  readonly unknown: ReadonlyArray<string>;
-} => {
-  const resolved = names.map((name) => ({
-    name,
-    group: available.find(
-      (group) => group.name.toLowerCase() === name.toLowerCase(),
-    ),
-  }));
-  return {
-    selected: resolved.flatMap(({ group }) =>
-      group === undefined ? [] : [group],
-    ),
-    unknown: resolved.flatMap(({ name, group }) =>
-      group === undefined ? [name] : [],
-    ),
-  };
+const printSuccess = (input: {
+  readonly name: string;
+  readonly permissions: ReadonlyArray<string>;
+  readonly expiresOn: string;
+  readonly destination: string;
+  readonly format: DestinationFormat;
+  readonly accountId: string;
+  readonly jurisdiction: R2Jurisdiction;
+}): void => {
+  console.log(`standards creds: minted Cloudflare token ${input.name}`);
+  console.log(`  permissions: ${input.permissions.join(', ')}`);
+  console.log(
+    `  expires: ${input.expiresOn} (rotate via \`standards creds apply\`)`,
+  );
+  console.log(
+    `  ${input.format === 's3' ? 'derived S3 credential pair' : 'value'} written to ${input.destination}`,
+  );
+  if (input.format === 's3') {
+    console.log(
+      `  S3 endpoint: ${s3Endpoint(input.accountId, input.jurisdiction)}`,
+    );
+  }
 };
 
-const printSuccess = (
-  name: string,
-  permissions: ReadonlyArray<string>,
-  expiresOn: string,
-  destination: string,
-): void => {
-  console.log(`standards creds: minted Cloudflare token ${name}`);
-  console.log(`  permissions: ${permissions.join(', ')}`);
-  console.log(`  expires: ${expiresOn} (rotate via \`standards creds apply\`)`);
-  console.log(`  value written to ${destination}`);
+const inspectDestinations = async (
+  consumer: string,
+  rel: string,
+  paths: ReadonlyArray<string>,
+): Promise<string | null> => {
+  const inspected = await Promise.all(
+    paths.map((path) => inspectSopsScalarDestination(consumer, rel, path)),
+  );
+  const blocked = inspected.find((result) => !result.ok);
+  return blocked !== undefined && !blocked.ok ? blocked.problem : null;
 };
 
 export const runCredsAddCloudflare = async (
@@ -62,76 +64,56 @@ export const runCredsAddCloudflare = async (
     readonly permissions: string | undefined;
     readonly account: string | undefined;
     readonly ttlDays: number | undefined;
+    readonly bucket: string | undefined;
+    readonly jurisdiction?: R2Jurisdiction;
+    readonly s3: boolean;
   },
 ): Promise<boolean> => {
-  const context = await resolveContext(consumer, options.dest);
-  if (context === null) {
+  if (options.s3 && options.bucket === undefined) {
+    console.error(
+      'standards creds: --s3 requires --bucket so the credential is backed by a bucket-scoped R2 policy',
+    );
     return false;
   }
-  if (options.permissions === undefined || options.permissions.length === 0) {
-    console.error(
-      'standards creds: --permissions "<Group Name>[,<Group Name>...]" is required; list names with `standards creds permissions`',
-    );
+  const context = await resolveContext(consumer, options.dest);
+  if (context === null) {
     return false;
   }
   const account = selectAccount(context.store, options.account);
   if (account === null) {
     return false;
   }
-  const destination = await inspectSopsScalarDestination(
+  const format: DestinationFormat = options.s3 ? 's3' : 'bearer';
+  const paths =
+    format === 's3' ? s3PairPaths(context.dest.key) : [context.dest.key];
+  const destinationProblem = await inspectDestinations(
     consumer,
     context.rel,
-    context.dest.key,
+    paths,
   );
-  if (!destination.ok) {
-    console.error(`standards creds: ${destination.problem}`);
+  if (destinationProblem !== null) {
+    console.error(`standards creds: ${destinationProblem}`);
     return false;
   }
-  const groups = await listPermissionGroups(account.accountId, account.token);
-  if (!groups.ok) {
-    console.error(`standards creds: ${groups.problem}`);
+  const encryptedKeys = await readEncryptedKeys(consumer, context.rel);
+  if (!encryptedKeys.ok) {
+    console.error(`standards creds: ${encryptedKeys.problem}`);
     return false;
   }
-  const wanted = options.permissions
-    .split(',')
-    .map((groupName) => groupName.trim());
-  const { selected, unknown } = resolveWantedGroups(wanted, groups.value);
-  if (unknown.length > 0) {
-    console.error(
-      `standards creds: unknown permission group(s): ${unknown.join(', ')}; list names with \`standards creds permissions\``,
-    );
-    return false;
-  }
-  const unsupported = unsupportedAccountScopes(selected);
-  if (unsupported.length > 0) {
-    console.error(
-      `standards creds: permission group(s) ${unsupported.join(', ')} cannot target an account resource; choose account-scoped groups (zone-scoped groups require an explicit zone resource, which this command does not yet support)`,
-    );
+  const keys = new Set(encryptedKeys.keys);
+  const resolved = await resolveTokenPolicy(account, options);
+  if (!resolved.ok) {
+    console.error(`standards creds: ${resolved.problem}`);
     return false;
   }
   const name = tokenNameOf({ ...context.dest, repo: context.repo });
-  const listings = await Promise.all(
-    context.store.cloudflare.map(async (configured) => ({
-      accountId: configured.accountId,
-      listed: await listAccountTokens(configured.accountId, configured.token),
-    })),
+  const collisionProblem = await findManagedDestinationCollision(
+    context,
+    format,
+    keys,
   );
-  const failedListing = listings.find(({ listed }) => !listed.ok);
-  if (failedListing?.listed.ok === false) {
-    console.error(
-      `standards creds: account ${failedListing.accountId}: ${failedListing.listed.problem}; cannot prove the destination is unambiguous`,
-    );
-    return false;
-  }
-  const collisions = listings.flatMap(({ accountId, listed }) =>
-    listed.ok && listed.value.some((token) => token.name === name)
-      ? [accountId]
-      : [],
-  );
-  if (collisions.length > 0) {
-    console.error(
-      `standards creds: token ${name} already exists in Cloudflare account(s) ${collisions.join(', ')}; one SOPS destination may be managed by only one account`,
-    );
+  if (collisionProblem !== null) {
+    console.error(`standards creds: ${collisionProblem}`);
     return false;
   }
   const ttlDays = options.ttlDays ?? DEFAULT_TTL_DAYS;
@@ -140,29 +122,23 @@ export const runCredsAddCloudflare = async (
     name,
     expiresOn,
     condition: null,
-    policies: [
-      {
-        effect: 'allow',
-        resources: { [`com.cloudflare.api.account.${account.accountId}`]: '*' },
-        permission_groups: selected.map(({ id }) => ({ id })),
-      },
-    ],
+    policies: [resolved.policy],
   });
   if (!created.ok) {
     console.error(`standards creds: ${created.problem}`);
     return false;
   }
-  const written = setSopsValue(
-    consumer,
-    context.rel,
+  const writes = destinationWrites(
+    format,
     context.dest.key,
+    created.value.id,
     created.value.value,
   );
+  const written = setSopsValues(consumer, context.rel, writes);
   const committed = await commitCreatedCloudflareToken({
     consumer,
     rel: context.rel,
-    key: context.dest.key,
-    value: created.value.value,
+    writes,
     written,
     accountId: account.accountId,
     bootstrapToken: account.token,
@@ -173,11 +149,14 @@ export const runCredsAddCloudflare = async (
     console.error(`standards creds: ${committed.problem}`);
     return false;
   }
-  printSuccess(
+  printSuccess({
     name,
-    wanted,
+    permissions: resolved.wanted,
     expiresOn,
-    `${context.rel} at ${context.dest.key}`,
-  );
+    destination: `${context.rel} at ${context.dest.key}`,
+    format,
+    accountId: account.accountId,
+    jurisdiction: options.jurisdiction ?? DEFAULT_R2_JURISDICTION,
+  });
   return true;
 };

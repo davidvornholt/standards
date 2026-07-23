@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { parseTtlDays } from './creds-commands';
+import { parseTtlDays } from './creds-args';
 
 const DEFAULT_TTL_DAYS = 90;
 

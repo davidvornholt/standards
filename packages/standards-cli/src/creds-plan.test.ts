@@ -1,39 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import type { CloudflareToken } from './creds-cloudflare-api';
 import { computeCredsPlan } from './creds-plan';
-
-const REPO = 'davidvornholt/example';
-const NOW = new Date('2026-07-22T00:00:00Z');
-const TOKEN_TTL_DAYS = 90;
-const DAY_MS = 86_400_000;
-const POLICIES = [
-  {
-    effect: 'allow' as const,
-    resources: { 'com.cloudflare.api.account.a': '*' },
-    // biome-ignore lint/style/useNamingConvention: Cloudflare's policy wire field is snake_case.
-    permission_groups: [{ id: 'pg' }],
-  },
-];
-
-const token = (name: string, expiresOn: string | null): CloudflareToken => ({
-  id: `id-${name}`,
-  name,
-  status: 'active',
-  expiresOn,
-  issuedOn:
-    expiresOn === null
-      ? null
-      : new Date(Date.parse(expiresOn) - TOKEN_TTL_DAYS * DAY_MS).toISOString(),
-  policies: POLICIES,
-  condition: { supported: true, value: null },
-});
-
-const keys = (
-  entries: Readonly<Record<string, ReadonlyArray<string>>>,
-): ReadonlyMap<string, ReadonlySet<string>> =>
-  new Map(
-    Object.entries(entries).map(([target, list]) => [target, new Set(list)]),
-  );
+import { keys, NOW, POLICIES, REPO, token } from './creds-plan-test-support';
 
 describe('creds plan computation', () => {
   it('leaves healthy brokered tokens and all foreign tokens alone', () => {
@@ -118,6 +85,7 @@ describe('creds plan computation', () => {
         kind: 'renew',
         target: 'ci',
         key: 'ci.dns_token',
+        format: 'bearer',
         policies: POLICIES,
         replacementExpiresOn: '2026-10-20T00:00:00.000Z',
       }),

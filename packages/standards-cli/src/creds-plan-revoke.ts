@@ -1,5 +1,5 @@
 import { deleteAccountToken } from './creds-cloudflare';
-import type { PlannedAction } from './creds-plan';
+import type { PlannedAction } from './creds-plan-types';
 import type { CloudflareBrokerAccount } from './creds-store';
 
 export const revokePlannedToken = async (
