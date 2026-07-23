@@ -36,17 +36,18 @@ export const executeReviewJob = async (options: {
     ),
   );
   try {
-    const run = runCodex(
-      workspace.dir,
-      reviewPrompt({
+    const run = runCodex({
+      workDir: workspace.dir,
+      gitCommonDir: cacheClone,
+      prompt: reviewPrompt({
         repo: deps.repo,
         prNumber: pr.number,
         title: pr.title,
         baseSha: reviewBase,
         answers,
       }),
-      deps.config,
-    );
+      config: deps.config,
+    });
     await validateReviewClaim({
       deps,
       pr,

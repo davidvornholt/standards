@@ -139,9 +139,10 @@ export const runFixJob = async (
     workspace,
   };
   try {
-    const run = runCodex(
-      workspace.dir,
-      fixPrompt({
+    const run = runCodex({
+      workDir: workspace.dir,
+      gitCommonDir: cacheClone,
+      prompt: fixPrompt({
         repo,
         issueNumber: issue.number,
         title: currentIssue.title,
@@ -149,7 +150,7 @@ export const runFixJob = async (
         answers: preamble.answers,
       }),
       config,
-    );
+    });
     await validateFixClaim(job);
     const outcome = run.succeeded ? await readFixOutcome(workspace.dir) : null;
     if (outcome === null) {
