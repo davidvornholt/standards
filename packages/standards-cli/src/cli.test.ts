@@ -165,7 +165,7 @@ const githubExpression = (expression: string): string =>
 const githubMatrixExpression = (property: string): string =>
   githubExpression(`matrix.${property}`);
 const runNixDiscovery = (
-  metadata: string,
+  metadata: string | undefined,
 ): { readonly output: string; readonly result: RunResult } => {
   const fixture = mkTmp('nix-discovery-');
   const outputPath = join(fixture, 'github-output');
@@ -174,7 +174,9 @@ const runNixDiscovery = (
     'nix/bun-system-matrix.jq',
     readFileSync(NIX_SYSTEM_MATRIX_FILTER, 'utf8'),
   );
-  write(fixture, 'nix/bun-system-metadata.json', metadata);
+  if (metadata !== undefined) {
+    write(fixture, 'nix/bun-system-metadata.json', metadata);
+  }
   const result = runExecutable(
     'bash',
     fixture,
@@ -1801,7 +1803,11 @@ describe('canonical standards workflow Nix gate', () => {
     const jobs = yamlJobs(STANDARDS_WORKFLOW);
     const discoveryJob = jobs['nix-discovery'];
     const nixJob = jobs.nix;
+    const sourceRepositoryCondition =
+      "github.repository == 'davidvornholt/standards'";
 
+    expect(discoveryJob.if).toBe(sourceRepositoryCondition);
+    expect(nixJob.if).toBe(sourceRepositoryCondition);
     expect(discoveryJob['runs-on']).toBe('ubuntu-latest');
     expect(discoveryJob.outputs).toEqual({
       matrix: githubExpression('steps.matrix.outputs.matrix'),
@@ -1852,6 +1858,7 @@ describe('canonical standards workflow Nix gate', () => {
   });
 
   it.each([
+    ['missing metadata', undefined],
     ['invalid JSON', 'not json'],
     ['an empty system set', '{}'],
     [
@@ -1871,7 +1878,18 @@ describe('canonical standards workflow Nix gate', () => {
 });
 
 describe('canonical standards workflow Nix aggregation', () => {
-  it('keeps the required check fail-closed over discovery and the matrix', () => {
+  const runAggregate = (
+    aggregateScript: string,
+    results: Readonly<Record<string, string>>,
+  ): number =>
+    runExecutable(
+      'bash',
+      ACTUAL_UPSTREAM,
+      ['-euo', 'pipefail', '-c', aggregateScript],
+      results,
+    ).status;
+
+  it('keeps the source required check fail-closed over discovery and the matrix', () => {
     const jobs = yamlJobs(STANDARDS_WORKFLOW);
     const aggregateScript = yamlRunScript(
       STANDARDS_WORKFLOW,
@@ -1882,6 +1900,7 @@ describe('canonical standards workflow Nix aggregation', () => {
       NIX_DISCOVERY_RESULT: 'success',
       NIX_RESULT: 'success',
       QUALITY_RESULT: 'success',
+      REPOSITORY: 'davidvornholt/standards',
     };
 
     expect(jobs.check.if).toBe('always()');
@@ -1891,14 +1910,7 @@ describe('canonical standards workflow Nix aggregation', () => {
       'nix-discovery',
       'nix',
     ]);
-    expect(
-      runExecutable(
-        'bash',
-        ACTUAL_UPSTREAM,
-        ['-euo', 'pipefail', '-c', aggregateScript],
-        successfulResults,
-      ).status,
-    ).toBe(0);
+    expect(runAggregate(aggregateScript, successfulResults)).toBe(0);
     for (const failedResults of [
       { ...successfulResults, NIX_DISCOVERY_RESULT: 'failure' },
       {
@@ -1908,15 +1920,45 @@ describe('canonical standards workflow Nix aggregation', () => {
       },
       { ...successfulResults, NIX_RESULT: 'skipped' },
       { ...successfulResults, NIX_RESULT: 'failure' },
+      {
+        ...successfulResults,
+        NIX_DISCOVERY_RESULT: 'skipped',
+        NIX_RESULT: 'skipped',
+      },
     ]) {
-      expect(
-        runExecutable(
-          'bash',
-          ACTUAL_UPSTREAM,
-          ['-euo', 'pipefail', '-c', aggregateScript],
-          failedResults,
-        ).status,
-      ).not.toBe(0);
+      expect(runAggregate(aggregateScript, failedResults)).not.toBe(0);
+    }
+  });
+
+  it('accepts consumers only when ordinary gates succeed and both Nix jobs skip', () => {
+    const aggregateScript = yamlRunScript(
+      STANDARDS_WORKFLOW,
+      'Require all standards gates',
+    );
+    const successfulResults = {
+      GITHUB_SETTINGS_RESULT: 'success',
+      NIX_DISCOVERY_RESULT: 'skipped',
+      NIX_RESULT: 'skipped',
+      QUALITY_RESULT: 'success',
+      REPOSITORY: 'davidvornholt/punktlandung',
+    };
+
+    expect(runAggregate(aggregateScript, successfulResults)).toBe(0);
+    for (const failedResults of [
+      { ...successfulResults, QUALITY_RESULT: 'failure' },
+      { ...successfulResults, GITHUB_SETTINGS_RESULT: 'failure' },
+      { ...successfulResults, NIX_DISCOVERY_RESULT: 'success' },
+      { ...successfulResults, NIX_RESULT: 'success' },
+      {
+        ...successfulResults,
+        NIX_DISCOVERY_RESULT: 'success',
+        NIX_RESULT: 'success',
+      },
+      { ...successfulResults, NIX_DISCOVERY_RESULT: 'failure' },
+      { ...successfulResults, NIX_RESULT: 'failure' },
+      { ...successfulResults, NIX_RESULT: 'cancelled' },
+    ]) {
+      expect(runAggregate(aggregateScript, failedResults)).not.toBe(0);
     }
   });
 });
