@@ -69,6 +69,9 @@ jobs:
           package-manager-cache: false
           registry-url: https://registry.npmjs.org
 
+      - name: Install release dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+
       - name: Determine release state
         id: release
         run: |
@@ -90,13 +93,6 @@ jobs:
             "https://registry.npmjs.org/$encoded_name")"
           latest="$(jq -er '.["dist-tags"].latest' <<<"$metadata")"
 
-          if ! bun -e \
-            'if (Bun.semver.order(process.argv[1], process.argv[2]) < 0) process.exit(1)' \
-            "$version" "$latest"; then
-            echo "::error::Manifest version $version is behind npm latest $latest"
-            exit 1
-          fi
-
           npm_version="$(npm --version)"
           if ! bun -e \
             'if (Bun.semver.order(process.argv[1], "11.5.1") < 0) process.exit(1)' \
@@ -107,10 +103,21 @@ jobs:
 
           if jq -e --arg version "$version" '.versions[$version] != null' \
             <<<"$metadata" >/dev/null; then
-            publish=false
+            exact_version_exists=true
           else
-            publish=true
+            exact_version_exists=false
           fi
+          release_action="$(node \
+            packages/standards-cli/scripts/release-recovery.ts \
+            npm-state "$version" "$latest" "$exact_version_exists")"
+          case "$release_action" in
+            publish) publish=true ;;
+            recover) publish=false ;;
+            *)
+              echo "::error::Unexpected npm release action: $release_action"
+              exit 1
+              ;;
+          esac
 
           {
             echo "version=$version"
@@ -163,6 +170,17 @@ jobs:
             --registry=https://registry.npmjs.org \
             "$PACKAGE_NAME@$VERSION"
           npm audit signatures --prefix "$audit_dir"
+          package_path="node_modules/$PACKAGE_NAME"
+          installed_version="$(jq -er --arg path "$package_path" \
+            '.packages[$path].version | select(type == "string")' \
+            "$audit_dir/package-lock.json")"
+          if [[ "$installed_version" != "$VERSION" ]]; then
+            echo "::error::Installed $PACKAGE_NAME version $installed_version, expected $VERSION"
+            exit 1
+          fi
+          installed_integrity="$(jq -er --arg path "$package_path" \
+            '.packages[$path].integrity | select(type == "string")' \
+            "$audit_dir/package-lock.json")"
 
           encoded_name="${PACKAGE_NAME/@/%40}"
           encoded_name="${encoded_name//\//%2F}"
@@ -170,7 +188,7 @@ jobs:
           curl --fail --silent --show-error \
             "https://registry.npmjs.org/-/npm/v1/attestations/$encoded_name@$VERSION" \
             >"$attestations_file"
-          bun packages/standards-cli/scripts/release-recovery.ts \
+          node packages/standards-cli/scripts/release-recovery.ts \
             provenance \
             "$attestations_file" \
             "$PACKAGE_NAME" \
@@ -178,7 +196,9 @@ jobs:
             "$GITHUB_REPOSITORY" \
             "$GITHUB_SERVER_URL" \
             "$GITHUB_WORKFLOW_REF" \
-            "$RELEASE_SHA"
+            "$RELEASE_SHA" \
+            "$installed_integrity" \
+            "$RUNNER_TEMP/standards-cli-sigstore-tuf"
 
   release:
     needs: publish
@@ -194,11 +214,6 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
           ref: ${{ needs.publish.outputs.sha }}
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Reconcile GitHub release
         env:
@@ -224,7 +239,7 @@ jobs:
             tag_sha="$(git rev-list -n 1 "$RELEASE_TAG")"
           fi
 
-          action="$(bun packages/standards-cli/scripts/release-recovery.ts \
+          action="$(node packages/standards-cli/scripts/release-recovery.ts \
             github-state "$release_state" "$tag_sha" "$RELEASE_SHA")"
           case "$action" in
             none)

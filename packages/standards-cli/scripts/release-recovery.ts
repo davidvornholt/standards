@@ -1,13 +1,14 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 
 import { readFileSync } from 'node:fs';
 import process from 'node:process';
+import { verifyProvenance } from '../src/release-provenance.ts';
+import { workflowPathFromRef } from '../src/release-provenance-claims.ts';
 import {
   type GithubReleaseState,
   githubReconciliationPlan,
-  provenanceProblems,
-  workflowPathFromRef,
-} from '../src/release-recovery';
+  npmReleasePlan,
+} from '../src/release-recovery.ts';
 
 const reportProblems = (problems: ReadonlyArray<string>) => {
   for (const problem of problems) {
@@ -24,8 +25,10 @@ type ProvenanceArguments = readonly [
   serverUrl: string,
   workflowRef: string,
   commit: string,
+  installedIntegrity: string,
+  tufCachePath: string,
 ];
-const PROVENANCE_ARGUMENT_COUNT: ProvenanceArguments['length'] = 7;
+const PROVENANCE_ARGUMENT_COUNT: ProvenanceArguments['length'] = 9;
 
 const hasProvenanceArguments = (
   values: ReadonlyArray<string>,
@@ -33,11 +36,15 @@ const hasProvenanceArguments = (
   values.length === PROVENANCE_ARGUMENT_COUNT &&
   values.every((argument) => argument.length > 0);
 
-const verifyProvenance = (values: ReadonlyArray<string>) => {
+const runProvenanceVerification = (
+  values: ReadonlyArray<string>,
+): Promise<number> => {
   if (!hasProvenanceArguments(values)) {
-    return reportProblems([
-      'Provenance verification requires a response path and complete GitHub release context',
-    ]);
+    return Promise.resolve(
+      reportProblems([
+        'Provenance verification requires a response path, installed integrity, TUF cache, and complete GitHub release context',
+      ]),
+    );
   }
   const [
     path,
@@ -47,26 +54,35 @@ const verifyProvenance = (values: ReadonlyArray<string>) => {
     serverUrl,
     workflowRef,
     commit,
+    installedIntegrity,
+    tufCachePath,
   ] = values;
   const workflowPath = workflowPathFromRef(repository, workflowRef);
   if (workflowPath === null) {
-    return reportProblems([`Invalid GitHub workflow ref: ${workflowRef}`]);
+    return Promise.resolve(
+      reportProblems([`Invalid GitHub workflow ref: ${workflowRef}`]),
+    );
   }
   let response: unknown;
   try {
     response = JSON.parse(readFileSync(path, 'utf8')) as unknown;
   } catch {
-    return reportProblems(['npm attestation response must contain valid JSON']);
+    return Promise.resolve(
+      reportProblems(['npm attestation response must contain valid JSON']),
+    );
   }
-  return reportProblems(
-    provenanceProblems(response, {
+  return verifyProvenance(
+    response,
+    {
       packageName,
       version,
       repository: `${serverUrl}/${repository}`,
       workflowPath,
       commit,
-    }),
-  );
+      installedIntegrity,
+    },
+    tufCachePath,
+  ).then(reportProblems);
 };
 
 const planGithubReconciliation = (
@@ -98,15 +114,57 @@ const planGithubReconciliation = (
   return 0;
 };
 
+const planNpmRelease = (
+  version: string | undefined,
+  latest: string | undefined,
+  rawExactVersionExists: string | undefined,
+) => {
+  if (
+    version === undefined ||
+    latest === undefined ||
+    (rawExactVersionExists !== 'true' && rawExactVersionExists !== 'false')
+  ) {
+    return reportProblems([
+      'npm-state requires manifest version, latest version, and exact-version existence',
+    ]);
+  }
+  const plan = npmReleasePlan(
+    version,
+    latest,
+    rawExactVersionExists === 'true',
+  );
+  if (plan.problem !== null) {
+    return reportProblems([plan.problem]);
+  }
+  process.stdout.write(`${plan.action}\n`);
+  return 0;
+};
+
 const [, , command, ...args] = process.argv;
-let exitCode: number;
-if (command === 'provenance') {
-  exitCode = verifyProvenance(args);
-} else if (command === 'github-state') {
-  exitCode = planGithubReconciliation(args[0], args[1], args[2]);
-} else {
-  exitCode = reportProblems([
-    'Expected provenance or github-state release recovery command',
-  ]);
-}
-process.exitCode = exitCode;
+const run = (): Promise<number> => {
+  if (command === 'provenance') {
+    return runProvenanceVerification(args);
+  }
+  if (command === 'github-state') {
+    return Promise.resolve(planGithubReconciliation(args[0], args[1], args[2]));
+  }
+  if (command === 'npm-state') {
+    return Promise.resolve(planNpmRelease(args[0], args[1], args[2]));
+  }
+  return Promise.resolve(
+    reportProblems([
+      'Expected provenance, npm-state, or github-state release recovery command',
+    ]),
+  );
+};
+
+run().then(
+  (exitCode) => {
+    process.exitCode = exitCode;
+  },
+  (error: unknown) => {
+    process.exitCode = reportProblems([
+      `Release recovery failed: ${error instanceof Error ? error.message : String(error)}`,
+    ]);
+  },
+);

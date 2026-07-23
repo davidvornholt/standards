@@ -1,18 +1,9 @@
-import { Buffer } from 'node:buffer';
+const STABLE_SEMVER =
+  /^(?<major>0|[1-9][0-9]*)\.(?<minor>0|[1-9][0-9]*)\.(?<patch>0|[1-9][0-9]*)$/u;
 
-const SLSA_PROVENANCE_TYPE = 'https://slsa.dev/provenance/v1';
-const BASE64_PAYLOAD = /^[A-Za-z0-9+/]*={0,2}$/u;
-const BASE64_PADDING = /[=]+$/u;
-
-type JsonRecord = Readonly<Record<string, unknown>>;
-
-export type ProvenanceExpectation = {
-  readonly packageName: string;
-  readonly version: string;
-  readonly repository: string;
-  readonly workflowPath: string;
-  readonly commit: string;
-};
+export type NpmReleasePlan =
+  | { readonly action: 'publish' | 'recover'; readonly problem: null }
+  | { readonly action: null; readonly problem: string };
 
 export type GithubReleaseState = 'draft' | 'missing' | 'published' | 'tag-only';
 
@@ -20,138 +11,56 @@ export type ReconciliationPlan =
   | { readonly action: 'create' | 'none'; readonly problem: null }
   | { readonly action: null; readonly problem: string };
 
-const isRecord = (value: unknown): value is JsonRecord =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
-const recordAt = (
-  record: JsonRecord | null,
-  key: string,
-): JsonRecord | null => {
-  const value = record?.[key];
-  return isRecord(value) ? value : null;
-};
-
-const arrayAt = (
-  record: JsonRecord | null,
-  key: string,
-): ReadonlyArray<unknown> | null => {
-  const value = record?.[key];
-  return Array.isArray(value) ? value : null;
-};
-
-const stringAt = (record: JsonRecord | null, key: string): string | null => {
-  const value = record?.[key];
-  return typeof value === 'string' ? value : null;
-};
-
-const decodeStatement = (attestation: JsonRecord): JsonRecord | null => {
-  const payload = stringAt(
-    recordAt(recordAt(attestation, 'bundle'), 'dsseEnvelope'),
-    'payload',
-  );
-  if (payload === null || !BASE64_PAYLOAD.test(payload)) {
+const stableSemverParts = (version: string): ReadonlyArray<number> | null => {
+  const match = STABLE_SEMVER.exec(version);
+  if (match === null) {
     return null;
   }
-  try {
-    const decoded = Buffer.from(payload, 'base64');
-    const normalizedPayload = payload.replace(BASE64_PADDING, '');
-    if (
-      decoded.toString('base64').replace(BASE64_PADDING, '') !==
-      normalizedPayload
-    ) {
-      return null;
+  const { major, minor, patch } = match.groups ?? {};
+  if (major === undefined || minor === undefined || patch === undefined) {
+    return null;
+  }
+  const parts = [major, minor, patch].map(Number);
+  return parts.every(Number.isSafeInteger) ? parts : null;
+};
+
+const compareStableSemver = (left: string, right: string) => {
+  const leftParts = stableSemverParts(left);
+  const rightParts = stableSemverParts(right);
+  if (leftParts === null || rightParts === null) {
+    return null;
+  }
+  for (const [index, part] of leftParts.entries()) {
+    const difference = part - (rightParts[index] ?? 0);
+    if (difference !== 0) {
+      return difference;
     }
-    const parsed: unknown = JSON.parse(decoded.toString('utf8'));
-    return isRecord(parsed) ? parsed : null;
-  } catch {
-    return null;
   }
+  return 0;
 };
 
-export const workflowPathFromRef = (
-  repository: string,
-  workflowRef: string,
-): string | null => {
-  const prefix = `${repository}/`;
-  const refSeparator = workflowRef.lastIndexOf('@');
-  if (!workflowRef.startsWith(prefix) || refSeparator <= prefix.length) {
-    return null;
+export const npmReleasePlan = (
+  version: string,
+  latest: string,
+  exactVersionExists: boolean,
+): NpmReleasePlan => {
+  const order = compareStableSemver(version, latest);
+  if (order === null) {
+    return {
+      action: null,
+      problem: `Manifest and npm latest versions must be stable SemVer values; received ${version} and ${latest}`,
+    };
   }
-  return workflowRef.slice(prefix.length, refSeparator);
-};
-
-export const provenanceProblems = (
-  response: unknown,
-  expected: ProvenanceExpectation,
-): ReadonlyArray<string> => {
-  if (!isRecord(response)) {
-    return ['npm attestation response must be a JSON object'];
+  if (exactVersionExists) {
+    return { action: 'recover', problem: null };
   }
-  const attestations = arrayAt(response, 'attestations');
-  if (attestations === null) {
-    return ['npm attestation response must contain an attestations array'];
+  if (order < 0) {
+    return {
+      action: null,
+      problem: `Manifest version ${version} is behind npm latest ${latest}`,
+    };
   }
-  const provenance = attestations.filter(
-    (value): value is JsonRecord =>
-      isRecord(value) &&
-      stringAt(value, 'predicateType') === SLSA_PROVENANCE_TYPE,
-  );
-  if (provenance.length !== 1) {
-    return [
-      `npm package must have exactly one SLSA provenance attestation; found ${provenance.length}`,
-    ];
-  }
-
-  const statement = decodeStatement(provenance[0]);
-  if (statement === null) {
-    return ['npm SLSA provenance payload must be valid base64-encoded JSON'];
-  }
-  const problems: Array<string> = [];
-  if (stringAt(statement, 'predicateType') !== SLSA_PROVENANCE_TYPE) {
-    problems.push('npm SLSA statement predicate type is invalid');
-  }
-
-  const predicate = recordAt(statement, 'predicate');
-  const buildDefinition = recordAt(predicate, 'buildDefinition');
-  const externalParameters = recordAt(buildDefinition, 'externalParameters');
-  const workflow = recordAt(externalParameters, 'workflow');
-  if (stringAt(workflow, 'repository') !== expected.repository) {
-    problems.push(`npm provenance repository must be ${expected.repository}`);
-  }
-  if (stringAt(workflow, 'path') !== expected.workflowPath) {
-    problems.push(`npm provenance workflow must be ${expected.workflowPath}`);
-  }
-
-  const dependencies = arrayAt(buildDefinition, 'resolvedDependencies');
-  const expectedUriPrefix = `git+${expected.repository}@`;
-  const resolvedSource =
-    dependencies?.filter(
-      (value): value is JsonRecord =>
-        isRecord(value) &&
-        stringAt(value, 'uri')?.startsWith(expectedUriPrefix) === true,
-    ) ?? [];
-  if (resolvedSource.length !== 1) {
-    problems.push(
-      `npm provenance must resolve exactly one source from ${expected.repository}`,
-    );
-  } else if (
-    stringAt(recordAt(resolvedSource[0], 'digest'), 'gitCommit') !==
-    expected.commit
-  ) {
-    problems.push(`npm provenance resolved commit must be ${expected.commit}`);
-  }
-
-  const subjectName = `pkg:npm/${encodeURIComponent(expected.packageName).replace('%2F', '/')}@${expected.version}`;
-  const subjects = arrayAt(statement, 'subject');
-  if (
-    subjects?.some(
-      (subject) =>
-        isRecord(subject) && stringAt(subject, 'name') === subjectName,
-    ) !== true
-  ) {
-    problems.push(`npm provenance subject must be ${subjectName}`);
-  }
-  return problems;
+  return { action: 'publish', problem: null };
 };
 
 export const githubReconciliationPlan = (
