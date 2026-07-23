@@ -25,6 +25,7 @@ const token = (name: string, expiresOn: string | null): CloudflareToken => ({
       ? null
       : new Date(Date.parse(expiresOn) - TOKEN_TTL_DAYS * DAY_MS).toISOString(),
   policies: POLICIES,
+  condition: { supported: true, value: null },
 });
 
 const keys = (

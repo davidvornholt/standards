@@ -158,7 +158,9 @@ describe('creds plan/apply safety', () => {
     const { consumer, events } = initialize(
       'ci:\n  token: ENC[AES256_GCM,data:x]\nsops:\n  mac: ENC[AES256_GCM,data:y]\n',
     );
-    installSops('exit 1');
+    installSops(
+      'if [ "$1" = "decrypt" ]; then printf \'"old-value"\'; exit 0; fi\nexit 1',
+    );
     stubCloudflare();
     expect(await runCredsPlan(consumer, true)).toBe(false);
     expect(readFileSync(events, 'utf8').trim().split('\n')).toEqual([
@@ -172,7 +174,7 @@ describe('creds plan/apply safety', () => {
       'ci:\n  token: ENC[AES256_GCM,data:x]\nsops:\n  mac: ENC[AES256_GCM,data:y]\n',
     );
     installSops(
-      'eval "$SOPS_EDITOR \\"$2\\"" && printf "write\\n" >> "$PLAN_EVENT_FILE"',
+      'if [ "$1" = "decrypt" ]; then printf \'"new-value"\'; exit 0; fi\neval "$SOPS_EDITOR \\"$2\\"" && printf "write\\n" >> "$PLAN_EVENT_FILE"',
     );
     stubCloudflare();
     expect(await runCredsPlan(consumer, true)).toBe(true);

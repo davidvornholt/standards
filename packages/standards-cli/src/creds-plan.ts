@@ -6,6 +6,7 @@
 // secrets are — and are never touched. Execution lives in creds-plan-run.ts.
 
 import type { CloudflareToken, TokenPolicy } from './creds-cloudflare-api';
+import type { TokenCondition } from './creds-cloudflare-condition';
 import { parseTokenName } from './creds-naming';
 
 const DEFAULT_RENEW_WITHIN_DAYS = 30;
@@ -32,6 +33,7 @@ export type PlannedAction =
       readonly target: string;
       readonly key: string;
       readonly policies: ReadonlyArray<TokenPolicy>;
+      readonly condition: TokenCondition | null;
       readonly replacementExpiresOn: string;
       readonly reason: string;
     };
@@ -65,6 +67,12 @@ const dispositionOf = (
     return {
       kind: 'finding',
       finding: `${token.name} (${accountId}/${token.id}) has status ${token.status}; it is not healthy and will not be mutated automatically`,
+    };
+  }
+  if (!token.condition.supported) {
+    return {
+      kind: 'finding',
+      finding: `${token.name} has an unsupported condition shape; it will not be mutated automatically`,
     };
   }
   if (!input.keysByTarget.get(ref.target)?.has(ref.key)) {
@@ -111,6 +119,7 @@ const dispositionOf = (
       target: ref.target,
       key: ref.key,
       policies: token.policies,
+      condition: token.condition.value,
       replacementExpiresOn: new Date(
         input.now.getTime() + expiry - issued,
       ).toISOString(),

@@ -10,8 +10,15 @@ import {
   cfRequest,
   type PermissionGroup,
   type TokenPolicy,
-  tokenOf,
 } from './creds-cloudflare-api';
+import {
+  encodeTokenCondition,
+  type TokenCondition,
+} from './creds-cloudflare-condition';
+import {
+  cloudflarePaginationProblem,
+  decodeCloudflareTokenPage,
+} from './creds-cloudflare-pagination';
 import { isRecord } from './github-settings-parse';
 
 const PAGE_SIZE = 50;
@@ -41,6 +48,8 @@ export const listAccountTokens = async (
   token: string,
 ): Promise<CfResult<ReadonlyArray<CloudflareToken>>> => {
   const tokens: Array<CloudflareToken> = [];
+  const tokenIds = new Set<string>();
+  let expectedTotal: number | null = null;
   for (let page = 1; ; page += 1) {
     // biome-ignore lint/performance/noAwaitInLoops: pages are sequential by definition; the next request depends on the previous page count.
     const response = await cfRequest(
@@ -52,16 +61,11 @@ export const listAccountTokens = async (
       return response;
     }
     const { result, resultInfo } = response.value;
-    if (!Array.isArray(result)) {
-      return { ok: false, problem: 'token list returned a non-array result' };
+    const decoded = decodeCloudflareTokenPage(result);
+    if (!decoded.ok) {
+      return decoded;
     }
-    const pageTokens = result
-      .map(tokenOf)
-      .filter((entry): entry is CloudflareToken => entry !== null);
-    if (pageTokens.length !== result.length) {
-      return { ok: false, problem: 'token list returned a malformed token' };
-    }
-    tokens.push(...pageTokens);
+    const pageTokens = decoded.value;
     if (resultInfo === null) {
       return {
         ok: false,
@@ -69,17 +73,26 @@ export const listAccountTokens = async (
           'token list returned invalid pagination metadata (expected page, per_page, count, and total_count)',
       };
     }
-    if (resultInfo.page !== page || resultInfo.count !== result.length) {
-      return {
-        ok: false,
-        problem: `token list returned inconsistent pagination metadata for page ${page}`,
-      };
+    expectedTotal ??= resultInfo.totalCount;
+    const problem = cloudflarePaginationProblem({
+      page,
+      resultLength: pageTokens.length,
+      resultInfo,
+      accumulated: tokens.length,
+      expectedTotal,
+      duplicate:
+        new Set(pageTokens.map((entry) => entry.id)).size !==
+          pageTokens.length ||
+        pageTokens.some((entry) => tokenIds.has(entry.id)),
+    });
+    if (problem !== null) {
+      return { ok: false, problem };
     }
-    if (
-      tokens.length >= resultInfo.totalCount ||
-      result.length < resultInfo.perPage ||
-      result.length === 0
-    ) {
+    for (const pageToken of pageTokens) {
+      tokenIds.add(pageToken.id);
+    }
+    tokens.push(...pageTokens);
+    if (tokens.length === expectedTotal) {
       return { ok: true, value: tokens };
     }
   }
@@ -125,6 +138,7 @@ export const createAccountToken = async (
     readonly name: string;
     readonly policies: ReadonlyArray<TokenPolicy>;
     readonly expiresOn: string | null;
+    readonly condition: TokenCondition | null;
   },
 ): Promise<CfResult<CreatedToken>> => {
   const response = await cfRequest(
@@ -135,6 +149,9 @@ export const createAccountToken = async (
       name: request.name,
       policies: request.policies,
       ...(request.expiresOn === null ? {} : { expires_on: request.expiresOn }),
+      ...(request.condition === null
+        ? {}
+        : { condition: encodeTokenCondition(request.condition) }),
     },
   );
   if (!response.ok) {
