@@ -107,15 +107,20 @@ describe('standards CLI publish recovery workflow', () => {
   });
 
   it('routes existing tag and release states through the tested SHA model', () => {
-    const reconciliation = step(
-      jobs().release ?? {},
-      'Reconcile GitHub release',
-    );
+    const releaseJob = jobs().release ?? {};
+    expect(step(releaseJob, 'Setup Bun')).toMatchObject({
+      uses: 'oven-sh/setup-bun@v2',
+      with: { 'bun-version': githubExpression('env.BUN_VERSION') },
+    });
+    const reconciliation = step(releaseJob, 'Reconcile GitHub release');
     expect(reconciliation.run).toContain('release_state=published');
     expect(reconciliation.run).toContain('release_state=tag-only');
     expect(reconciliation.run).toContain('release-recovery.ts');
     expect(reconciliation.run).toContain(
       'github-state "$release_state" "$tag_sha"',
+    );
+    expect(reconciliation.run).toContain(
+      'bun packages/standards-cli/scripts/release-recovery.ts',
     );
   });
 });

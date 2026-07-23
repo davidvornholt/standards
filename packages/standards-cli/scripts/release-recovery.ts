@@ -2,12 +2,11 @@
 
 import { readFileSync } from 'node:fs';
 import process from 'node:process';
-import { verifyProvenance } from '../src/release-provenance.ts';
-import { workflowPathFromRef } from '../src/release-provenance-claims.ts';
 import {
   type GithubReleaseState,
   githubReconciliationPlan,
   npmReleasePlan,
+  type ProvenanceVerificationResult,
 } from '../src/release-recovery.ts';
 
 const reportProblems = (problems: ReadonlyArray<string>) => {
@@ -57,32 +56,59 @@ const runProvenanceVerification = (
     installedIntegrity,
     tufCachePath,
   ] = values;
-  const workflowPath = workflowPathFromRef(repository, workflowRef);
-  if (workflowPath === null) {
-    return Promise.resolve(
-      reportProblems([`Invalid GitHub workflow ref: ${workflowRef}`]),
-    );
-  }
   let response: unknown;
   try {
     response = JSON.parse(readFileSync(path, 'utf8')) as unknown;
   } catch {
-    return Promise.resolve(
-      reportProblems(['npm attestation response must contain valid JSON']),
-    );
+    const result: ProvenanceVerificationResult = {
+      kind: 'malformed-provenance',
+      message: 'npm attestation response must contain valid JSON',
+    };
+    return Promise.resolve(reportProvenanceResult(result));
   }
-  return verifyProvenance(
-    response,
-    {
-      packageName,
-      version,
-      repository: `${serverUrl}/${repository}`,
-      workflowPath,
-      commit,
-      installedIntegrity,
-    },
-    tufCachePath,
-  ).then(reportProblems);
+  return Promise.all([
+    import('../src/release-provenance.ts'),
+    import('../src/release-provenance-claims.ts'),
+  ])
+    .then(([{ verifyProvenance }, { workflowPathFromRef }]) => {
+      const workflowPath = workflowPathFromRef(repository, workflowRef);
+      if (workflowPath === null) {
+        return {
+          kind: 'malformed-provenance',
+          message: `Invalid GitHub workflow ref: ${workflowRef}`,
+        } as const;
+      }
+      return verifyProvenance(
+        response,
+        {
+          packageName,
+          version,
+          repository: `${serverUrl}/${repository}`,
+          workflowPath,
+          commit,
+          installedIntegrity,
+        },
+        `${serverUrl}/${workflowRef}`,
+        tufCachePath,
+      );
+    })
+    .then(reportProvenanceResult);
+};
+
+const reportProvenanceResult = (result: ProvenanceVerificationResult) => {
+  switch (result.kind) {
+    case 'verified':
+      return 0;
+    case 'malformed-provenance':
+    case 'cryptographic-verification-failure':
+    case 'operational-verification-failure':
+      process.stderr.write(`::error::[${result.kind}] ${result.message}\n`);
+      return 1;
+    default: {
+      const unhandled: never = result;
+      return unhandled;
+    }
+  }
 };
 
 const planGithubReconciliation = (

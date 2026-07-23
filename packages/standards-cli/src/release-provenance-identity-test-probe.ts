@@ -1,20 +1,22 @@
 import { readFileSync } from 'node:fs';
 import process from 'node:process';
-import { verifyBundleForIssuer } from './release-provenance.ts';
+import { verifyBundleForIdentity } from './release-provenance.ts';
 import {
   isJsonRecord,
   jsonArrayAt,
   jsonRecordAt,
 } from './release-provenance-claims.ts';
 
-const [fixturePath, issuer, tufCachePath] = process.argv.slice(2);
+const [fixturePath, issuer, identity, tufCachePath, tufMirrorURL] =
+  process.argv.slice(2);
 if (
   fixturePath === undefined ||
   issuer === undefined ||
+  identity === undefined ||
   tufCachePath === undefined
 ) {
   process.stderr.write(
-    'issuer probe requires fixture, issuer, and TUF cache\n',
+    'identity probe requires fixture, issuer, identity, and TUF cache\n',
   );
   process.exitCode = 1;
 } else {
@@ -33,15 +35,17 @@ if (
     process.stderr.write('fixture has no bundle\n');
     process.exitCode = 1;
   } else {
-    verifyBundleForIssuer(bundle, {
+    verifyBundleForIdentity(bundle, {
+      certificateIdentityURI: identity,
       certificateIssuer: issuer,
       tufCachePath,
+      tufMirrorURL,
     }).then(
-      (problem) => {
-        if (problem === null) {
+      (result) => {
+        if (result.kind === 'verified') {
           process.exitCode = 0;
         } else {
-          process.stderr.write(`${problem}\n`);
+          process.stderr.write(`[${result.kind}] ${result.message}\n`);
           process.exitCode = 1;
         }
       },

@@ -1,4 +1,11 @@
-import { type Bundle, verify } from 'sigstore';
+import {
+  type Bundle,
+  PolicyError,
+  TUFError,
+  ValidationError,
+  VerificationError,
+  verify,
+} from 'sigstore';
 import {
   decodeVerifiedStatement,
   isJsonRecord,
@@ -10,32 +17,43 @@ import {
   SLSA_PROVENANCE_TYPE,
   verifiedStatementProblems,
 } from './release-provenance-claims.ts';
+import type { ProvenanceVerificationResult } from './release-recovery.ts';
 
 export const GITHUB_ACTIONS_ISSUER =
   'https://token.actions.githubusercontent.com';
 
 type VerificationOptions = {
+  readonly certificateIdentityURI: string;
   readonly certificateIssuer: string;
   readonly tufCachePath: string;
+  readonly tufMirrorURL?: string;
 };
 
 const provenanceBundle = (
   response: unknown,
-): {
-  readonly bundle: JsonRecord | null;
-  readonly problems: ReadonlyArray<string>;
-} => {
+):
+  | { readonly bundle: JsonRecord; readonly result: null }
+  | {
+      readonly bundle: null;
+      readonly result: ProvenanceVerificationResult;
+    } => {
   if (!isJsonRecord(response)) {
     return {
       bundle: null,
-      problems: ['npm attestation response must be a JSON object'],
+      result: {
+        kind: 'malformed-provenance',
+        message: 'npm attestation response must be a JSON object',
+      },
     };
   }
   const attestations = jsonArrayAt(response, 'attestations');
   if (attestations === null) {
     return {
       bundle: null,
-      problems: ['npm attestation response must contain an attestations array'],
+      result: {
+        kind: 'malformed-provenance',
+        message: 'npm attestation response must contain an attestations array',
+      },
     };
   }
   const provenance = attestations.filter(
@@ -46,54 +64,92 @@ const provenanceBundle = (
   if (provenance.length !== 1) {
     return {
       bundle: null,
-      problems: [
-        `npm package must have exactly one SLSA provenance attestation; found ${provenance.length}`,
-      ],
+      result: {
+        kind: 'malformed-provenance',
+        message: `npm package must have exactly one SLSA provenance attestation; found ${provenance.length}`,
+      },
     };
   }
   const bundle = jsonRecordAt(provenance[0], 'bundle');
   return bundle === null
-    ? { bundle: null, problems: ['npm SLSA attestation bundle is malformed'] }
-    : { bundle, problems: [] };
+    ? {
+        bundle: null,
+        result: {
+          kind: 'malformed-provenance',
+          message: 'npm SLSA attestation bundle is malformed',
+        },
+      }
+    : { bundle, result: null };
 };
 
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
-export const verifyBundleForIssuer = (
+const verificationFailure = (
+  error: unknown,
+): Exclude<ProvenanceVerificationResult, { readonly kind: 'verified' }> => {
+  if (error instanceof ValidationError) {
+    return {
+      kind: 'malformed-provenance',
+      message: `npm SLSA provenance bundle is malformed: ${errorMessage(error)}`,
+    };
+  }
+  if (error instanceof VerificationError || error instanceof PolicyError) {
+    return {
+      kind: 'cryptographic-verification-failure',
+      message: `npm SLSA provenance cryptographic verification failed: ${errorMessage(error)}`,
+    };
+  }
+  const operation = error instanceof TUFError ? 'TUF verification' : 'Sigstore';
+  return {
+    kind: 'operational-verification-failure',
+    message: `npm SLSA provenance ${operation} failed: ${errorMessage(error)}`,
+  };
+};
+
+export const verifyBundleForIdentity = (
   bundle: JsonRecord,
   options: VerificationOptions,
-): Promise<string | null> =>
+): Promise<ProvenanceVerificationResult> =>
   verify(bundle as Bundle, {
+    certificateIdentityURI: options.certificateIdentityURI,
     certificateIssuer: options.certificateIssuer,
     tufCachePath: options.tufCachePath,
-  }).then(
-    () => null,
-    (error: unknown) => errorMessage(error),
-  );
+    tufMirrorURL: options.tufMirrorURL,
+  }).then(() => ({ kind: 'verified' }), verificationFailure);
 
 export const verifyProvenance = (
   response: unknown,
   expected: ProvenanceExpectation,
+  certificateIdentityURI: string,
   tufCachePath: string,
-): Promise<ReadonlyArray<string>> => {
+): Promise<ProvenanceVerificationResult> => {
   const selected = provenanceBundle(response);
   if (selected.bundle === null) {
-    return Promise.resolve(selected.problems);
+    return Promise.resolve(selected.result);
   }
   const { bundle } = selected;
-  return verifyBundleForIssuer(bundle, {
+  return verifyBundleForIdentity(bundle, {
+    certificateIdentityURI,
     certificateIssuer: GITHUB_ACTIONS_ISSUER,
     tufCachePath,
-  }).then((verificationProblem) => {
-    if (verificationProblem !== null) {
-      return [
-        `npm SLSA provenance cryptographic verification failed: ${verificationProblem}`,
-      ];
+  }).then((verificationResult) => {
+    if (verificationResult.kind !== 'verified') {
+      return verificationResult;
     }
     const statement = decodeVerifiedStatement(bundle);
-    return statement === null
-      ? ['Verified npm SLSA provenance payload must contain valid JSON']
-      : verifiedStatementProblems(statement, expected);
+    if (statement === null) {
+      return {
+        kind: 'malformed-provenance',
+        message: 'Verified npm SLSA provenance payload must contain valid JSON',
+      };
+    }
+    const problems = verifiedStatementProblems(statement, expected);
+    return problems.length === 0
+      ? { kind: 'verified' }
+      : {
+          kind: 'cryptographic-verification-failure',
+          message: problems.join('; '),
+        };
   });
 };

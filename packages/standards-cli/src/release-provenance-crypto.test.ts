@@ -9,10 +9,6 @@ const FIXTURE = join(
   'fixtures/npm-standards-0.13.0-attestation.json',
 );
 const RECOVERY_SCRIPT = join(import.meta.dir, '../scripts/release-recovery.ts');
-const ISSUER_PROBE = join(
-  import.meta.dir,
-  'release-provenance-issuer-test-probe.ts',
-);
 const PACKAGE_NAME = '@davidvornholt/standards';
 const VERSION = '0.13.0';
 const REPOSITORY = 'davidvornholt/standards';
@@ -22,7 +18,6 @@ const WORKFLOW_REF =
 const COMMIT = '1764cab73dee8a95d8e3e47b064fa8e7080f08dd';
 const MISMATCHED_COMMIT = 'ffffffffffffffffffffffffffffffffffffffff';
 const SHA512_HEX_LENGTH = 128;
-const CRYPTO_TEST_TIMEOUT_MS = 15_000;
 const INTEGRITY =
   'sha512-+VI4epdPLqRVB4G6Mly2+QZtGvfmCmWWL15/WUSNHLgRrbL1FVJQ3ZsrzFruEtakrGI96FsDp68LxYkgUKo4IQ==';
 
@@ -102,6 +97,14 @@ describe('npm provenance cryptographic verification', () => {
     expect(result.status).toBe(0);
   });
 
+  it('classifies an unparsable attestation response as malformed', () => {
+    const path = join(fixtureRoot, 'malformed.json');
+    writeFileSync(path, 'not json');
+    const result = runProvenance(path);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('[malformed-provenance]');
+  });
+
   it.each([
     [
       'repository',
@@ -155,22 +158,6 @@ describe('npm provenance cryptographic verification', () => {
   ] as const)('rejects a signed %s mutation retaining the original signature', (name, change) => {
     const result = runProvenance(mutatedFixture(name, change));
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain('cryptographic verification failed');
+    expect(result.stderr).toContain('[cryptographic-verification-failure]');
   });
-
-  it(
-    'rejects a non-GitHub Actions certificate issuer',
-    () => {
-      const result = spawnSync(
-        'node',
-        [ISSUER_PROBE, FIXTURE, 'https://issuer.example.com', tufCache],
-        { encoding: 'utf8' },
-      );
-      expect(result.status).not.toBe(0);
-      expect(result.stderr).toContain(
-        'expected issuer=https://issuer.example.com',
-      );
-    },
-    CRYPTO_TEST_TIMEOUT_MS,
-  );
 });

@@ -215,6 +215,11 @@ jobs:
           persist-credentials: false
           ref: ${{ needs.publish.outputs.sha }}
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
       - name: Reconcile GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -239,7 +244,7 @@ jobs:
             tag_sha="$(git rev-list -n 1 "$RELEASE_TAG")"
           fi
 
-          action="$(node packages/standards-cli/scripts/release-recovery.ts \
+          action="$(bun packages/standards-cli/scripts/release-recovery.ts \
             github-state "$release_state" "$tag_sha" "$RELEASE_SHA")"
           case "$action" in
             none)

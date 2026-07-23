@@ -24,6 +24,10 @@ The fix poller and its approved Codex runs may share one host service identity a
 
 Under the frozen non-hostile-consumer threat model, the installed `@davidvornholt/standards` manifest version plus the frozen lockfile is the capability assertion. The consumer already controls that dependency and executes its code, so extra package-name, bin, or capability probes do not establish official identity; defending against a falsely versioned or malicious substitution is out of scope.
 
+## RELEASE-002: Standards CLI bootstrap error architecture
+
+`packages/standards-cli` deliberately uses plain TypeScript async code, discriminated result unions, and a minimal runtime dependency surface because its published bin bootstraps dependency-free consumers through `bunx`; adding Effect would either defeat that bootstrap boundary or split the package into two architectures. Reviews may challenge this decision only if the CLI no longer bootstraps dependency-free consumers, its runtime moves to a separately installed package, or the minimal-dependency premise otherwise changes.
+
 ## TOOLING-001: Root-owned Biome pin
 
 `@biomejs/biome` is pinned only at the repository root (and `template/package.json` for consumers); workspaces deliberately do not declare it. Workspace lint scripts resolve the root-hoisted Biome executable, while `packages/standards-cli/src/template-biome.test.ts` invokes that executable by its root path; a missing install fails at invocation. Reviews must not request per-workspace `@biomejs/biome` declarations; the pin moves with the root/template dependency-hold policy.

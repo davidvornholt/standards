@@ -11,6 +11,21 @@ export type ReconciliationPlan =
   | { readonly action: 'create' | 'none'; readonly problem: null }
   | { readonly action: null; readonly problem: string };
 
+export type ProvenanceVerificationResult =
+  | { readonly kind: 'verified' }
+  | {
+      readonly kind: 'malformed-provenance';
+      readonly message: string;
+    }
+  | {
+      readonly kind: 'cryptographic-verification-failure';
+      readonly message: string;
+    }
+  | {
+      readonly kind: 'operational-verification-failure';
+      readonly message: string;
+    };
+
 const stableSemverParts = (version: string): ReadonlyArray<number> | null => {
   const match = STABLE_SEMVER.exec(version);
   if (match === null) {
