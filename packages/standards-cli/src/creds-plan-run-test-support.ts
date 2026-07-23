@@ -36,7 +36,7 @@ export const planRunRoot = (): string => root;
 
 export const initialize = (
   secrets: string,
-): { consumer: string; events: string } => {
+): { consumer: string; events: string; broker: string } => {
   root = mkdtempSync(join(tmpdir(), 'creds-plan-run-'));
   const consumer = join(root, 'consumer');
   mkdirSync(join(consumer, 'secrets'), { recursive: true });
@@ -54,7 +54,7 @@ export const initialize = (
   writeFileSync(events, '');
   process.env.STANDARDS_BROKER_FILE = broker;
   process.env.PLAN_EVENT_FILE = events;
-  return { consumer, events };
+  return { consumer, events, broker };
 };
 
 export const installSops = (body: string): void => {

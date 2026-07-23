@@ -80,7 +80,7 @@ const parseCloudflare = (
   if (!Array.isArray(raw)) {
     throw new Error(`${path}: "cloudflare" must be a list of accounts`);
   }
-  return raw.map((entry) => {
+  const accounts = raw.map((entry) => {
     const valid =
       isRecord(entry) &&
       isNonEmptyString(entry.account_id) &&
@@ -92,6 +92,16 @@ const parseCloudflare = (
     }
     return { accountId: String(entry.account_id), token: String(entry.token) };
   });
+  const accountIds = new Set<string>();
+  for (const account of accounts) {
+    if (accountIds.has(account.accountId)) {
+      throw new Error(
+        `${path}: duplicate Cloudflare account ${account.accountId}; keep one bootstrap credential per account`,
+      );
+    }
+    accountIds.add(account.accountId);
+  }
+  return accounts;
 };
 export const readBrokerStore = async (path: string): Promise<BrokerStore> => {
   const raw = existsSync(path)
