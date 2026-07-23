@@ -6,7 +6,7 @@
   outputs =
     { self, nixpkgs }:
     let
-      bunSystemMetadata = import ./nix/bun-system-metadata.nix;
+      bunSystemMetadata = builtins.fromJSON (builtins.readFile ./nix/bun-system-metadata.json);
       systems = builtins.attrNames bunSystemMetadata;
       forAllSystems = nixpkgs.lib.genAttrs systems;
     in

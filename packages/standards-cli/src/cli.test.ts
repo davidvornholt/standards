@@ -38,6 +38,14 @@ const NOTIFY_WORKFLOW = join(
   ACTUAL_UPSTREAM,
   '.github/workflows/notify-pause.yml',
 );
+const NIX_SYSTEM_METADATA = join(
+  ACTUAL_UPSTREAM,
+  'nix/bun-system-metadata.json',
+);
+const NIX_SYSTEM_MATRIX_FILTER = join(
+  ACTUAL_UPSTREAM,
+  'nix/bun-system-matrix.jq',
+);
 const SYNC_MANIFEST = join(ACTUAL_UPSTREAM, 'sync-standards.json');
 const SOPS_VERSION_ASSIGNMENT = /version=v\d+\.\d+\.\d+/gu;
 const SOPS_CHECKSUM_ASSIGNMENT = /sha=[a-f0-9]{64}/gu;
@@ -152,8 +160,37 @@ const run = (cwd: string, args: ReadonlyArray<string>): RunResult =>
 
 const workflowRunScript = (stepName: string): string =>
   yamlRunScript(SYNC_WORKFLOW, stepName);
+const githubExpression = (expression: string): string =>
+  `${'$'}{{ ${expression} }}`;
 const githubMatrixExpression = (property: string): string =>
-  `${'$'}{{ matrix.${property} }}`;
+  githubExpression(`matrix.${property}`);
+const runNixDiscovery = (
+  metadata: string,
+): { readonly output: string; readonly result: RunResult } => {
+  const fixture = mkTmp('nix-discovery-');
+  const outputPath = join(fixture, 'github-output');
+  write(
+    fixture,
+    'nix/bun-system-matrix.jq',
+    readFileSync(NIX_SYSTEM_MATRIX_FILTER, 'utf8'),
+  );
+  write(fixture, 'nix/bun-system-metadata.json', metadata);
+  const result = runExecutable(
+    'bash',
+    fixture,
+    [
+      '-euo',
+      'pipefail',
+      '-c',
+      yamlRunScript(STANDARDS_WORKFLOW, 'Discover Nix matrix'),
+    ],
+    { GITHUB_OUTPUT: outputPath },
+  );
+  return {
+    output: existsSync(outputPath) ? readFileSync(outputPath, 'utf8') : '',
+    result,
+  };
+};
 
 const yamlJobs = (path: string): Record<string, WorkflowJob> => {
   const parsedWorkflow: unknown = parseYaml(readFileSync(path, 'utf8'));
@@ -1760,25 +1797,40 @@ describe('canonical standards workflow settings security', () => {
 });
 
 describe('canonical standards workflow Nix gate', () => {
-  it('builds every Nix system natively and gates on the complete matrix', () => {
+  it('derives every native Nix job from validated metadata at the tested commit', () => {
     const jobs = yamlJobs(STANDARDS_WORKFLOW);
+    const discoveryJob = jobs['nix-discovery'];
     const nixJob = jobs.nix;
 
+    expect(discoveryJob['runs-on']).toBe('ubuntu-latest');
+    expect(discoveryJob.outputs).toEqual({
+      matrix: githubExpression('steps.matrix.outputs.matrix'),
+    });
     expect(nixJob['runs-on']).toBe(githubMatrixExpression('runner'));
+    expect(nixJob.needs).toBe('nix-discovery');
     expect(nixJob.strategy).toEqual({
       'fail-fast': false,
-      matrix: {
-        include: [
-          { runner: 'ubuntu-24.04', system: 'x86_64-linux' },
-          { runner: 'ubuntu-24.04-arm', system: 'aarch64-linux' },
-        ],
-      },
+      matrix: githubExpression('fromJSON(needs.nix-discovery.outputs.matrix)'),
     });
+    for (const job of [discoveryJob, nixJob]) {
+      expect(job.steps).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            name: 'Checkout',
+            with: { ref: githubExpression('github.sha') },
+          }),
+        ]),
+      );
+    }
     expect(nixJob.steps).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           name: 'Install Nix',
           uses: 'cachix/install-nix-action@v31',
+        }),
+        expect.objectContaining({
+          name: 'Test Nix system metadata',
+          run: 'bash nix/bun-system-metadata.test.sh',
         }),
         expect.objectContaining({
           name: 'Build Nix check',
@@ -1788,16 +1840,84 @@ describe('canonical standards workflow Nix gate', () => {
     );
   });
 
-  it('keeps the required check name fail-closed over every gate', () => {
-    const workflow = readFileSync(STANDARDS_WORKFLOW, 'utf8');
+  it('emits the current native runner matrix from its sole JSON owner', () => {
+    const { output, result } = runNixDiscovery(
+      readFileSync(NIX_SYSTEM_METADATA, 'utf8'),
+    );
+
+    expect(result.status).toBe(0);
+    expect(output).toBe(
+      'matrix={"include":[{"runner":"ubuntu-24.04-arm","system":"aarch64-linux"},{"runner":"ubuntu-24.04","system":"x86_64-linux"}]}\n',
+    );
+  });
+
+  it.each([
+    ['invalid JSON', 'not json'],
+    ['an empty system set', '{}'],
+    [
+      'a missing runner mapping',
+      '{"x86_64-linux":{"archiveHash":"sha256-lR7iruhV8IWVruxiJSJqKY0/6oOj3NZGXAnLzN9+hI8=","archivePlatform":"x64"}}',
+    ],
+    [
+      'a non-GitHub runner mapping',
+      '{"x86_64-linux":{"archiveHash":"sha256-lR7iruhV8IWVruxiJSJqKY0/6oOj3NZGXAnLzN9+hI8=","archivePlatform":"x64","runner":"self-hosted"}}',
+    ],
+  ])('fails discovery for %s', (_label, metadata) => {
+    const { output, result } = runNixDiscovery(metadata);
+
+    expect(result.status).not.toBe(0);
+    expect(output).toBe('');
+  });
+});
+
+describe('canonical standards workflow Nix aggregation', () => {
+  it('keeps the required check fail-closed over discovery and the matrix', () => {
     const jobs = yamlJobs(STANDARDS_WORKFLOW);
-    expect(workflow).toContain('  quality:');
-    expect(workflow).toContain('  github-settings:');
-    expect(workflow).toContain('  nix:');
-    expect(workflow).toContain('  check:');
+    const aggregateScript = yamlRunScript(
+      STANDARDS_WORKFLOW,
+      'Require all standards gates',
+    );
+    const successfulResults = {
+      GITHUB_SETTINGS_RESULT: 'success',
+      NIX_DISCOVERY_RESULT: 'success',
+      NIX_RESULT: 'success',
+      QUALITY_RESULT: 'success',
+    };
+
     expect(jobs.check.if).toBe('always()');
-    expect(jobs.check.needs).toEqual(['quality', 'github-settings', 'nix']);
-    expect(workflow).toContain('[ "$NIX_RESULT" != success ]');
+    expect(jobs.check.needs).toEqual([
+      'quality',
+      'github-settings',
+      'nix-discovery',
+      'nix',
+    ]);
+    expect(
+      runExecutable(
+        'bash',
+        ACTUAL_UPSTREAM,
+        ['-euo', 'pipefail', '-c', aggregateScript],
+        successfulResults,
+      ).status,
+    ).toBe(0);
+    for (const failedResults of [
+      { ...successfulResults, NIX_DISCOVERY_RESULT: 'failure' },
+      {
+        ...successfulResults,
+        NIX_DISCOVERY_RESULT: 'failure',
+        NIX_RESULT: 'skipped',
+      },
+      { ...successfulResults, NIX_RESULT: 'skipped' },
+      { ...successfulResults, NIX_RESULT: 'failure' },
+    ]) {
+      expect(
+        runExecutable(
+          'bash',
+          ACTUAL_UPSTREAM,
+          ['-euo', 'pipefail', '-c', aggregateScript],
+          failedResults,
+        ).status,
+      ).not.toBe(0);
+    }
   });
 });
 
@@ -1841,6 +1961,7 @@ describe('canonical workflow runner boundaries', () => {
       '.github/workflows/standards-sync.yml:sync': 'ubuntu-latest',
       '.github/workflows/standards.yml:check': 'ubuntu-latest',
       '.github/workflows/standards.yml:github-settings': 'ubuntu-latest',
+      '.github/workflows/standards.yml:nix-discovery': 'ubuntu-latest',
       '.github/workflows/standards.yml:nix': githubMatrixExpression('runner'),
     });
     expect(fixedRunnerJobDefinitions.join('\n')).not.toContain(
