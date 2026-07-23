@@ -39,6 +39,12 @@ export type SopsWriteResult =
 export type SopsStoredValueVerification =
   | { readonly ok: true; readonly matches: boolean }
   | { readonly ok: false; readonly problem: string };
+type SopsStoredValueInput = {
+  readonly consumer: string;
+  readonly rel: string;
+  readonly dottedPath: string;
+  readonly expectedValue: string;
+};
 
 export const listEncryptedKeys = (text: string): EncryptedKeysReadResult => {
   const result = inspectSopsStructure(text, true);
@@ -117,12 +123,11 @@ const editorCommand = (): string => {
   return `"${process.execPath}" "${editor}"`;
 };
 
-export const verifySopsStoredValue = (
-  consumer: string,
-  rel: string,
-  dottedPath: string,
-  expectedValue: string,
+export const verifySopsStoredValueWith = (
+  runner: typeof runSops,
+  input: SopsStoredValueInput,
 ): SopsStoredValueVerification => {
+  const { consumer, rel, dottedPath, expectedValue } = input;
   const path = parseSopsKeyPath(dottedPath);
   const problem = `could not verify stored SOPS value at ${dottedPath} in ${rel}`;
   if (path === null || !isContainedSopsPath(consumer, rel, 'file')) {
@@ -131,7 +136,7 @@ export const verifySopsStoredValue = (
   const extract = path
     .map((segment) => `[${JSON.stringify(segment)}]`)
     .join('');
-  const result = runSops(
+  const result = runner(
     ['decrypt', '--extract', extract, '--output-type', 'json', rel],
     consumer,
   );
@@ -147,6 +152,19 @@ export const verifySopsStoredValue = (
     return { ok: false, problem };
   }
 };
+
+export const verifySopsStoredValue = (
+  consumer: string,
+  rel: string,
+  dottedPath: string,
+  expectedValue: string,
+): SopsStoredValueVerification =>
+  verifySopsStoredValueWith(runSops, {
+    consumer,
+    rel,
+    dottedPath,
+    expectedValue,
+  });
 
 export const setSopsValues = (
   consumer: string,

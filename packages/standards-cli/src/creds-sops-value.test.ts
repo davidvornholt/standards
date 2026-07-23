@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
+import { afterEach, describe, expect, it, spyOn } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { verifySopsStoredValueWith } from './creds-sops';
 import type { SopsRunResult } from './sops-exec';
 
 const calls: Array<{
@@ -15,14 +16,19 @@ let runResult: SopsRunResult = {
   errorMessage: null,
 };
 
-mock.module('./sops-exec', () => ({
-  runSops: (args: ReadonlyArray<string>, cwd: string): SopsRunResult => {
-    calls.push({ args, cwd });
-    return runResult;
-  },
-}));
-
-const { verifySopsStoredValue } = await import('./creds-sops');
+const verifySopsStoredValue = (
+  consumer: string,
+  rel: string,
+  dottedPath: string,
+  expectedValue: string,
+) =>
+  verifySopsStoredValueWith(
+    (args: ReadonlyArray<string>, cwd: string): SopsRunResult => {
+      calls.push({ args, cwd });
+      return runResult;
+    },
+    { consumer, rel, dottedPath, expectedValue },
+  );
 const dirs: Array<string> = [];
 
 const fixture = (): string => {
