@@ -17,7 +17,7 @@ const runSopsAction = createSopsActionRunner(process.env);
 afterEach(cleanupTmpDirs);
 
 const ciValue = (value: unknown): string =>
-  JSON.stringify({ ci: { standards_sync_token: value } });
+  JSON.stringify({ ci: { example_token: value } });
 
 const FINAL_VALUE_ERROR = '::error::Resolved secret value must be non-empty';
 
@@ -68,19 +68,19 @@ const FALLBACK_SCENARIOS: ReadonlyArray<FallbackScenario> = [
   {
     label: 'the requested key is absent',
     options: { sopsOutput: ciValue(undefined) },
-    reason: 'ci.standards_sync_token is missing in secrets/ci.yaml',
+    reason: 'ci.example_token is missing in secrets/ci.yaml',
     failsAt: 'resolve',
   },
   {
     label: 'the decrypted value is empty',
     options: { sopsOutput: ciValue('') },
-    reason: 'ci.standards_sync_token is empty in secrets/ci.yaml',
+    reason: 'ci.example_token is empty in secrets/ci.yaml',
     failsAt: 'resolve',
   },
   {
     label: 'the decrypted value is not a string',
     options: { sopsOutput: ciValue({ token: 'value' }) },
-    reason: 'ci.standards_sync_token is not a string in secrets/ci.yaml',
+    reason: 'ci.example_token is not a string in secrets/ci.yaml',
     failsAt: 'resolve',
   },
 ];

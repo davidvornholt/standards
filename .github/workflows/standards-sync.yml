@@ -21,7 +21,6 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
 
 concurrency:
   group: standards-sync
@@ -89,6 +88,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -104,7 +105,7 @@ jobs:
       # managed-file contract.
       - name: Require compatible standards CLI
         env:
-          MINIMUM_STANDARDS_VERSION: "0.12.0"
+          MINIMUM_STANDARDS_VERSION: "0.14.0"
         run: |
           package_path=node_modules/@davidvornholt/standards/package.json
           installed_version=$(jq -er '.version | select(type == "string")' "$package_path")
@@ -121,30 +122,53 @@ jobs:
       # Resolve through the action from the trusted pre-sync checkout. Sync
       # replaces managed files, including this action, so no local action may
       # execute after the mirror changes.
-      - name: Resolve sync PR token
-        id: sync-token
+      - name: Resolve broker App ID
         uses: ./.github/actions/sops-secret
         with:
           age-key: ${{ secrets.SOPS_AGE_KEY }}
           secret-file: secrets/ci.yaml
-          secret-key: standards_sync_token
-          env-name: GH_TOKEN
-          fallback-value: ${{ github.token }}
-          failure-mode: fallback
+          secret-key: broker_app.app_id
+          env-name: BROKER_APP_ID
+
+      - name: Resolve broker App private key
+        uses: ./.github/actions/sops-secret
+        with:
+          age-key: ${{ secrets.SOPS_AGE_KEY }}
+          secret-file: secrets/ci.yaml
+          secret-key: broker_app.private_key
+          env-name: BROKER_APP_PRIVATE_KEY
+
+      - name: Mint current-repository PR token
+        id: broker-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ env.BROKER_APP_ID }}
+          private-key: ${{ env.BROKER_APP_PRIVATE_KEY }}
+          # Omitting owner and repositories is the action's exact
+          # current-repository scope; never derive either from event payload.
+          permission-contents: read
+          permission-pull-requests: write
+
+      - name: Clear broker App credentials
+        run: |
+          {
+            echo "BROKER_APP_ID="
+            echo "BROKER_APP_PRIVATE_KEY="
+          } >> "$GITHUB_ENV"
 
       # Forward the validated policy pin explicitly as a second fail-closed
       # boundary. The CLI also reads and validates the same document, so local
-      # init/sync commands and this workflow retain one policy owner. GH_TOKEN
-      # is deliberately removed from this step so the sync engine and fetched
-      # canonical content never receive the PR-opening credential.
+      # init/sync commands and this workflow retain one policy owner. The
+      # broker token is an action output, not an ambient variable, so the sync
+      # engine and fetched canonical content never receive it.
       - name: Sync canonical files from upstream
         env:
           SYNC_POLICY_REF: ${{ needs.policy.outputs.ref }}
         run: |
           if [ -n "$SYNC_POLICY_REF" ]; then
-            env -u GH_TOKEN bun standards sync --ref "$SYNC_POLICY_REF"
+            bun standards sync --ref "$SYNC_POLICY_REF"
           else
-            env -u GH_TOKEN bun standards sync
+            bun standards sync
           fi
 
       - name: Detect mirror changes
@@ -157,20 +181,10 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # The PR-opening token comes from the repo's encrypted CI secrets
-      # (ci.standards_sync_token in secrets/ci.yaml, a fine-grained PAT with
-      # Contents read + Pull requests write), decrypted with the single
-      # SOPS_AGE_KEY bootstrap Actions secret before sync can replace the
-      # trusted local action. PRs opened with it trigger the required Standards
-      # gate automatically. Without it, the workflow token can create a PR only
-      # when repository or organization policy allows Actions to do so; the
-      # resulting workflow runs wait for maintainer approval.
-
-      - name: Report sync PR token fallback
-        if: steps.mirror.outputs.changed == 'true' && steps.sync-token.outputs.used-fallback == 'true'
-        run: |
-          echo "::warning::ci.standards_sync_token could not be resolved from secrets/ci.yaml; the workflow will try to open the sync PR with the workflow token."
-          echo "::warning::If repository policy permits that PR, approve its queued workflow runs. Otherwise gh pr create will fail after pushing the sync branch, leaving the branch without a PR."
+      # The PR-opening token is a short-lived installation token for only this
+      # repository. Its App credentials come from ci.broker_app in the
+      # SOPS-encrypted secrets/ci.yaml, resolved through the trusted pre-sync
+      # action. Missing credentials or failed token minting stop the job.
 
       # This workflow deliberately runs no inline `bun run check`: the synced
       # result is validated by the required Standards gate on the PR it opens,
@@ -185,14 +199,19 @@ jobs:
       # `github.event.repository.default_branch` are empty here.
       - name: Open a pull request if the mirror changed
         if: steps.mirror.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.broker-token.outputs.token }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           branch="standards-sync/$(date -u +%Y%m%d%H%M%S)"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local credential.helper "!f() { echo username=x-access-token; echo \"password=\$GITHUB_TOKEN\"; }; f"
           git switch -c "$branch"
           git add -A
           git commit -m "chore: sync standards from upstream"
           git push --set-upstream origin "$branch"
+          git config --unset credential.helper
           gh pr create \
             --head "$branch" \
             --title "chore: sync standards from upstream" \

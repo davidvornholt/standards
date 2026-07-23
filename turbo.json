@@ -47,6 +47,7 @@
         "$TURBO_ROOT$/packages/a11y-testing/tsconfig.json",
         "$TURBO_ROOT$/packages/a11y-testing/src/**",
         "$TURBO_ROOT$/.github/workflows/**",
+        "$TURBO_ROOT$/secrets/ci.yaml",
         "$TURBO_ROOT$/template/**",
         "$TURBO_ROOT$/package.json",
         "$TURBO_ROOT$/AGENTS.local.md",

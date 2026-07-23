@@ -301,7 +301,7 @@ const runWorkflowVersionGuard = (version: string): RunResult => {
       '-c',
       workflowRunScript('Require compatible standards CLI'),
     ],
-    { MINIMUM_STANDARDS_VERSION: '0.12.0' },
+    { MINIMUM_STANDARDS_VERSION: '0.14.0' },
   );
 };
 
@@ -1729,9 +1729,9 @@ describe('canonical standards workflow settings security', () => {
     expect(workflow).toContain('persist-credentials: false');
     expect(installStep).toContain('bun_version=1.3.14');
     expect(installStep.match(/bun_sha=[a-f0-9]{64}/gu)).toHaveLength(2);
-    expect(installStep).toContain('standards_version=0.12.0');
+    expect(installStep).toContain('standards_version=0.14.0');
     expect(installStep).toContain(
-      'standards_sha=253d45c85d7f83617053e04c1c962be49ea01bd030014072d9051409317baaa8222b980a5a712452f61d50df588ac0a59e77e18dfdb768ad634cf1518a435563',
+      'standards_sha=a9884f90ab4bc4c037f519e99cb844b9dac1d9aa0d53f3885eea0abbd9d3960e86404eed7df8b9865aaf8d040fccc73381fd5f666fde05d60f38a36fde8e792d',
     );
     expect(installStep).toContain('yaml_version=2.9.0');
     expect(installStep.match(/sha=[a-f0-9]{128}/gu)).toHaveLength(2);
@@ -2030,7 +2030,7 @@ describe('standards sync workflow ordering', () => {
     expect(result.stdout).toContain('Already in sync');
   });
 
-  it('resolves the token from the trusted action before sync and never executes post-sync action content', () => {
+  it('resolves broker credentials through the trusted action before sync and never executes post-sync action content', () => {
     const jobs = yamlJobs(SYNC_WORKFLOW);
     const { steps } = jobs.sync;
     if (!Array.isArray(steps)) {
@@ -2041,7 +2041,12 @@ describe('standards sync workflow ordering', () => {
         ? step.name
         : null,
     );
-    const resolveIndex = stepNames.indexOf('Resolve sync PR token');
+    const resolveAppIdIndex = stepNames.indexOf('Resolve broker App ID');
+    const resolvePrivateKeyIndex = stepNames.indexOf(
+      'Resolve broker App private key',
+    );
+    const mintIndex = stepNames.indexOf('Mint current-repository PR token');
+    const clearIndex = stepNames.indexOf('Clear broker App credentials');
     const syncIndex = stepNames.indexOf('Sync canonical files from upstream');
     const localActionIndexes = steps.flatMap((step, index) =>
       typeof step === 'object' &&
@@ -2051,15 +2056,16 @@ describe('standards sync workflow ordering', () => {
         ? [index]
         : [],
     );
-    const syncScript = workflowRunScript('Sync canonical files from upstream');
-
-    expect(resolveIndex).toBeGreaterThan(-1);
-    expect(syncIndex).toBeGreaterThan(resolveIndex);
-    expect(localActionIndexes).toEqual([resolveIndex]);
+    expect(resolveAppIdIndex).toBeGreaterThan(-1);
+    expect(resolvePrivateKeyIndex).toBeGreaterThan(resolveAppIdIndex);
+    expect(mintIndex).toBeGreaterThan(resolvePrivateKeyIndex);
+    expect(clearIndex).toBeGreaterThan(mintIndex);
+    expect(syncIndex).toBeGreaterThan(clearIndex);
+    expect(localActionIndexes).toEqual([
+      resolveAppIdIndex,
+      resolvePrivateKeyIndex,
+    ]);
     expect(localActionIndexes.every((index) => index < syncIndex)).toBe(true);
-    expect(
-      syncScript.match(/env -u GH_TOKEN bun standards sync/gu),
-    ).toHaveLength(2);
   });
 
   it('orders generated migration guidance before merge', () => {
@@ -2158,23 +2164,28 @@ describe('standards sync workflow policy', () => {
     '0.10.0-beta.1',
     '0.11.0',
     '0.11.1',
+    '0.12.0',
+    '0.12.1',
+    '0.13.0',
+    '0.13.1',
   ])('rejects installed CLI version %s without a policy file', (version) => {
     const result = runWorkflowVersionGuard(version);
     expect(result.status).toBe(1);
     expect(`${result.stdout}${result.stderr}`).toContain('::error::');
   });
 
-  it('makes the 0.12.0 guard unconditional', () => {
+  it('makes the 0.14.0 guard unconditional', () => {
     const workflow = readFileSync(SYNC_WORKFLOW, 'utf8');
-    expect(workflow).toContain('MINIMUM_STANDARDS_VERSION: "0.12.0"');
+    expect(workflow).toContain('MINIMUM_STANDARDS_VERSION: "0.14.0"');
     expect(workflow).not.toContain(
       "if: needs.policy.outputs.present == 'true'",
     );
   });
 
   it.each([
-    '0.12.0',
-    '0.12.1',
+    '0.14.0',
+    '0.14.1',
+    '1.0.0',
   ])('accepts installed CLI version %s without a policy file', (version) => {
     expect(runWorkflowVersionGuard(version).status).toBe(0);
   });

@@ -202,8 +202,8 @@ jobs:
           unzip -q "$bun_archive" -d "$bun_root"
           install -m 0755 "$bun_root/bun-linux-${bun_arch}/bun" "$bun_root/bun"
 
-          standards_version=0.12.0
-          standards_sha=253d45c85d7f83617053e04c1c962be49ea01bd030014072d9051409317baaa8222b980a5a712452f61d50df588ac0a59e77e18dfdb768ad634cf1518a435563
+          standards_version=0.14.0
+          standards_sha=a9884f90ab4bc4c037f519e99cb844b9dac1d9aa0d53f3885eea0abbd9d3960e86404eed7df8b9865aaf8d040fccc73381fd5f666fde05d60f38a36fde8e792d
           standards_archive="$RUNNER_TEMP/standards.tgz"
           cli_root="$RUNNER_TEMP/standards-cli"
           mkdir -p "$cli_root/package"
