@@ -31,7 +31,9 @@ export type JobLabels = {
   readonly failed: string;
 };
 
-const FAILURE_SNIPPET_LIMIT = 1500;
+// Must exceed runCodex's failure string at its longest (its stderr snippet
+// plus the exit-cause prefix), so the diagnostic tail is never cut off.
+const FAILURE_SNIPPET_LIMIT = 4000;
 
 export type JobPreamble =
   | { readonly kind: 'rejected' }
