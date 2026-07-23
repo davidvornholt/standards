@@ -30,10 +30,11 @@ export const findManagedDestinationCollision = async (
           const ref = parseTokenName(token.name, context.repo);
           return ref !== null &&
             ref.target === context.dest.target &&
-            destinationFootprintsIntersect(
-              wanted,
-              inferredDestinationFootprint(keys, ref.key),
-            )
+            (ref.key === context.dest.key ||
+              destinationFootprintsIntersect(
+                wanted,
+                inferredDestinationFootprint(keys, ref.key),
+              ))
             ? [`${accountId}/${token.id} (${ref.key})`]
             : [];
         })
@@ -41,5 +42,5 @@ export const findManagedDestinationCollision = async (
   );
   return collisions.length === 0
     ? null
-    : `managed Cloudflare token already exists at ${collisions.join(', ')} and its destination footprint intersects ${context.dest.target}:${context.dest.key}; one SOPS destination may be managed by only one account`;
+    : `managed Cloudflare token already exists at ${collisions.join(', ')} and conflicts with ${context.dest.target}:${context.dest.key} by exact identity or destination footprint; one SOPS destination may be managed by only one account`;
 };
