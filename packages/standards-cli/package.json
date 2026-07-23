@@ -32,6 +32,7 @@
     "src/creds-dest.ts",
     "src/creds-login-cloudflare.ts",
     "src/creds-login-github.ts",
+    "src/creds-login-github-manifest.ts",
     "src/creds-naming.ts",
     "src/creds-plan.ts",
     "src/creds-plan-run.ts",
