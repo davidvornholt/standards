@@ -2,8 +2,9 @@
 // `standards creds add`. Untrusted paths are rejected before any SOPS or
 // provider operation can run.
 
-import { readdirSync, statSync } from 'node:fs';
+import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { isContainedSopsPath, parseSopsKeyPath } from './creds-sops-structure';
 import {
   type BrokerStore,
   type CloudflareBrokerAccount,
@@ -14,13 +15,6 @@ import { resolveGithubRepo } from './github-api';
 import { isRecord } from './github-settings-parse';
 
 const SAFE_TARGET = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9_-])?$/u;
-const SAFE_KEY_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9_-]*$/u;
-const RESERVED_KEY_SEGMENTS = new Set([
-  'constructor',
-  'prototype',
-  'sops',
-  '__proto__',
-]);
 
 export type CredsDestination = {
   readonly target: string;
@@ -32,18 +26,6 @@ export type ResolvedContext = {
   readonly rel: string;
   readonly dest: CredsDestination;
   readonly store: BrokerStore;
-};
-
-export const isSafeSopsKeySegment = (segment: string): boolean =>
-  SAFE_KEY_SEGMENT.test(segment) && !RESERVED_KEY_SEGMENTS.has(segment);
-
-export const parseSopsKeyPath = (
-  dottedPath: string,
-): ReadonlyArray<string> | null => {
-  const segments = dottedPath.split('.');
-  return segments.length > 0 && segments.every(isSafeSopsKeySegment)
-    ? segments
-    : null;
 };
 
 export const parseDestination = (raw: string): CredsDestination | null => {
@@ -82,41 +64,44 @@ export const assertWritableSopsPath = (
 
 const isYamlSecrets = (name: string): boolean =>
   name.endsWith('.yaml') && !name.endsWith('.example.yaml');
-const listDir = (dir: string): ReadonlyArray<string> => {
-  try {
-    return readdirSync(dir);
-  } catch {
+const listDir = (consumer: string, rel: string): ReadonlyArray<string> => {
+  if (!isContainedSopsPath(consumer, rel, 'directory')) {
     return [];
   }
-};
-const isFile = (path: string): boolean => {
   try {
-    return statSync(path).isFile();
+    return readdirSync(join(consumer, rel));
   } catch {
-    return false;
+    return [];
   }
 };
 
 export const listSecretsTargets = (
   consumer: string,
 ): ReadonlyArray<SecretsTarget> => {
-  const flat = listDir(join(consumer, 'secrets'))
+  const flat = listDir(consumer, 'secrets')
     .filter(isYamlSecrets)
     .map((name) => ({
       target: name.slice(0, -'.yaml'.length),
       rel: `secrets/${name}`,
-    }));
-  const hosts = listDir(join(consumer, 'infra', 'hosts'))
+    }))
+    .filter(
+      ({ target, rel }) =>
+        SAFE_TARGET.test(target) && isContainedSopsPath(consumer, rel, 'file'),
+    );
+  const hosts = listDir(consumer, 'infra/hosts')
+    .filter(
+      (name) =>
+        SAFE_TARGET.test(name) &&
+        isContainedSopsPath(consumer, `infra/hosts/${name}`, 'directory'),
+    )
     .filter((name) =>
-      isFile(join(consumer, 'infra', 'hosts', name, 'secrets.yaml')),
+      isContainedSopsPath(consumer, `infra/hosts/${name}/secrets.yaml`, 'file'),
     )
     .map((name) => ({
       target: name,
       rel: `infra/hosts/${name}/secrets.yaml`,
     }));
-  return [...flat, ...hosts].filter((entry) =>
-    isFile(join(consumer, entry.rel)),
-  );
+  return [...flat, ...hosts];
 };
 
 export const resolveTargetRel = (
@@ -127,11 +112,11 @@ export const resolveTargetRel = (
     return null;
   }
   const host = `infra/hosts/${target}/secrets.yaml`;
-  if (isFile(join(consumer, host))) {
+  if (isContainedSopsPath(consumer, host, 'file')) {
     return host;
   }
   const flat = `secrets/${target}.yaml`;
-  return isFile(join(consumer, flat)) ? flat : null;
+  return isContainedSopsPath(consumer, flat, 'file') ? flat : null;
 };
 
 export const resolveContext = async (
