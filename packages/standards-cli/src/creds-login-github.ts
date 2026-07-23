@@ -7,6 +7,7 @@ import {
   MANIFEST_STATE_BYTES,
   manifestFormHtml,
 } from './creds-login-github-manifest';
+import { BROKER_IDENTITY_NAME } from './creds-naming';
 import {
   readBrokerStore,
   resolveBrokerPath,
@@ -99,7 +100,7 @@ export const runCredsLoginGithub = async (options: {
     options.org === undefined
       ? 'https://github.com/settings/apps/new'
       : `https://github.com/organizations/${options.org}/settings/apps/new`;
-  const name = options.name ?? 'standards-broker';
+  const name = options.name ?? BROKER_IDENTITY_NAME;
   const code = await waitForCode((port, state) =>
     manifestFormHtml(
       action,

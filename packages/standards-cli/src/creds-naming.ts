@@ -6,6 +6,16 @@
 
 const NAME_PREFIX = 'standards';
 
+// One broker identity credential per provider — the GitHub App and each
+// account's Cloudflare bootstrap token — shares this name. It contains no
+// slash, so it can never fall inside the minted namespace below.
+export const BROKER_IDENTITY_NAME = 'standards-broker';
+
+// Reconciliation owns every name under `standards/` (it revokes and renews
+// by parsed name), so hand-made tokens must never be named inside it.
+export const isInMintedNamespace = (name: string): boolean =>
+  name.startsWith(`${NAME_PREFIX}/`);
+
 export type BrokeredTokenRef = {
   readonly repo: string;
   readonly target: string;

@@ -23,10 +23,15 @@ import { isRecord } from './github-settings-parse';
 
 const PAGE_SIZE = 50;
 
+export type VerifiedToken = {
+  readonly id: string | null;
+  readonly status: string;
+};
+
 export const verifyAccountToken = async (
   accountId: string,
   token: string,
-): Promise<CfResult<string>> => {
+): Promise<CfResult<VerifiedToken>> => {
   const response = await cfRequest(
     token,
     'GET',
@@ -35,12 +40,14 @@ export const verifyAccountToken = async (
   if (!response.ok) {
     return response;
   }
-  const status =
-    isRecord(response.value.result) &&
-    typeof response.value.result.status === 'string'
-      ? response.value.result.status
-      : 'unknown';
-  return { ok: true, value: status };
+  const result = isRecord(response.value.result) ? response.value.result : {};
+  return {
+    ok: true,
+    value: {
+      id: typeof result.id === 'string' ? result.id : null,
+      status: typeof result.status === 'string' ? result.status : 'unknown',
+    },
+  };
 };
 
 export const listAccountTokens = async (

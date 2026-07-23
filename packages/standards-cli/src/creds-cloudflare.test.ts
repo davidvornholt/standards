@@ -48,7 +48,10 @@ describe('cloudflare account token client', () => {
   it('verifies the bootstrap token and reports its status', async () => {
     stubFetch(() => ({ body: envelope({ id: 't', status: 'active' }) }));
     const verified = await verifyAccountToken(ACCOUNT, 'cfat');
-    expect(verified).toEqual({ ok: true, value: 'active' });
+    expect(verified).toEqual({
+      ok: true,
+      value: { id: 't', status: 'active' },
+    });
     expect(calls[0]?.url).toContain(`/accounts/${ACCOUNT}/tokens/verify`);
   });
 
