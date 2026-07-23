@@ -95,6 +95,34 @@ describe('resolveTokenPolicy', () => {
     });
   });
 
+  it('targets an EU-jurisdiction bucket resource', async () => {
+    stubGroups([
+      {
+        id: 'r2',
+        name: 'Workers R2 Storage Bucket Item Read',
+        scopes: ['com.cloudflare.edge.r2.bucket'],
+      },
+    ]);
+    expect(
+      await resolveTokenPolicy(BROKER_ACCOUNT, {
+        permissions: 'Workers R2 Storage Bucket Item Read',
+        bucket: 'assets',
+        jurisdiction: 'eu',
+      }),
+    ).toEqual({
+      ok: true,
+      wanted: ['Workers R2 Storage Bucket Item Read'],
+      policy: {
+        effect: 'allow',
+        resources: {
+          [`com.cloudflare.edge.r2.bucket.${ACCOUNT}_eu_assets`]: '*',
+        },
+        // biome-ignore lint/style/useNamingConvention: Cloudflare's policy wire field is snake_case.
+        permission_groups: [{ id: 'r2' }],
+      },
+    });
+  });
+
   it('rejects bucket-item groups without --bucket', async () => {
     stubGroups([
       {

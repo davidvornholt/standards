@@ -25,6 +25,9 @@ describe('R2 provider ground truth', () => {
     expect(r2BucketResource(ACCOUNT, 'my-bucket')).toBe(
       `com.cloudflare.edge.r2.bucket.${ACCOUNT}_default_my-bucket`,
     );
+    expect(r2BucketResource(ACCOUNT, 'my-bucket', 'eu')).toBe(
+      `com.cloudflare.edge.r2.bucket.${ACCOUNT}_eu_my-bucket`,
+    );
   });
 
   it('pins the S3 credential derivation: token ID and SHA-256 of the value', () => {
@@ -40,6 +43,9 @@ describe('R2 provider ground truth', () => {
   it('pins the S3 endpoint URL', () => {
     expect(s3Endpoint(ACCOUNT)).toBe(
       `https://${ACCOUNT}.r2.cloudflarestorage.com`,
+    );
+    expect(s3Endpoint(ACCOUNT, 'eu')).toBe(
+      `https://${ACCOUNT}.eu.r2.cloudflarestorage.com`,
     );
   });
 

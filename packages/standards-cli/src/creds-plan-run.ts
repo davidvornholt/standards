@@ -1,12 +1,9 @@
 import { listSecretsTargets } from './creds-dest';
 import { identifyCloudflareBootstrapAuthority } from './creds-login-cloudflare';
-import {
-  type AccountToken,
-  computeCredsPlan,
-  type PlannedAction,
-} from './creds-plan';
+import { computeCredsPlan } from './creds-plan';
 import { renewPlannedToken } from './creds-plan-renew';
 import { revokePlannedToken } from './creds-plan-revoke';
+import type { AccountToken, PlannedAction } from './creds-plan-types';
 import { readEncryptedKeys } from './creds-sops';
 import {
   type BrokerStore,

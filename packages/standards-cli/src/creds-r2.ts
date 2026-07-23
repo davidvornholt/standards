@@ -14,9 +14,11 @@ import type { SopsValueChange } from './creds-sops';
 // report `com.cloudflare.api.account` instead.
 export const R2_BUCKET_SCOPE = 'com.cloudflare.edge.r2.bucket';
 
-// Only the default jurisdiction is supported: EU and FedRAMP buckets encode
-// a different infix and stay out of scope until a real destination needs one.
-const JURISDICTION = 'default';
+export type R2Jurisdiction = 'default' | 'eu';
+export const DEFAULT_R2_JURISDICTION: R2Jurisdiction = 'default';
+
+export const isR2Jurisdiction = (value: string): value is R2Jurisdiction =>
+  value === DEFAULT_R2_JURISDICTION || value === 'eu';
 
 // R2 bucket names are 3-63 characters of lowercase letters, digits, and
 // hyphens, starting and ending alphanumeric.
@@ -24,14 +26,20 @@ const BUCKET_NAME = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/u;
 
 export const isR2BucketName = (name: string): boolean => BUCKET_NAME.test(name);
 
-export const r2BucketResource = (accountId: string, bucket: string): string =>
-  `${R2_BUCKET_SCOPE}.${accountId}_${JURISDICTION}_${bucket}`;
+export const r2BucketResource = (
+  accountId: string,
+  bucket: string,
+  jurisdiction: R2Jurisdiction = DEFAULT_R2_JURISDICTION,
+): string => `${R2_BUCKET_SCOPE}.${accountId}_${jurisdiction}_${bucket}`;
 
 export const deriveS3SecretAccessKey = (tokenValue: string): string =>
   createHash('sha256').update(tokenValue).digest('hex');
 
-export const s3Endpoint = (accountId: string): string =>
-  `https://${accountId}.r2.cloudflarestorage.com`;
+export const s3Endpoint = (
+  accountId: string,
+  jurisdiction: R2Jurisdiction = DEFAULT_R2_JURISDICTION,
+): string =>
+  `https://${accountId}.${jurisdiction === 'eu' ? 'eu.' : ''}r2.cloudflarestorage.com`;
 
 export type DestinationFormat = 'bearer' | 's3';
 
@@ -39,8 +47,23 @@ const ACCESS_KEY_SEGMENT = 'access_key_id';
 const SECRET_KEY_SEGMENT = 'secret_access_key';
 const S3_PAIR_SEGMENTS = [ACCESS_KEY_SEGMENT, SECRET_KEY_SEGMENT] as const;
 
-export const s3PairPaths = (key: string): ReadonlyArray<string> =>
-  S3_PAIR_SEGMENTS.map((segment) => `${key}.${segment}`);
+export const s3AccessKeyPath = (key: string): string =>
+  `${key}.${ACCESS_KEY_SEGMENT}`;
+
+export const s3PairPaths = (key: string): ReadonlyArray<string> => [
+  s3AccessKeyPath(key),
+  `${key}.${SECRET_KEY_SEGMENT}`,
+];
+
+export const destinationFootprint = (
+  format: DestinationFormat,
+  key: string,
+): ReadonlyArray<string> => (format === 's3' ? s3PairPaths(key) : [key]);
+
+export const destinationFootprintsIntersect = (
+  left: ReadonlyArray<string>,
+  right: ReadonlyArray<string>,
+): boolean => left.some((path) => right.includes(path));
 
 // The SOPS writes for one minted token: a bearer destination stores the raw
 // token value at the key itself; an S3 destination stores the derived
@@ -80,4 +103,15 @@ export const destinationFormatOf = (
     return 's3';
   }
   return present.length === 0 ? 'absent' : 'partial';
+};
+
+export const inferredDestinationFootprint = (
+  keys: ReadonlySet<string> | undefined,
+  key: string,
+): ReadonlyArray<string> => {
+  const format = destinationFormatOf(keys, key);
+  return destinationFootprint(
+    format === 's3' || format === 'partial' ? 's3' : 'bearer',
+    key,
+  );
 };

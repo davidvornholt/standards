@@ -5,49 +5,21 @@
 // lifetime. Secret keys without a brokered token are simply unmanaged — most
 // secrets are — and are never touched. Execution lives in creds-plan-run.ts.
 
-import type { CloudflareToken, TokenPolicy } from './creds-cloudflare-api';
-import type { TokenCondition } from './creds-cloudflare-condition';
 import { parseTokenName } from './creds-naming';
-import { type DestinationFormat, destinationFormatOf } from './creds-r2';
+import { groupByIntersectingFootprint } from './creds-plan-groups';
+import type {
+  AccountToken,
+  CredsPlan,
+  PlannedAction,
+} from './creds-plan-types';
+import { destinationFormatOf, inferredDestinationFootprint } from './creds-r2';
 
 const DEFAULT_RENEW_WITHIN_DAYS = 30;
 const DAY_MS = 86_400_000;
 
-export type AccountToken = {
-  readonly accountId: string;
-  readonly token: CloudflareToken;
-};
-
-export type PlannedAction =
-  | {
-      readonly kind: 'revoke';
-      readonly accountId: string;
-      readonly tokenId: string;
-      readonly name: string;
-      readonly reason: string;
-    }
-  | {
-      readonly kind: 'renew';
-      readonly accountId: string;
-      readonly tokenId: string;
-      readonly name: string;
-      readonly target: string;
-      readonly key: string;
-      readonly format: DestinationFormat;
-      readonly policies: ReadonlyArray<TokenPolicy>;
-      readonly condition: TokenCondition | null;
-      readonly replacementExpiresOn: string;
-      readonly reason: string;
-    };
-
-export type CredsPlan = {
-  readonly actions: ReadonlyArray<PlannedAction>;
-  readonly findings: ReadonlyArray<string>;
-  readonly healthy: number;
-};
-
 type ManagedToken = AccountToken & {
   readonly ref: { readonly target: string; readonly key: string };
+  readonly footprint: ReadonlyArray<string>;
 };
 
 type Disposition =
@@ -153,7 +125,7 @@ const dispositionForGroup = (
     const [first] = group;
     return {
       kind: 'finding',
-      finding: `ambiguous Cloudflare tokens target ${first?.ref.target}:${first?.ref.key} across ${group.map((candidate) => `${candidate.accountId}/${candidate.token.id}`).join(', ')}; revoke duplicates manually before plan/apply`,
+      finding: `ambiguous Cloudflare tokens have destination footprints intersecting in ${first?.ref.target}: ${group.map((candidate) => `${candidate.ref.key} (${candidate.accountId}/${candidate.token.id})`).join(', ')}; revoke duplicates manually before plan/apply`,
     };
   }
   const [entry] = group;
@@ -176,13 +148,20 @@ export const computeCredsPlan = (input: {
   let healthy = 0;
   const managed = input.tokens.flatMap((entry) => {
     const ref = parseTokenName(entry.token.name, input.repo);
-    return ref === null ? [] : [{ ...entry, ref }];
+    return ref === null
+      ? []
+      : [
+          {
+            ...entry,
+            ref,
+            footprint: inferredDestinationFootprint(
+              input.keysByTarget.get(ref.target),
+              ref.key,
+            ),
+          },
+        ];
   });
-  const byDestination = Map.groupBy(
-    managed,
-    ({ ref }) => `${ref.target}\0${ref.key}`,
-  );
-  const dispositions = [...byDestination.values()].map((group) =>
+  const dispositions = groupByIntersectingFootprint(managed).map((group) =>
     dispositionForGroup(group, input, renewWithin),
   );
   for (const disposition of dispositions) {

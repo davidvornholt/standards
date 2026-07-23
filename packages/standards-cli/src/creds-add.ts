@@ -1,15 +1,22 @@
 import { commitCreatedCloudflareToken } from './creds-add-cloudflare-commit';
+import { findManagedDestinationCollision } from './creds-add-collision';
 import { resolveTokenPolicy } from './creds-add-policy';
-import { createAccountToken, listAccountTokens } from './creds-cloudflare';
+import { createAccountToken } from './creds-cloudflare';
 import { resolveContext, selectAccount } from './creds-dest';
 import { tokenNameOf } from './creds-naming';
 import {
+  DEFAULT_R2_JURISDICTION,
   type DestinationFormat,
   destinationWrites,
+  type R2Jurisdiction,
   s3Endpoint,
   s3PairPaths,
 } from './creds-r2';
-import { inspectSopsScalarDestination, setSopsValues } from './creds-sops';
+import {
+  inspectSopsScalarDestination,
+  readEncryptedKeys,
+  setSopsValues,
+} from './creds-sops';
 
 const DEFAULT_TTL_DAYS = 90;
 const DAY_MS = 86_400_000;
@@ -21,6 +28,7 @@ const printSuccess = (input: {
   readonly destination: string;
   readonly format: DestinationFormat;
   readonly accountId: string;
+  readonly jurisdiction: R2Jurisdiction;
 }): void => {
   console.log(`standards creds: minted Cloudflare token ${input.name}`);
   console.log(`  permissions: ${input.permissions.join(', ')}`);
@@ -31,7 +39,9 @@ const printSuccess = (input: {
     `  ${input.format === 's3' ? 'derived S3 credential pair' : 'value'} written to ${input.destination}`,
   );
   if (input.format === 's3') {
-    console.log(`  S3 endpoint: ${s3Endpoint(input.accountId)}`);
+    console.log(
+      `  S3 endpoint: ${s3Endpoint(input.accountId, input.jurisdiction)}`,
+    );
   }
 };
 
@@ -55,9 +65,16 @@ export const runCredsAddCloudflare = async (
     readonly account: string | undefined;
     readonly ttlDays: number | undefined;
     readonly bucket: string | undefined;
+    readonly jurisdiction?: R2Jurisdiction;
     readonly s3: boolean;
   },
 ): Promise<boolean> => {
+  if (options.s3 && options.bucket === undefined) {
+    console.error(
+      'standards creds: --s3 requires --bucket so the credential is backed by a bucket-scoped R2 policy',
+    );
+    return false;
+  }
   const context = await resolveContext(consumer, options.dest);
   if (context === null) {
     return false;
@@ -78,34 +95,25 @@ export const runCredsAddCloudflare = async (
     console.error(`standards creds: ${destinationProblem}`);
     return false;
   }
+  const encryptedKeys = await readEncryptedKeys(consumer, context.rel);
+  if (!encryptedKeys.ok) {
+    console.error(`standards creds: ${encryptedKeys.problem}`);
+    return false;
+  }
+  const keys = new Set(encryptedKeys.keys);
   const resolved = await resolveTokenPolicy(account, options);
   if (!resolved.ok) {
     console.error(`standards creds: ${resolved.problem}`);
     return false;
   }
   const name = tokenNameOf({ ...context.dest, repo: context.repo });
-  const listings = await Promise.all(
-    context.store.cloudflare.map(async (configured) => ({
-      accountId: configured.accountId,
-      listed: await listAccountTokens(configured.accountId, configured.token),
-    })),
+  const collisionProblem = await findManagedDestinationCollision(
+    context,
+    format,
+    keys,
   );
-  const failedListing = listings.find(({ listed }) => !listed.ok);
-  if (failedListing?.listed.ok === false) {
-    console.error(
-      `standards creds: account ${failedListing.accountId}: ${failedListing.listed.problem}; cannot prove the destination is unambiguous`,
-    );
-    return false;
-  }
-  const collisions = listings.flatMap(({ accountId, listed }) =>
-    listed.ok && listed.value.some((token) => token.name === name)
-      ? [accountId]
-      : [],
-  );
-  if (collisions.length > 0) {
-    console.error(
-      `standards creds: token ${name} already exists in Cloudflare account(s) ${collisions.join(', ')}; one SOPS destination may be managed by only one account`,
-    );
+  if (collisionProblem !== null) {
+    console.error(`standards creds: ${collisionProblem}`);
     return false;
   }
   const ttlDays = options.ttlDays ?? DEFAULT_TTL_DAYS;
@@ -148,6 +156,7 @@ export const runCredsAddCloudflare = async (
     destination: `${context.rel} at ${context.dest.key}`,
     format,
     accountId: account.accountId,
+    jurisdiction: options.jurisdiction ?? DEFAULT_R2_JURISDICTION,
   });
   return true;
 };

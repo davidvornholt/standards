@@ -44,14 +44,14 @@ export const pageInfo = (count: number, totalCount: number): unknown => ({
   total_count: totalCount,
 });
 
-export const initializeConsumer = (accounts: ReadonlyArray<string>): string => {
+export const initializeConsumer = (
+  accounts: ReadonlyArray<string>,
+  secrets = 'ci:\n  token: ENC[AES256_GCM,data:x]\nsops:\n  mac: ENC[AES256_GCM,data:y]\n  version: 3.9.4\n',
+): string => {
   root = mkdtempSync(join(tmpdir(), 'creds-add-'));
   const consumer = join(root, 'consumer');
   mkdirSync(join(consumer, 'secrets'), { recursive: true });
-  writeFileSync(
-    join(consumer, 'secrets', 'ci.yaml'),
-    'ci:\n  token: ENC[AES256_GCM,data:x]\nsops:\n  mac: ENC[AES256_GCM,data:y]\n  version: 3.9.4\n',
-  );
+  writeFileSync(join(consumer, 'secrets', 'ci.yaml'), secrets);
   execFileSync('git', ['init', '-q', consumer]);
   execFileSync('git', [
     '-C',

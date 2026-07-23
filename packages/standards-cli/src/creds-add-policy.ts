@@ -6,7 +6,13 @@
 
 import { listPermissionGroups } from './creds-cloudflare';
 import type { PermissionGroup, TokenPolicy } from './creds-cloudflare-api';
-import { isR2BucketName, R2_BUCKET_SCOPE, r2BucketResource } from './creds-r2';
+import {
+  DEFAULT_R2_JURISDICTION,
+  isR2BucketName,
+  R2_BUCKET_SCOPE,
+  type R2Jurisdiction,
+  r2BucketResource,
+} from './creds-r2';
 import type { CloudflareBrokerAccount } from './creds-store';
 
 const ACCOUNT_SCOPE = 'com.cloudflare.api.account';
@@ -46,6 +52,7 @@ export const resolveTokenPolicy = async (
   options: {
     readonly permissions: string | undefined;
     readonly bucket: string | undefined;
+    readonly jurisdiction?: R2Jurisdiction;
   },
 ): Promise<ResolvedTokenPolicy> => {
   if (options.permissions === undefined || options.permissions.length === 0) {
@@ -93,7 +100,11 @@ export const resolveTokenPolicy = async (
   const resource =
     options.bucket === undefined
       ? `${ACCOUNT_SCOPE}.${account.accountId}`
-      : r2BucketResource(account.accountId, options.bucket);
+      : r2BucketResource(
+          account.accountId,
+          options.bucket,
+          options.jurisdiction ?? DEFAULT_R2_JURISDICTION,
+        );
   return {
     ok: true,
     wanted,

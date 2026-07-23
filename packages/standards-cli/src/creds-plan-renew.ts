@@ -5,8 +5,8 @@
 
 import { createAccountToken, deleteAccountToken } from './creds-cloudflare';
 import { resolveTargetRel } from './creds-dest';
-import type { PlannedAction } from './creds-plan';
-import { destinationWrites, s3PairPaths } from './creds-r2';
+import type { PlannedAction } from './creds-plan-types';
+import { destinationWrites, s3AccessKeyPath, s3PairPaths } from './creds-r2';
 import {
   inspectSopsScalarDestination,
   setSopsValues,
@@ -64,6 +64,17 @@ export const renewPlannedToken = async (
   );
   if (destinationProblem !== null) {
     return destinationProblem;
+  }
+  if (action.format === 's3') {
+    const accessKey = verifySopsStoredValue(
+      consumer,
+      rel,
+      s3AccessKeyPath(action.key),
+      action.tokenId,
+    );
+    if (!(accessKey.ok && accessKey.matches)) {
+      return `${action.name}: could not prove the stored S3 access key belongs to the managed token; renewal stopped before mutation`;
+    }
   }
   const replacement = await createAccountToken(accountId, bootstrapToken, {
     name: action.name,
