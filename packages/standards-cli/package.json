@@ -30,6 +30,7 @@
     "src/creds-cloudflare.ts",
     "src/creds-cloudflare-api.ts",
     "src/creds-cloudflare-condition.ts",
+    "src/creds-cloudflare-expiry.ts",
     "src/creds-cloudflare-pagination.ts",
     "src/creds-commands.ts",
     "src/creds-args.ts",

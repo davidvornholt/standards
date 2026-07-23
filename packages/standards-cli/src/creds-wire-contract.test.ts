@@ -15,6 +15,7 @@ import {
   listPermissionGroups,
   verifyAccountToken,
 } from './creds-cloudflare';
+import { cloudflareExpiresOn } from './creds-cloudflare-expiry';
 import { convertManifestCode } from './creds-login-github-manifest';
 
 const ACCOUNT_ID_LENGTH = 32;
@@ -119,6 +120,15 @@ describe('provider wire contract', () => {
     });
     expect(created.ok).toBe(true);
     expect(requests).toEqual([`POST ${CF}/tokens`]);
+  });
+
+  // https://developers.cloudflare.com/api/resources/accounts/subresources/tokens/methods/create/
+  // Cloudflare rejects fractional seconds in expires_on before creating the
+  // token: `expires_on must be a valid date/time in the format
+  // "2005-12-30T01:02:03Z"`.
+  it('Cloudflare expires_on: whole-second RFC3339, no fractional part', () => {
+    const withMillis = Date.parse('2026-10-21T20:03:23.989Z');
+    expect(cloudflareExpiresOn(withMillis)).toBe('2026-10-21T20:03:23Z');
   });
 
   // https://developers.cloudflare.com/api/resources/accounts/subresources/tokens/methods/delete/

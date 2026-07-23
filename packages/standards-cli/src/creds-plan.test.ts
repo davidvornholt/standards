@@ -87,7 +87,7 @@ describe('creds plan computation', () => {
         key: 'ci.dns_token',
         format: 'bearer',
         policies: POLICIES,
-        replacementExpiresOn: '2026-10-20T00:00:00.000Z',
+        replacementExpiresOn: '2026-10-20T00:00:00Z',
       }),
     ]);
   });
