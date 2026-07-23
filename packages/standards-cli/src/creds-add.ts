@@ -1,20 +1,78 @@
-// `standards creds add cloudflare`: mint a scoped, expiring account token and
-// write its value straight into a SOPS target. The command prints only
-// metadata (name, expiry, scopes); the secret value flows API-to-SOPS
-// without touching stdout or argv. The provider-side token name doubles as
-// the reconciliation record — there is no separate manifest to maintain.
-
 import {
   createAccountToken,
+  deleteAccountToken,
   listAccountTokens,
   listPermissionGroups,
 } from './creds-cloudflare';
+import type { PermissionGroup } from './creds-cloudflare-api';
 import { resolveContext, selectAccount } from './creds-dest';
 import { tokenNameOf } from './creds-naming';
-import { setSopsValue } from './creds-sops';
+import { inspectSopsScalarDestination, setSopsValue } from './creds-sops';
 
 const DEFAULT_TTL_DAYS = 90;
 const DAY_MS = 86_400_000;
+const ACCOUNT_SCOPE = 'com.cloudflare.api.account';
+
+const reportWriteFailure = async (input: {
+  readonly accountId: string;
+  readonly bootstrapToken: string;
+  readonly tokenId: string;
+  readonly name: string;
+  readonly problem: string;
+}): Promise<void> => {
+  const cleanup = await deleteAccountToken(
+    input.accountId,
+    input.bootstrapToken,
+    input.tokenId,
+  );
+  console.error(
+    cleanup.ok
+      ? `standards creds: token ${input.name} was created, but ${input.problem}; deleted replacement token ${input.tokenId}`
+      : `standards creds: token ${input.name} was created, but ${input.problem}; cleanup of token ${input.tokenId} also failed: ${cleanup.problem}`,
+  );
+};
+
+export const unsupportedAccountScopes = (
+  groups: ReadonlyArray<PermissionGroup>,
+): ReadonlyArray<string> =>
+  groups
+    .filter((group) => !group.scopes.includes(ACCOUNT_SCOPE))
+    .map((group) => group.name);
+
+const resolveWantedGroups = (
+  names: ReadonlyArray<string>,
+  available: ReadonlyArray<PermissionGroup>,
+): {
+  readonly selected: ReadonlyArray<PermissionGroup>;
+  readonly unknown: ReadonlyArray<string>;
+} => {
+  const resolved = names.map((name) => ({
+    name,
+    group: available.find(
+      (group) => group.name.toLowerCase() === name.toLowerCase(),
+    ),
+  }));
+  return {
+    selected: resolved.flatMap(({ group }) =>
+      group === undefined ? [] : [group],
+    ),
+    unknown: resolved.flatMap(({ name, group }) =>
+      group === undefined ? [name] : [],
+    ),
+  };
+};
+
+const printSuccess = (
+  name: string,
+  permissions: ReadonlyArray<string>,
+  expiresOn: string,
+  destination: string,
+): void => {
+  console.log(`standards creds: minted Cloudflare token ${name}`);
+  console.log(`  permissions: ${permissions.join(', ')}`);
+  console.log(`  expires: ${expiresOn} (rotate via \`standards creds apply\`)`);
+  console.log(`  value written to ${destination}`);
+};
 
 export const runCredsAddCloudflare = async (
   consumer: string,
@@ -39,6 +97,15 @@ export const runCredsAddCloudflare = async (
   if (account === null) {
     return false;
   }
+  const destination = await inspectSopsScalarDestination(
+    consumer,
+    context.rel,
+    context.dest.key,
+  );
+  if (!destination.ok) {
+    console.error(`standards creds: ${destination.problem}`);
+    return false;
+  }
   const groups = await listPermissionGroups(account.accountId, account.token);
   if (!groups.ok) {
     console.error(`standards creds: ${groups.problem}`);
@@ -47,28 +114,42 @@ export const runCredsAddCloudflare = async (
   const wanted = options.permissions
     .split(',')
     .map((groupName) => groupName.trim());
-  const resolved = wanted.map((groupName) => ({
-    name: groupName,
-    group: groups.value.find(
-      (group) => group.name.toLowerCase() === groupName.toLowerCase(),
-    ),
-  }));
-  const unknown = resolved.filter((entry) => entry.group === undefined);
+  const { selected, unknown } = resolveWantedGroups(wanted, groups.value);
   if (unknown.length > 0) {
     console.error(
-      `standards creds: unknown permission group(s): ${unknown.map((entry) => entry.name).join(', ')}; list names with \`standards creds permissions\``,
+      `standards creds: unknown permission group(s): ${unknown.join(', ')}; list names with \`standards creds permissions\``,
+    );
+    return false;
+  }
+  const unsupported = unsupportedAccountScopes(selected);
+  if (unsupported.length > 0) {
+    console.error(
+      `standards creds: permission group(s) ${unsupported.join(', ')} cannot target an account resource; choose account-scoped groups (zone-scoped groups require an explicit zone resource, which this command does not yet support)`,
     );
     return false;
   }
   const name = tokenNameOf({ ...context.dest, repo: context.repo });
-  const existing = await listAccountTokens(account.accountId, account.token);
-  if (!existing.ok) {
-    console.error(`standards creds: ${existing.problem}`);
+  const listings = await Promise.all(
+    context.store.cloudflare.map(async (configured) => ({
+      accountId: configured.accountId,
+      listed: await listAccountTokens(configured.accountId, configured.token),
+    })),
+  );
+  const failedListing = listings.find(({ listed }) => !listed.ok);
+  if (failedListing?.listed.ok === false) {
+    console.error(
+      `standards creds: account ${failedListing.accountId}: ${failedListing.listed.problem}; cannot prove the destination is unambiguous`,
+    );
     return false;
   }
-  if (existing.value.some((token) => token.name === name)) {
+  const collisions = listings.flatMap(({ accountId, listed }) =>
+    listed.ok && listed.value.some((token) => token.name === name)
+      ? [accountId]
+      : [],
+  );
+  if (collisions.length > 0) {
     console.error(
-      `standards creds: a token named ${name} already exists; \`standards creds apply\` rotates it, or remove the secret key and apply to revoke it first`,
+      `standards creds: token ${name} already exists in Cloudflare account(s) ${collisions.join(', ')}; one SOPS destination may be managed by only one account`,
     );
     return false;
   }
@@ -81,9 +162,7 @@ export const runCredsAddCloudflare = async (
       {
         effect: 'allow',
         resources: { [`com.cloudflare.api.account.${account.accountId}`]: '*' },
-        permission_groups: resolved.map((entry) => ({
-          id: entry.group?.id ?? '',
-        })),
+        permission_groups: selected.map(({ id }) => ({ id })),
       },
     ],
   });
@@ -98,14 +177,20 @@ export const runCredsAddCloudflare = async (
     created.value.value,
   );
   if (!written.ok) {
-    console.error(
-      `standards creds: token ${name} was created, but ${written.problem}; write it into ${context.rel} manually or delete token ${created.value.id} and retry`,
-    );
+    await reportWriteFailure({
+      accountId: account.accountId,
+      bootstrapToken: account.token,
+      tokenId: created.value.id,
+      name,
+      problem: written.problem,
+    });
     return false;
   }
-  console.log(`standards creds: minted Cloudflare token ${name}`);
-  console.log(`  permissions: ${wanted.join(', ')}`);
-  console.log(`  expires: ${expiresOn} (rotate via \`standards creds apply\`)`);
-  console.log(`  value written to ${context.rel} at ${context.dest.key}`);
+  printSuccess(
+    name,
+    wanted,
+    expiresOn,
+    `${context.rel} at ${context.dest.key}`,
+  );
   return true;
 };
