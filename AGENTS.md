@@ -70,6 +70,7 @@ Before generating code, inspect the `description` frontmatter for every local sk
 - Non-secret configuration lives in plain config next to its consumer. A value is secret if leaking it enables impersonation, data access, or cost; otherwise it is configuration.
 - Each workspace under `apps/*` or `packages/*` maintains a `README.md` documenting every configuration value and secret it consumes — requiredness, behavior, defaults. Mirror the secret shape in the matching `*.example.yaml` (`secrets/dev.example.yaml`, `secrets/ci.example.yaml`, `infra/hosts/<host>/secrets.example.yaml`).
 - Dev secrets in `secrets/dev.yaml` are keyed by workspace (`apps.<name>`, `packages.<name>`); `just dev-env-generate` derives each workspace's generated `.env.local` from them. Never edit generated env files by hand.
+- Provider credentials (Cloudflare API tokens, GitHub automation credentials) are minted with `bun standards creds`, which writes values directly into SOPS targets — do not ask the operator to create tokens in provider dashboards for needs the broker covers; see the declarative-infra skill's secrets reference.
 
 ## TypeScript standards
 
