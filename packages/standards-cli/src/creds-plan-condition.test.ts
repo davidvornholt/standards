@@ -61,4 +61,22 @@ describe('Cloudflare renewal condition planning', () => {
     expect(plan.actions).toEqual([]);
     expect(plan.findings).toEqual([expect.stringContaining('condition')]);
   });
+
+  it('revokes an absent key before validating its condition shape', () => {
+    const plan = computeCredsPlan({
+      repo: 'davidvornholt/example',
+      keysByTarget: new Map([['ci', new Set(['ci.other'])]]),
+      tokens: [
+        {
+          accountId: 'a',
+          token: token({ supported: false }),
+        },
+      ],
+      now: new Date('2026-07-22T00:00:00Z'),
+    });
+    expect(plan.actions).toEqual([
+      expect.objectContaining({ kind: 'revoke', tokenId: 'old' }),
+    ]);
+    expect(plan.findings).toEqual([]);
+  });
 });
