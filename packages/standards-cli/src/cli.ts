@@ -17,6 +17,7 @@ import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, posix, resolve } from 'node:path';
 import process from 'node:process';
+import { runCredsCommand } from './creds-commands';
 import {
   composeDependabot,
   DEPENDABOT_BASE_FILE,
@@ -740,6 +741,7 @@ Commands:
   dependabot  Verify (--check) or regenerate (--write) the composed .github/dependabot.yml
   dev-env     Write each workspace's generated .env.local from the SOPS-encrypted secrets/dev.yaml
   github      Compare (--check) or converge (--apply) live GitHub settings
+  creds       Mint, rotate, and revoke brokered credentials (see \`standards creds help\`)
   poller      Run one fix-poller tick over the configured repositories (host automation)
   help        Show this help
 
@@ -1142,6 +1144,15 @@ const runGateCommand = (
 };
 
 const main = async (): Promise<void> => {
+  // The creds family owns its flag vocabulary; route it before the strict
+  // global parser rejects those flags.
+  const rawArgs = process.argv.slice(2);
+  if (rawArgs[0] === 'creds') {
+    if (!(await runCredsCommand(rawArgs.slice(1)))) {
+      process.exitCode = 1;
+    }
+    return;
+  }
   const {
     command,
     consumer,
