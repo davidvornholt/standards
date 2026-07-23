@@ -1,13 +1,15 @@
 import { describe, expect, it, mock, spyOn } from 'bun:test';
 import {
-  buildAppManifest,
-  createManifestState,
   githubInstallMessage,
-  manifestFormHtml,
-  parseConversion,
   startManifestLoginListener,
   waitForCode,
 } from './creds-login-github';
+import {
+  buildAppManifest,
+  createManifestState,
+  manifestFormHtml,
+  parseConversion,
+} from './creds-login-github-manifest';
 
 const MANIFEST_STATE_HEX_LENGTH = 64;
 const HTTP_BAD_REQUEST = 400;

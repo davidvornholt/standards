@@ -1,79 +1,21 @@
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { openInBrowser } from './creds-browser';
 import {
-  type GithubBrokerApp,
+  buildAppManifest,
+  convertManifestCode,
+  createManifestState,
+  MANIFEST_STATE_BYTES,
+  manifestFormHtml,
+} from './creds-login-github-manifest';
+import {
   readBrokerStore,
   resolveBrokerPath,
   updateBrokerStore,
 } from './creds-store';
-import { HTTP_CREATED, request } from './github-api';
-import { isRecord } from './github-settings-parse';
 
 const LOGIN_TIMEOUT_MS = 600_000;
-const MANIFEST_STATE_BYTES = 32;
 const HTTP_BAD_REQUEST = 400;
 const HTTP_NOT_FOUND = 404;
-const DEFAULT_PERMISSIONS = Object.fromEntries(
-  'administration actions contents issues pull_requests secrets workflows'
-    .split(' ')
-    .map((permission) => [permission, 'write']),
-);
-export const buildAppManifest = (
-  name: string,
-  redirectUrl: string,
-): Readonly<Record<string, unknown>> => ({
-  name,
-  url: 'https://github.com/davidvornholt/standards',
-  hook_attributes: { url: 'https://example.invalid/unused', active: false },
-  redirect_url: redirectUrl,
-  public: false,
-  default_permissions: DEFAULT_PERMISSIONS,
-  default_events: [],
-});
-const escapeAttribute = (value: string): string =>
-  value
-    .replaceAll('&', '&amp;')
-    .replaceAll('"', '&quot;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;');
-export const createManifestState = () => {
-  const expected = randomBytes(MANIFEST_STATE_BYTES);
-  let available = true;
-  return {
-    value: expected.toString('hex'),
-    accept: (candidate: string | null) => {
-      const received =
-        candidate === null ? Buffer.alloc(0) : Buffer.from(candidate, 'hex');
-      const matches =
-        available &&
-        received.length === expected.length &&
-        timingSafeEqual(received, expected);
-      available = matches ? false : available;
-      return matches;
-    },
-  };
-};
-export const manifestFormHtml = (
-  action: string,
-  manifest: string,
-  state: string,
-): string =>
-  `<!doctype html><html><body><form id="m" action="${escapeAttribute(`${action}?state=${encodeURIComponent(state)}`)}" method="post"><input type="hidden" name="manifest" value="${escapeAttribute(manifest)}"><noscript><button type="submit">Create GitHub App</button></noscript></form><script>document.getElementById("m").submit()</script></body></html>`;
-export const parseConversion = (body: unknown): GithubBrokerApp | null =>
-  isRecord(body) &&
-  typeof body.id === 'number' &&
-  typeof body.slug === 'string' &&
-  typeof body.html_url === 'string' &&
-  typeof body.client_id === 'string' &&
-  typeof body.pem === 'string'
-    ? {
-        appId: body.id,
-        slug: body.slug,
-        htmlUrl: body.html_url,
-        clientId: body.client_id,
-        privateKey: body.pem,
-      }
-    : null;
 
 export const startManifestLoginListener = (
   formHtml: (port: number, state: string) => string,
@@ -167,22 +109,12 @@ export const runCredsLoginGithub = async (options: {
       state,
     ),
   );
-  const conversion = await request(
-    null,
-    'POST',
-    `/app-manifest/${code}/conversions`,
-  );
-  if (conversion.status !== HTTP_CREATED) {
-    console.error(
-      `standards creds: conversion failed: HTTP ${conversion.status}`,
-    );
+  const conversion = await convertManifestCode(code);
+  if (!conversion.ok) {
+    console.error(`standards creds: ${conversion.problem}`);
     return false;
   }
-  const app = parseConversion(conversion.body);
-  if (app === null) {
-    console.error('standards creds: unexpected manifest conversion response');
-    return false;
-  }
+  const { app } = conversion;
   await updateBrokerStore(storePath, (current) => {
     if (current.github !== null) {
       throw new Error(
