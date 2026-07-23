@@ -8,6 +8,7 @@ import {
 import { parseDevEnvDocument } from './dev-env-document';
 import { renderDotenv } from './dev-env-dotenv';
 import { writeDevEnvFiles } from './dev-env-transaction';
+import { runSops } from './sops-exec';
 
 export const DEV_SECRETS_FILE = 'secrets/dev.yaml';
 
@@ -17,30 +18,11 @@ type DecryptResult =
   | { readonly ok: true; readonly value: unknown }
   | { readonly ok: false; readonly problem: string };
 
-// sops emits JSON here so the CLI never parses the encrypted YAML itself; the
-// nix fallback mirrors the canonical secrets.just tool resolution.
+// sops emits JSON here so the CLI never parses the encrypted YAML itself.
 const decryptDevSecrets = (consumer: string): DecryptResult => {
-  const localSops = spawnSync('sops', SOPS_ARGS, {
-    cwd: consumer,
-    encoding: 'utf8',
-  });
-  const result =
-    localSops.error === undefined && localSops.status !== null
-      ? localSops
-      : spawnSync(
-          'nix',
-          [
-            '--extra-experimental-features',
-            'nix-command flakes',
-            'run',
-            'nixpkgs#sops',
-            '--',
-            ...SOPS_ARGS,
-          ],
-          { cwd: consumer, encoding: 'utf8' },
-        );
+  const result = runSops(SOPS_ARGS, consumer);
   if (result.status !== 0) {
-    const detail = result.error?.message ?? result.stderr?.trim();
+    const detail = result.errorMessage ?? result.stderr.trim();
     return {
       ok: false,
       problem: detail
