@@ -7,6 +7,7 @@
 
 import { openInBrowser } from './creds-browser';
 import { listAccountTokens, verifyAccountToken } from './creds-cloudflare';
+import { isCloudflareAccountId } from './creds-cloudflare-account';
 import type { CfResult, CloudflareToken } from './creds-cloudflare-api';
 import { BROKER_IDENTITY_NAME, isInMintedNamespace } from './creds-naming';
 import { promptHidden, promptLine } from './creds-prompt';
@@ -15,8 +16,6 @@ import {
   resolveBrokerPath,
   updateBrokerStore,
 } from './creds-store';
-
-const ACCOUNT_ID_PATTERN = /^[0-9a-f]{32}$/u;
 
 type IdentifiedBootstrapToken = {
   readonly id: string;
@@ -89,9 +88,9 @@ export const runCredsLoginCloudflare = async (options: {
     (await promptLine(
       'Cloudflare account ID (dash.cloudflare.com, account home, "Account ID" in the sidebar): ',
     ));
-  if (!ACCOUNT_ID_PATTERN.test(accountId)) {
+  if (!isCloudflareAccountId(accountId)) {
     console.error(
-      'standards creds: a Cloudflare account ID is 32 hex characters',
+      'standards creds: a Cloudflare account ID is 32 lowercase hexadecimal characters',
     );
     return false;
   }

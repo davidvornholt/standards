@@ -5,6 +5,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import process from 'node:process';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
+import { isCloudflareAccountId } from './creds-cloudflare-account';
 import { withBrokerLock } from './creds-store-lock';
 import { isNonEmptyString, isRecord } from './github-settings-parse';
 export type GithubBrokerApp = {
@@ -70,6 +71,31 @@ const parseGithub = (raw: unknown): GithubBrokerApp | null => {
     privateKey: raw.private_key,
   };
 };
+const validateCloudflareAccounts = (
+  accounts: ReadonlyArray<CloudflareBrokerAccount>,
+  path: string,
+): ReadonlyArray<CloudflareBrokerAccount> => {
+  const accountIds = new Set<string>();
+  for (const account of accounts) {
+    if (!isCloudflareAccountId(account.accountId)) {
+      throw new Error(
+        `${path}: Cloudflare account_id must be exactly 32 lowercase hexadecimal characters`,
+      );
+    }
+    if (!isNonEmptyString(account.token)) {
+      throw new Error(
+        'invalid cloudflare: run `standards creds login cloudflare`',
+      );
+    }
+    if (accountIds.has(account.accountId)) {
+      throw new Error(
+        `${path}: duplicate Cloudflare account ${account.accountId}; keep one bootstrap credential per account`,
+      );
+    }
+    accountIds.add(account.accountId);
+  }
+  return accounts;
+};
 const parseCloudflare = (
   raw: unknown,
   path: string,
@@ -92,16 +118,7 @@ const parseCloudflare = (
     }
     return { accountId: String(entry.account_id), token: String(entry.token) };
   });
-  const accountIds = new Set<string>();
-  for (const account of accounts) {
-    if (accountIds.has(account.accountId)) {
-      throw new Error(
-        `${path}: duplicate Cloudflare account ${account.accountId}; keep one bootstrap credential per account`,
-      );
-    }
-    accountIds.add(account.accountId);
-  }
-  return accounts;
+  return validateCloudflareAccounts(accounts, path);
 };
 export const readBrokerStore = async (path: string): Promise<BrokerStore> => {
   const raw = existsSync(path)
@@ -125,6 +142,7 @@ export const updateBrokerStore = async (
 ): Promise<void> =>
   withBrokerLock(path, async () => {
     const store = await update(await readBrokerStore(path));
+    validateCloudflareAccounts(store.cloudflare, path);
     await writeBrokerStoreUnlocked(path, store, sync);
   });
 const storeDocument = (store: BrokerStore): unknown => ({
