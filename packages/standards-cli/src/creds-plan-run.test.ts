@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -19,6 +20,8 @@ const ACCOUNT = 'a'.repeat(ACCOUNT_ID_LENGTH);
 const EXECUTABLE_MODE = 0o755;
 const DAY_MS = 86_400_000;
 const TOKEN_TTL_DAYS = 90;
+const ENCRYPTED_SECRETS =
+  'ci:\n  token: ENC[AES256_GCM,data:x]\nsops:\n  mac: ENC[AES256_GCM,data:y]\n';
 const originalBroker = process.env.STANDARDS_BROKER_FILE;
 const originalEventFile = process.env.PLAN_EVENT_FILE;
 const originalFetch = globalThis.fetch;
@@ -33,7 +36,6 @@ const envelope = (result: unknown, info?: unknown): Response =>
     // biome-ignore lint/style/useNamingConvention: Cloudflare's response field is snake_case.
     ...(info === undefined ? {} : { result_info: info }),
   });
-
 const pageInfo = (count: number): unknown => ({
   page: 1,
   // biome-ignore lint/style/useNamingConvention: Cloudflare's pagination field is snake_case.
@@ -42,26 +44,20 @@ const pageInfo = (count: number): unknown => ({
   // biome-ignore lint/style/useNamingConvention: Cloudflare's pagination field is snake_case.
   total_count: count,
 });
-
 const initialize = (secrets: string): { consumer: string; events: string } => {
   root = mkdtempSync(join(tmpdir(), 'creds-plan-run-'));
   const consumer = join(root, 'consumer');
   mkdirSync(join(consumer, 'secrets'), { recursive: true });
   writeFileSync(join(consumer, 'secrets', 'ci.yaml'), secrets);
   execFileSync('git', ['init', '-q', consumer]);
-  execFileSync('git', [
-    '-C',
-    consumer,
-    'remote',
-    'add',
-    'origin',
-    'git@github.com:davidvornholt/example.git',
-  ]);
-  const broker = join(root, 'broker.yaml');
-  writeFileSync(
-    broker,
-    `cloudflare:\n  - account_id: ${ACCOUNT}\n    token: bootstrap\n`,
+  execFileSync(
+    'git',
+    ['remote', 'add', 'origin', 'git@github.com:davidvornholt/example.git'],
+    { cwd: consumer },
   );
+  const broker = join(root, 'broker.yaml');
+  const brokerContent = `cloudflare:\n  - account_id: ${ACCOUNT}\n    token: bootstrap\n`;
+  writeFileSync(broker, brokerContent);
   const events = join(root, 'events');
   writeFileSync(events, '');
   process.env.STANDARDS_BROKER_FILE = broker;
@@ -78,11 +74,11 @@ const installSops = (body: string): void => {
   process.env.PATH = `${bin}:${originalPath ?? ''}`;
 };
 
-const expiringToken = (): unknown => {
+const expiringToken = (target = 'ci'): unknown => {
   const expires = Date.now() + 10 * DAY_MS;
   return {
     id: 'old',
-    name: 'standards/davidvornholt/example/ci/ci.token',
+    name: `standards/davidvornholt/example/${target}/ci.token`,
     status: 'active',
     // biome-ignore lint/style/useNamingConvention: Cloudflare's token field is snake_case.
     expires_on: new Date(expires).toISOString(),
@@ -99,7 +95,7 @@ const expiringToken = (): unknown => {
   };
 };
 
-const stubCloudflare = (): void => {
+const stubCloudflare = (target = 'ci'): void => {
   globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? 'GET';
@@ -116,7 +112,7 @@ const stubCloudflare = (): void => {
       );
       return Promise.resolve(envelope({ id: 'deleted' }));
     }
-    return Promise.resolve(envelope([expiringToken()], pageInfo(1)));
+    return Promise.resolve(envelope([expiringToken(target)], pageInfo(1)));
   }) as typeof fetch;
 };
 
@@ -153,11 +149,31 @@ describe('creds plan/apply safety', () => {
       expect.stringContaining('reconciliation aborted'),
     );
   });
-
-  it('cleans a replacement and preserves the old token on write failure', async () => {
-    const { consumer, events } = initialize(
-      'ci:\n  token: ENC[AES256_GCM,data:x]\nsops:\n  mac: ENC[AES256_GCM,data:y]\n',
+  it.each([
+    ['flat', 'ci', 'secrets/ci.yaml'],
+    ['host', 'prod', 'infra/hosts/prod/secrets.yaml'],
+  ] as const)('aborts on an unsafe %s target without provider deletion', async (kind, target, rel) => {
+    const { consumer, events } = initialize(ENCRYPTED_SECRETS);
+    const outside = join(root, `outside-${kind}`);
+    if (kind === 'flat') {
+      writeFileSync(outside, 'outside\n');
+      rmSync(join(consumer, rel));
+      symlinkSync(outside, join(consumer, rel));
+    } else {
+      mkdirSync(outside);
+      mkdirSync(join(consumer, 'infra', 'hosts'), { recursive: true });
+      symlinkSync(outside, join(consumer, 'infra', 'hosts', target), 'dir');
+    }
+    stubCloudflare(target);
+    const error = spyOn(console, 'error').mockImplementation(() => undefined);
+    expect(await runCredsPlan(consumer, true)).toBe(false);
+    expect(readFileSync(events, 'utf8')).toBe('');
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining(`unsafe encrypted secrets target ${rel}`),
     );
+  });
+  it('cleans a replacement and preserves the old token on write failure', async () => {
+    const { consumer, events } = initialize(ENCRYPTED_SECRETS);
     installSops(
       'if [ "$1" = "decrypt" ]; then printf \'"old-value"\'; exit 0; fi\nexit 1',
     );
@@ -168,11 +184,8 @@ describe('creds plan/apply safety', () => {
       'delete-replacement',
     ]);
   });
-
   it('writes and verifies the replacement before revoking the old token', async () => {
-    const { consumer, events } = initialize(
-      'ci:\n  token: ENC[AES256_GCM,data:x]\nsops:\n  mac: ENC[AES256_GCM,data:y]\n',
-    );
+    const { consumer, events } = initialize(ENCRYPTED_SECRETS);
     installSops(
       'if [ "$1" = "decrypt" ]; then printf \'"new-value"\'; exit 0; fi\neval "$SOPS_EDITOR \\"$2\\"" && printf "write\\n" >> "$PLAN_EVENT_FILE"',
     );
