@@ -130,12 +130,13 @@ export const startManifestLoginListener = (
     close,
   };
 };
-const waitForCode = (
+export const waitForCode = (
   formHtml: (port: number, state: string) => string,
+  opener: typeof openInBrowser = openInBrowser,
 ): Promise<string> => {
   const listener = startManifestLoginListener(formHtml);
-  console.log('Opening the one-time GitHub App creation page in your browser.');
-  openInBrowser(listener.startUrl);
+  console.log(`Open ${listener.startUrl} to create the GitHub App.`);
+  opener(listener.startUrl);
   return listener.code.finally(listener.close);
 };
 export const githubInstallMessage = (installUrl: string): string =>
