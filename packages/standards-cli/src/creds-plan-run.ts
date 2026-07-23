@@ -9,10 +9,11 @@ import {
   computeCredsPlan,
   type PlannedAction,
 } from './creds-plan';
+import { revokePlannedToken } from './creds-plan-revoke';
 import {
   inspectSopsScalarDestination as inspectDestination,
   readEncryptedKeys,
-  verifySopsScalarLeaf as verifyLeaf,
+  verifySopsStoredValue as verifyStoredValue,
   setSopsValue as writeValue,
 } from './creds-sops';
 import {
@@ -88,12 +89,7 @@ const applyAction = async (
   }
   const { accountId, token: bootstrapToken } = account;
   if (action.kind === 'revoke') {
-    const deleted = await deleteToken(
-      accountId,
-      bootstrapToken,
-      action.tokenId,
-    );
-    return deleted.ok ? null : `${action.name}: ${deleted.problem}`;
+    return revokePlannedToken(account, action);
   }
   const rel = resolveTargetRel(consumer, action.target);
   if (rel === null) {
@@ -110,20 +106,22 @@ const applyAction = async (
     name: action.name,
     policies: action.policies,
     expiresOn: action.replacementExpiresOn,
+    condition: action.condition,
   });
   if (!replacement.ok) {
     return `${action.name}: ${replacement.problem}`;
   }
   const { id: replacementId, value } = replacement.value;
   const written = writeValue(consumer, rel, action.key, value);
-  if (!written.ok) {
-    const problem = `${action.name}: ${written.problem}`;
+  const verified = verifyStoredValue(consumer, rel, action.key, value);
+  if (verified.ok && !verified.matches) {
+    const problem = written.ok
+      ? `${action.name}: stored SOPS value does not match replacement`
+      : `${action.name}: ${written.problem}`;
     return cleanupReplacement(account, replacementId, action.tokenId, problem);
   }
-  const verified = await verifyLeaf(consumer, rel, action.key);
   if (!verified.ok) {
-    const problem = `${action.name}: ${verified.problem}`;
-    return cleanupReplacement(account, replacementId, action.tokenId, problem);
+    return `${action.name}: ${written.ok ? verified.problem : `${written.problem}; ${verified.problem}`}; account ${accountId} replacement ${replacementId} and old token ${action.tokenId} remain active because the stored value is unverifiable`;
   }
   const deleted = await deleteToken(accountId, bootstrapToken, action.tokenId);
   return deleted.ok

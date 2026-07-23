@@ -1,6 +1,6 @@
+import { commitCreatedCloudflareToken } from './creds-add-cloudflare-commit';
 import {
   createAccountToken,
-  deleteAccountToken,
   listAccountTokens,
   listPermissionGroups,
 } from './creds-cloudflare';
@@ -12,25 +12,6 @@ import { inspectSopsScalarDestination, setSopsValue } from './creds-sops';
 const DEFAULT_TTL_DAYS = 90;
 const DAY_MS = 86_400_000;
 const ACCOUNT_SCOPE = 'com.cloudflare.api.account';
-
-const reportWriteFailure = async (input: {
-  readonly accountId: string;
-  readonly bootstrapToken: string;
-  readonly tokenId: string;
-  readonly name: string;
-  readonly problem: string;
-}): Promise<void> => {
-  const cleanup = await deleteAccountToken(
-    input.accountId,
-    input.bootstrapToken,
-    input.tokenId,
-  );
-  console.error(
-    cleanup.ok
-      ? `standards creds: token ${input.name} was created, but ${input.problem}; deleted replacement token ${input.tokenId}`
-      : `standards creds: token ${input.name} was created, but ${input.problem}; cleanup of token ${input.tokenId} also failed: ${cleanup.problem}`,
-  );
-};
 
 export const unsupportedAccountScopes = (
   groups: ReadonlyArray<PermissionGroup>,
@@ -158,6 +139,7 @@ export const runCredsAddCloudflare = async (
   const created = await createAccountToken(account.accountId, account.token, {
     name,
     expiresOn,
+    condition: null,
     policies: [
       {
         effect: 'allow',
@@ -176,14 +158,19 @@ export const runCredsAddCloudflare = async (
     context.dest.key,
     created.value.value,
   );
-  if (!written.ok) {
-    await reportWriteFailure({
-      accountId: account.accountId,
-      bootstrapToken: account.token,
-      tokenId: created.value.id,
-      name,
-      problem: written.problem,
-    });
+  const committed = await commitCreatedCloudflareToken({
+    consumer,
+    rel: context.rel,
+    key: context.dest.key,
+    value: created.value.value,
+    written,
+    accountId: account.accountId,
+    bootstrapToken: account.token,
+    tokenId: created.value.id,
+    name,
+  });
+  if (!committed.ok) {
+    console.error(`standards creds: ${committed.problem}`);
     return false;
   }
   printSuccess(

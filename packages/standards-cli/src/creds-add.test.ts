@@ -20,7 +20,6 @@ const originalFetch = globalThis.fetch;
 const originalBroker = process.env.STANDARDS_BROKER_FILE;
 const originalPath = process.env.PATH;
 let root = '';
-
 const response = (result: unknown, info?: unknown): Response =>
   Response.json({
     success: true,
@@ -38,7 +37,6 @@ const pageInfo = (count: number, totalCount: number): unknown => ({
   // biome-ignore lint/style/useNamingConvention: Cloudflare's pagination field is snake_case.
   total_count: totalCount,
 });
-
 const initializeConsumer = (accounts: ReadonlyArray<string>): string => {
   root = mkdtempSync(join(tmpdir(), 'creds-add-'));
   const consumer = join(root, 'consumer');
@@ -64,7 +62,6 @@ const initializeConsumer = (accounts: ReadonlyArray<string>): string => {
   process.env.STANDARDS_BROKER_FILE = broker;
   return consumer;
 };
-
 afterEach(() => {
   mock.restore();
   globalThis.fetch = originalFetch;
@@ -153,7 +150,10 @@ describe('creds add cloudflare compensation', () => {
     const bin = join(root, 'bin');
     mkdirSync(bin);
     const sops = join(bin, 'sops');
-    writeFileSync(sops, '#!/bin/sh\nexit 1\n');
+    writeFileSync(
+      sops,
+      '#!/bin/sh\nif [ "$1" = "decrypt" ]; then printf \'"old-value"\'; exit 0; fi\nexit 1\n',
+    );
     chmodSync(sops, EXECUTABLE_MODE);
     process.env.PATH = `${bin}:${originalPath ?? ''}`;
     const methods: Array<string> = [];

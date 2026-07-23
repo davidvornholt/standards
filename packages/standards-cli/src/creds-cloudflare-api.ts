@@ -1,6 +1,10 @@
 // Cloudflare v4 API plumbing shared by the account-token operations in
 // creds-cloudflare.ts: envelope parsing, error folding, and shared types.
 
+import {
+  type DecodedTokenCondition,
+  decodeTokenCondition,
+} from './creds-cloudflare-condition';
 import { isRecord } from './github-settings-parse';
 
 const API_ROOT = 'https://api.cloudflare.com/client/v4';
@@ -16,6 +20,7 @@ export type CloudflareToken = {
   readonly expiresOn: string | null;
   readonly issuedOn: string | null;
   readonly policies: ReadonlyArray<TokenPolicy> | null;
+  readonly condition: DecodedTokenCondition;
 };
 
 export type PermissionGroup = {
@@ -190,5 +195,6 @@ export const tokenOf = (raw: unknown): CloudflareToken | null =>
         expiresOn: typeof raw.expires_on === 'string' ? raw.expires_on : null,
         issuedOn: typeof raw.issued_on === 'string' ? raw.issued_on : null,
         policies: policiesOf(raw.policies),
+        condition: decodeTokenCondition(raw.condition),
       }
     : null;

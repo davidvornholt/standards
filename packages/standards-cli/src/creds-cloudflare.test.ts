@@ -171,6 +171,7 @@ describe('cloudflare token mutations and permission groups', () => {
         },
       ],
       expiresOn: '2026-10-01T00:00:00Z',
+      condition: null,
     });
     expect(created).toEqual({
       ok: true,
