@@ -2,6 +2,7 @@ import { expect, it } from 'bun:test';
 import process from 'node:process';
 import { ACTUAL_UPSTREAM, runProcess } from './cli-test-support';
 import {
+  contract,
   DIGEST_A,
   environment,
   SHA_A,
@@ -99,6 +100,15 @@ it('uses disjoint least-privilege source and writer tokens', () => {
     owner: 'example',
     'permission-actions': 'read',
     repositories: 'app',
+  });
+  const images = JSON.parse(contract('images-json', 'json')) as {
+    readonly web: {
+      readonly sourceWorkflow: { readonly id: number; readonly path: string };
+    };
+  };
+  expect(images.web.sourceWorkflow).toEqual({
+    id: 123_456,
+    path: '.github/workflows/build.yml',
   });
 });
 

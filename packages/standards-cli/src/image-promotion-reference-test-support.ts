@@ -1,168 +1,171 @@
-import { SHA_LENGTH } from './image-promotion-reference-contract-test-support';
+import { yamlContract } from './image-promotion-reference-contract-test-support';
 
 export type Metadata = {
   readonly imageRepository: string;
   readonly promotionLatencyMinutes: number;
   readonly sourceRef: string;
   readonly sourceRepository: string;
+  readonly sourceWorkflow: { readonly id: number; readonly path: string };
   readonly trackedTag: string;
 };
-type DisabledPin = {
-  readonly digest: null;
-  readonly promotedSourceSha: null;
-  readonly promotionEnabled: false;
+export type AppState = Metadata & {
+  readonly digest: string | null;
+  readonly promotedSourceSha: string | null;
+  readonly promotionEnabled: boolean;
 };
-type LivePin = {
-  readonly digest: string;
-  readonly promotedSourceSha: string;
-  readonly promotionEnabled: true;
-};
-export type AppState = Metadata & (DisabledPin | LivePin);
 export type Promotion = {
   readonly digest: string;
-  readonly generation: number;
   readonly imageRepository: string;
   readonly sourceRef: string;
   readonly sourceRepository: string;
   readonly sourceRunId: string;
   readonly sourceSha: string;
 };
-export type Proof = Omit<Promotion, 'generation'>;
-export type Provenance = {
-  readonly appBot: boolean;
-  readonly imagesOnly: boolean;
-  readonly sameRepositoryBranch: boolean;
-  readonly trustedCode: boolean;
+export type Compare =
+  | 'same'
+  | 'descendant'
+  | 'ancestor'
+  | 'diverged'
+  | 'unprovable';
+type WriterContract = {
+  readonly lifecycle: ReadonlyArray<Operation['phase']>;
+  readonly requiredProvenance: ReadonlyArray<string>;
+  readonly rollback: { readonly required: ReadonlyArray<string> };
 };
-export type Completion = {
+export type Operation = {
+  readonly candidate: Promotion;
   readonly identity: string;
-  readonly mergeSha: string;
-  readonly number: number;
+  readonly kind: 'promotion' | 'rollback';
+  readonly mergeSha: string | null;
+  readonly phase:
+    | 'announced'
+    | 'branch'
+    | 'open'
+    | 'merged'
+    | 'deploy-failed'
+    | 'completed';
+  readonly prNumber: number | null;
   readonly runEvidence: ReadonlyArray<string>;
 };
 export type PromotionState = {
   readonly app: AppState;
-  readonly completions: Readonly<Record<string, Completion>>;
-  readonly generation: number;
+  readonly nextPrNumber: number;
+  readonly operations: Readonly<Record<string, Operation>>;
 };
-export type ModelResult =
-  | {
-      readonly kind: 'accepted' | 'duplicate' | 'stale';
-      readonly state: PromotionState;
-    }
-  | { readonly kind: 'rejected'; readonly state: PromotionState };
+export type ModelResult = {
+  readonly kind: 'started' | 'attached' | 'stale' | 'rejected' | 'advanced';
+  readonly state: PromotionState;
+};
 
+export const writerContract = yamlContract<WriterContract>('writer-provenance');
 export const metadata: Metadata = {
   imageRepository: 'ghcr.io/example/app/web',
   promotionLatencyMinutes: 30,
   sourceRef: 'refs/heads/main',
   sourceRepository: 'example/app',
+  sourceWorkflow: { id: 123_456, path: '.github/workflows/build.yml' },
   trackedTag: 'main',
 };
-
 export const disabledApp = (value: Metadata = metadata): AppState => ({
   ...value,
   digest: null,
   promotedSourceSha: null,
   promotionEnabled: false,
 });
-
+export const validEvidence = (): Readonly<Record<string, boolean>> =>
+  Object.fromEntries(
+    writerContract.requiredProvenance.map((name) => [name, true]),
+  );
 export const canonicalIdentity = (value: Promotion): string =>
   `${value.sourceRepository}@${value.sourceSha} digest=${value.digest}`;
-
-const proofMatches = (candidate: Promotion, proof: Proof): boolean =>
-  candidate.digest === proof.digest &&
-  candidate.imageRepository === proof.imageRepository &&
-  candidate.sourceRef === proof.sourceRef &&
-  candidate.sourceRepository === proof.sourceRepository &&
-  candidate.sourceRunId === proof.sourceRunId &&
-  candidate.sourceSha === proof.sourceSha;
-
-const provenanceValid = (value: Provenance): boolean =>
-  Object.values(value).every(Boolean);
-
-export const promote = (
+const exactProof = (candidate: Promotion, proof: Promotion): boolean =>
+  JSON.stringify(candidate) === JSON.stringify(proof);
+const metadataMatches = (app: AppState, value: Promotion): boolean =>
+  app.imageRepository === value.imageRepository &&
+  app.sourceRef === value.sourceRef &&
+  app.sourceRepository === value.sourceRepository;
+const evidencePasses = (
+  evidence: Readonly<Record<string, boolean>>,
+  required = writerContract.requiredProvenance,
+): boolean => required.every((name) => evidence[name] === true);
+const attach = (
   state: PromotionState,
-  candidate: Promotion,
-  proof: Proof,
-  provenance: Provenance,
-): ModelResult => {
+  operation: Operation,
+  sourceRunId: string,
+): PromotionState => ({
+  ...state,
+  operations: {
+    ...state.operations,
+    [operation.identity]: {
+      ...operation,
+      runEvidence: [...new Set([...operation.runEvidence, sourceRunId])],
+    },
+  },
+});
+
+export const announce = ({
+  candidate,
+  compare,
+  evidence,
+  proof,
+  state,
+}: {
+  readonly candidate: Promotion;
+  readonly compare: Compare;
+  readonly evidence: Readonly<Record<string, boolean>>;
+  readonly proof: Promotion;
+  readonly state: PromotionState;
+}): ModelResult => {
   if (
-    !(proofMatches(candidate, proof) && provenanceValid(provenance)) ||
-    candidate.imageRepository !== state.app.imageRepository ||
-    candidate.sourceRef !== state.app.sourceRef ||
-    candidate.sourceRepository !== state.app.sourceRepository
+    !(
+      exactProof(candidate, proof) &&
+      metadataMatches(state.app, candidate) &&
+      evidencePasses(evidence)
+    )
   ) {
     return { kind: 'rejected', state };
   }
   const identity = canonicalIdentity(candidate);
-  const existing = state.completions[identity];
-  if (existing !== undefined) {
-    const runEvidence = [
-      ...new Set([...existing.runEvidence, candidate.sourceRunId]),
-    ];
+  const existing = state.operations[identity];
+  const currentMatches =
+    state.app.promotedSourceSha === candidate.sourceSha &&
+    state.app.digest === candidate.digest;
+  if (
+    existing?.kind === 'promotion' &&
+    (existing.phase !== 'completed' || currentMatches)
+  ) {
     return {
-      kind: 'duplicate',
-      state: {
-        ...state,
-        completions: {
-          ...state.completions,
-          [identity]: { ...existing, runEvidence },
-        },
-      },
+      kind: 'attached',
+      state: attach(state, existing, candidate.sourceRunId),
     };
   }
-  if (state.app.promotionEnabled && candidate.generation < state.generation) {
+  if (compare === 'ancestor') {
     return { kind: 'stale', state };
   }
-  if (state.app.promotionEnabled && candidate.generation === state.generation) {
+  if (
+    compare === 'diverged' ||
+    compare === 'unprovable' ||
+    (compare === 'same' && !currentMatches)
+  ) {
     return { kind: 'rejected', state };
   }
-  const completion: Completion = {
+  if (compare === 'same') {
+    return { kind: 'attached', state };
+  }
+  const operation: Operation = {
+    candidate,
     identity,
-    mergeSha: candidate.sourceSha.replaceAll(candidate.sourceSha[0] ?? '', 'd'),
-    number: Object.keys(state.completions).length + 1,
+    kind: 'promotion',
+    mergeSha: null,
+    phase: 'announced',
+    prNumber: null,
     runEvidence: [candidate.sourceRunId],
   };
   return {
-    kind: 'accepted',
+    kind: 'started',
     state: {
-      app: {
-        ...state.app,
-        digest: candidate.digest,
-        promotedSourceSha: candidate.sourceSha,
-        promotionEnabled: true,
-      },
-      completions: { ...state.completions, [identity]: completion },
-      generation: candidate.generation,
+      ...state,
+      operations: { ...state.operations, [identity]: operation },
     },
   };
-};
-
-export const reviewedMetadata = (
-  current: AppState | undefined,
-  next: Metadata | undefined,
-): AppState | undefined | 'reject' => {
-  if (next === undefined) {
-    return current?.promotionEnabled === false ? undefined : 'reject';
-  }
-  const unchanged = Object.entries(next).every(
-    ([key, value]) => current?.[key as keyof Metadata] === value,
-  );
-  if (current === undefined || !unchanged) {
-    return disabledApp(next);
-  }
-  return current;
-};
-
-export const deployable = (app: AppState | undefined): boolean =>
-  app?.promotionEnabled === true &&
-  app.digest.startsWith('sha256:') &&
-  app.promotedSourceSha.length === SHA_LENGTH;
-
-export const validProvenance: Provenance = {
-  appBot: true,
-  imagesOnly: true,
-  sameRepositoryBranch: true,
-  trustedCode: true,
 };

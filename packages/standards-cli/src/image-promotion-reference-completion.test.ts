@@ -1,4 +1,5 @@
 import { expect, it } from 'bun:test';
+import { Buffer } from 'node:buffer';
 import process from 'node:process';
 import { ACTUAL_UPSTREAM, runProcess } from './cli-test-support';
 import {
@@ -9,22 +10,41 @@ import {
   SHA_LENGTH,
 } from './image-promotion-reference-contract-test-support';
 
-const JQ_ARGUMENT_COMMAND_COUNT = 3;
 const MERGE_SHA = 'd'.repeat(SHA_LENGTH);
-const WRONG_SHA = 'e'.repeat(SHA_LENGTH);
+const PREFIX_LENGTH = 12;
+const DIGEST_PREFIX_START = 'sha256:'.length;
 const marker = `promotion-source: example/app@${SHA_A} digest=${DIGEST_A}`;
+const branch = `image-bump/web/${SHA_A.slice(0, PREFIX_LENGTH)}-${DIGEST_A.slice(DIGEST_PREFIX_START, DIGEST_PREFIX_START + PREFIX_LENGTH)}`;
 type Fixture = {
-  readonly merge: string;
+  readonly content: string;
   readonly prs: string;
   readonly result: string;
   readonly runs: string;
+  readonly view: string;
   readonly watch: string;
 };
 
+const images = {
+  web: {
+    digest: DIGEST_A,
+    promotedSourceSha: SHA_A,
+    promotionEnabled: true,
+  },
+};
+const trustedView = {
+  author: { login: 'promotion-bot[bot]' },
+  files: [{ path: 'infra/images.json' }],
+  headRefName: branch,
+  headRepository: { nameWithOwner: 'example/infra' },
+  mergeCommit: { oid: MERGE_SHA },
+  state: 'MERGED',
+  statusCheckRollup: [
+    { conclusion: 'SUCCESS', name: 'trusted-promotion-provenance' },
+  ],
+};
 const success: Fixture = {
-  merge: JSON.stringify({
-    mergeCommit: { oid: MERGE_SHA },
-    state: 'MERGED',
+  content: JSON.stringify({
+    content: Buffer.from(JSON.stringify(images)).toString('base64'),
   }),
   prs: JSON.stringify([{ body: marker, number: 7, state: 'MERGED' }]),
   result: JSON.stringify({
@@ -33,6 +53,7 @@ const success: Fixture = {
     jobs: [{ conclusion: 'success', name: 'deploy' }],
   }),
   runs: JSON.stringify([{ databaseId: 9, headSha: MERGE_SHA }]),
+  view: JSON.stringify(trustedView),
   watch: 'success',
 };
 
@@ -40,7 +61,8 @@ const ghFixture = `
 gh() {
   case "$1 $2" in
     "pr list") printf '%s' "$PRS_JSON" ;;
-    "pr view") printf '%s' "$MERGE_JSON" ;;
+    "pr view") printf '%s' "$VIEW_JSON" ;;
+    "api repos/example/infra/contents/infra/images.json?ref=$MERGE_SHA") printf '%s' "$CONTENT_JSON" ;;
     "run list") printf '%s' "$RUNS_JSON" ;;
     "run watch") test "$WATCH_RESULT" = success ;;
     "run view") printf '%s' "$RESULT_JSON" ;;
@@ -58,37 +80,47 @@ const runFixture = (fixture: Fixture) =>
       `set -euo pipefail\n${ghFixture}\n${contract('completion-trace', 'sh')}`,
     ],
     environment([
+      ['APP', 'web'],
+      ['CONTENT_JSON', fixture.content],
       ['DIGEST', DIGEST_A],
-      ['MERGE_JSON', fixture.merge],
+      ['MERGE_SHA', MERGE_SHA],
       ['PATH', process.env.PATH],
       ['PRS_JSON', fixture.prs],
       ['RESULT_JSON', fixture.result],
       ['RUNS_JSON', fixture.runs],
       ['SOURCE_REPOSITORY', 'example/app'],
       ['SOURCE_SHA', SHA_A],
+      ['VIEW_JSON', fixture.view],
       ['WATCH_RESULT', fixture.watch],
     ]),
   );
 
-it('uses supported gh syntax and standalone fail-closed jq', () => {
-  const trace = contract('completion-trace', 'sh');
-  for (const line of trace
-    .split('\n')
-    .filter((value) => value.includes('gh '))) {
-    expect(line).not.toContain('--arg');
-    expect(line).not.toContain('--jq');
+it('ignores open and closed copies before merged uniqueness', () => {
+  for (const state of ['OPEN', 'CLOSED']) {
+    const prs = JSON.stringify([
+      { body: marker, number: 6, state },
+      { body: marker, number: 7, state: 'MERGED' },
+    ]);
+    expect(runFixture({ ...success, prs }).status, state).toBe(0);
   }
-  expect(trace.match(/jq -er --arg/gu)?.length).toBe(JQ_ARGUMENT_COMMAND_COUNT);
-  expect(runFixture(success).status).toBe(0);
 });
 
-it('fails for missing, open, ambiguous, and wrong-SHA fixtures', () => {
-  const fixtures: ReadonlyArray<Fixture> = [
-    { ...success, prs: '[]' },
+it('rejects missing, multiple, and forged merged candidates', () => {
+  const forgedViews = [
+    { ...trustedView, author: { login: 'attacker' } },
     {
-      ...success,
-      prs: JSON.stringify([{ body: marker, number: 7, state: 'OPEN' }]),
+      ...trustedView,
+      headRepository: { nameWithOwner: 'attacker/infra' },
     },
+    { ...trustedView, headRefName: 'image-bump/web/forged' },
+    {
+      ...trustedView,
+      files: [{ path: 'infra/images.json' }, { path: 'backdoor.sh' }],
+    },
+    { ...trustedView, statusCheckRollup: [] },
+  ];
+  const invalid: ReadonlyArray<Fixture> = [
+    { ...success, prs: '[]' },
     {
       ...success,
       prs: JSON.stringify([
@@ -96,37 +128,26 @@ it('fails for missing, open, ambiguous, and wrong-SHA fixtures', () => {
         { body: marker, number: 8, state: 'MERGED' },
       ]),
     },
-    {
-      ...success,
-      runs: JSON.stringify([{ databaseId: 9, headSha: WRONG_SHA }]),
-    },
+    ...forgedViews.map((view) => ({ ...success, view: JSON.stringify(view) })),
   ];
-  for (const fixture of fixtures) {
+  for (const fixture of invalid) {
     expect(runFixture(fixture).status).not.toBe(0);
   }
 });
 
-it('fails for ambiguous, skipped, and failing deploy jobs', () => {
-  const fixtures: ReadonlyArray<Fixture> = [
+it('requires the exact resulting pin and successful exact deploy', () => {
+  const wrongImages = {
+    ...images,
+    web: { ...images.web, promotedSourceSha: 'e'.repeat(SHA_LENGTH) },
+  };
+  const failures: ReadonlyArray<Fixture> = [
     {
       ...success,
-      result: JSON.stringify({
-        conclusion: 'success',
-        headSha: MERGE_SHA,
-        jobs: [
-          { conclusion: 'success', name: 'deploy' },
-          { conclusion: 'success', name: 'deploy' },
-        ],
+      content: JSON.stringify({
+        content: Buffer.from(JSON.stringify(wrongImages)).toString('base64'),
       }),
     },
-    {
-      ...success,
-      result: JSON.stringify({
-        conclusion: 'success',
-        headSha: MERGE_SHA,
-        jobs: [{ conclusion: 'skipped', name: 'deploy' }],
-      }),
-    },
+    { ...success, runs: '[]' },
     {
       ...success,
       result: JSON.stringify({
@@ -137,7 +158,16 @@ it('fails for ambiguous, skipped, and failing deploy jobs', () => {
       watch: 'failure',
     },
   ];
-  for (const fixture of fixtures) {
+  expect(runFixture(success).status).toBe(0);
+  for (const fixture of failures) {
     expect(runFixture(fixture).status).not.toBe(0);
+  }
+});
+
+it('uses only supported gh arguments', () => {
+  for (const line of contract('completion-trace', 'sh')
+    .split('\n')
+    .filter((value) => value.includes('gh '))) {
+    expect(line).not.toContain('--arg');
   }
 });

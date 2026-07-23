@@ -11,13 +11,13 @@ export const DIGEST_C = `sha256:${'c'.repeat(DIGEST_LENGTH)}`;
 export const SHA_A = 'a'.repeat(SHA_LENGTH);
 export const SHA_B = 'b'.repeat(SHA_LENGTH);
 export const SHA_C = 'c'.repeat(SHA_LENGTH);
-const document = readFileSync(
-  join(
-    ACTUAL_UPSTREAM,
-    '.agents/skills/declarative-infra/references/image-promotion.md',
-  ),
-  'utf8',
+const referenceDirectory = join(
+  ACTUAL_UPSTREAM,
+  '.agents/skills/declarative-infra/references',
 );
+const document = ['image-promotion.md', 'image-promotion-contracts.md']
+  .map((file) => readFileSync(join(referenceDirectory, file), 'utf8'))
+  .join('\n');
 
 export const contract = (name: string, language: string): string => {
   const fence = '```';
