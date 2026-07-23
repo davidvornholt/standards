@@ -51,10 +51,10 @@ const DEFAULT_OPTIONS = {
   envName: 'GH_TOKEN',
   failureMode: 'fallback',
   fallbackValue: 'workflow-token',
-  secretKey: 'standards_sync_token',
+  secretKey: 'example_token',
   sha256Status: 0,
   sopsOutput: JSON.stringify({
-    ci: { standards_sync_token: 'resolved-token' },
+    ci: { example_token: 'resolved-token' },
   }),
   sopsStatus: 0,
   unameMachine: 'x86_64',

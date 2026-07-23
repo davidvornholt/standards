@@ -79,7 +79,7 @@ bun standards github --apply  # converge the live repo (needs admin gh auth)
 bun standards help            # list commands and options
 ```
 
-The `Standards sync` workflow also runs `sync` weekly and opens a PR when upstream has moved, so you never have to remember to pull. It resolves the PR token through the trusted pre-sync copy of the canonical SOPS action, removes that credential from the sync command's environment, and never executes action content after sync can replace managed files. External actions use their maintained major-version tags by policy. The PR is validated by the required `Standards` gate like any other change; set `ci.standards_sync_token` in the encrypted `secrets/ci.yaml` (repository-scoped fine-grained PAT with Contents read + Pull requests write) so the opened PR triggers that gate automatically. Without the PAT, the workflow token can create the PR only when repository or organization policy permits GitHub Actions to do so, and a maintainer must approve the queued workflow runs; when policy blocks PR creation, the pushed sync branch remains without a PR.
+The `Standards sync` workflow also runs `sync` weekly and opens a PR when upstream has moved, so you never have to remember to pull. It resolves `ci.broker_app.app_id` and `ci.broker_app.private_key` through the trusted pre-sync copy of the canonical SOPS action, mints a short-lived installation token for only the current repository with Contents read and Pull requests write, and never exposes that token to the sync command. External actions use their maintained major-version tags by policy. The PR is validated by the required `Standards` gate like any other change. Install the broker GitHub App only on the selected repository and provision its nested credentials with `bun standards creds add github --dest ci:ci.broker_app`; missing credentials or failed token minting stop the workflow without a fallback.
 
 ### Automate deferred fixes with the poller
 
@@ -127,6 +127,10 @@ Every CLI release already creates a `vX.Y.Z` tag and GitHub Release, so released
 ### Breaking migration to 0.13.0
 
 Version 0.13.0 is an intentional hard ownership cutover for infrastructure consumers adopting the standards-owned Nix package for host-side CLI and poller use. In the same migration, delete every locally assembled Bun, standards CLI, and production-dependency derivation used for those standards-owned pieces, pin a released tag, and use only its `packages.<system>.standards-cli` output; do not retain parallel derivations. The release package is the sole owner of the Bun runtime and lock-derived production dependency closure. This breaking change is limited to infrastructure packaging: npm consumers and standards-sync consumers are unchanged.
+
+### Breaking migration to brokered Standards sync credentials
+
+The weekly `Standards sync` workflow now requires the broker GitHub App and fails closed; it no longer accepts a durable repository token or falls back to the workflow token for PR creation. Delete the old scalar sync credential from `secrets/ci.yaml`, install the broker App only on each selected consumer repository, and run `bun standards creds add github --dest ci:ci.broker_app` from that repository. Commit the resulting SOPS-encrypted nested `ci.broker_app.app_id` and `ci.broker_app.private_key` values before accepting the canonical workflow update. Keep `ci.github_settings_read_token` unchanged: it remains the isolated, read-only credential for live repository-settings verification.
 
 ### Breaking migration to squash-only merging
 

@@ -2030,7 +2030,7 @@ describe('standards sync workflow ordering', () => {
     expect(result.stdout).toContain('Already in sync');
   });
 
-  it('resolves the token from the trusted action before sync and never executes post-sync action content', () => {
+  it('resolves broker credentials through the trusted action before sync and never executes post-sync action content', () => {
     const jobs = yamlJobs(SYNC_WORKFLOW);
     const { steps } = jobs.sync;
     if (!Array.isArray(steps)) {
@@ -2041,7 +2041,12 @@ describe('standards sync workflow ordering', () => {
         ? step.name
         : null,
     );
-    const resolveIndex = stepNames.indexOf('Resolve sync PR token');
+    const resolveAppIdIndex = stepNames.indexOf('Resolve broker App ID');
+    const resolvePrivateKeyIndex = stepNames.indexOf(
+      'Resolve broker App private key',
+    );
+    const mintIndex = stepNames.indexOf('Mint current-repository PR token');
+    const clearIndex = stepNames.indexOf('Clear broker App credentials');
     const syncIndex = stepNames.indexOf('Sync canonical files from upstream');
     const localActionIndexes = steps.flatMap((step, index) =>
       typeof step === 'object' &&
@@ -2051,15 +2056,16 @@ describe('standards sync workflow ordering', () => {
         ? [index]
         : [],
     );
-    const syncScript = workflowRunScript('Sync canonical files from upstream');
-
-    expect(resolveIndex).toBeGreaterThan(-1);
-    expect(syncIndex).toBeGreaterThan(resolveIndex);
-    expect(localActionIndexes).toEqual([resolveIndex]);
+    expect(resolveAppIdIndex).toBeGreaterThan(-1);
+    expect(resolvePrivateKeyIndex).toBeGreaterThan(resolveAppIdIndex);
+    expect(mintIndex).toBeGreaterThan(resolvePrivateKeyIndex);
+    expect(clearIndex).toBeGreaterThan(mintIndex);
+    expect(syncIndex).toBeGreaterThan(clearIndex);
+    expect(localActionIndexes).toEqual([
+      resolveAppIdIndex,
+      resolvePrivateKeyIndex,
+    ]);
     expect(localActionIndexes.every((index) => index < syncIndex)).toBe(true);
-    expect(
-      syncScript.match(/env -u GH_TOKEN bun standards sync/gu),
-    ).toHaveLength(2);
   });
 
   it('orders generated migration guidance before merge', () => {
