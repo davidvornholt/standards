@@ -1,7 +1,3 @@
-// Command surface for `standards creds`: broker logins, minting, and
-// reconciliation. Parsing is local to the creds family because its flag
-// vocabulary is disjoint from the sync/check commands.
-
 import { resolve } from 'node:path';
 import process from 'node:process';
 import { runCredsAddCloudflare } from './creds-add';
@@ -38,6 +34,9 @@ Options:
   --name <name>         GitHub App name (default: standards-broker)
 
 Secret values are written directly into SOPS-encrypted targets and never printed.`;
+const DAY_MS = 86_400_000;
+const MAX_PROVIDER_EXPIRATION_MS = Date.parse('9999-12-31T23:59:59.999Z');
+const POSITIVE_INTEGER = /^[1-9][0-9]*$/u;
 
 type CredsFlags = {
   dir: string;
@@ -58,10 +57,13 @@ const flagValue = (argv: ReadonlyArray<string>, index: number): string => {
   return value;
 };
 
-const parseTtlDays = (raw: string): number => {
-  const ttlDays = Number.parseInt(raw, 10);
-  if (!(Number.isInteger(ttlDays) && ttlDays > 0)) {
-    throw new Error('--ttl-days must be a positive integer');
+export const parseTtlDays = (raw: string): number => {
+  const ttlDays = Number(raw);
+  if (
+    !(POSITIVE_INTEGER.test(raw) && Number.isSafeInteger(ttlDays)) ||
+    Date.now() + ttlDays * DAY_MS > MAX_PROVIDER_EXPIRATION_MS
+  ) {
+    throw new Error('--ttl-days must be a provider-safe positive integer');
   }
   return ttlDays;
 };

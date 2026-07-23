@@ -5,7 +5,11 @@
 // runtime, scoped per repository and permission.
 
 import { resolveContext } from './creds-dest';
-import { setSopsValue } from './creds-sops';
+import {
+  inspectSopsScalarDestination,
+  setSopsValues,
+  verifySopsScalarLeaf,
+} from './creds-sops';
 
 export const runCredsAddGithub = async (
   consumer: string,
@@ -22,22 +26,34 @@ export const runCredsAddGithub = async (
     return false;
   }
   const { appId, privateKey, slug } = context.store.github;
-  const appIdWrite = setSopsValue(
-    consumer,
-    context.rel,
-    `${context.dest.key}.app_id`,
-    String(appId),
+  const appIdPath = `${context.dest.key}.app_id`;
+  const privateKeyPath = `${context.dest.key}.private_key`;
+  const preflight = await Promise.all(
+    [appIdPath, privateKeyPath].map((path) =>
+      inspectSopsScalarDestination(consumer, context.rel, path),
+    ),
   );
-  const keyWrite = appIdWrite.ok
-    ? setSopsValue(
-        consumer,
-        context.rel,
-        `${context.dest.key}.private_key`,
-        privateKey,
-      )
-    : appIdWrite;
-  if (!keyWrite.ok) {
-    console.error(`standards creds: ${keyWrite.problem}`);
+  const blocked = preflight.find((result) => !result.ok);
+  if (blocked !== undefined && !blocked.ok) {
+    console.error(`standards creds: ${blocked.problem}`);
+    return false;
+  }
+  const written = setSopsValues(consumer, context.rel, [
+    { path: appIdPath, value: String(appId) },
+    { path: privateKeyPath, value: privateKey },
+  ]);
+  if (!written.ok) {
+    console.error(`standards creds: ${written.problem}`);
+    return false;
+  }
+  const verified = await Promise.all(
+    [appIdPath, privateKeyPath].map((path) =>
+      verifySopsScalarLeaf(consumer, context.rel, path),
+    ),
+  );
+  const failedVerification = verified.find((result) => !result.ok);
+  if (failedVerification !== undefined && !failedVerification.ok) {
+    console.error(`standards creds: ${failedVerification.problem}`);
     return false;
   }
   console.log(
