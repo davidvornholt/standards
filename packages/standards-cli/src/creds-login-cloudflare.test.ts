@@ -4,10 +4,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
-import {
-  cloudflareBootstrapInstructions,
-  verifyCloudflareBootstrapAuthority,
-} from './creds-login-cloudflare';
+import { verifyCloudflareBootstrapAuthority } from './creds-login-cloudflare';
 import { BROKER_IDENTITY_NAME } from './creds-naming';
 
 const ACCOUNT_ID_LENGTH = 32;
@@ -155,7 +152,7 @@ describe('Cloudflare bootstrap authority rejection', () => {
     expect(calls).toHaveLength(1);
   });
 
-  it('does not mutate the broker store when verification omits the id', () => {
+  it('prints the required setup guidance without storing an invalid token', () => {
     const directory = mkdtempSync(join(tmpdir(), 'creds-login-cloudflare-'));
     temporaryDirectories.push(directory);
     const brokerPath = join(directory, 'broker.yaml');
@@ -179,22 +176,14 @@ describe('Cloudflare bootstrap authority rejection', () => {
       input: `${TOKEN}\n`,
     });
     expect(run.status).toBe(1);
+    expect(run.stdout).toContain(
+      `https://dash.cloudflare.com/${ACCOUNT}/api-tokens`,
+    );
+    expect(run.stdout).toContain('Create additional tokens');
+    expect(run.stdout).not.toContain('Create Custom Token');
     expect(run.stderr).toContain(
       'token verification returned no valid token id',
     );
     expect(existsSync(brokerPath)).toBe(false);
   });
-});
-
-it('prints the complete Create additional tokens template sequence', () => {
-  const tokensUrl = `https://dash.cloudflare.com/${ACCOUNT}/api-tokens`;
-  expect(cloudflareBootstrapInstructions(tokensUrl)).toEqual([
-    'Create the bootstrap token (one time for this account):',
-    `  1. Open ${tokensUrl}`,
-    '  2. Select Create Token',
-    '  3. Find Create additional tokens and select Use template',
-    `  4. Name it ${BROKER_IDENTITY_NAME}`,
-    '  5. Keep exactly one permission: Account / Account API Tokens / Edit',
-    '  6. Continue to summary, create the token, and copy the value',
-  ]);
 });

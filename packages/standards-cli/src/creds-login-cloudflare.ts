@@ -59,18 +59,6 @@ export const verifyCloudflareBootstrapAuthority = async (
   return { ok: true, value: { tokenName: own.name } };
 };
 
-export const cloudflareBootstrapInstructions = (
-  tokensUrl: string,
-): ReadonlyArray<string> => [
-  'Create the bootstrap token (one time for this account):',
-  `  1. Open ${tokensUrl}`,
-  '  2. Select Create Token',
-  '  3. Find Create additional tokens and select Use template',
-  `  4. Name it ${BROKER_IDENTITY_NAME}`,
-  '  5. Keep exactly one permission: Account / Account API Tokens / Edit',
-  '  6. Continue to summary, create the token, and copy the value',
-];
-
 export const runCredsLoginCloudflare = async (options: {
   readonly account: string | undefined;
 }): Promise<boolean> => {
@@ -94,9 +82,15 @@ export const runCredsLoginCloudflare = async (options: {
     return false;
   }
   const tokensUrl = `https://dash.cloudflare.com/${accountId}/api-tokens`;
-  for (const instruction of cloudflareBootstrapInstructions(tokensUrl)) {
-    console.log(instruction);
-  }
+  console.log('Create the bootstrap token (one time for this account):');
+  console.log(`  1. Open ${tokensUrl}`);
+  console.log('  2. Select Create Token');
+  console.log('  3. Find Create additional tokens and select Use template');
+  console.log(`  4. Name it ${BROKER_IDENTITY_NAME}`);
+  console.log(
+    '  5. Keep exactly one permission: Account / Account API Tokens / Edit',
+  );
+  console.log('  6. Continue to summary, create the token, and copy the value');
   openInBrowser(tokensUrl);
   const token = await promptHidden('Paste the token (input is hidden): ');
   if (token.length === 0) {
