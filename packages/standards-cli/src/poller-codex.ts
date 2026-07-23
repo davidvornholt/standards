@@ -93,7 +93,7 @@ export const runCodex = (
     const details: Record<string, unknown> = isRecord(error) ? error : {};
     const stderr =
       typeof details.stderr === 'string'
-        ? details.stderr.slice(-STDERR_SNIPPET_LIMIT).trim()
+        ? details.stderr.trim().slice(-STDERR_SNIPPET_LIMIT)
         : '';
     const message = error instanceof Error ? error.message : String(error);
     // Node's "Command failed" message echoes the full command line, and the

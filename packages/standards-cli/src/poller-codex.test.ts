@@ -15,6 +15,7 @@ import { OUTCOME_DIR } from './poller-protocol';
 
 const dirs: Array<string> = [];
 const EXPECTED_TIMEOUT_MS = 120_000;
+const EXCESSIVE_TRAILING_WHITESPACE_LENGTH = 2001;
 const config = {
   repos: ['owner/repo'],
   model: 'gpt-test',
@@ -77,6 +78,19 @@ describe('runCodex', () => {
     expect(result.succeeded).toBeFalse();
     expect(result.failure).toContain('timed out');
     expect(result.failure).toContain('last process output');
+  });
+
+  it('preserves stderr before trailing whitespace', () => {
+    const workDir = mkdtempSync(join(tmpdir(), 'poller-codex-'));
+    dirs.push(workDir);
+    const result = runCodex(workDir, 'do work', config, () => {
+      const error = new Error('failed') as Error & { stderr: string };
+      error.stderr = `ROOT CAUSE: model requires a newer CLI\n${' '.repeat(
+        EXCESSIVE_TRAILING_WHITESPACE_LENGTH,
+      )}`;
+      throw error;
+    });
+    expect(result.failure).toContain('ROOT CAUSE: model requires a newer CLI');
   });
 
   it('replaces the echoed command line with the exit cause', () => {
