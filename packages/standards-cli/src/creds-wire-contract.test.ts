@@ -66,11 +66,11 @@ describe('provider wire contract', () => {
   });
 
   it('preserves GitHub manifest conversion errors', async () => {
-    stubFetch(HTTP_NOT_FOUND, { message: 'Not Found' });
+    stubFetch(HTTP_NOT_FOUND, { message: 'manifest code expired' });
 
     expect(await convertManifestCode('expired')).toEqual({
       ok: false,
-      problem: 'manifest conversion: HTTP 404 Not Found',
+      problem: 'manifest conversion: HTTP 404 manifest code expired',
     });
   });
 
