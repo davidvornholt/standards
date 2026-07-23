@@ -56,6 +56,8 @@ const PINNED_STANDARDS_VERSION_PATTERN =
 const MINIMUM_STANDARDS_VERSION_PATTERN =
   /MINIMUM_STANDARDS_VERSION: "(?<version>\d+\.\d+\.\d+)"/u;
 const MAJOR_ACTION_REF = /^[^@\s]+@v\d+$/u;
+const SOURCE_REPOSITORY_CONDITION =
+  "github.repository == 'davidvornholt/standards'";
 const STD_PATHS: ReadonlyArray<string> = [
   'sync-standards.json',
   '.github/dependabot.base.yml',
@@ -164,16 +166,18 @@ const githubExpression = (expression: string): string =>
   `${'$'}{{ ${expression} }}`;
 const githubMatrixExpression = (property: string): string =>
   githubExpression(`matrix.${property}`);
-const runNixDiscovery = (
-  metadata: string | undefined,
-): { readonly output: string; readonly result: RunResult } => {
+const runNixDiscovery = ({
+  filter,
+  metadata,
+}: {
+  readonly filter: string | undefined;
+  readonly metadata: string | undefined;
+}): { readonly output: string; readonly result: RunResult } => {
   const fixture = mkTmp('nix-discovery-');
   const outputPath = join(fixture, 'github-output');
-  write(
-    fixture,
-    'nix/bun-system-matrix.jq',
-    readFileSync(NIX_SYSTEM_MATRIX_FILTER, 'utf8'),
-  );
+  if (filter !== undefined) {
+    write(fixture, 'nix/bun-system-matrix.jq', filter);
+  }
   if (metadata !== undefined) {
     write(fixture, 'nix/bun-system-metadata.json', metadata);
   }
@@ -1803,11 +1807,20 @@ describe('canonical standards workflow Nix gate', () => {
     const jobs = yamlJobs(STANDARDS_WORKFLOW);
     const discoveryJob = jobs['nix-discovery'];
     const nixJob = jobs.nix;
-    const sourceRepositoryCondition =
-      "github.repository == 'davidvornholt/standards'";
+    const checkSteps = jobs.check.steps as ReadonlyArray<
+      Readonly<Record<string, unknown>>
+    >;
+    const aggregateStep = checkSteps.find(
+      (step) => step.name === 'Require all standards gates',
+    );
 
-    expect(discoveryJob.if).toBe(sourceRepositoryCondition);
-    expect(nixJob.if).toBe(sourceRepositoryCondition);
+    expect(discoveryJob.if).toBe(SOURCE_REPOSITORY_CONDITION);
+    expect(nixJob.if).toBe(SOURCE_REPOSITORY_CONDITION);
+    expect(aggregateStep?.env).toEqual(
+      expect.objectContaining({
+        IS_SOURCE_REPOSITORY: githubExpression(SOURCE_REPOSITORY_CONDITION),
+      }),
+    );
     expect(discoveryJob['runs-on']).toBe('ubuntu-latest');
     expect(discoveryJob.outputs).toEqual({
       matrix: githubExpression('steps.matrix.outputs.matrix'),
@@ -1847,14 +1860,26 @@ describe('canonical standards workflow Nix gate', () => {
   });
 
   it('emits the current native runner matrix from its sole JSON owner', () => {
-    const { output, result } = runNixDiscovery(
-      readFileSync(NIX_SYSTEM_METADATA, 'utf8'),
-    );
+    const { output, result } = runNixDiscovery({
+      filter: readFileSync(NIX_SYSTEM_MATRIX_FILTER, 'utf8'),
+      metadata: readFileSync(NIX_SYSTEM_METADATA, 'utf8'),
+    });
 
     expect(result.status).toBe(0);
     expect(output).toBe(
       'matrix={"include":[{"runner":"ubuntu-24.04-arm","system":"aarch64-linux"},{"runner":"ubuntu-24.04","system":"x86_64-linux"}]}\n',
     );
+  });
+
+  it('fails discovery when the Punktlandung matrix filter is missing', () => {
+    const { output, result } = runNixDiscovery({
+      filter: undefined,
+      metadata: readFileSync(NIX_SYSTEM_METADATA, 'utf8'),
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(output).toBe('');
+    expect(result.stderr).toContain('nix/bun-system-matrix.jq');
   });
 
   it.each([
@@ -1870,7 +1895,10 @@ describe('canonical standards workflow Nix gate', () => {
       '{"x86_64-linux":{"archiveHash":"sha256-lR7iruhV8IWVruxiJSJqKY0/6oOj3NZGXAnLzN9+hI8=","archivePlatform":"x64","runner":"self-hosted"}}',
     ],
   ])('fails discovery for %s', (_label, metadata) => {
-    const { output, result } = runNixDiscovery(metadata);
+    const { output, result } = runNixDiscovery({
+      filter: readFileSync(NIX_SYSTEM_MATRIX_FILTER, 'utf8'),
+      metadata,
+    });
 
     expect(result.status).not.toBe(0);
     expect(output).toBe('');
@@ -1878,6 +1906,7 @@ describe('canonical standards workflow Nix gate', () => {
 });
 
 describe('canonical standards workflow Nix aggregation', () => {
+  const needsResults = ['success', 'failure', 'cancelled', 'skipped'] as const;
   const runAggregate = (
     aggregateScript: string,
     results: Readonly<Record<string, string>>,
@@ -1889,19 +1918,12 @@ describe('canonical standards workflow Nix aggregation', () => {
       results,
     ).status;
 
-  it('keeps the source required check fail-closed over discovery and the matrix', () => {
+  it('requires the exact repository-mode result across every Nix needs outcome', () => {
     const jobs = yamlJobs(STANDARDS_WORKFLOW);
     const aggregateScript = yamlRunScript(
       STANDARDS_WORKFLOW,
       'Require all standards gates',
     );
-    const successfulResults = {
-      GITHUB_SETTINGS_RESULT: 'success',
-      NIX_DISCOVERY_RESULT: 'success',
-      NIX_RESULT: 'success',
-      QUALITY_RESULT: 'success',
-      REPOSITORY: 'davidvornholt/standards',
-    };
 
     expect(jobs.check.if).toBe('always()');
     expect(jobs.check.needs).toEqual([
@@ -1910,55 +1932,80 @@ describe('canonical standards workflow Nix aggregation', () => {
       'nix-discovery',
       'nix',
     ]);
-    expect(runAggregate(aggregateScript, successfulResults)).toBe(0);
-    for (const failedResults of [
-      { ...successfulResults, NIX_DISCOVERY_RESULT: 'failure' },
-      {
-        ...successfulResults,
-        NIX_DISCOVERY_RESULT: 'failure',
-        NIX_RESULT: 'skipped',
-      },
-      { ...successfulResults, NIX_RESULT: 'skipped' },
-      { ...successfulResults, NIX_RESULT: 'failure' },
-      {
-        ...successfulResults,
-        NIX_DISCOVERY_RESULT: 'skipped',
-        NIX_RESULT: 'skipped',
-      },
-    ]) {
-      expect(runAggregate(aggregateScript, failedResults)).not.toBe(0);
+
+    for (const [isSourceRepository, expectedNixResult] of [
+      ['true', 'success'],
+      ['false', 'skipped'],
+    ] as const) {
+      for (const nixDiscoveryResult of needsResults) {
+        for (const nixResult of needsResults) {
+          const status = runAggregate(aggregateScript, {
+            GITHUB_SETTINGS_RESULT: 'success',
+            IS_SOURCE_REPOSITORY: isSourceRepository,
+            NIX_DISCOVERY_RESULT: nixDiscoveryResult,
+            NIX_RESULT: nixResult,
+            QUALITY_RESULT: 'success',
+          });
+          const expectedStatus =
+            nixDiscoveryResult === expectedNixResult &&
+            nixResult === expectedNixResult
+              ? 0
+              : 1;
+
+          expect(status).toBe(expectedStatus);
+        }
+      }
     }
   });
 
-  it('accepts consumers only when ordinary gates succeed and both Nix jobs skip', () => {
+  it('rejects mixed-case and otherwise unexpected repository modes', () => {
     const aggregateScript = yamlRunScript(
       STANDARDS_WORKFLOW,
       'Require all standards gates',
     );
-    const successfulResults = {
-      GITHUB_SETTINGS_RESULT: 'success',
-      NIX_DISCOVERY_RESULT: 'skipped',
-      NIX_RESULT: 'skipped',
-      QUALITY_RESULT: 'success',
-      REPOSITORY: 'davidvornholt/punktlandung',
-    };
 
-    expect(runAggregate(aggregateScript, successfulResults)).toBe(0);
-    for (const failedResults of [
-      { ...successfulResults, QUALITY_RESULT: 'failure' },
-      { ...successfulResults, GITHUB_SETTINGS_RESULT: 'failure' },
-      { ...successfulResults, NIX_DISCOVERY_RESULT: 'success' },
-      { ...successfulResults, NIX_RESULT: 'success' },
-      {
-        ...successfulResults,
-        NIX_DISCOVERY_RESULT: 'success',
-        NIX_RESULT: 'success',
-      },
-      { ...successfulResults, NIX_DISCOVERY_RESULT: 'failure' },
-      { ...successfulResults, NIX_RESULT: 'failure' },
-      { ...successfulResults, NIX_RESULT: 'cancelled' },
-    ]) {
-      expect(runAggregate(aggregateScript, failedResults)).not.toBe(0);
+    for (const isSourceRepository of ['True', 'FALSE', 'unexpected']) {
+      for (const nixDiscoveryResult of needsResults) {
+        for (const nixResult of needsResults) {
+          expect(
+            runAggregate(aggregateScript, {
+              GITHUB_SETTINGS_RESULT: 'success',
+              IS_SOURCE_REPOSITORY: isSourceRepository,
+              NIX_DISCOVERY_RESULT: nixDiscoveryResult,
+              NIX_RESULT: nixResult,
+              QUALITY_RESULT: 'success',
+            }),
+          ).not.toBe(0);
+        }
+      }
+    }
+  });
+
+  it('requires both ordinary gates in source and consumer modes', () => {
+    const aggregateScript = yamlRunScript(
+      STANDARDS_WORKFLOW,
+      'Require all standards gates',
+    );
+
+    for (const [isSourceRepository, nixResult] of [
+      ['true', 'success'],
+      ['false', 'skipped'],
+    ] as const) {
+      for (const failedGate of [
+        'GITHUB_SETTINGS_RESULT',
+        'QUALITY_RESULT',
+      ] as const) {
+        expect(
+          runAggregate(aggregateScript, {
+            GITHUB_SETTINGS_RESULT: 'success',
+            IS_SOURCE_REPOSITORY: isSourceRepository,
+            NIX_DISCOVERY_RESULT: nixResult,
+            NIX_RESULT: nixResult,
+            QUALITY_RESULT: 'success',
+            [failedGate]: 'failure',
+          }),
+        ).not.toBe(0);
+      }
     }
   });
 });
