@@ -123,6 +123,45 @@ jobs:
           STANDARDS_SKIP_GITHUB_CHECK: "true"
         run: bun run check
 
+  nix-discovery:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Discover Nix matrix
+        id: matrix
+        run: |
+          set -euo pipefail
+          matrix=$(jq -cer -f nix/bun-system-matrix.jq nix/bun-system-metadata.json)
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  nix:
+    name: Nix (${{ matrix.system }})
+    needs: nix-discovery
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.nix-discovery.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+
+      - name: Test Nix system metadata
+        run: bash nix/bun-system-metadata.test.sh
+
+      - name: Build Nix check
+        run: nix build ".#checks.${{ matrix.system }}.standards-cli" -L
+
   # The settings-read PAT is isolated from all repository-controlled executable
   # code. The checkout contains only declarative settings inputs and the
   # encrypted token source; the CLI is a published, checksum-pinned artifact
@@ -234,7 +273,7 @@ jobs:
           GH_TOKEN="$value" "$RUNNER_TEMP/standards-bin/bun" \
             package/src/cli.ts github --check --dir "$GITHUB_WORKSPACE"
 
-  # Keep the stable required-check name while making both independent gates
+  # Keep the stable required-check name while making all independent gates
   # mandatory. `always()` ensures a failed or cancelled dependency cannot turn
   # this required check into a skipped success.
   check:
@@ -242,14 +281,18 @@ jobs:
     needs:
       - quality
       - github-settings
+      - nix-discovery
+      - nix
     runs-on: ubuntu-latest
     steps:
       - name: Require all standards gates
         env:
           GITHUB_SETTINGS_RESULT: ${{ needs.github-settings.result }}
+          NIX_DISCOVERY_RESULT: ${{ needs.nix-discovery.result }}
+          NIX_RESULT: ${{ needs.nix.result }}
           QUALITY_RESULT: ${{ needs.quality.result }}
         run: |
-          if [ "$QUALITY_RESULT" != success ] || [ "$GITHUB_SETTINGS_RESULT" != success ]; then
-            echo "::error::Standards gates did not all succeed (quality=$QUALITY_RESULT, github-settings=$GITHUB_SETTINGS_RESULT)"
+          if [ "$QUALITY_RESULT" != success ] || [ "$GITHUB_SETTINGS_RESULT" != success ] || [ "$NIX_DISCOVERY_RESULT" != success ] || [ "$NIX_RESULT" != success ]; then
+            echo "::error::Standards gates did not all succeed (quality=$QUALITY_RESULT, github-settings=$GITHUB_SETTINGS_RESULT, nix-discovery=$NIX_DISCOVERY_RESULT, nix=$NIX_RESULT)"
             exit 1
           fi

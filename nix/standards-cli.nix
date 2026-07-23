@@ -1,5 +1,6 @@
 {
   bun,
+  bunSystemMetadata,
   cacert,
   fetchurl,
   lib,
@@ -13,23 +14,12 @@ let
   packageName = cliManifest.name;
   version = cliManifest.version;
   bunVersion = lib.removePrefix "bun@" rootManifest.packageManager;
-  bunPlatform =
-    {
-      aarch64-linux = "aarch64";
-      x86_64-linux = "x64";
-    }
-    .${stdenvNoCC.hostPlatform.system};
-  bunArchiveHash =
-    {
-      aarch64-linux = "sha256-on/7Y6gxA3WDbg1vZorhf6jY0YuIw3yCHGUzGXOhmjs=";
-      x86_64-linux = "sha256-lR7iruhV8IWVruxiJSJqKY0/6oOj3NZGXAnLzN9+hI8=";
-    }
-    .${stdenvNoCC.hostPlatform.system};
+  systemMetadata = bunSystemMetadata.${stdenvNoCC.hostPlatform.system};
   standardsBun = bun.overrideAttrs {
     version = bunVersion;
     src = fetchurl {
-      url = "https://github.com/oven-sh/bun/releases/download/bun-v${bunVersion}/bun-linux-${bunPlatform}.zip";
-      hash = bunArchiveHash;
+      url = "https://github.com/oven-sh/bun/releases/download/bun-v${bunVersion}/bun-linux-${systemMetadata.archivePlatform}.zip";
+      hash = systemMetadata.archiveHash;
     };
   };
   runtimeDependencies = stdenvNoCC.mkDerivation {
@@ -92,9 +82,6 @@ stdenvNoCC.mkDerivation {
     homepage = cliManifest.homepage;
     license = lib.licenses.mit;
     mainProgram = "standards";
-    platforms = [
-      "aarch64-linux"
-      "x86_64-linux"
-    ];
+    platforms = builtins.attrNames bunSystemMetadata;
   };
 }
