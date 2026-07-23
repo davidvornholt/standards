@@ -1,7 +1,14 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import {
   type BrokerStore,
   EMPTY_BROKER_STORE,
@@ -74,6 +81,22 @@ describe('broker store', () => {
       exists: true,
       problem: null,
     });
+  });
+
+  it('syncs the parent directory only after the atomic rename', async () => {
+    const target = storePath();
+    mkdirSync(dirname(target), { recursive: true });
+    const calls: Array<string> = [];
+    await updateBrokerStore(
+      target,
+      () => EMPTY_BROKER_STORE,
+      (parent) => {
+        expect(existsSync(target)).toBe(true);
+        calls.push(`sync:${parent}`);
+        return Promise.resolve();
+      },
+    );
+    expect(calls).toEqual([`sync:${dirname(target)}`]);
   });
 
   it('rejects a malformed github section with a login hint', async () => {

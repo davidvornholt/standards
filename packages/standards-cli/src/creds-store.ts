@@ -13,10 +13,9 @@ export type GithubBrokerApp = {
   readonly clientId: string;
   readonly privateKey: string;
 };
-export type CloudflareBrokerAccount = {
-  readonly accountId: string;
-  readonly token: string;
-};
+export type CloudflareBrokerAccount = Readonly<
+  Record<'accountId' | 'token', string>
+>;
 export type BrokerStore = {
   readonly github: GithubBrokerApp | null;
   readonly cloudflare: ReadonlyArray<CloudflareBrokerAccount>;
@@ -32,11 +31,10 @@ const LOCK_TIMEOUT_MS = 10_000;
 export const inspectBrokerFileMode = (path: string) => {
   try {
     const mode = statSync(path).mode % FILE_MODE_MODULUS;
-    const groupOther = mode % GROUP_OTHER_MODULUS;
     return {
       exists: true,
       problem:
-        groupOther === 0
+        mode % GROUP_OTHER_MODULUS === 0
           ? null
           : `mode ${mode.toString(OCTAL_RADIX)} is broader than 0600; tighten with chmod 600`,
     };
@@ -50,24 +48,20 @@ export const resolveBrokerPath = (): string =>
     process.env.XDG_CONFIG_HOME ?? join(homedir(), '.config'),
     'standards/broker.yaml',
   );
-const parseGithub = (raw: unknown, path: string): GithubBrokerApp | null => {
+const parseGithub = (raw: unknown): GithubBrokerApp | null => {
   if (raw === undefined || raw === null) {
     return null;
   }
   if (
-    !(
-      isRecord(raw) &&
-      typeof raw.app_id === 'number' &&
-      Number.isInteger(raw.app_id) &&
-      isNonEmptyString(raw.slug) &&
-      isNonEmptyString(raw.html_url) &&
-      isNonEmptyString(raw.client_id) &&
-      isNonEmptyString(raw.private_key)
-    )
+    !isRecord(raw) ||
+    typeof raw.app_id !== 'number' ||
+    !Number.isInteger(raw.app_id) ||
+    !isNonEmptyString(raw.slug) ||
+    !isNonEmptyString(raw.html_url) ||
+    !isNonEmptyString(raw.client_id) ||
+    !isNonEmptyString(raw.private_key)
   ) {
-    throw new Error(
-      `${path}: invalid "github" credentials; re-run \`standards creds login github\``,
-    );
+    throw new Error('invalid github: run `standards creds login github`');
   }
   return {
     appId: raw.app_id,
@@ -88,18 +82,16 @@ const parseCloudflare = (
     throw new Error(`${path}: "cloudflare" must be a list of accounts`);
   }
   return raw.map((entry) => {
-    if (
-      !(
-        isRecord(entry) &&
-        isNonEmptyString(entry.account_id) &&
-        isNonEmptyString(entry.token)
-      )
-    ) {
+    const valid =
+      isRecord(entry) &&
+      isNonEmptyString(entry.account_id) &&
+      isNonEmptyString(entry.token);
+    if (!valid) {
       throw new Error(
-        `${path}: invalid "cloudflare" credentials; re-run \`standards creds login cloudflare\``,
+        'invalid cloudflare: run `standards creds login cloudflare`',
       );
     }
-    return { accountId: entry.account_id, token: entry.token };
+    return { accountId: String(entry.account_id), token: String(entry.token) };
   });
 };
 export const readBrokerStore = async (path: string): Promise<BrokerStore> => {
@@ -113,17 +105,18 @@ export const readBrokerStore = async (path: string): Promise<BrokerStore> => {
     throw new Error(`${path} must contain a YAML mapping`);
   }
   return {
-    github: parseGithub(raw.github, path),
+    github: parseGithub(raw.github),
     cloudflare: parseCloudflare(raw.cloudflare, path),
   };
 };
 export const updateBrokerStore = async (
   path: string,
   update: (store: BrokerStore) => BrokerStore | Promise<BrokerStore>,
+  sync: typeof syncDirectory = syncDirectory,
 ): Promise<void> =>
   withBrokerLock(path, async () => {
     const store = await update(await readBrokerStore(path));
-    await writeBrokerStoreUnlocked(path, store);
+    await writeBrokerStoreUnlocked(path, store, sync);
   });
 const storeDocument = (store: BrokerStore): unknown => ({
   ...(store.github === null
@@ -146,9 +139,18 @@ const storeDocument = (store: BrokerStore): unknown => ({
         })),
       }),
 });
+const syncDirectory = async (path: string): Promise<void> => {
+  const handle = await open(path, 'r');
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+};
 const writeBrokerStoreUnlocked = async (
   path: string,
   store: BrokerStore,
+  sync: typeof syncDirectory,
 ): Promise<void> => {
   const parent = dirname(path);
   await mkdir(parent, { recursive: true, mode: OWNER_ONLY_DIR_MODE });
@@ -163,6 +165,7 @@ const writeBrokerStoreUnlocked = async (
       await handle.close();
     }
     await rename(temporary, path);
+    await sync(parent);
   } finally {
     await unlink(temporary).catch(() => undefined);
   }
@@ -184,10 +187,7 @@ const withBrokerLock = async <T>(
         throw error;
       }
       if (Date.now() >= deadline) {
-        throw new Error(
-          `timed out waiting for ${lockPath}; if no standards creds process is running, remove this stale lock directory`,
-          { cause: error },
-        );
+        throw new Error(`lock timeout: ${lockPath}`, { cause: error });
       }
       await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS));
     }

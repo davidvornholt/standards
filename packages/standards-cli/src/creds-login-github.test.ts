@@ -2,11 +2,18 @@ import { describe, expect, it } from 'bun:test';
 import {
   buildAppManifest,
   createManifestState,
+  githubInstallMessage,
   manifestFormHtml,
   parseConversion,
+  startManifestLoginListener,
 } from './creds-login-github';
 
 const MANIFEST_STATE_HEX_LENGTH = 64;
+const HTTP_BAD_REQUEST = 400;
+const HTTP_NOT_FOUND = 404;
+const HTTP_OK = 200;
+const LISTENER_TIMEOUT_MS = 5000;
+const STATE_QUERY = /[?&]state=(?<state>[a-f0-9]+)/u;
 
 describe('GitHub App manifest flow', () => {
   it('builds a manifest with an inactive webhook and the localhost redirect', () => {
@@ -52,7 +59,71 @@ describe('GitHub App manifest flow', () => {
     expect(state.accept(state.value)).toBe(true);
     expect(state.accept(state.value)).toBe(false);
   });
+});
 
+describe('GitHub App manifest listener', () => {
+  it('keeps the form behind a separate one-time start capability', async () => {
+    const listener = startManifestLoginListener(
+      (port, state) =>
+        manifestFormHtml(
+          'https://github.com/settings/apps/new',
+          JSON.stringify(
+            buildAppManifest(
+              'standards-broker',
+              `http://127.0.0.1:${port}/callback`,
+            ),
+          ),
+          state,
+        ),
+      LISTENER_TIMEOUT_MS,
+    );
+    const { origin } = new URL(listener.startUrl);
+    try {
+      const root = await fetch(`${origin}/`);
+      const rootBody = await root.text();
+      expect(root.status).toBe(HTTP_NOT_FOUND);
+      const unknown = await fetch(`${origin}/unknown`);
+      const unknownBody = await unknown.text();
+      expect(unknown.status).toBe(HTTP_NOT_FOUND);
+
+      const start = await fetch(listener.startUrl);
+      const form = await start.text();
+      expect(start.status).toBe(HTTP_OK);
+      const state = form.match(STATE_QUERY)?.groups?.state ?? '';
+      expect(state).toHaveLength(MANIFEST_STATE_HEX_LENGTH);
+      expect(rootBody).not.toContain(state);
+      expect(unknownBody).not.toContain(state);
+
+      const consumedStart = await fetch(listener.startUrl);
+      expect(consumedStart.status).toBe(HTTP_NOT_FOUND);
+      expect(await consumedStart.text()).not.toContain(state);
+      expect((await fetch(`${origin}/callback?code=missing`)).status).toBe(
+        HTTP_BAD_REQUEST,
+      );
+      expect(
+        (
+          await fetch(
+            `${origin}/callback?code=wrong&state=${'0'.repeat(MANIFEST_STATE_HEX_LENGTH)}`,
+          )
+        ).status,
+      ).toBe(HTTP_BAD_REQUEST);
+      const callback = `${origin}/callback?code=created&state=${state}`;
+      expect((await fetch(callback)).status).toBe(HTTP_OK);
+      expect((await fetch(callback)).status).toBe(HTTP_BAD_REQUEST);
+      expect(await listener.code).toBe('created');
+    } finally {
+      listener.close();
+    }
+  });
+
+  it('instructs installation only on selected repositories', () => {
+    const output = githubInstallMessage('https://github.com/apps/broker');
+    expect(output).toContain('selected repositories');
+    expect(output).not.toContain('All repositories');
+  });
+});
+
+describe('GitHub App manifest conversion', () => {
   it('parses a manifest conversion into broker app credentials', () => {
     expect(
       parseConversion({
