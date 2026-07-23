@@ -63,6 +63,28 @@ describe('parsePollerConfig', () => {
     ).toContain('poller config "repos" entries must be unique');
   });
 
+  it('accepts at most twelve watched repositories', () => {
+    const repos = Array.from(
+      { length: 12 },
+      (_, index) => `owner/repo-${index + 1}`,
+    );
+    expect(
+      parsePollerConfig({ ...validConfig(), repos }, CONFIG_DIR),
+    ).toMatchObject({ config: { repos }, problems: [] });
+  });
+
+  it('rejects a thirteenth watched repository with migration guidance', () => {
+    const repos = Array.from(
+      { length: 13 },
+      (_, index) => `owner/repo-${index + 1}`,
+    );
+    expect(
+      parsePollerConfig({ ...validConfig(), repos }, CONFIG_DIR).problems,
+    ).toEqual([
+      'poller config "repos" supports at most 12 repositories at the one-minute polling cadence; reduce the list or split it across pollers with independent GitHub API budgets',
+    ]);
+  });
+
   it('requires an explicit model and reasoning effort', () => {
     const { config, problems } = parsePollerConfig(
       { repos: ['owner/repo'] },

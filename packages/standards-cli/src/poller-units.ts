@@ -8,9 +8,8 @@ import { fileURLToPath } from 'node:url';
 import type { PollerConfig } from './poller-config';
 
 const SERVICE_NAME = 'standards-poller';
-// Bounds idle pickup latency only: OnUnitActiveSec on a oneshot unit never
-// starts a tick while one is running, and an idle tick costs ~4 GitHub reads
-// per watched repo, so a short interval stays well inside the API budget.
+// Bounds idle pickup latency while preserving a full cooldown after each tick:
+// OnUnitInactiveSec starts counting when the oneshot service finishes.
 // AccuracySec matters at this scale: systemd's default 1min accuracy would
 // stretch a 1min interval into a 1-2min window.
 const TICK_INTERVAL_MINUTES = 1;
@@ -67,7 +66,7 @@ Description=Run the standards fix poller on an interval
 
 [Timer]
 OnBootSec=2min
-OnUnitActiveSec=${TICK_INTERVAL_MINUTES}min
+OnUnitInactiveSec=${TICK_INTERVAL_MINUTES}min
 AccuracySec=15s
 Persistent=true
 

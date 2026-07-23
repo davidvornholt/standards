@@ -24,7 +24,8 @@ describe('renderUnits', () => {
     expect(service).toContain(
       'poller --config "/etc/standards-poller/config.json"',
     );
-    expect(timer).toContain('OnUnitActiveSec=1min');
+    expect(timer).toContain('OnUnitInactiveSec=1min');
+    expect(timer).not.toContain('OnUnitActiveSec');
     expect(timer).toContain('AccuracySec=15s');
     expect(timer).toContain('Persistent=true');
   });

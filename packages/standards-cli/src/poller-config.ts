@@ -28,6 +28,7 @@ const DEFAULT_STALE_CLAIM_HOURS = 6;
 // wedged agents, not to bound honest work.
 const DEFAULT_RUN_TIMEOUT_MINUTES = 240;
 const MINUTES_PER_HOUR = 60;
+const MAX_WATCHED_REPOSITORIES = 12;
 
 export type PollerConfig = {
   readonly repos: ReadonlyArray<string>;
@@ -58,6 +59,11 @@ const parseRepos = (
   }
   if (raw.length === 0) {
     problems.push('poller config "repos" must list at least one repository');
+  }
+  if (raw.length > MAX_WATCHED_REPOSITORIES) {
+    problems.push(
+      `poller config "repos" supports at most ${MAX_WATCHED_REPOSITORIES} repositories at the one-minute polling cadence; reduce the list or split it across pollers with independent GitHub API budgets`,
+    );
   }
   for (const repo of raw) {
     if (!REPO_PATTERN.test(repo)) {
