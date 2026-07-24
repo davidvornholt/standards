@@ -1,13 +1,21 @@
 import { hasLabel } from './github-label-identity';
-import type { ApprovalBinding } from './poller-approval';
+import {
+  type ApprovalBinding,
+  issueRevision,
+  prRevision,
+  readApprovalBinding,
+} from './poller-approval';
 import {
   hiddenCommentMetadata,
   parseHiddenCommentMetadata,
 } from './poller-comment-metadata';
 import { getIssue, listIssueComments } from './poller-github';
+import { getPullRequest } from './poller-github-pulls';
 import { createComment, deleteComment } from './poller-github-write';
 import type { JobDeps } from './poller-job-shared';
 import {
+  APPROVED_FOR_FIX,
+  APPROVED_FOR_REVIEW,
   FIX_IN_PROGRESS,
   isTrustedRole,
   NEEDS_CLARIFICATION,
@@ -80,6 +88,54 @@ const matchingTrustedCommentIds = async (
 const inProgressLabel = (kind: PollerJobKind) =>
   kind === 'fix' ? FIX_IN_PROGRESS : REVIEW_IN_PROGRESS;
 
+const approvalLabel = (kind: PollerJobKind) =>
+  kind === 'fix' ? APPROVED_FOR_FIX : APPROVED_FOR_REVIEW;
+
+const isStillQueueable = async (
+  deps: JobDeps,
+  issueNumber: number,
+  approval: ApprovalBinding,
+  kind: PollerJobKind,
+): Promise<boolean> => {
+  const expectedApprovalLabel = approvalLabel(kind);
+  if (
+    approval.repo !== deps.repo ||
+    approval.issueNumber !== issueNumber ||
+    approval.label !== expectedApprovalLabel
+  ) {
+    return false;
+  }
+  const issue = await getIssue(deps.token, deps.repo, issueNumber);
+  if (
+    !hasLabel(issue.labels, expectedApprovalLabel) ||
+    hasLabel(issue.labels, inProgressLabel(kind)) ||
+    hasLabel(issue.labels, NEEDS_CLARIFICATION)
+  ) {
+    return false;
+  }
+  const target =
+    kind === 'fix'
+      ? issueRevision(issue)
+      : await getPullRequest(deps.token, deps.repo, issueNumber).then((pr) =>
+          prRevision(pr.baseRef, pr.baseSha, pr.headSha),
+        );
+  if (target !== approval.target) {
+    return false;
+  }
+  const currentApproval = await readApprovalBinding(
+    {
+      token: deps.token,
+      repo: deps.repo,
+      issueNumber,
+    },
+    expectedApprovalLabel,
+    target,
+  );
+  return (
+    typeof currentApproval !== 'string' && currentApproval.id === approval.id
+  );
+};
+
 export const acknowledgeQueuedJob = async (
   deps: JobDeps,
   issueNumber: number,
@@ -115,8 +171,7 @@ export const acknowledgeQueuedJob = async (
     await deleteComment(deps.token, deps.repo, markerId);
     return false;
   }
-  const after = await getIssue(deps.token, deps.repo, issueNumber);
-  if (hasLabel(after.labels, inProgressLabel(kind))) {
+  if (!(await isStillQueueable(deps, issueNumber, approval, kind))) {
     await deleteComment(deps.token, deps.repo, markerId);
     return false;
   }

@@ -109,6 +109,20 @@ const apiResponses = (
     },
     { body: Object.fromEntries([['role_name', 'admin']]) },
     { body: issue },
+    ...(isPullRequest ? [{ body: pullRequest }] : []),
+    { body: issue },
+    {
+      body: [
+        {
+          id: APPROVAL_EVENT_ID,
+          event: 'labeled',
+          label: { name: approvalLabel },
+          actor: { login: 'maintainer' },
+          ...Object.fromEntries([['created_at', APPROVED_AT]]),
+        },
+      ],
+    },
+    { body: Object.fromEntries([['role_name', 'admin']]) },
   ];
 };
 
