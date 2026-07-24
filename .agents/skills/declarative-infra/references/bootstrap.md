@@ -250,6 +250,17 @@ terraform {
 provider "cloudflare" {}
 ```
 
+## Nix binary cache
+
+A repo whose trusted CI builds and deploys NixOS system closures uses a private, signed binary cache. Cloudflare R2 is the default when the repo already has a Cloudflare stack; another backend works if it holds the same trust and access boundaries.
+
+- The bucket is declared in the host's infrastructure home like any other data-bearing resource, and exists before any workflow references it.
+- Validation holds a bucket-scoped read/write credential and the signing key; deployment holds a read-only credential and neither. Only the signing key's public half appears in workflow configuration.
+- Validation substitutes from the cache, runs the full Nix gate, then signs and copies the closure of every check output. A failed or partial copy fails the validation job, which blocks deployment.
+- Deployment waits for validation of the exact main-branch commit and substitutes that closure instead of rebuilding.
+- The bucket must never be publicly readable — for R2, no `r2.dev` hostname and no custom domain. Verify through the provider API in PR validation and again before deployment.
+- Document the credentials, signing-key rotation, and retention policy with the repo's other infrastructure configuration.
+
 ## Install and convergence
 
 - **First install**: nixos-anywhere with the disko layout, or a NixOS installer + `disko` run; capture `hardware-configuration.nix` from the target. After install, collect the host key and re-encrypt secrets for it.

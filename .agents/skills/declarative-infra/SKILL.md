@@ -13,6 +13,7 @@ description: Operating contract for declarative infrastructure (NixOS hosts, Ope
 - App services run as Podman `oci-containers` with digest-pinned images, published only through Caddy; hosts never run Docker. Wiring details live in `references/bootstrap.md`.
 - When the home is a dedicated infra repo, public-image freshness is automation-owned: the source repo announces new digests via `repository_dispatch`, the home repo bumps its committed desired state through its own gates, and completion requires the exact infra merge SHA plus healthy exact-digest readback from every target — see `references/image-promotion.md`.
 - Provider credentials are written directly into SOPS targets by `bun standards creds`: Cloudflare tokens are minted, renewed, and revoked by `plan` / `apply`, while GitHub App credentials let workflows mint short-lived installation tokens for selected repositories. GitHub App keys rotate manually through the App settings page; do not claim `creds apply` rotates them or ask the operator to create brokered Cloudflare tokens by hand.
+- Trusted CI that builds and deploys NixOS closures uses a signed binary cache: validation publishes only after the full Nix gate passes, and deployment reads the validated closure with separate read-only credentials instead of rebuilding it. Leaving the cache out is a documented decision in the host repo; see `references/bootstrap.md#nix-binary-cache`.
 
 ## Changing existing infrastructure
 
