@@ -56,9 +56,20 @@ const REVIEW_STATUSES: ReadonlySet<string> = new Set([
 // Conventional Commit subject: consumers lint PR titles in CI, so a
 // malformed title is caught here instead of as a red check later.
 const PR_TITLE_PATTERN = /^[a-z]+(?:\([^)]+\))?!?: .+/u;
+const CLOSING_KEYWORD_PATTERN = String.raw`\b(?:close(?:s|d)?|fix(?:es|ed)?|resolve(?:s|d)?):?[ \t]+#`;
+
+export const hasClosingReferenceToIssue = (
+  body: string,
+  issueNumber: number,
+): boolean =>
+  new RegExp(
+    `${CLOSING_KEYWORD_PATTERN}${issueNumber}(?![0-9A-Za-z_-])`,
+    'iu',
+  ).test(body);
 
 export const readFixOutcome = async (
   workDir: string,
+  issueNumber: number,
 ): Promise<FixOutcome | null> => {
   const raw = await readOutcomeRaw(workDir);
   if (
@@ -78,7 +89,8 @@ export const readFixOutcome = async (
     !(
       isNonEmptyString(raw.prTitle) &&
       PR_TITLE_PATTERN.test(raw.prTitle) &&
-      isNonEmptyString(raw.prBody)
+      isNonEmptyString(raw.prBody) &&
+      hasClosingReferenceToIssue(raw.prBody, issueNumber)
     )
   ) {
     return null;
