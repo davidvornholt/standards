@@ -32,7 +32,7 @@ describe('renderUnits', () => {
     );
     expect(acknowledgementService).toContain('TimeoutStartSec=30min');
     expect(acknowledgementTimer).toContain('OnBootSec=1min');
-    expect(acknowledgementTimer).toContain('OnUnitInactiveSec=1min');
+    expect(acknowledgementTimer).toContain('OnUnitInactiveSec=5min');
   });
 
   it('derives the tick budget from job count and agent timeout', () => {

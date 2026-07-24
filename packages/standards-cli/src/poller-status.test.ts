@@ -27,10 +27,8 @@ const APPROVED_AT = '2026-07-18T10:00:00Z';
 const APPROVAL_EVENT_ID = 101;
 const COMMENT_ID = 500;
 const JOB_KINDS: Array<PollerJobKind> = ['fix', 'review'];
-
 const approvalLabel = (kind: PollerJobKind) =>
   kind === 'fix' ? APPROVED_FOR_FIX : APPROVED_FOR_REVIEW;
-
 const issue = (
   kind: PollerJobKind,
   labels: ReadonlyArray<string>,
@@ -43,7 +41,6 @@ const issue = (
   labels,
   authorLogin: 'reporter',
 });
-
 const rawIssue = (
   kind: PollerJobKind,
   labels: ReadonlyArray<string>,
@@ -58,17 +55,16 @@ const rawIssue = (
     ? Object.fromEntries([['pull_request', { url: 'x' }]])
     : {}),
 });
-
-const pullRequest = (headSha = SHAS.head) => ({
+const pullRequest = (headSha = SHAS.head, draft = true, headRepo = REPO) => ({
   ...Object.fromEntries([['node_id', 'PR_node']]),
+  draft,
   head: {
     ref: 'feature',
     sha: headSha,
-    repo: Object.fromEntries([['full_name', REPO]]),
+    repo: Object.fromEntries([['full_name', headRepo]]),
   },
   base: { ref: 'main', sha: SHAS.base },
 });
-
 const approval = (kind: PollerJobKind): ApprovalBinding => {
   const fields = {
     repo: REPO,
@@ -87,7 +83,6 @@ const approval = (kind: PollerJobKind): ApprovalBinding => {
     ...fields,
   };
 };
-
 const labelEvent = (kind: PollerJobKind, id = APPROVAL_EVENT_ID) => ({
   id,
   event: 'labeled',
@@ -95,7 +90,6 @@ const labelEvent = (kind: PollerJobKind, id = APPROVAL_EVENT_ID) => ({
   actor: { login: 'maintainer' },
   ...Object.fromEntries([['created_at', APPROVED_AT]]),
 });
-
 const markerComment = (kind: PollerJobKind) => ({
   id: COMMENT_ID,
   body: hiddenCommentMetadata(QUEUE_METADATA_MARKER, {
@@ -105,7 +99,6 @@ const markerComment = (kind: PollerJobKind) => ({
   user: { login: 'poller' },
   ...Object.fromEntries([['created_at', APPROVED_AT]]),
 });
-
 const beforePost = (kind: PollerJobKind) => [
   { body: rawIssue(kind, [approvalLabel(kind)]) },
   { body: [] },
@@ -113,19 +106,16 @@ const beforePost = (kind: PollerJobKind) => [
   { body: [markerComment(kind)] },
   { body: Object.fromEntries([['role_name', 'admin']]) },
 ];
-
 const deps = {
   config: {} as PollerConfig,
   token: 'token',
   repo: REPO,
   roleCache: new Map(),
 };
-
 afterEach(() => {
   globalThis.fetch = originalFetch;
   deps.roleCache.clear();
 });
-
 const runRace = async (
   kind: PollerJobKind,
   responses: ReadonlyArray<{
@@ -150,13 +140,11 @@ const runRace = async (
     calls.at(-1)?.path === `/repos/${REPO}/issues/comments/${COMMENT_ID}`
   );
 };
-
 it.each(
   JOB_KINDS,
 )('deletes a race-late %s marker when completion removes approval', async (kind) => {
   expect(await runRace(kind, [{ body: rawIssue(kind, []) }])).toBe(true);
 });
-
 it.each(
   JOB_KINDS,
 )('deletes a race-late %s marker when clarification starts', async (kind) => {
@@ -196,5 +184,17 @@ it.each(
             { body: pullRequest('changed-head') },
           ],
     ),
+  ).toBe(true);
+});
+
+it.each([
+  ['ready', pullRequest(SHAS.head, false)],
+  ['fork', pullRequest(SHAS.head, true, 'contributor/repo')],
+] as const)('deletes a race-late review marker when the PR becomes %s', async (_description, pr) => {
+  expect(
+    await runRace('review', [
+      { body: rawIssue('review', [APPROVED_FOR_REVIEW]) },
+      { body: pr },
+    ]),
   ).toBe(true);
 });

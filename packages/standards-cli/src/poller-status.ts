@@ -18,6 +18,7 @@ import {
   type PollerJobKind,
   queueMarkerFor,
 } from './poller-queue-marker';
+import { reviewEligibility } from './poller-review-eligibility';
 
 const queuedMessage = (kind: PollerJobKind) =>
   kind === 'fix'
@@ -46,12 +47,20 @@ const isStillQueueable = async (
   ) {
     return false;
   }
-  const target =
-    kind === 'fix'
-      ? issueRevision(issue)
-      : await getPullRequest(deps.token, deps.repo, issueNumber).then((pr) =>
-          prRevision(pr.baseRef, pr.baseSha, pr.headSha),
-        );
+  let target = issueRevision(issue);
+  if (kind === 'review') {
+    const pr = await getPullRequest(deps.token, deps.repo, issueNumber);
+    if (
+      reviewEligibility({
+        repo: deps.repo,
+        pr,
+        hasPlan: false,
+      }).kind !== 'eligible'
+    ) {
+      return false;
+    }
+    target = prRevision(pr.baseRef, pr.baseSha, pr.headSha);
+  }
   if (target !== approval.target) {
     return false;
   }

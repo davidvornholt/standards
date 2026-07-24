@@ -8,11 +8,11 @@ import { fileURLToPath } from 'node:url';
 import type { PollerConfig } from './poller-config';
 
 const SERVICE_NAME = 'standards-poller';
-// Bounds idle pickup latency while preserving a full cooldown after each tick:
-// OnUnitInactiveSec starts counting when the oneshot service finishes.
-// AccuracySec matters at this scale: systemd's default 1min accuracy would
-// stretch a 1min interval into a 1-2min window.
-const TICK_INTERVAL_MINUTES = 1;
+// OnUnitInactiveSec starts counting when each oneshot service finishes.
+// Keep worker pickup prompt while giving the acknowledgement observer enough
+// API headroom for mixed queues, recovery plans, pagination, and worker calls.
+const WORKER_INTERVAL_MINUTES = 1;
+export const ACKNOWLEDGEMENT_INTERVAL_MINUTES = 5;
 // Non-agent tick work: stale sweeps, clone/fetch, GitHub reads and writes.
 const TICK_OVERHEAD_MINUTES = 30;
 const MAX_ASCII_CONTROL_CODE = 31;
@@ -71,7 +71,7 @@ Description=Run the standards fix poller on an interval
 
 [Timer]
 OnBootSec=2min
-OnUnitInactiveSec=${TICK_INTERVAL_MINUTES}min
+OnUnitInactiveSec=${WORKER_INTERVAL_MINUTES}min
 AccuracySec=15s
 Persistent=true
 
@@ -93,7 +93,7 @@ Description=Check for newly queued standards poller requests
 
 [Timer]
 OnBootSec=1min
-OnUnitInactiveSec=${TICK_INTERVAL_MINUTES}min
+OnUnitInactiveSec=${ACKNOWLEDGEMENT_INTERVAL_MINUTES}min
 AccuracySec=15s
 Persistent=true
 
