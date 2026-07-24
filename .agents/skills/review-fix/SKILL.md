@@ -48,6 +48,8 @@ Workflow({ name: 'review-pass', args: {
 
 A non-empty `skippedLenses` is a partial fan-out: rerun those lenses before dispositioning. Without the Workflow tool, spawn `reviewer` subagents directly with identical pass semantics.
 
+Each returned finding carries the `lenses` that reported it — the array holds more than one key when the merge folded the same finding from several lenses. Carry that attribution through disposition into the report; it is the only place it survives, since review threads and issues record the finding, not its origin.
+
 ## Disposition
 
 Every finding gets exactly one disposition, judged against the scope contract. A finding's `unverified` observation routes it: a human intent question → needs-clarification; an external observation → defer, with that observation as the issue's suggested verification.
@@ -99,6 +101,6 @@ Flip the PR from draft to ready for review and post the report. It opens with a 
 - Scope is the pass's reviewed range (baseRef → head SHA). Outcome names what the pass produced: threads fixed, repairs triggered, mechanical-only verification.
 - Details links to the artifact carrying the pass's output — its posted PR review, or the threads and comments holding its findings. The table carries counts and provenance; evidence stays in the linked artifacts.
 
-Below the table, a finding index: one line per finding — short title, originating pass, disposition, impact tag, and a link to its review thread, filed issue, or `.agents/review/decisions.md` entry. The impact tag records blast radius, which disposition does not: `breakage` (behavior would be wrong or broken), `weakening` (a guarantee, policy, or gate silently loses force), or `polish` (wording, naming, coverage). Impact tags are what let later analysis measure which passes catch what, so tag against the finding's consequence, not its fix size. Do not restate evidence or reasoning in the index; the linked artifact is the ledger.
+Below the table, a finding index: one line per finding — short title, originating pass, originating lens keys, disposition, impact tag, and a link to its review thread, filed issue, or `.agents/review/decisions.md` entry. The impact tag records blast radius, which disposition does not: `breakage` (behavior would be wrong or broken), `weakening` (a guarantee, policy, or gate silently loses force), or `polish` (wording, naming, coverage). List every lens that reported the finding, not just one: a key that appears alone earned its slot in the fan-out, and a finding carrying three keys shows where the lens set overlaps. Together the two are what let later analysis measure which passes and which lenses catch what, so tag against the finding's consequence, not its fix size, and name the lenses the pass actually attributed it to rather than the lens that seems to own the topic. Do not restate evidence or reasoning in the index; the linked artifact is the ledger.
 
 The rest stays prose: ratchets implemented, residual risk, any repaired regressions and what remains unverified by fresh eyes, and an honest cycle-shape statement ("one review fan-out over N lenses, one verification pass"). Then hand what remains to the human: review the PR and decide the merge.
