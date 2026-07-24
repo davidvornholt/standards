@@ -79,6 +79,7 @@ describe('runPollerTick', () => {
           },
         ],
       },
+      { body: [] }, // stale claim marker reconciliation
       { body: {} }, // DELETE stale label
       { status: HTTP_CREATED, body: { id: 1 } }, // POST release comment
       {
