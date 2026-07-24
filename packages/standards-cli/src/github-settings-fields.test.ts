@@ -17,6 +17,11 @@ const fieldCases = [
   ['rulesets', 'scalar', 'invalid', 'array'],
   ['rulesets', 'object', {}, 'array'],
   ['rulesets', 'array', [], null],
+  ['labels', 'omitted', undefined, null],
+  ['labels', 'null', null, 'array'],
+  ['labels', 'scalar', 'invalid', 'array'],
+  ['labels', 'object', {}, 'array'],
+  ['labels', 'array', [], null],
 ] as const;
 
 for (const [source, fileLabel] of sources) {
