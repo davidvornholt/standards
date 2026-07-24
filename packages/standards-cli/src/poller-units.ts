@@ -50,7 +50,12 @@ const tickBudgetMinutes = (config: PollerConfig): number =>
 export const renderUnits = (
   configPath: string,
   config: PollerConfig,
-): { readonly service: string; readonly timer: string } => ({
+): {
+  readonly service: string;
+  readonly timer: string;
+  readonly acknowledgementService: string;
+  readonly acknowledgementTimer: string;
+} => ({
   service: `[Unit]
 Description=Standards fix poller tick
 After=network-online.target
@@ -73,6 +78,28 @@ Persistent=true
 [Install]
 WantedBy=timers.target
 `,
+  acknowledgementService: `[Unit]
+Description=Acknowledge queued standards poller requests
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=${quoteSystemdExecArg(process.execPath)} ${quoteSystemdExecArg(cliEntryPath())} poller --acknowledge-only --config ${quoteSystemdExecArg(configPath)}
+TimeoutStartSec=${TICK_OVERHEAD_MINUTES}min
+`,
+  acknowledgementTimer: `[Unit]
+Description=Check for newly queued standards poller requests
+
+[Timer]
+OnBootSec=1min
+OnUnitInactiveSec=${TICK_INTERVAL_MINUTES}min
+AccuracySec=15s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+`,
 });
 
 export const runPollerPrintUnits = (
@@ -84,4 +111,8 @@ export const runPollerPrintUnits = (
   console.log(units.service);
   console.log(`# ${SERVICE_NAME}.timer`);
   console.log(units.timer);
+  console.log(`# ${SERVICE_NAME}-acknowledgements.service`);
+  console.log(units.acknowledgementService);
+  console.log(`# ${SERVICE_NAME}-acknowledgements.timer`);
+  console.log(units.acknowledgementTimer);
 };

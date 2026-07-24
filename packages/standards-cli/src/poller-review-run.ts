@@ -28,6 +28,7 @@ import {
 } from './poller-review-output';
 import { resumeReviewedJob } from './poller-review-publication';
 import { publishReviewPlan, readReviewPlan } from './poller-review-state';
+import { acknowledgeQueuedJob } from './poller-status';
 import { ensureCacheClone, localBranchExists } from './poller-workspace';
 
 const REVIEW_LABELS: JobLabels = {
@@ -113,6 +114,7 @@ export const runReviewJob = async (
     throw new Error(`sealed output on ${outputBranch} is invalid`);
   }
   if (plan === null && sealed === null && !allowCodex) {
+    await acknowledgeQueuedJob(deps, pr.number, preamble.approval, 'review');
     return {
       lines: [`PR #${pr.number}: waiting for run capacity`],
       ranCodex: false,

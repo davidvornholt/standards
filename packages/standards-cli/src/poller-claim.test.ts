@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import process from 'node:process';
-import { HTTP_CREATED, HTTP_OK } from './github-api';
+import { HTTP_CREATED, HTTP_NO_CONTENT, HTTP_OK } from './github-api';
 import { type ApiCall, installApi } from './github-commands-test-support';
 import { issueRevision, readApprovalBinding } from './poller-approval';
 import { acquireClaim, validateClaim } from './poller-claim';
@@ -84,6 +84,7 @@ describe('approval and claim bindings', () => {
       },
       role('maintain'),
       role('maintain'),
+      { status: HTTP_NO_CONTENT, body: null },
     ]);
 
     expect(await acquireClaim(context, approval, 'fix-in-progress')).toBeNull();
