@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { hasLabel } from './github-label-identity';
+import { isRecord } from './github-settings-parse';
 import { type ApprovalBinding, readApprovalBinding } from './poller-approval';
 import {
   hiddenCommentMetadata,
@@ -69,23 +70,28 @@ const markerPayload = (body: string): unknown | null => {
   }
 };
 
+const isApprovalBinding = (value: unknown): value is ApprovalBinding =>
+  isRecord(value) &&
+  typeof value.id === 'string' &&
+  typeof value.repo === 'string' &&
+  typeof value.issueNumber === 'number' &&
+  typeof value.eventId === 'number' &&
+  typeof value.label === 'string' &&
+  typeof value.actorLogin === 'string' &&
+  typeof value.approvedAt === 'string' &&
+  typeof value.target === 'string';
+
 const parseMarker = (comment: IssueComment): ClaimMarker | null => {
   const payload = markerPayload(comment.body);
-  if (typeof payload !== 'object' || payload === null) {
+  if (!isRecord(payload)) {
     return null;
   }
-  const raw = payload as {
-    readonly approval?: ApprovalBinding;
-    readonly claimLabel?: unknown;
-    readonly claimEpoch?: unknown;
-    readonly nonce?: unknown;
-  };
+  const raw = payload;
   if (
     typeof raw.claimLabel !== 'string' ||
     typeof raw.claimEpoch !== 'string' ||
     typeof raw.nonce !== 'string' ||
-    raw.approval === undefined ||
-    typeof raw.approval.id !== 'string'
+    !isApprovalBinding(raw.approval)
   ) {
     return null;
   }
