@@ -41,16 +41,16 @@ describe('release declaration', () => {
       previousVersion: '0.17.3',
       version: '0.18.0',
     },
+    {
+      action: 'withdrawn',
+      label: 'revert of a release commit',
+      previousVersion: '0.17.3',
+      version: '0.17.2',
+    },
   ] as const)('plans $label as $action', (fixture) => {
     expect(
       releaseDeclarationPlan(fixture.version, fixture.previousVersion),
     ).toEqual({ action: fixture.action, problem: null });
-  });
-
-  it('rejects a version behind the previous declaration', () => {
-    const plan = releaseDeclarationPlan('0.17.2', '0.17.3');
-    expect(plan.action).toBeNull();
-    expect(plan.problem).toContain('behind the previously declared 0.17.3');
   });
 
   it.each([

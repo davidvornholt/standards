@@ -6,7 +6,10 @@ export type NpmReleasePlan =
   | { readonly action: null; readonly problem: string };
 
 export type ReleaseDeclarationPlan =
-  | { readonly action: 'declared' | 'unchanged'; readonly problem: null }
+  | {
+      readonly action: 'declared' | 'unchanged' | 'withdrawn';
+      readonly problem: null;
+    }
   | { readonly action: null; readonly problem: string };
 
 export type GithubReleaseState = 'draft' | 'missing' | 'published' | 'tag-only';
@@ -75,11 +78,11 @@ export const releaseDeclarationPlan = (
   if (order === 0) {
     return { action: 'unchanged', problem: null };
   }
+  // Reverting a release commit walks the manifest backwards. That withdraws a
+  // declaration rather than making one, so it releases nothing and is not an
+  // error; the next release has to climb past whatever npm already carries.
   if (order < 0) {
-    return {
-      action: null,
-      problem: `Manifest version ${version} is behind the previously declared ${previousVersion}`,
-    };
+    return { action: 'withdrawn', problem: null };
   }
   return { action: 'declared', problem: null };
 };

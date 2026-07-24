@@ -1,117 +1,44 @@
 import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { parse } from 'yaml';
+import {
+  githubExpression,
+  publishWorkflowJobs,
+  workflowStep,
+} from './publish-workflow-fixture';
 
-const WORKFLOW_PATH = join(
-  import.meta.dir,
-  '../../../.github/workflows/publish-standards-cli.yml',
-);
 const PACKAGE_PATH = join(import.meta.dir, '../package.json');
-const githubExpression = (property: string): string =>
-  `${'$'}{{ ${property} }}`;
-
-type Step = {
-  readonly name?: unknown;
-  readonly if?: unknown;
-  readonly run?: string;
-};
-
-type Job = {
-  readonly if?: unknown;
-  readonly needs?: unknown;
-  readonly steps?: unknown;
-};
-
-const jobs = (): Readonly<Record<string, Job>> => {
-  const workflow: unknown = parse(readFileSync(WORKFLOW_PATH, 'utf8'));
-  if (
-    typeof workflow !== 'object' ||
-    workflow === null ||
-    !('jobs' in workflow) ||
-    typeof workflow.jobs !== 'object' ||
-    workflow.jobs === null
-  ) {
-    throw new Error('Publish workflow must contain jobs');
-  }
-  return workflow.jobs as Readonly<Record<string, Job>>;
-};
-
-const step = (job: Job, name: string): Step => {
-  if (!Array.isArray(job.steps)) {
-    throw new Error('Workflow job must contain steps');
-  }
-  const match = job.steps.find(
-    (candidate): candidate is Step =>
-      typeof candidate === 'object' &&
-      candidate !== null &&
-      'name' in candidate &&
-      candidate.name === name,
-  );
-  if (match === undefined) {
-    throw new Error(`Workflow step not found: ${name}`);
-  }
-  return match;
-};
 
 describe('standards CLI publish recovery workflow', () => {
   it('publishes a new version and reconciles its exact tested commit', () => {
-    const workflowJobs = jobs();
-    expect(step(workflowJobs.publish ?? {}, 'Publish package').if).toBe(
+    const workflowJobs = publishWorkflowJobs();
+    expect(workflowStep(workflowJobs.publish ?? {}, 'Publish package').if).toBe(
       "steps.release.outputs.publish == 'true'",
     );
     expect(workflowJobs.release?.needs).toBe('publish');
-    expect(workflowJobs.release?.if).toBe(
-      "needs.publish.result == 'success' && needs.publish.outputs.declared == 'true'",
-    );
     expect(
-      step(workflowJobs.release ?? {}, 'Checkout released commit'),
+      workflowStep(workflowJobs.release ?? {}, 'Checkout released commit'),
     ).toMatchObject({
       with: { ref: githubExpression('needs.publish.outputs.sha') },
     });
     expect(
-      step(workflowJobs.publish ?? {}, 'Install release dependencies').run,
+      workflowStep(workflowJobs.publish ?? {}, 'Install release dependencies')
+        .run,
     ).toBe('bun install --frozen-lockfile --ignore-scripts');
   });
 
-  it('releases only the commit that declares the version', () => {
-    const publishJob = jobs().publish ?? {};
-    const declaration = step(publishJob, 'Determine release declaration');
-    expect(declaration.if).toBeUndefined();
-    expect(declaration.run).toContain('git rev-parse --verify "$RELEASE_SHA^"');
-    expect(declaration.run).toContain('git show "$parent:$PACKAGE_PATH"');
-    expect(declaration.run).toContain(
-      'declaration "$version" "$previous_version"',
-    );
-    expect(declaration.run).toContain('declared) declared=true');
-    expect(declaration.run).toContain('unchanged)');
-  });
-
-  it('stops an unchanged version before any registry or release work', () => {
-    const publishJob = jobs().publish ?? {};
-    for (const name of [
-      'Setup Bun',
-      'Install release dependencies',
-      'Determine release state',
-    ]) {
-      expect(step(publishJob, name).if).toBe(
-        "steps.declaration.outputs.declared == 'true'",
-      );
-    }
-    expect(step(publishJob, 'Determine release state').run).toContain(
-      'registry.npmjs.org',
-    );
-  });
-
   it('uses the exact-version-aware release state model', () => {
-    const releaseState = step(jobs().publish ?? {}, 'Determine release state');
+    const releaseState = workflowStep(
+      publishWorkflowJobs().publish ?? {},
+      'Determine release state',
+    );
     expect(releaseState.run).toContain('.versions[$version] != null');
     expect(releaseState.run).toContain('npm-state');
   });
 
   it('verifies one fetched bundle and binds it to the installed package before recovery', () => {
-    const verification = step(
-      jobs().publish ?? {},
+    const verification = workflowStep(
+      publishWorkflowJobs().publish ?? {},
       'Verify existing package provenance',
     );
     expect(verification.if).toBe("steps.release.outputs.publish == 'false'");
@@ -133,17 +60,22 @@ describe('standards CLI publish recovery workflow', () => {
     };
     expect(manifest.devDependencies?.sigstore).toBe('5.0.0');
     expect(manifest.dependencies?.sigstore).toBeUndefined();
-    expect(manifest.files).not.toContain('src/release-provenance.ts');
-    expect(manifest.files).not.toContain('scripts/release-recovery.ts');
+    for (const excluded of [
+      'src/release-provenance.ts',
+      'src/release-provenance-verification.ts',
+      'scripts/release-recovery.ts',
+    ]) {
+      expect(manifest.files).not.toContain(excluded);
+    }
   });
 
   it('routes existing tag and release states through the tested SHA model', () => {
-    const releaseJob = jobs().release ?? {};
-    expect(step(releaseJob, 'Setup Bun')).toMatchObject({
+    const releaseJob = publishWorkflowJobs().release ?? {};
+    expect(workflowStep(releaseJob, 'Setup Bun')).toMatchObject({
       uses: 'oven-sh/setup-bun@v2',
       with: { 'bun-version': githubExpression('env.BUN_VERSION') },
     });
-    const reconciliation = step(releaseJob, 'Reconcile GitHub release');
+    const reconciliation = workflowStep(releaseJob, 'Reconcile GitHub release');
     expect(reconciliation.run).toContain('release_state=published');
     expect(reconciliation.run).toContain('release_state=tag-only');
     expect(reconciliation.run).toContain('release-recovery.ts');

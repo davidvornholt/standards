@@ -36,9 +36,9 @@ jobs:
       id-token: write
     outputs:
       declared: ${{ steps.declaration.outputs.declared }}
+      version: ${{ steps.declaration.outputs.version }}
       publish: ${{ steps.release.outputs.publish }}
       tag: ${{ steps.release.outputs.tag }}
-      version: ${{ steps.release.outputs.version }}
       sha: ${{ github.event.workflow_run.head_sha }}
     steps:
       - name: Checkout tested commit
@@ -66,8 +66,8 @@ jobs:
           registry-url: https://registry.npmjs.org
 
       # The release is the merge commit that changes the manifest version. A
-      # commit that inherits an already released version has nothing to publish,
-      # tag, or verify, so it stops here without contacting any registry.
+      # commit that inherits a version declared by an earlier commit releases
+      # nothing itself, so it stops here without contacting any registry.
       - name: Determine release declaration
         id: declaration
         env:
@@ -79,8 +79,12 @@ jobs:
             echo "::error::Tested commit $RELEASE_SHA has no parent to compare its release declaration against"
             exit 1
           fi
-          previous_version="$(git show "$parent:$PACKAGE_PATH" |
-            jq -er '.version | select(type == "string")')"
+          if ! previous_manifest="$(git show "$parent:$PACKAGE_PATH" 2>&1)"; then
+            echo "::error::Cannot read $PACKAGE_PATH at parent commit $parent: $previous_manifest"
+            exit 1
+          fi
+          previous_version="$(jq -er '.version | select(type == "string")' \
+            <<<"$previous_manifest")"
           declaration_action="$(node \
             packages/standards-cli/scripts/release-recovery.ts \
             declaration "$version" "$previous_version")"
@@ -90,12 +94,48 @@ jobs:
               declared=false
               echo "$PACKAGE_PATH still declares $version; no release to publish"
               ;;
+            withdrawn)
+              declared=false
+              echo "$PACKAGE_PATH withdrew $previous_version back to $version; no release to publish"
+              ;;
             *)
               echo "::error::Unexpected release declaration action: $declaration_action"
               exit 1
               ;;
           esac
-          echo "declared=$declared" >>"$GITHUB_OUTPUT"
+          {
+            echo "declared=$declared"
+            echo "version=$version"
+          } >>"$GITHUB_OUTPUT"
+
+      # An inherited version whose own release never completed would otherwise
+      # be skipped in silence by every later commit. The tag is written last, so
+      # its absence is the durable evidence that the release is unfinished.
+      - name: Verify the inherited release completed
+        if: steps.declaration.outputs.declared == 'false'
+        env:
+          VERSION: ${{ steps.declaration.outputs.version }}
+        run: |
+          if ! git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+            echo "::error::$PACKAGE_PATH declares $VERSION but tag v$VERSION does not exist, so that release never completed. Re-run the declaring commit's Standards workflow while it is still the tip of main, or declare a new version."
+            exit 1
+          fi
+
+      # npm builds provenance from GITHUB_SHA, which for a workflow_run event is
+      # the tip of the default branch, not the commit this run checked out and
+      # packages. They agree only while the declaring commit is still that tip.
+      # Publishing when they diverge would attest a tree the tarball does not
+      # contain, so this is a cheap precondition for an irreversible publish.
+      - name: Verify the declaring commit is still the tip of main
+        if: steps.declaration.outputs.declared == 'true'
+        env:
+          PROVENANCE_SHA: ${{ github.sha }}
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          if [[ "$PROVENANCE_SHA" != "$RELEASE_SHA" ]]; then
+            echo "::error::npm provenance would attest $PROVENANCE_SHA but this run packages $RELEASE_SHA. Main advanced past the declaring commit, so declare a new version on current main instead of re-running this one."
+            exit 1
+          fi
 
       - name: Setup Bun
         if: steps.declaration.outputs.declared == 'true'
@@ -107,9 +147,13 @@ jobs:
         if: steps.declaration.outputs.declared == 'true'
         run: bun install --frozen-lockfile --ignore-scripts
 
+      # The declaration step already proved the version is a stable SemVer, so
+      # this step consumes that value instead of re-validating its shape.
       - name: Determine release state
         id: release
         if: steps.declaration.outputs.declared == 'true'
+        env:
+          VERSION: ${{ steps.declaration.outputs.version }}
         run: |
           name="$(jq -er '.name | select(type == "string")' "$PACKAGE_PATH")"
           if [[ "$name" != "$PACKAGE_NAME" ]]; then
@@ -117,11 +161,7 @@ jobs:
             exit 1
           fi
 
-          version="$(jq -er '.version | select(type == "string")' "$PACKAGE_PATH")"
-          if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-            echo "::error::$PACKAGE_PATH version must be a stable SemVer; received $version"
-            exit 1
-          fi
+          version="$VERSION"
 
           encoded_name="${PACKAGE_NAME/@/%40}"
           encoded_name="${encoded_name//\//%2F}"
@@ -156,7 +196,6 @@ jobs:
           esac
 
           {
-            echo "version=$version"
             echo "tag=v$version"
             echo "publish=$publish"
           } >>"$GITHUB_OUTPUT"
@@ -192,14 +231,15 @@ jobs:
           --tag latest
           --registry=https://registry.npmjs.org
 
-      # Reached only when this declaring commit already published to npm and a
-      # later step failed, so the attested commit is this commit. Verifying that
-      # binding gates the tag and Release this run is about to assert.
+      # Reached when the declaring commit already published to npm and a later
+      # step failed. The preceding tip check is what makes the attested commit
+      # equal this commit; verifying that binding gates the tag and Release this
+      # run is about to assert.
       - name: Verify existing package provenance
         if: steps.release.outputs.publish == 'false'
         env:
           RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
-          VERSION: ${{ steps.release.outputs.version }}
+          VERSION: ${{ steps.declaration.outputs.version }}
         run: |
           audit_dir="$RUNNER_TEMP/standards-cli-provenance-audit"
           npm install \

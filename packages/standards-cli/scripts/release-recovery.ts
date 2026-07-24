@@ -16,12 +16,64 @@ const reportProblems = (problems: ReadonlyArray<string>) => {
   return problems.length === 0 ? 0 : 1;
 };
 
+type ProvenanceArguments = readonly [
+  path: string,
+  packageName: string,
+  version: string,
+  repository: string,
+  serverUrl: string,
+  workflowRef: string,
+  commit: string,
+  installedIntegrity: string,
+  tufCachePath: string,
+];
+const PROVENANCE_ARGUMENT_COUNT: ProvenanceArguments['length'] = 9;
+
+const hasProvenanceArguments = (
+  values: ReadonlyArray<string>,
+): values is ProvenanceArguments =>
+  values.length === PROVENANCE_ARGUMENT_COUNT &&
+  values.every((argument) => argument.length > 0);
+
+// Validated here, before the lazy import, so a malformed invocation reports its
+// usage problem even where Sigstore has never been installed.
 const runProvenanceVerification = (
   values: ReadonlyArray<string>,
-): Promise<number> =>
-  import('../src/release-provenance-cli.ts')
-    .then(({ verifyProvenanceArguments }) => verifyProvenanceArguments(values))
+): Promise<number> => {
+  if (!hasProvenanceArguments(values)) {
+    return Promise.resolve(
+      reportProblems([
+        'Provenance verification requires a response path, installed integrity, TUF cache, and complete GitHub release context',
+      ]),
+    );
+  }
+  const [
+    path,
+    packageName,
+    version,
+    repository,
+    serverUrl,
+    workflowRef,
+    commit,
+    installedIntegrity,
+    tufCachePath,
+  ] = values;
+  return import('../src/release-provenance-verification.ts')
+    .then(({ verifyProvenanceRequest }) =>
+      verifyProvenanceRequest({
+        commit,
+        installedIntegrity,
+        packageName,
+        path,
+        repository,
+        serverUrl,
+        tufCachePath,
+        version,
+        workflowRef,
+      }),
+    )
     .then(reportProvenanceResult);
+};
 
 const reportProvenanceResult = (result: ProvenanceVerificationResult) => {
   switch (result.kind) {
