@@ -1,3 +1,4 @@
+import { directoriesOverlap } from './dependabot-directory-overlap';
 import { isNonEmptyString, isRecord } from './github-settings-parse';
 
 export type UpdateBlock = Record<string, unknown>;
@@ -6,12 +7,21 @@ export type UpdateTarget = {
   readonly ecosystem: string;
   readonly targetBranch: string | null;
   readonly directories: ReadonlyArray<string>;
+  readonly globDirectories: ReadonlyArray<string>;
 };
 
 const listOfNonEmptyStrings = (
   value: unknown,
 ): value is ReadonlyArray<string> =>
   Array.isArray(value) && value.length > 0 && value.every(isNonEmptyString);
+
+const globDirectories = (
+  directories: ReadonlyArray<string>,
+  supportsGlobs: boolean,
+): ReadonlyArray<string> =>
+  supportsGlobs
+    ? directories.filter((directory) => directory.includes('*'))
+    : [];
 
 const inspectIgnoreEntry = (
   entry: unknown,
@@ -120,6 +130,7 @@ export const updateTarget = (
     ecosystem,
     targetBranch: targetBranch ?? null,
     directories: normalized,
+    globDirectories: globDirectories(normalized, hasDirectories),
   };
 };
 
@@ -138,6 +149,10 @@ export const sameUpdateTarget = (
   left.directories.length === right.directories.length &&
   left.directories.every(
     (directory, index) => directory === right.directories[index],
+  ) &&
+  left.globDirectories.length === right.globDirectories.length &&
+  left.globDirectories.every(
+    (directory, index) => directory === right.globDirectories[index],
   );
 
 export const overlapsUpdateTarget = (
@@ -145,7 +160,16 @@ export const overlapsUpdateTarget = (
   right: UpdateTarget,
 ): boolean =>
   sameUpdateScope(left, right) &&
-  left.directories.some((directory) => right.directories.includes(directory));
+  left.directories.some((leftDirectory) =>
+    right.directories.some((rightDirectory) =>
+      directoriesOverlap(
+        leftDirectory,
+        left.globDirectories.includes(leftDirectory),
+        rightDirectory,
+        right.globDirectories.includes(rightDirectory),
+      ),
+    ),
+  );
 
 export const updateTargetDescription = (target: UpdateTarget): string => {
   const branch =
