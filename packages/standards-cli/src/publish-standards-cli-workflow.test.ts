@@ -61,7 +61,9 @@ describe('standards CLI publish recovery workflow', () => {
       "steps.release.outputs.publish == 'true'",
     );
     expect(workflowJobs.release?.needs).toBe('publish');
-    expect(workflowJobs.release?.if).toBe("needs.publish.result == 'success'");
+    expect(workflowJobs.release?.if).toBe(
+      "needs.publish.result == 'success' && needs.publish.outputs.declared == 'true'",
+    );
     expect(
       step(workflowJobs.release ?? {}, 'Checkout released commit'),
     ).toMatchObject({
@@ -70,6 +72,35 @@ describe('standards CLI publish recovery workflow', () => {
     expect(
       step(workflowJobs.publish ?? {}, 'Install release dependencies').run,
     ).toBe('bun install --frozen-lockfile --ignore-scripts');
+  });
+
+  it('releases only the commit that declares the version', () => {
+    const publishJob = jobs().publish ?? {};
+    const declaration = step(publishJob, 'Determine release declaration');
+    expect(declaration.if).toBeUndefined();
+    expect(declaration.run).toContain('git rev-parse --verify "$RELEASE_SHA^"');
+    expect(declaration.run).toContain('git show "$parent:$PACKAGE_PATH"');
+    expect(declaration.run).toContain(
+      'declaration "$version" "$previous_version"',
+    );
+    expect(declaration.run).toContain('declared) declared=true');
+    expect(declaration.run).toContain('unchanged)');
+  });
+
+  it('stops an unchanged version before any registry or release work', () => {
+    const publishJob = jobs().publish ?? {};
+    for (const name of [
+      'Setup Bun',
+      'Install release dependencies',
+      'Determine release state',
+    ]) {
+      expect(step(publishJob, name).if).toBe(
+        "steps.declaration.outputs.declared == 'true'",
+      );
+    }
+    expect(step(publishJob, 'Determine release state').run).toContain(
+      'registry.npmjs.org',
+    );
   });
 
   it('uses the exact-version-aware release state model', () => {

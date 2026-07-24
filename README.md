@@ -175,7 +175,9 @@ Version 0.11.0 adds canonical and repo-local `labels` declarations to `.github/s
 
 ## Release the CLI
 
-The version in `packages/standards-cli/package.json` is the release declaration. Change it to a new stable SemVer in a pull request and update the version seeded by `template/package.json` at the same time. After the exact merge commit passes the `Standards` workflow on `main`, `Publish standards CLI` packs and publishes that version through npm trusted publishing, then creates the matching `vX.Y.Z` Git tag and GitHub Release. An unchanged version is a no-op; a version behind npm or a conflicting tag fails closed.
+The version in `packages/standards-cli/package.json` is the release declaration, and the merge commit that changes it is the release. Change it to a new stable SemVer in a pull request and update the version seeded by `template/package.json` at the same time. After that exact merge commit passes the `Standards` workflow on `main`, `Publish standards CLI` packs and publishes that version through npm trusted publishing, then creates the matching `vX.Y.Z` Git tag and GitHub Release at that same commit.
+
+A merge that inherits an already declared version is a no-op: it reads the parent commit's manifest, finds the version unchanged, and stops without contacting npm. If the release commit's own `Standards` run fails, the release stays unpublished until that run is re-run — a later merge never completes it, so a release is always packed and tagged from the tree that was reviewed as that release. Re-running a partially completed release verifies the published package's npm provenance against that same commit before reconciling the tag and Release. A version behind the previous declaration, a version behind npm latest, unverifiable provenance, or a tag pointing at another commit all fail closed.
 
 ## How sync works
 

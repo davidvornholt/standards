@@ -13,12 +13,56 @@ import {
   type GithubReleaseState,
   githubReconciliationPlan,
   npmReleasePlan,
+  releaseDeclarationPlan,
 } from './release-recovery';
 
 const SHA = '1234567890abcdef1234567890abcdef12345678';
 const MISMATCHED_SHA = 'ffffffffffffffffffffffffffffffffffffffff';
 const RECOVERY_SCRIPT = join(import.meta.dir, '../scripts/release-recovery.ts');
 const RECOVERY_MODULE = join(import.meta.dir, 'release-recovery.ts');
+
+describe('release declaration', () => {
+  it.each([
+    {
+      action: 'unchanged',
+      label: 'unrelated merge inheriting a released version',
+      previousVersion: '0.17.3',
+      version: '0.17.3',
+    },
+    {
+      action: 'declared',
+      label: 'patch release commit',
+      previousVersion: '0.17.3',
+      version: '0.17.4',
+    },
+    {
+      action: 'declared',
+      label: 'minor release commit',
+      previousVersion: '0.17.3',
+      version: '0.18.0',
+    },
+  ] as const)('plans $label as $action', (fixture) => {
+    expect(
+      releaseDeclarationPlan(fixture.version, fixture.previousVersion),
+    ).toEqual({ action: fixture.action, problem: null });
+  });
+
+  it('rejects a version behind the previous declaration', () => {
+    const plan = releaseDeclarationPlan('0.17.2', '0.17.3');
+    expect(plan.action).toBeNull();
+    expect(plan.problem).toContain('behind the previously declared 0.17.3');
+  });
+
+  it.each([
+    'not-a-version',
+    '1.0.0-rc.1',
+    '',
+  ])('rejects the unstable previous version %p', (previousVersion) => {
+    const plan = releaseDeclarationPlan('0.18.0', previousVersion);
+    expect(plan.action).toBeNull();
+    expect(plan.problem).toContain('stable SemVer');
+  });
+});
 
 describe('npm release state', () => {
   it.each([
@@ -109,6 +153,11 @@ describe('dependency-free release dispatcher', () => {
       command: ['npm-state', '0.14.0', '0.13.0', 'false'],
       expected: 'publish\n',
       label: 'npm release planning',
+    },
+    {
+      command: ['declaration', '0.14.0', '0.13.0'],
+      expected: 'declared\n',
+      label: 'release declaration planning',
     },
   ] as const)('runs $label from a detached source-only tree', (fixture) => {
     const root = mkdtempSync(join(tmpdir(), 'release-dispatcher-source-'));

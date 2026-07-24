@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 
-import { readFileSync } from 'node:fs';
 import process from 'node:process';
 import {
   type GithubReleaseState,
   githubReconciliationPlan,
   npmReleasePlan,
   type ProvenanceVerificationResult,
+  releaseDeclarationPlan,
 } from '../src/release-recovery.ts';
 
 const reportProblems = (problems: ReadonlyArray<string>) => {
@@ -16,84 +16,12 @@ const reportProblems = (problems: ReadonlyArray<string>) => {
   return problems.length === 0 ? 0 : 1;
 };
 
-type ProvenanceArguments = readonly [
-  path: string,
-  packageName: string,
-  version: string,
-  repository: string,
-  serverUrl: string,
-  workflowRef: string,
-  commit: string,
-  installedIntegrity: string,
-  tufCachePath: string,
-];
-const PROVENANCE_ARGUMENT_COUNT: ProvenanceArguments['length'] = 9;
-
-const hasProvenanceArguments = (
-  values: ReadonlyArray<string>,
-): values is ProvenanceArguments =>
-  values.length === PROVENANCE_ARGUMENT_COUNT &&
-  values.every((argument) => argument.length > 0);
-
 const runProvenanceVerification = (
   values: ReadonlyArray<string>,
-): Promise<number> => {
-  if (!hasProvenanceArguments(values)) {
-    return Promise.resolve(
-      reportProblems([
-        'Provenance verification requires a response path, installed integrity, TUF cache, and complete GitHub release context',
-      ]),
-    );
-  }
-  const [
-    path,
-    packageName,
-    version,
-    repository,
-    serverUrl,
-    workflowRef,
-    commit,
-    installedIntegrity,
-    tufCachePath,
-  ] = values;
-  let response: unknown;
-  try {
-    response = JSON.parse(readFileSync(path, 'utf8')) as unknown;
-  } catch {
-    const result: ProvenanceVerificationResult = {
-      kind: 'malformed-provenance',
-      message: 'npm attestation response must contain valid JSON',
-    };
-    return Promise.resolve(reportProvenanceResult(result));
-  }
-  return Promise.all([
-    import('../src/release-provenance.ts'),
-    import('../src/release-provenance-claims.ts'),
-  ])
-    .then(([{ verifyProvenance }, { workflowPathFromRef }]) => {
-      const workflowPath = workflowPathFromRef(repository, workflowRef);
-      if (workflowPath === null) {
-        return {
-          kind: 'malformed-provenance',
-          message: `Invalid GitHub workflow ref: ${workflowRef}`,
-        } as const;
-      }
-      return verifyProvenance(
-        response,
-        {
-          packageName,
-          version,
-          repository: `${serverUrl}/${repository}`,
-          workflowPath,
-          commit,
-          installedIntegrity,
-        },
-        `${serverUrl}/${workflowRef}`,
-        tufCachePath,
-      );
-    })
+): Promise<number> =>
+  import('../src/release-provenance-cli.ts')
+    .then(({ verifyProvenanceArguments }) => verifyProvenanceArguments(values))
     .then(reportProvenanceResult);
-};
 
 const reportProvenanceResult = (result: ProvenanceVerificationResult) => {
   switch (result.kind) {
@@ -166,6 +94,23 @@ const planNpmRelease = (
   return 0;
 };
 
+const planReleaseDeclaration = (
+  version: string | undefined,
+  previousVersion: string | undefined,
+) => {
+  if (version === undefined || previousVersion === undefined) {
+    return reportProblems([
+      'declaration requires the manifest version and the previously declared version',
+    ]);
+  }
+  const plan = releaseDeclarationPlan(version, previousVersion);
+  if (plan.problem !== null) {
+    return reportProblems([plan.problem]);
+  }
+  process.stdout.write(`${plan.action}\n`);
+  return 0;
+};
+
 const [, , command, ...args] = process.argv;
 const run = (): Promise<number> => {
   if (command === 'provenance') {
@@ -177,9 +122,12 @@ const run = (): Promise<number> => {
   if (command === 'npm-state') {
     return Promise.resolve(planNpmRelease(args[0], args[1], args[2]));
   }
+  if (command === 'declaration') {
+    return Promise.resolve(planReleaseDeclaration(args[0], args[1]));
+  }
   return Promise.resolve(
     reportProblems([
-      'Expected provenance, npm-state, or github-state release recovery command',
+      'Expected declaration, provenance, npm-state, or github-state release recovery command',
     ]),
   );
 };

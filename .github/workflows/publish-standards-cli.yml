@@ -35,6 +35,7 @@ jobs:
       contents: read
       id-token: write
     outputs:
+      declared: ${{ steps.declaration.outputs.declared }}
       publish: ${{ steps.release.outputs.publish }}
       tag: ${{ steps.release.outputs.tag }}
       version: ${{ steps.release.outputs.version }}
@@ -57,11 +58,6 @@ jobs:
             exit 1
           fi
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: ${{ env.BUN_VERSION }}
-
       - name: Setup Node for npm trusted publishing
         uses: actions/setup-node@v7
         with:
@@ -69,11 +65,51 @@ jobs:
           package-manager-cache: false
           registry-url: https://registry.npmjs.org
 
+      # The release is the merge commit that changes the manifest version. A
+      # commit that inherits an already released version has nothing to publish,
+      # tag, or verify, so it stops here without contacting any registry.
+      - name: Determine release declaration
+        id: declaration
+        env:
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          version="$(jq -er '.version | select(type == "string")' "$PACKAGE_PATH")"
+          parent="$(git rev-parse --verify "$RELEASE_SHA^" 2>/dev/null || true)"
+          if [[ -z "$parent" ]]; then
+            echo "::error::Tested commit $RELEASE_SHA has no parent to compare its release declaration against"
+            exit 1
+          fi
+          previous_version="$(git show "$parent:$PACKAGE_PATH" |
+            jq -er '.version | select(type == "string")')"
+          declaration_action="$(node \
+            packages/standards-cli/scripts/release-recovery.ts \
+            declaration "$version" "$previous_version")"
+          case "$declaration_action" in
+            declared) declared=true ;;
+            unchanged)
+              declared=false
+              echo "$PACKAGE_PATH still declares $version; no release to publish"
+              ;;
+            *)
+              echo "::error::Unexpected release declaration action: $declaration_action"
+              exit 1
+              ;;
+          esac
+          echo "declared=$declared" >>"$GITHUB_OUTPUT"
+
+      - name: Setup Bun
+        if: steps.declaration.outputs.declared == 'true'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
       - name: Install release dependencies
+        if: steps.declaration.outputs.declared == 'true'
         run: bun install --frozen-lockfile --ignore-scripts
 
       - name: Determine release state
         id: release
+        if: steps.declaration.outputs.declared == 'true'
         run: |
           name="$(jq -er '.name | select(type == "string")' "$PACKAGE_PATH")"
           if [[ "$name" != "$PACKAGE_NAME" ]]; then
@@ -156,6 +192,9 @@ jobs:
           --tag latest
           --registry=https://registry.npmjs.org
 
+      # Reached only when this declaring commit already published to npm and a
+      # later step failed, so the attested commit is this commit. Verifying that
+      # binding gates the tag and Release this run is about to assert.
       - name: Verify existing package provenance
         if: steps.release.outputs.publish == 'false'
         env:
@@ -202,7 +241,9 @@ jobs:
 
   release:
     needs: publish
-    if: needs.publish.result == 'success'
+    if: >-
+      needs.publish.result == 'success' &&
+      needs.publish.outputs.declared == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
