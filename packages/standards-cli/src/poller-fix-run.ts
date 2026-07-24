@@ -3,7 +3,7 @@
 import { join } from 'node:path';
 import { hasLabel } from './github-label-identity';
 import { approvalIsCurrent, issueRevision } from './poller-approval';
-import { acquireClaim } from './poller-claim';
+import { startClaim } from './poller-claim';
 import { runCodex } from './poller-codex';
 import { handleNonFixedOutcome } from './poller-fix-outcome';
 import { readSealedFixOutput } from './poller-fix-output';
@@ -14,7 +14,6 @@ import {
   validateFixClaim,
 } from './poller-fix-publication';
 import { getIssue, type IssueItem } from './poller-github';
-import { addLabels } from './poller-github-write';
 import {
   failJob,
   type JobDeps,
@@ -118,12 +117,7 @@ export const runFixJob = async (
     await acknowledgeQueuedJob(deps, issue.number, preamble.approval, 'fix');
     return result(issue.number, 'waiting for run capacity');
   }
-  await addLabels(token, repo, issue.number, [FIX_IN_PROGRESS]);
-  const claim = await acquireClaim(
-    { token, repo, issueNumber: issue.number },
-    preamble.approval,
-    FIX_IN_PROGRESS,
-  );
+  const claim = await startClaim(deps, issue.number, preamble.approval, 'fix');
   if (claim === null) {
     return result(issue.number, 'another poller owns the claim');
   }

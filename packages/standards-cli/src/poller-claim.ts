@@ -1,34 +1,28 @@
 import { randomUUID } from 'node:crypto';
 import { hasLabel } from './github-label-identity';
-import { isRecord } from './github-settings-parse';
 import { type ApprovalBinding, readApprovalBinding } from './poller-approval';
 import {
-  hiddenCommentMetadata,
-  parseHiddenCommentMetadata,
-} from './poller-comment-metadata';
-import {
-  collaboratorRole,
-  getIssue,
-  type IssueComment,
-  lastLabelEvent,
-  listIssueComments,
-} from './poller-github';
-import { createComment, deleteComment } from './poller-github-write';
+  type ClaimMarkerBinding,
+  reconcileTrustedClaimElection,
+  reconcileTrustedClaimHistory,
+} from './poller-claim-reconciliation';
+import { hiddenCommentMetadata } from './poller-comment-metadata';
+import { getIssue, lastLabelEvent } from './poller-github';
+import { addLabels, createComment, deleteComment } from './poller-github-write';
+import type { JobDeps } from './poller-job-shared';
 import {
   CLAIM_METADATA_MARKER,
   FIX_IN_PROGRESS,
-  isTrustedRole,
   REVIEW_IN_PROGRESS,
 } from './poller-protocol';
+import { inProgressLabelFor, type PollerJobKind } from './poller-queue-marker';
+import { reconcileExistingQueuedJob } from './poller-status';
 
-export type ClaimBinding = {
-  readonly approval: ApprovalBinding;
-  readonly claimLabel: string;
-  readonly claimEpoch: string;
+export type ClaimBinding = ClaimMarkerBinding & {
   readonly markerId: number;
 };
 
-type ClaimMarker = Omit<ClaimBinding, 'markerId'> & {
+type ClaimMarker = ClaimMarkerBinding & {
   readonly nonce: string;
 };
 
@@ -53,73 +47,6 @@ const markerBody = (marker: ClaimMarker): string =>
     CLAIM_METADATA_MARKER,
     marker,
   )}`;
-
-const isApprovalBinding = (value: unknown): value is ApprovalBinding =>
-  isRecord(value) &&
-  typeof value.id === 'string' &&
-  typeof value.repo === 'string' &&
-  typeof value.issueNumber === 'number' &&
-  typeof value.eventId === 'number' &&
-  typeof value.label === 'string' &&
-  typeof value.actorLogin === 'string' &&
-  typeof value.approvedAt === 'string' &&
-  typeof value.target === 'string';
-
-const parseMarker = (comment: IssueComment): ClaimMarker | null => {
-  const payload = parseHiddenCommentMetadata(
-    comment.body,
-    CLAIM_METADATA_MARKER,
-  );
-  if (!isRecord(payload)) {
-    return null;
-  }
-  const raw = payload;
-  if (
-    typeof raw.claimLabel !== 'string' ||
-    typeof raw.claimEpoch !== 'string' ||
-    typeof raw.nonce !== 'string' ||
-    !isApprovalBinding(raw.approval)
-  ) {
-    return null;
-  }
-  return {
-    approval: raw.approval,
-    claimLabel: raw.claimLabel,
-    claimEpoch: raw.claimEpoch,
-    nonce: raw.nonce,
-  };
-};
-
-const winningMarkerId = async (
-  context: ClaimContext,
-  binding: Omit<ClaimBinding, 'markerId'>,
-): Promise<number | null> => {
-  const comments = await listIssueComments(
-    context.token,
-    context.repo,
-    context.issueNumber,
-  );
-  let winner: number | null = null;
-  for (const comment of comments) {
-    const marker = parseMarker(comment);
-    const differs =
-      marker?.approval.id !== binding.approval.id ||
-      marker.claimLabel !== binding.claimLabel ||
-      marker.claimEpoch !== binding.claimEpoch;
-    if (!differs) {
-      // biome-ignore lint/performance/noAwaitInLoops: claim authors must be checked against their current role; the usually-one-item list is deliberately fail-closed.
-      const role = await collaboratorRole(
-        context.token,
-        context.repo,
-        comment.authorLogin,
-      );
-      if (isTrustedRole(role) && (winner === null || comment.id < winner)) {
-        winner = comment.id;
-      }
-    }
-  }
-  return winner;
-};
 
 export const acquireClaim = async (
   context: ClaimContext,
@@ -147,12 +74,34 @@ export const acquireClaim = async (
     context.issueNumber,
     markerBody({ ...provisional, nonce }),
   );
-  const winner = await winningMarkerId(context, provisional);
-  if (winner !== markerId) {
-    await deleteComment(context.token, context.repo, markerId);
+  const election = await reconcileTrustedClaimElection(context, provisional);
+  if (election.retainedId !== markerId) {
+    if (!election.markerIds.includes(markerId)) {
+      await deleteComment(context.token, context.repo, markerId);
+    }
     return null;
   }
   return { ...provisional, markerId };
+};
+
+export const startClaim = async (
+  deps: JobDeps,
+  issueNumber: number,
+  approval: ApprovalBinding,
+  kind: PollerJobKind,
+): Promise<ClaimBinding | null> => {
+  await reconcileExistingQueuedJob(deps, issueNumber, approval, kind);
+  const claimLabel = inProgressLabelFor(kind);
+  await reconcileTrustedClaimHistory(
+    { token: deps.token, repo: deps.repo, issueNumber },
+    claimLabel,
+  );
+  await addLabels(deps.token, deps.repo, issueNumber, [claimLabel]);
+  return acquireClaim(
+    { token: deps.token, repo: deps.repo, issueNumber },
+    approval,
+    claimLabel,
+  );
 };
 
 export const validateClaim = async (
@@ -182,8 +131,8 @@ export const validateClaim = async (
   if (!hasLabel(issue.labels, claim.claimLabel)) {
     return `"${claim.claimLabel}" is no longer present`;
   }
-  const winner = await winningMarkerId(context, claim);
-  return winner === claim.markerId
+  const election = await reconcileTrustedClaimElection(context, claim);
+  return election.retainedId === claim.markerId
     ? null
     : 'claim ownership changed or could not be proven';
 };

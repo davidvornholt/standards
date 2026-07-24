@@ -182,13 +182,14 @@ export const inspectQueuedAcknowledgement = async (options: {
     item.number,
     expectedLabel,
   );
-  return (
-    event !== null &&
-    checkpoints.some(
-      (checkpoint) =>
-        checkpoint.eventId === event.id &&
-        checkpoint.actorLogin === event.actorLogin &&
-        checkpoint.approvedAt === event.createdAt,
-    )
-  );
+  if (event === null) {
+    return false;
+  }
+  const currentCheckpointCount = checkpoints.filter(
+    (checkpoint) =>
+      checkpoint.eventId === event.id &&
+      checkpoint.actorLogin === event.actorLogin &&
+      checkpoint.approvedAt === event.createdAt,
+  ).length;
+  return currentCheckpointCount === 1;
 };
