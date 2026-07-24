@@ -6,11 +6,10 @@
 
 import { hasLabel } from './github-label-identity';
 import { approvalIsCurrent, prRevision } from './poller-approval';
-import { acquireClaim } from './poller-claim';
+import { startClaim } from './poller-claim';
 import { runCodex } from './poller-codex';
 import { getIssue, type IssueItem } from './poller-github';
 import { getPullRequest } from './poller-github-pulls';
-import { addLabels } from './poller-github-write';
 import {
   failJob,
   type JobDeps,
@@ -157,12 +156,7 @@ export const runReviewJob = async (
       ranCodex: false,
     };
   }
-  await addLabels(token, repo, prItem.number, [REVIEW_IN_PROGRESS]);
-  const claim = await acquireClaim(
-    { token, repo, issueNumber: pr.number },
-    preamble.approval,
-    REVIEW_IN_PROGRESS,
-  );
+  const claim = await startClaim(deps, pr.number, preamble.approval, 'review');
   if (claim === null) {
     return {
       lines: [`PR #${pr.number}: another poller owns the claim`],

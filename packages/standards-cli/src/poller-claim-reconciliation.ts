@@ -90,38 +90,64 @@ const trustedMarkers = async (
   return markers;
 };
 
-export const matchingTrustedClaimMarkerIds = async (
-  context: ClaimContext,
-  binding: ClaimMarkerBinding,
-): Promise<ReadonlyArray<number>> =>
-  (
-    await trustedMarkers(
-      context,
-      (marker) =>
-        marker.approval.id === binding.approval.id &&
-        marker.claimLabel === binding.claimLabel &&
-        marker.claimEpoch === binding.claimEpoch,
-    )
-  ).map(({ id }) => id);
+const claimGroupKey = (approvalId: string, claimEpoch: string): string =>
+  JSON.stringify([approvalId, claimEpoch]);
 
-export const reconcileTrustedClaimEpoch = async (
+const reconcileTrustedClaimGroups = async (
   context: ClaimContext,
   claimLabel: string,
-  claimEpoch: string,
-): Promise<void> => {
+): Promise<
+  ReadonlyMap<
+    string,
+    {
+      readonly markerIds: ReadonlyArray<number>;
+      readonly retainedId: number | null;
+    }
+  >
+> => {
   const groups = new Map<string, Array<number>>();
   const markers = await trustedMarkers(
     context,
-    (marker) =>
-      marker.claimLabel === claimLabel && marker.claimEpoch === claimEpoch,
+    (marker) => marker.claimLabel === claimLabel,
   );
   for (const { id, marker } of markers) {
-    const ids = groups.get(marker.approval.id) ?? [];
+    const key = claimGroupKey(marker.approval.id, marker.claimEpoch);
+    const ids = groups.get(key) ?? [];
     ids.push(id);
-    groups.set(marker.approval.id, ids);
+    groups.set(key, ids);
   }
-  for (const ids of groups.values()) {
+  const reconciled = new Map<
+    string,
+    {
+      readonly markerIds: ReadonlyArray<number>;
+      readonly retainedId: number | null;
+    }
+  >();
+  for (const [key, ids] of groups) {
     // biome-ignore lint/performance/noAwaitInLoops: each group contains GitHub mutations and groups are deliberately reconciled serially.
-    await retainEarliestComment(context, ids);
+    const retainedId = await retainEarliestComment(context, ids);
+    reconciled.set(key, { markerIds: ids, retainedId });
   }
+  return reconciled;
+};
+
+export const reconcileTrustedClaimElection = async (
+  context: ClaimContext,
+  binding: ClaimMarkerBinding,
+): Promise<{
+  readonly markerIds: ReadonlyArray<number>;
+  readonly retainedId: number | null;
+}> =>
+  (await reconcileTrustedClaimGroups(context, binding.claimLabel)).get(
+    claimGroupKey(binding.approval.id, binding.claimEpoch),
+  ) ?? {
+    markerIds: [],
+    retainedId: null,
+  };
+
+export const reconcileTrustedClaimHistory = async (
+  context: ClaimContext,
+  claimLabel: string,
+): Promise<void> => {
+  await reconcileTrustedClaimGroups(context, claimLabel);
 };

@@ -1,5 +1,5 @@
 import { hasLabel } from './github-label-identity';
-import { reconcileTrustedClaimEpoch } from './poller-claim-reconciliation';
+import { reconcileTrustedClaimHistory } from './poller-claim-reconciliation';
 import {
   type IssueItem,
   lastLabelEvent,
@@ -48,13 +48,10 @@ const sweepStaleClaims = async (
         ? Number.POSITIVE_INFINITY
         : now - Date.parse(event.createdAt);
     if (ageMs > config.staleClaimHours * MS_PER_HOUR) {
-      if (event !== null) {
-        await reconcileTrustedClaimEpoch(
-          { token, repo, issueNumber: item.number },
-          claimLabel,
-          String(event.id),
-        );
-      }
+      await reconcileTrustedClaimHistory(
+        { token, repo, issueNumber: item.number },
+        claimLabel,
+      );
       await removeLabel(token, repo, item.number, claimLabel);
       await createComment(
         token,

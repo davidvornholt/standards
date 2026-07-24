@@ -1,17 +1,21 @@
 import { randomUUID } from 'node:crypto';
 import { hasLabel } from './github-label-identity';
 import { type ApprovalBinding, readApprovalBinding } from './poller-approval';
-import type { ClaimMarkerBinding } from './poller-claim-reconciliation';
-import { matchingTrustedClaimMarkerIds } from './poller-claim-reconciliation';
+import {
+  type ClaimMarkerBinding,
+  reconcileTrustedClaimElection,
+} from './poller-claim-reconciliation';
 import { hiddenCommentMetadata } from './poller-comment-metadata';
-import { retainEarliestComment } from './poller-comment-reconciliation';
 import { getIssue, lastLabelEvent } from './poller-github';
-import { createComment, deleteComment } from './poller-github-write';
+import { addLabels, createComment, deleteComment } from './poller-github-write';
+import type { JobDeps } from './poller-job-shared';
 import {
   CLAIM_METADATA_MARKER,
   FIX_IN_PROGRESS,
   REVIEW_IN_PROGRESS,
 } from './poller-protocol';
+import { inProgressLabelFor, type PollerJobKind } from './poller-queue-marker';
+import { reconcileExistingQueuedJob } from './poller-status';
 
 export type ClaimBinding = ClaimMarkerBinding & {
   readonly markerId: number;
@@ -69,15 +73,30 @@ export const acquireClaim = async (
     context.issueNumber,
     markerBody({ ...provisional, nonce }),
   );
-  const markerIds = await matchingTrustedClaimMarkerIds(context, provisional);
-  const winner = await retainEarliestComment(context, markerIds);
-  if (winner !== markerId) {
-    if (!markerIds.includes(markerId)) {
+  const election = await reconcileTrustedClaimElection(context, provisional);
+  if (election.retainedId !== markerId) {
+    if (!election.markerIds.includes(markerId)) {
       await deleteComment(context.token, context.repo, markerId);
     }
     return null;
   }
   return { ...provisional, markerId };
+};
+
+export const startClaim = async (
+  deps: JobDeps,
+  issueNumber: number,
+  approval: ApprovalBinding,
+  kind: PollerJobKind,
+): Promise<ClaimBinding | null> => {
+  await reconcileExistingQueuedJob(deps, issueNumber, approval, kind);
+  const claimLabel = inProgressLabelFor(kind);
+  await addLabels(deps.token, deps.repo, issueNumber, [claimLabel]);
+  return acquireClaim(
+    { token: deps.token, repo: deps.repo, issueNumber },
+    approval,
+    claimLabel,
+  );
 };
 
 export const validateClaim = async (
@@ -107,11 +126,8 @@ export const validateClaim = async (
   if (!hasLabel(issue.labels, claim.claimLabel)) {
     return `"${claim.claimLabel}" is no longer present`;
   }
-  const winner = await retainEarliestComment(
-    context,
-    await matchingTrustedClaimMarkerIds(context, claim),
-  );
-  return winner === claim.markerId
+  const election = await reconcileTrustedClaimElection(context, claim);
+  return election.retainedId === claim.markerId
     ? null
     : 'claim ownership changed or could not be proven';
 };

@@ -133,3 +133,18 @@ export const acknowledgeQueuedJob = async (
   }
   return true;
 };
+
+export const reconcileExistingQueuedJob = async (
+  deps: JobDeps,
+  issueNumber: number,
+  approval: ApprovalBinding,
+  kind: PollerJobKind,
+): Promise<void> => {
+  const markerIds = await matchingTrustedQueueCommentIds(
+    deps,
+    issueNumber,
+    approval.id,
+    kind,
+  );
+  await retainEarliestComment(deps, markerIds);
+};

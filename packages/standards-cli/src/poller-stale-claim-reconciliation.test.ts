@@ -119,6 +119,7 @@ it('reconciles a stale epoch before releasing it and preserves it in the next el
       ],
     },
     role,
+    role,
   ]);
   await expect(
     acquireClaim(
@@ -128,4 +129,33 @@ it('reconciles a stale epoch before releasing it and preserves it in the next el
     ),
   ).resolves.toMatchObject({ markerId: NEW_MARKER_ID });
   expect(deletedCommentIds(nextElection)).toEqual([]);
+});
+
+it('reconciles claim history before releasing a label with no usable event', async () => {
+  const calls = installApi([
+    { body: [issue([FIX_IN_PROGRESS])] },
+    { body: [] },
+    {
+      body: [
+        marker(EARLIEST_MARKER_ID, OLD_CLAIM_EVENT_ID),
+        marker(DUPLICATE_MARKER_ID, OLD_CLAIM_EVENT_ID),
+      ],
+    },
+    role,
+    role,
+    { status: HTTP_NO_CONTENT, body: null },
+    { status: HTTP_OK, body: [] },
+    { status: HTTP_CREATED, body: { id: 20 } },
+    { body: [] },
+    { body: [] },
+    { body: [] },
+  ]);
+  const report = await discoverRepositoryJobs(
+    deps,
+    Date.parse('2026-07-18T12:00:01Z'),
+  );
+  expect(report.lines).toEqual([
+    `${REPO}#${ISSUE_NUMBER}: released stale ${FIX_IN_PROGRESS}`,
+  ]);
+  expect(deletedCommentIds(calls)).toEqual([DUPLICATE_MARKER_ID]);
 });

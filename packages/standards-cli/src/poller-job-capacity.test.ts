@@ -142,5 +142,14 @@ describe('poller entrypoints without Codex capacity', () => {
         (call) => call.method === 'POST' && call.path.endsWith('/pulls'),
       ),
     ).toBe(true);
+    expect(
+      calls.some(
+        (call) =>
+          call.method === 'POST' &&
+          String(
+            (call.body as { readonly body?: unknown } | null)?.body,
+          ).startsWith('**Fix queued**'),
+      ),
+    ).toBe(false);
   });
 });

@@ -14,6 +14,7 @@ const APPROVED_AT = '2026-07-18T11:00:00Z';
 const CLAIMED_AT = '2026-07-18T12:00:00Z';
 const APPROVAL_EVENT_ID = 100;
 const CLAIM_EVENT_ID = 101;
+const NEXT_CLAIM_EVENT_ID = 102;
 const EARLIEST_MARKER_ID = 10;
 const DUPLICATE_MARKER_ID = 11;
 const NEW_MARKER_ID = 12;
@@ -132,4 +133,29 @@ it('deletes a newly posted claim marker omitted from its election listing', asyn
     acquireClaim(context, approval, 'fix-in-progress'),
   ).resolves.toBeNull();
   expect(deletedIds(calls)).toEqual([NEW_MARKER_ID]);
+});
+
+it('reconciles an ended epoch while electing a later claim', async () => {
+  const currentMarkerId = 13;
+  const calls = installApi([
+    {
+      body: [labelEvent(NEXT_CLAIM_EVENT_ID, 'fix-in-progress', CLAIMED_AT)],
+    },
+    { status: HTTP_CREATED, body: { id: currentMarkerId } },
+    {
+      body: [
+        marker(EARLIEST_MARKER_ID),
+        marker(DUPLICATE_MARKER_ID),
+        marker(currentMarkerId, String(NEXT_CLAIM_EVENT_ID)),
+      ],
+    },
+    role,
+    role,
+    role,
+    { status: HTTP_NO_CONTENT, body: null },
+  ]);
+  await expect(
+    acquireClaim(context, approval, 'fix-in-progress'),
+  ).resolves.toMatchObject({ markerId: currentMarkerId });
+  expect(deletedIds(calls)).toEqual([DUPLICATE_MARKER_ID]);
 });
