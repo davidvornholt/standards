@@ -327,13 +327,6 @@ const reportMirror = (result: MirrorResult, dryRun: boolean): void => {
         `  would overwrite ${result.tampered.length} locally-modified canonical file(s): ${result.tampered.join(', ')}`,
       );
     }
-    const changes =
-      result.created.length + result.updated.length + result.deleted.length;
-    console.log(
-      changes === 0
-        ? 'dry run: already in sync; no changes'
-        : `dry run: ${result.created.length} to create, ${result.updated.length} to update, ${result.deleted.length} to delete`,
-    );
     return;
   }
   for (const rel of result.deleted) {
@@ -344,6 +337,22 @@ const reportMirror = (result: MirrorResult, dryRun: boolean): void => {
       `  overwrote ${result.tampered.length} locally-modified canonical file(s): ${result.tampered.join(', ')}`,
     );
   }
+};
+
+const reportDryRunSummary = (
+  result: MirrorResult,
+  generated: boolean,
+): void => {
+  const changes =
+    result.created.length +
+    result.updated.length +
+    result.deleted.length +
+    Number(generated);
+  console.log(
+    changes === 0
+      ? 'dry run: already in sync; no changes'
+      : `dry run: ${result.created.length} to create, ${result.updated.length} to update, ${result.deleted.length} to delete, ${Number(generated)} to generate`,
+  );
 };
 
 const seedTargets = (
@@ -421,8 +430,13 @@ const runSync = async (
     dryRun,
   });
   reportMirror(result, dryRun);
-  await applyProspectiveDependabot(consumer, prospectiveDependabot, dryRun);
+  const generated = await applyProspectiveDependabot(
+    consumer,
+    prospectiveDependabot,
+    dryRun,
+  );
   if (dryRun) {
+    reportDryRunSummary(result, generated);
     return;
   }
   await writeLock(consumer, {
@@ -611,16 +625,17 @@ const applyProspectiveDependabot = async (
   consumer: string,
   prospective: ProspectiveDependabot,
   dryRun: boolean,
-): Promise<void> => {
+): Promise<boolean> => {
   if (prospective.current === prospective.composed) {
-    return;
+    return false;
   }
   if (dryRun) {
     console.log(`  would generate ${DEPENDABOT_FILE}`);
-    return;
+    return true;
   }
   await writeComposedDependabot(consumer, prospective.composed);
   console.log(`  generated ${DEPENDABOT_FILE}`);
+  return true;
 };
 
 const runDependabotCheck = async (consumer: string): Promise<boolean> => {

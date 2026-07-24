@@ -898,6 +898,8 @@ describe('dependabot composition seam', () => {
     ]);
     expect(dry.status).toBe(0);
     expect(dry.stdout).toContain('would generate .github/dependabot.yml');
+    expect(dry.stdout).not.toContain('already in sync; no changes');
+    expect(dry.stdout).toContain('0 to delete, 1 to generate');
     expect(read(consumer, '.github/dependabot.yml')).not.toContain('nix');
 
     const syncRun = run(consumer, ['sync', '--from', up, '--dir', consumer]);
