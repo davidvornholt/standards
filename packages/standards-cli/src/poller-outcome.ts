@@ -8,7 +8,6 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isNonEmptyString, isRecord } from './github-settings-parse';
 import {
-  type DeferredFinding,
   type FixOutcome,
   OUTCOME_FILE,
   type ReviewOutcome,
@@ -99,38 +98,10 @@ export const readReviewOutcome = async (
   if (status === 'reviewed' && !isNonEmptyString(raw.report)) {
     return null;
   }
-  const deferred = parseDeferred(raw.deferred);
-  if (deferred === null) {
-    return null;
-  }
   return {
     status,
     summary: raw.summary,
     question: typeof raw.question === 'string' ? raw.question : undefined,
     report: typeof raw.report === 'string' ? raw.report : undefined,
-    deferred,
   };
-};
-
-const parseDeferred = (raw: unknown): ReadonlyArray<DeferredFinding> | null => {
-  if (raw === undefined) {
-    return [];
-  }
-  if (!Array.isArray(raw)) {
-    return null;
-  }
-  const deferred: Array<DeferredFinding> = [];
-  for (const entry of raw) {
-    if (
-      !(
-        isRecord(entry) &&
-        isNonEmptyString(entry.title) &&
-        isNonEmptyString(entry.body)
-      )
-    ) {
-      return null;
-    }
-    deferred.push({ title: entry.title, body: entry.body });
-  }
-  return deferred;
 };

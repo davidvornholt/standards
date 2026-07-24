@@ -94,7 +94,6 @@ const reviewPlan = (repo: string, number: number): ReviewPublicationPlan => {
     baseSha: BASE_SHA,
     report: 'Reviewed.',
     commits: 0,
-    deferred: [],
   };
 };
 

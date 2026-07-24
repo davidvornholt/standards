@@ -56,7 +56,6 @@ const plan: ReviewPublicationPlan = {
   baseSha: 'base',
   report: 'Report',
   commits: 0,
-  deferred: [],
 };
 
 afterEach(() => {

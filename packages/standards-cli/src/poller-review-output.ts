@@ -8,7 +8,6 @@ import {
   isGitObjectId,
   singleParentOf,
 } from './poller-output-integrity';
-import type { DeferredFinding } from './poller-protocol';
 import { runGit } from './poller-workspace';
 
 const REVIEW_OUTPUT_MARKER = '<!-- standards-poller:review-output\n';
@@ -26,15 +25,7 @@ export type ReviewPublicationPlan = {
   readonly baseSha: string;
   readonly report: string;
   readonly commits: number;
-  readonly deferred: ReadonlyArray<DeferredFinding>;
 };
-
-const isDeferredFinding = (value: unknown): value is DeferredFinding =>
-  isRecord(value) &&
-  typeof value.title === 'string' &&
-  value.title.length > 0 &&
-  typeof value.body === 'string' &&
-  value.body.length > 0;
 
 export const reviewPlanMarker = (plan: ReviewPublicationPlan): string =>
   `${REVIEW_OUTPUT_MARKER}${Buffer.from(JSON.stringify(plan)).toString('base64url')}${REVIEW_OUTPUT_END}`;
@@ -68,9 +59,7 @@ export const parseReviewPlan = (body: string): ReviewPublicationPlan | null => {
       typeof raw.report !== 'string' ||
       typeof raw.commits !== 'number' ||
       !Number.isInteger(raw.commits) ||
-      raw.commits < 0 ||
-      !Array.isArray(raw.deferred) ||
-      !raw.deferred.every(isDeferredFinding)
+      raw.commits < 0
     ) {
       return null;
     }

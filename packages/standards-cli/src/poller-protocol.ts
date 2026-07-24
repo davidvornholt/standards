@@ -41,17 +41,11 @@ export type FixOutcome = {
   readonly prBody?: string;
 };
 
-export type DeferredFinding = {
-  readonly title: string;
-  readonly body: string;
-};
-
 export type ReviewOutcome = {
   readonly status: 'reviewed' | 'question' | 'cannot-review';
   readonly summary: string;
   readonly question?: string;
   readonly report?: string;
-  readonly deferred?: ReadonlyArray<DeferredFinding>;
 };
 
 // Paths the automation must never modify in a consumer repository. Canonical

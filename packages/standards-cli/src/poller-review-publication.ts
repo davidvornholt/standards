@@ -112,7 +112,6 @@ export const finishReviewedJob = async (options: {
     baseSha: pr.baseSha,
     report: outcome.report ?? '',
     commits,
-    deferred: outcome.deferred ?? [],
   };
   const outputBranch = outputBranchFor(plan);
   const sealedHead = sealReviewPlan(workDir, plan);

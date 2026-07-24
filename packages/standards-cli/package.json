@@ -90,7 +90,6 @@
     "src/poller-fix-run.ts",
     "src/poller-fix-validation.ts",
     "src/poller-github-pulls.ts",
-    "src/poller-github-publication.ts",
     "src/poller-github-write.ts",
     "src/poller-github.ts",
     "src/poller-job-shared.ts",

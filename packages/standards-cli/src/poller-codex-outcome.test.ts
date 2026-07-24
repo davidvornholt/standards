@@ -70,35 +70,21 @@ describe('readFixOutcome', () => {
 });
 
 describe('readReviewOutcome', () => {
-  it('accepts a reviewed outcome with deferred findings', async () => {
+  it('accepts a reviewed outcome with its report', async () => {
     const outcome = await readReviewOutcome(
       workDirWithOutcome({
         status: 'reviewed',
-        summary: 'Two fixes, one deferral.',
+        summary: 'Two fixes.',
         report: '## Review\n...',
-        deferred: [{ title: 'fix(x): tighten y', body: 'Evidence: ...' }],
       }),
     );
-    expect(outcome?.deferred).toHaveLength(1);
+    expect(outcome?.status).toBe('reviewed');
   });
 
   it('rejects a reviewed outcome without a report', async () => {
     expect(
       await readReviewOutcome(
         workDirWithOutcome({ status: 'reviewed', summary: 'done' }),
-      ),
-    ).toBeNull();
-  });
-
-  it('rejects malformed deferred entries', async () => {
-    expect(
-      await readReviewOutcome(
-        workDirWithOutcome({
-          status: 'reviewed',
-          summary: 'done',
-          report: 'r',
-          deferred: [{ title: 'only-a-title' }],
-        }),
       ),
     ).toBeNull();
   });

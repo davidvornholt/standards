@@ -1,8 +1,8 @@
 // One review job: a maintainer-approved draft PR gets a full review-fix
 // cycle — lens fan-out inside the Codex run, fixes as new commits — then the
-// poller posts the report, files deferred findings as issues, and flips the
-// PR to ready. GitHub writes stay in deterministic poller code; the agent
-// never holds credentials.
+// Codex maintains the GitHub review ledger and commits fixes, then the poller
+// verifies and pushes those commits, posts the final report, and flips the PR
+// ready.
 
 import { prRevision } from './poller-approval';
 import { acquireClaim } from './poller-claim';

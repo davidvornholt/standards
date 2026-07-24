@@ -40,7 +40,6 @@ const plan: ReviewPublicationPlan = {
   baseSha: 'base',
   report: 'Report',
   commits: 0,
-  deferred: [{ title: 'Follow up', body: 'Evidence.' }],
 };
 const deps = {
   token: 'token',
@@ -130,20 +129,6 @@ it('replays a fully published ready review without duplicate artifacts', async (
         {
           body: `<!-- standards-poller:review repo=${plan.repo} pr=${plan.prNumber} approval=${approval.id} -->`,
           ...Object.fromEntries([['commit_id', 'head']]),
-          user: { login: 'poller' },
-        },
-      ],
-    },
-    { body: Object.fromEntries([['role_name', 'write']]) },
-    { body: Object.fromEntries([['role_name', 'admin']]) },
-    {
-      body: [
-        {
-          body: `<!-- standards-poller:deferred repo=${plan.repo} pr=${plan.prNumber} approval=${approval.id} index=0 -->`,
-          user: { login: 'revoked' },
-        },
-        {
-          body: `<!-- standards-poller:deferred repo=${plan.repo} pr=${plan.prNumber} approval=${approval.id} index=0 -->`,
           user: { login: 'poller' },
         },
       ],
