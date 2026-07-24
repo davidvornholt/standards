@@ -1,7 +1,6 @@
-import { resolve } from 'node:path';
-import process from 'node:process';
 import { runCredsAddCloudflare } from './creds-add';
 import { runCredsAddGithub } from './creds-add-github';
+import { parseCredsArgs } from './creds-args';
 import { listPermissionGroups } from './creds-cloudflare';
 import { runCredsLoginCloudflare } from './creds-login-cloudflare';
 import { runCredsLoginGithub } from './creds-login-github';
@@ -31,94 +30,13 @@ Options:
   --permissions <list>  Comma-separated Cloudflare permission group names
   --account <id>        Cloudflare account when more than one is configured
   --ttl-days <n>        Token lifetime in days (default: 90)
+  --bucket <name>       Scope a Cloudflare token to one R2 bucket
+  --jurisdiction <name> R2 jurisdiction: default or eu (default: default)
+  --s3                  Store the derived R2 S3 credential pair (<key>.access_key_id, <key>.secret_access_key) instead of the raw token
   --org <org>           Create the GitHub App under an organization
   --name <name>         GitHub App name (default: ${BROKER_IDENTITY_NAME})
 
 Secret values are written directly into SOPS-encrypted targets and never printed.`;
-const DAY_MS = 86_400_000;
-const MAX_PROVIDER_EXPIRATION_MS = Date.parse('9999-12-31T23:59:59.999Z');
-const POSITIVE_INTEGER = /^[1-9][0-9]*$/u;
-
-type CredsFlags = {
-  dir: string;
-  dest: string | undefined;
-  permissions: string | undefined;
-  account: string | undefined;
-  ttlDays: number | undefined;
-  org: string | undefined;
-  name: string | undefined;
-  readonly words: Array<string>;
-};
-
-const flagValue = (argv: ReadonlyArray<string>, index: number): string => {
-  const value = argv[index + 1];
-  if (value === undefined || value.startsWith('--')) {
-    throw new Error(`${argv[index]} requires a value`);
-  }
-  return value;
-};
-
-export const parseTtlDays = (raw: string): number => {
-  const ttlDays = Number(raw);
-  if (
-    !(POSITIVE_INTEGER.test(raw) && Number.isSafeInteger(ttlDays)) ||
-    Date.now() + ttlDays * DAY_MS > MAX_PROVIDER_EXPIRATION_MS
-  ) {
-    throw new Error('--ttl-days must be a provider-safe positive integer');
-  }
-  return ttlDays;
-};
-
-const parseCredsArgs = (argv: ReadonlyArray<string>): CredsFlags => {
-  const flags: CredsFlags = {
-    dir: process.cwd(),
-    dest: undefined,
-    permissions: undefined,
-    account: undefined,
-    ttlDays: undefined,
-    org: undefined,
-    name: undefined,
-    words: [],
-  };
-  const setters: Readonly<Record<string, (value: string) => void>> = {
-    '--dir': (value) => {
-      flags.dir = value;
-    },
-    '--dest': (value) => {
-      flags.dest = value;
-    },
-    '--permissions': (value) => {
-      flags.permissions = value;
-    },
-    '--account': (value) => {
-      flags.account = value;
-    },
-    '--ttl-days': (value) => {
-      flags.ttlDays = parseTtlDays(value);
-    },
-    '--org': (value) => {
-      flags.org = value;
-    },
-    '--name': (value) => {
-      flags.name = value;
-    },
-  };
-  for (let index = 0; index < argv.length; index += 1) {
-    const arg = argv[index] ?? '';
-    const setter = setters[arg];
-    if (setter !== undefined) {
-      setter(flagValue(argv, index));
-      index += 1;
-    } else if (arg.startsWith('--')) {
-      throw new Error(`Unknown creds option: ${arg}`);
-    } else {
-      flags.words.push(arg);
-    }
-  }
-  flags.dir = resolve(flags.dir);
-  return flags;
-};
-
 const runCredsStatus = async (): Promise<boolean> => {
   const path = resolveBrokerPath();
   const store = await readBrokerStore(path);

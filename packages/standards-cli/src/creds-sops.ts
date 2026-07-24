@@ -189,10 +189,3 @@ export const setSopsValues = (
     problem: `could not write ${paths} into ${rel}${detail ? `: ${detail}` : ''}`,
   };
 };
-
-export const setSopsValue = (
-  consumer: string,
-  rel: string,
-  path: string,
-  value: string,
-): SopsWriteResult => setSopsValues(consumer, rel, [{ path, value }]);

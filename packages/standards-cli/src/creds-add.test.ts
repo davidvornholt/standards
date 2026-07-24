@@ -1,80 +1,16 @@
-import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
-import { execFileSync } from 'node:child_process';
+import { afterEach, describe, expect, it, spyOn } from 'bun:test';
+import { runCredsAddCloudflare } from './creds-add';
 import {
-  chmodSync,
-  mkdirSync,
-  mkdtempSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import process from 'node:process';
-import { runCredsAddCloudflare, unsupportedAccountScopes } from './creds-add';
+  ACCOUNT_A,
+  ACCOUNT_B,
+  cleanupCredsAdd,
+  initializeConsumer,
+  installSops,
+  pageInfo,
+  response,
+} from './creds-add-test-support';
 
-const ACCOUNT_ID_LENGTH = 32;
-const ACCOUNT_A = 'a'.repeat(ACCOUNT_ID_LENGTH);
-const ACCOUNT_B = 'b'.repeat(ACCOUNT_ID_LENGTH);
-const EXECUTABLE_MODE = 0o755;
-const originalFetch = globalThis.fetch;
-const originalBroker = process.env.STANDARDS_BROKER_FILE;
-const originalPath = process.env.PATH;
-let root = '';
-const response = (result: unknown, info?: unknown): Response =>
-  Response.json({
-    success: true,
-    errors: [],
-    result,
-    // biome-ignore lint/style/useNamingConvention: Cloudflare's response field is snake_case.
-    ...(info === undefined ? {} : { result_info: info }),
-  });
-
-const pageInfo = (count: number, totalCount: number): unknown => ({
-  page: 1,
-  // biome-ignore lint/style/useNamingConvention: Cloudflare's pagination field is snake_case.
-  per_page: 50,
-  count,
-  // biome-ignore lint/style/useNamingConvention: Cloudflare's pagination field is snake_case.
-  total_count: totalCount,
-});
-const initializeConsumer = (accounts: ReadonlyArray<string>): string => {
-  root = mkdtempSync(join(tmpdir(), 'creds-add-'));
-  const consumer = join(root, 'consumer');
-  mkdirSync(join(consumer, 'secrets'), { recursive: true });
-  writeFileSync(
-    join(consumer, 'secrets', 'ci.yaml'),
-    'ci:\n  token: ENC[AES256_GCM,data:x]\nsops:\n  mac: ENC[AES256_GCM,data:y]\n  version: 3.9.4\n',
-  );
-  execFileSync('git', ['init', '-q', consumer]);
-  execFileSync('git', [
-    '-C',
-    consumer,
-    'remote',
-    'add',
-    'origin',
-    'git@github.com:davidvornholt/example.git',
-  ]);
-  const broker = join(root, 'broker.yaml');
-  writeFileSync(
-    broker,
-    `cloudflare:\n${accounts.map((account) => `  - account_id: ${account}\n    token: bootstrap-${account}`).join('\n')}\n`,
-  );
-  process.env.STANDARDS_BROKER_FILE = broker;
-  return consumer;
-};
-afterEach(() => {
-  mock.restore();
-  globalThis.fetch = originalFetch;
-  if (originalBroker === undefined) {
-    delete process.env.STANDARDS_BROKER_FILE;
-  } else {
-    process.env.STANDARDS_BROKER_FILE = originalBroker;
-  }
-  process.env.PATH = originalPath;
-  if (root.length > 0) {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
+afterEach(cleanupCredsAdd);
 
 describe('creds add cloudflare', () => {
   it('rejects a cross-account destination collision before creation', async () => {
@@ -116,6 +52,8 @@ describe('creds add cloudflare', () => {
       permissions: 'Workers Scripts Write',
       account: ACCOUNT_A,
       ttlDays: 90,
+      bucket: undefined,
+      s3: false,
     });
     expect(ok).toBe(false);
     expect(methods).not.toContain('POST');
@@ -125,37 +63,14 @@ describe('creds add cloudflare', () => {
       ),
     );
   });
-
-  it('rejects groups without a supported account scope', () => {
-    expect(
-      unsupportedAccountScopes([
-        {
-          id: 'zone',
-          name: 'DNS Write',
-          scopes: ['com.cloudflare.api.account.zone'],
-        },
-        {
-          id: 'account',
-          name: 'Workers Scripts Write',
-          scopes: ['com.cloudflare.api.account'],
-        },
-      ]),
-    ).toEqual(['DNS Write']);
-  });
 });
 
 describe('creds add cloudflare compensation', () => {
   it('deletes a just-created token when the SOPS write fails', async () => {
     const consumer = initializeConsumer([ACCOUNT_A]);
-    const bin = join(root, 'bin');
-    mkdirSync(bin);
-    const sops = join(bin, 'sops');
-    writeFileSync(
-      sops,
-      '#!/bin/sh\nif [ "$1" = "decrypt" ]; then printf \'"old-value"\'; exit 0; fi\nexit 1\n',
+    installSops(
+      'if [ "$1" = "decrypt" ]; then printf \'"old-value"\'; exit 0; fi\nexit 1',
     );
-    chmodSync(sops, EXECUTABLE_MODE);
-    process.env.PATH = `${bin}:${originalPath ?? ''}`;
     const methods: Array<string> = [];
     globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
@@ -188,6 +103,8 @@ describe('creds add cloudflare compensation', () => {
       permissions: 'Workers Scripts Write',
       account: ACCOUNT_A,
       ttlDays: 90,
+      bucket: undefined,
+      s3: false,
     });
     expect(ok).toBe(false);
     expect(methods).toContain('POST');

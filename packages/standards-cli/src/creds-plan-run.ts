@@ -1,24 +1,12 @@
-import {
-  createAccountToken as createToken,
-  deleteAccountToken as deleteToken,
-} from './creds-cloudflare';
-import { listSecretsTargets, resolveTargetRel } from './creds-dest';
+import { listSecretsTargets } from './creds-dest';
 import { identifyCloudflareBootstrapAuthority } from './creds-login-cloudflare';
-import {
-  type AccountToken,
-  computeCredsPlan,
-  type PlannedAction,
-} from './creds-plan';
+import { computeCredsPlan } from './creds-plan';
+import { renewPlannedToken } from './creds-plan-renew';
 import { revokePlannedToken } from './creds-plan-revoke';
-import {
-  inspectSopsScalarDestination as inspectDestination,
-  readEncryptedKeys,
-  verifySopsStoredValue as verifyStoredValue,
-  setSopsValue as writeValue,
-} from './creds-sops';
+import type { AccountToken, PlannedAction } from './creds-plan-types';
+import { readEncryptedKeys } from './creds-sops';
 import {
   type BrokerStore,
-  type CloudflareBrokerAccount,
   readBrokerStore,
   resolveBrokerPath,
 } from './creds-store';
@@ -68,20 +56,7 @@ const gatherRepoState = async (consumer: string, store: BrokerStore) => {
   return { keysByTarget, tokens, problems };
 };
 
-const cleanupReplacement = async (
-  account: CloudflareBrokerAccount,
-  replacementId: string,
-  oldId: string,
-  context: string,
-): Promise<string> => {
-  const { accountId, token } = account;
-  const cleanup = await deleteToken(accountId, token, replacementId);
-  return cleanup.ok
-    ? `${context}; deleted replacement ${replacementId} and preserved old token ${oldId}`
-    : `${context}; cleanup of replacement ${replacementId} also failed: ${cleanup.problem}; old token ${oldId} remains active`;
-};
-
-const applyAction = async (
+const applyAction = (
   consumer: string,
   store: BrokerStore,
   action: PlannedAction,
@@ -90,48 +65,13 @@ const applyAction = async (
     (entry) => entry.accountId === action.accountId,
   );
   if (account === undefined) {
-    return `${action.name}: account ${action.accountId} is not in the broker store`;
+    return Promise.resolve(
+      `${action.name}: account ${action.accountId} is not in the broker store`,
+    );
   }
-  const { accountId, token: bootstrapToken } = account;
-  if (action.kind === 'revoke') {
-    return revokePlannedToken(account, action);
-  }
-  const rel = resolveTargetRel(consumer, action.target);
-  if (rel === null) {
-    return `${action.name}: secrets target ${action.target} not found`;
-  }
-  const destination = await inspectDestination(consumer, rel, action.key);
-  if (!destination.ok) {
-    return `${action.name}: ${destination.problem}`;
-  }
-  if (destination.state !== 'scalar') {
-    return `${action.name}: secret ${action.target}:${action.key} disappeared before renewal`;
-  }
-  const replacement = await createToken(accountId, bootstrapToken, {
-    name: action.name,
-    policies: action.policies,
-    expiresOn: action.replacementExpiresOn,
-    condition: action.condition,
-  });
-  if (!replacement.ok) {
-    return `${action.name}: ${replacement.problem}`;
-  }
-  const { id: replacementId, value } = replacement.value;
-  const written = writeValue(consumer, rel, action.key, value);
-  const verified = verifyStoredValue(consumer, rel, action.key, value);
-  if (verified.ok && !verified.matches) {
-    const problem = written.ok
-      ? `${action.name}: ${rel} at ${action.key} now holds a value matching neither the old nor the replacement token; repair the stored value manually`
-      : `${action.name}: ${written.problem}`;
-    return cleanupReplacement(account, replacementId, action.tokenId, problem);
-  }
-  if (!verified.ok) {
-    return `${action.name}: ${written.ok ? verified.problem : `${written.problem}; ${verified.problem}`}; account ${accountId} replacement ${replacementId} and old token ${action.tokenId} remain active because the stored value is unverifiable`;
-  }
-  const deleted = await deleteToken(accountId, bootstrapToken, action.tokenId);
-  return deleted.ok
-    ? null
-    : `${action.name}: replacement ${replacementId} is stored, but old token ${action.tokenId} could not be revoked: ${deleted.problem}`;
+  return action.kind === 'revoke'
+    ? revokePlannedToken(account, action)
+    : renewPlannedToken(consumer, account, action);
 };
 
 const fail = (message: string): false => {

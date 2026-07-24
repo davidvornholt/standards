@@ -98,6 +98,8 @@ const run = (consumer: string): Promise<boolean> =>
     permissions: 'Workers Scripts Write',
     account: ACCOUNT,
     ttlDays: 90,
+    bucket: undefined,
+    s3: false,
   });
 
 afterEach(() => {
