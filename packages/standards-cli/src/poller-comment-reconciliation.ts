@@ -19,12 +19,11 @@ export const retainEarliestComment = async (
   commentIds: ReadonlyArray<number>,
 ): Promise<number | null> => {
   const retainedId = earliestCommentId(commentIds);
-  await Promise.all(
-    commentIds
-      .filter((commentId) => commentId !== retainedId)
-      .map((commentId) =>
-        deleteComment(context.token, context.repo, commentId),
-      ),
-  );
+  for (const commentId of commentIds) {
+    if (commentId !== retainedId) {
+      // biome-ignore lint/performance/noAwaitInLoops: GitHub mutations are deliberately serialized to avoid secondary rate limits.
+      await deleteComment(context.token, context.repo, commentId);
+    }
+  }
   return retainedId;
 };

@@ -114,16 +114,17 @@ export const acknowledgeQueuedJob = async (
       expected,
     )}`,
   );
-  const winner = await retainEarliestComment(
+  const markerIds = await matchingTrustedQueueCommentIds(
     deps,
-    await matchingTrustedQueueCommentIds(
-      deps,
-      issueNumber,
-      expected.approvalId,
-      kind,
-    ),
+    issueNumber,
+    expected.approvalId,
+    kind,
   );
+  const winner = await retainEarliestComment(deps, markerIds);
   if (winner !== markerId) {
+    if (!markerIds.includes(markerId)) {
+      await deleteComment(deps.token, deps.repo, markerId);
+    }
     return false;
   }
   if (!(await isStillQueueable(deps, issueNumber, approval, kind))) {
