@@ -2,7 +2,6 @@ import { hasLabel } from './github-label-identity';
 import type { ApprovalBinding } from './poller-approval';
 import { parseHiddenCommentMetadata } from './poller-comment-metadata';
 import {
-  type IssueComment,
   type IssueItem,
   lastLabelEvent,
   listIssueComments,
@@ -140,9 +139,8 @@ export const inspectQueuedAcknowledgement = async (options: {
   readonly item: IssueItem;
   readonly kind: PollerJobKind;
   readonly target: string;
-  readonly blocksShortcut: (comment: IssueComment) => boolean;
 }): Promise<boolean> => {
-  const { deps, item, kind, target, blocksShortcut } = options;
+  const { deps, item, kind, target } = options;
   const expectedLabel = approvalLabelFor(kind);
   if (
     !hasLabel(item.labels, expectedLabel) ||
@@ -152,9 +150,6 @@ export const inspectQueuedAcknowledgement = async (options: {
     return false;
   }
   const comments = await listIssueComments(deps.token, deps.repo, item.number);
-  if (comments.some(blocksShortcut)) {
-    return false;
-  }
   const checkpoints: Array<ApprovalCheckpoint> = [];
   for (const comment of comments) {
     const marker = queueMarker(comment.body);

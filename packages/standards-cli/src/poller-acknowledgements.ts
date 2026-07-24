@@ -13,7 +13,6 @@ import {
   type PollerJobKind,
 } from './poller-queue-marker';
 import { reviewEligibility } from './poller-review-eligibility';
-import { parseReviewPlan } from './poller-review-output';
 import { readReviewPlan } from './poller-review-state';
 import { acknowledgeQueuedJob } from './poller-status';
 import type { RoleCache } from './poller-trust';
@@ -37,7 +36,6 @@ const approvalFor = async (
         item,
         kind,
         target,
-        blocksShortcut: () => false,
       })
     ) {
       return null;
@@ -53,7 +51,6 @@ const approvalFor = async (
         item,
         kind,
         target: currentTarget,
-        blocksShortcut: (comment) => parseReviewPlan(comment.body) !== null,
       }))
     ) {
       return null;

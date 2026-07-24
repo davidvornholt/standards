@@ -39,6 +39,68 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
+it.each([
+  {
+    description: 'current target and trusted author',
+    comments: [queueComment],
+    role: 'admin',
+    target: issueRevision(item),
+    expected: true,
+  },
+  {
+    description: 'different target',
+    comments: [queueComment],
+    role: 'admin',
+    target: 'issue:different',
+    expected: false,
+  },
+  {
+    description: 'untrusted marker author',
+    comments: [queueComment],
+    role: 'write',
+    target: issueRevision(item),
+    expected: false,
+  },
+] as const)('evaluates a checkpoint with $description', async ({
+  comments,
+  role,
+  target,
+  expected,
+}) => {
+  const responses: ReadonlyArray<unknown> = [
+    comments,
+    Object.fromEntries([['role_name', role]]),
+    [
+      {
+        id: APPROVAL_EVENT_ID,
+        event: 'labeled',
+        label: { name: 'approved-for-fix' },
+        actor: { login: 'maintainer' },
+        ...Object.fromEntries([['created_at', APPROVED_AT]]),
+      },
+    ],
+  ];
+  let requestIndex = 0;
+  globalThis.fetch = (() => {
+    const body = responses[requestIndex];
+    requestIndex += 1;
+    return Promise.resolve(Response.json(body));
+  }) as unknown as typeof fetch;
+  expect(
+    await inspectQueuedAcknowledgement({
+      deps: {
+        config: {} as PollerConfig,
+        token: 'test-token',
+        repo: REPO,
+        roleCache: new Map(),
+      },
+      item,
+      kind: 'fix',
+      target,
+    }),
+  ).toBe(expected);
+});
+
 it('does not let an old marker hide a new approval generation', async () => {
   let requestIndex = 0;
   const bodies = [
@@ -70,7 +132,6 @@ it('does not let an old marker hide a new approval generation', async () => {
       item,
       kind: 'fix',
       target: issueRevision(item),
-      blocksShortcut: () => false,
     }),
   ).toBe(false);
 });
