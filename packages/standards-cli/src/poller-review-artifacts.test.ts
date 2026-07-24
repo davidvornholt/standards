@@ -2,8 +2,9 @@ import { afterEach, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { type ApiCall, installApi } from './github-commands-test-support';
 import { prRevision } from './poller-approval';
+import { hiddenCommentMetadata } from './poller-comment-metadata';
 import type { JobDeps } from './poller-job-shared';
-import { CLAIM_MARKER } from './poller-protocol';
+import { CLAIM_METADATA_MARKER } from './poller-protocol';
 import { publishReviewArtifacts } from './poller-review-artifacts';
 import type { ReviewPublicationPlan } from './poller-review-output';
 
@@ -104,12 +105,12 @@ const validationResponses = () => [
     body: [
       {
         id: claim.markerId,
-        body: `${CLAIM_MARKER}\n${JSON.stringify({
+        body: hiddenCommentMetadata(CLAIM_METADATA_MARKER, {
           approval,
           claimLabel: claim.claimLabel,
           claimEpoch: claim.claimEpoch,
           nonce: 'nonce',
-        })}`,
+        }),
         user: { login: 'poller' },
       },
     ],

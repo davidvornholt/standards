@@ -2601,7 +2601,13 @@ describe('poller', () => {
     ]);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('standards-poller.service');
+    expect(result.stdout).toContain(
+      'standards-poller-acknowledgements.service',
+    );
     expect(result.stdout).toContain(`poller --config "${configPath}"`);
+    expect(result.stdout).toContain(
+      `poller --acknowledge-only --config "${configPath}"`,
+    );
     expect(result.stdout).toContain('TimeoutStartSec=270min');
   });
 });

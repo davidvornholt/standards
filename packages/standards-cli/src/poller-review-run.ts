@@ -21,6 +21,7 @@ import {
   REVIEW_FAILED,
   REVIEW_IN_PROGRESS,
 } from './poller-protocol';
+import { reviewEligibility } from './poller-review-eligibility';
 import { executeReviewJob } from './poller-review-execution';
 import {
   readSealedReviewPlan,
@@ -28,6 +29,7 @@ import {
 } from './poller-review-output';
 import { resumeReviewedJob } from './poller-review-publication';
 import { publishReviewPlan, readReviewPlan } from './poller-review-state';
+import { acknowledgeQueuedJob } from './poller-status';
 import { ensureCacheClone, localBranchExists } from './poller-workspace';
 
 const REVIEW_LABELS: JobLabels = {
@@ -73,30 +75,15 @@ export const runReviewJob = async (
       ranCodex: false,
     };
   }
-  if (!pr.draft && plan === null) {
-    await failJob(
-      deps,
-      REVIEW_LABELS,
-      pr.number,
-      'automated review requires a draft PR',
-    );
+  const eligibility = reviewEligibility({
+    repo,
+    pr,
+    hasPlan: plan !== null,
+  });
+  if (eligibility.kind === 'rejected') {
+    await failJob(deps, REVIEW_LABELS, pr.number, eligibility.message);
     return {
-      lines: [`PR #${pr.number}: rejected (not draft)`],
-      ranCodex: false,
-    };
-  }
-  // Fork PRs are out of scope: their head branch lives in a repository the
-  // poller must not push to, and pushing a same-named branch to the base repo
-  // would fake a review. Fail explicitly instead of pretending.
-  if (pr.headRepo !== repo) {
-    await failJob(
-      deps,
-      REVIEW_LABELS,
-      pr.number,
-      `this PR's head branch lives in ${pr.headRepo || 'an unknown repository'}; automated review runs only support same-repository branches`,
-    );
-    return {
-      lines: [`PR #${pr.number}: rejected (fork head)`],
+      lines: [`PR #${pr.number}: ${eligibility.result}`],
       ranCodex: false,
     };
   }
@@ -113,6 +100,7 @@ export const runReviewJob = async (
     throw new Error(`sealed output on ${outputBranch} is invalid`);
   }
   if (plan === null && sealed === null && !allowCodex) {
+    await acknowledgeQueuedJob(deps, pr.number, preamble.approval, 'review');
     return {
       lines: [`PR #${pr.number}: waiting for run capacity`],
       ranCodex: false,

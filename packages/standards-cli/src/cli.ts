@@ -88,6 +88,7 @@ type CliOptions = {
   readonly profile: StructureProfile;
   readonly config: string | undefined;
   readonly printUnits: boolean;
+  readonly acknowledgeOnly: boolean;
 };
 
 const sha256 = (buf: Buffer): string =>
@@ -755,7 +756,9 @@ Options:
   --apply          With github: converge the live repository (needs admin auth)
   --write          With dependabot: regenerate the composed .github/dependabot.yml
   --config <path>  With poller: the host-level poller config file (required)
-  --print-units    With poller: print declarative systemd unit content without touching the host`;
+  --print-units    With poller: print declarative systemd unit content without touching the host
+  --acknowledge-only
+                   With poller: acknowledge queued requests without starting work`;
 
 const commandFromArg = (arg: string): Command => {
   if (
@@ -811,6 +814,7 @@ type ParsedFlags = {
   readonly profile: StructureProfile | undefined;
   readonly config: string | undefined;
   readonly printUnits: boolean;
+  readonly acknowledgeOnly: boolean;
 };
 
 const assertPollerOptionUsage = (flags: ParsedFlags): void => {
@@ -819,6 +823,14 @@ const assertPollerOptionUsage = (flags: ParsedFlags): void => {
   }
   if (flags.printUnits && flags.command !== 'poller') {
     throw new Error('--print-units is only valid with the poller command');
+  }
+  if (flags.acknowledgeOnly && flags.command !== 'poller') {
+    throw new Error('--acknowledge-only is only valid with the poller command');
+  }
+  if (flags.acknowledgeOnly && flags.printUnits) {
+    throw new Error(
+      'poller accepts only one of --acknowledge-only or --print-units',
+    );
   }
 };
 
@@ -864,12 +876,16 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
   let profile: StructureProfile | undefined;
   let config: string | undefined;
   let printUnits = false;
+  let acknowledgeOnly = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     switch (arg) {
       case '--apply':
         apply = true;
+        break;
+      case '--acknowledge-only':
+        acknowledgeOnly = true;
         break;
       case '--config':
         config = nextOptionValue(argv, index);
@@ -921,6 +937,7 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
     profile,
     config,
     printUnits,
+    acknowledgeOnly,
   });
 
   return {
@@ -934,6 +951,7 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
     profile: profile ?? 'consumer',
     config,
     printUnits,
+    acknowledgeOnly,
   };
 };
 
@@ -1164,6 +1182,7 @@ const main = async (): Promise<void> => {
     profile,
     config,
     printUnits,
+    acknowledgeOnly,
   } = parseArgs(process.argv.slice(2));
 
   if (command === undefined) {
@@ -1194,7 +1213,13 @@ const main = async (): Promise<void> => {
   }
 
   if (command === 'poller') {
-    if (!(await runPollerCommand({ configPath: config, printUnits }))) {
+    if (
+      !(await runPollerCommand({
+        configPath: config,
+        printUnits,
+        acknowledgeOnly,
+      }))
+    ) {
       process.exitCode = 1;
     }
     return;

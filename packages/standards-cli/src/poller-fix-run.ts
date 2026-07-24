@@ -31,6 +31,7 @@ import {
   FIX_FAILED,
   FIX_IN_PROGRESS,
 } from './poller-protocol';
+import { acknowledgeQueuedJob } from './poller-status';
 import {
   createWorktree,
   ensureCacheClone,
@@ -86,6 +87,7 @@ export const runFixJob = async (
     );
   }
   if (sealed === null && !allowCodex) {
+    await acknowledgeQueuedJob(deps, issue.number, preamble.approval, 'fix');
     return {
       lines: [`#${issue.number}: waiting for run capacity`],
       ranCodex: false,

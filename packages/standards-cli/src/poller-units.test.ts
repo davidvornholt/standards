@@ -16,10 +16,8 @@ const config = (overrides: Partial<PollerConfig> = {}): PollerConfig => ({
 
 describe('renderUnits', () => {
   it('renders a oneshot service running a tick against the config', () => {
-    const { service, timer } = renderUnits(
-      '/etc/standards-poller/config.json',
-      config(),
-    );
+    const { service, timer, acknowledgementService, acknowledgementTimer } =
+      renderUnits('/etc/standards-poller/config.json', config());
     expect(service).toContain('Type=oneshot');
     expect(service).toContain(
       'poller --config "/etc/standards-poller/config.json"',
@@ -28,6 +26,13 @@ describe('renderUnits', () => {
     expect(timer).not.toContain('OnUnitActiveSec');
     expect(timer).toContain('AccuracySec=15s');
     expect(timer).toContain('Persistent=true');
+    expect(acknowledgementService).toContain('Type=oneshot');
+    expect(acknowledgementService).toContain(
+      'poller --acknowledge-only --config "/etc/standards-poller/config.json"',
+    );
+    expect(acknowledgementService).toContain('TimeoutStartSec=30min');
+    expect(acknowledgementTimer).toContain('OnBootSec=1min');
+    expect(acknowledgementTimer).toContain('OnUnitInactiveSec=5min');
   });
 
   it('derives the tick budget from job count and agent timeout', () => {

@@ -16,7 +16,8 @@ export const DEFERRED_FINDING = 'deferred-finding';
 // questions and failure reports apart from human conversation.
 export const QUESTION_MARKER = '<!-- standards-poller:question -->';
 export const FAILURE_MARKER = '<!-- standards-poller:failure -->';
-export const CLAIM_MARKER = '<!-- standards-poller:claim -->';
+export const CLAIM_METADATA_MARKER = 'standards-poller:claim';
+export const QUEUE_METADATA_MARKER = 'standards-poller:queue';
 export const FIX_OUTPUT_MARKER = 'standards-poller:fix-output';
 
 // Repository roles trusted to approve automation and answer its questions.
