@@ -898,6 +898,8 @@ describe('dependabot composition seam', () => {
     ]);
     expect(dry.status).toBe(0);
     expect(dry.stdout).toContain('would generate .github/dependabot.yml');
+    expect(dry.stdout).not.toContain('already in sync; no changes');
+    expect(dry.stdout).toContain('0 to delete, 1 to generate');
     expect(read(consumer, '.github/dependabot.yml')).not.toContain('nix');
 
     const syncRun = run(consumer, ['sync', '--from', up, '--dir', consumer]);
@@ -1079,6 +1081,9 @@ describe('prospective Dependabot sync', () => {
     expect(dry.status).toBe(0);
     expect(dry.stdout).toContain('would update .github/dependabot.base.yml');
     expect(dry.stdout).toContain('would generate .github/dependabot.yml');
+    expect(dry.stdout).toContain(
+      'dry run: 0 to create, 1 to update, 0 to delete, 1 to generate',
+    );
     expect(snapshotTree(consumer)).toEqual(before);
   });
 });
@@ -1137,6 +1142,9 @@ describe('sync', () => {
     const dry = sync(up, consumer, ['--dry-run']);
     expect(dry.status).toBe(0);
     expect(dry.stdout).toContain('would update managed/a.txt');
+    expect(dry.stdout).toContain(
+      'dry run: 0 to create, 1 to update, 0 to delete, 0 to generate',
+    );
     expect(read(consumer, 'managed/a.txt')).toBe('alpha\n');
     expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
     sync(up, consumer);
