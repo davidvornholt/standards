@@ -252,14 +252,14 @@ provider "cloudflare" {}
 
 ## Nix binary cache
 
-A repo whose trusted CI builds and deploys NixOS system closures uses a private, signed binary cache. This does not apply to an OpenTofu-only repo or to a flake that CI never deploys. Cloudflare R2 is the default when the repo already has a Cloudflare stack; another backend is fine when it provides the same trust and access boundaries.
+A repo whose trusted CI builds and deploys NixOS system closures uses a private, signed binary cache. Cloudflare R2 is the default when the repo already has a Cloudflare stack; another backend works if it holds the same trust and access boundaries.
 
-- The cache belongs to the host's infrastructure home. Declare its bucket with the other cloud resources, protect it from accidental destruction, and adopt an existing bucket with a committed `import` block. Do not make a workflow depend on the bucket before the bucket exists.
-- Give validation a bucket-scoped read/write credential and deployment a separate bucket-scoped read-only credential. Mint provider credentials with `bun standards creds` and store them in SOPS. Keep the signing key in SOPS too; pin only its public half in the workflow.
-- Validation first substitutes what is already cached, then runs the complete Nix gate. Only after that gate passes does it sign and copy every check output's closure. Publishing is part of the gate: a failed or incomplete copy blocks deployment.
-- Deployment waits for validation of the exact main-branch commit and substitutes the closure that validation published. It never receives the signing key or the publisher credential.
-- A private R2 cache has no `r2.dev` hostname or custom domain. Check both access surfaces through the live Cloudflare API in PR validation and before deployment, and fail closed when the API cannot prove the bucket is private.
-- Document the credentials, signing-key rotation, and cache retention policy beside the rest of the repo's infrastructure configuration. If the cache is intentionally omitted, record the reason in the host repo.
+- The bucket is declared in the host's infrastructure home like any other data-bearing resource, and exists before any workflow references it.
+- Validation holds a bucket-scoped read/write credential and the signing key; deployment holds a read-only credential and neither. Only the signing key's public half appears in workflow configuration.
+- Validation substitutes from the cache, runs the full Nix gate, then signs and copies the closure of every check output. A failed or partial copy fails the validation job, which blocks deployment.
+- Deployment waits for validation of the exact main-branch commit and substitutes that closure instead of rebuilding.
+- The bucket must never be publicly readable — for R2, no `r2.dev` hostname and no custom domain. Verify through the provider API in PR validation and again before deployment.
+- Document the credentials, signing-key rotation, and retention policy with the repo's other infrastructure configuration.
 
 ## Install and convergence
 
