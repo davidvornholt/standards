@@ -83,9 +83,9 @@ The `Standards sync` workflow also runs `sync` weekly and opens a PR when upstre
 
 ### Automate deferred fixes with the poller
 
-Review-fix cycles defer real-but-adjacent findings as `deferred-finding` issues, and those accumulate. The fix poller works that backlog down with your approval as the only per-issue effort: apply `approved-for-fix` to any issue, deferred finding or not (admin/maintain role required — the poller verifies who applied the label, binds approval to that exact issue revision, and revalidates it before publication, so later edits and triage-level drive-bys on a public repo cannot start or redirect jobs) and the next tick verifies the issue's premise, implements it in a throwaway worktree, and opens a draft PR that your required CI checks gate like any other change. Apply `approved-for-review` to that draft PR and the next tick similarly binds approval to the exact PR head, runs a full review-fix cycle on it — lens fan-out, fixes as new commits, and fresh fix-delta verification — then revalidates the binding, posts the report, and flips it ready for review. Merging stays yours, always. When a run needs a decision, it asks in a comment and applies `needs-clarification`, which rings the same ntfy doorbell as review pauses (on issues and PRs alike); your reply resumes the job on a later tick, and comments from anyone without admin/maintain are ignored entirely.
+Review-fix cycles defer real-but-adjacent findings as `deferred-finding` issues, and those accumulate. The fix poller works that backlog down with your approval as the only per-issue effort: apply `approved-for-fix` to any issue, deferred finding or not (admin/maintain role required — the poller verifies who applied the label, binds approval to that exact issue revision, and revalidates it before publication, so later edits and triage-level drive-bys on a public repo cannot start or redirect jobs) and the next tick verifies the issue's premise, implements it in a throwaway worktree, and opens a draft PR that your required CI checks gate like any other change. Apply `approved-for-review` to that draft PR and the next tick similarly binds approval to the exact PR head, runs a full review-fix cycle on it — lens fan-out, fixes as new commits, and fresh fix-delta verification — then revalidates the binding, posts the report, and flips it ready for review. The poller acknowledges either request with a clear queued comment, even while a long-running job occupies the worker, and posts a second update when work starts; its approval and claim records stay in hidden comment metadata instead of appearing as raw JSON. Merging stays yours, always. When a run needs a decision, it asks in a comment and applies `needs-clarification`, which rings the same ntfy doorbell as review pauses (on issues and PRs alike); your reply resumes the job on a later tick, and comments from anyone without admin/maintain are ignored entirely.
 
-Setup is host-level, not per repo: every repo already carries the protocol (the labels ship in the declared GitHub settings via `github --apply`; the workflow and skills are synced). The polling host's infrastructure repository owns the service identity, writable HOME, PATH, token environment, lingering, and systemd deployment. Authenticate that identity for `codex`, provide a fine-grained PAT with issues/PRs/contents write on the watched repos, write a config file listing the repos plus the Codex model and reasoning effort, and adapt `standards poller --print-units --config <path>` into the host's declarative service and timer. The poller removes its direct GitHub token variables before launching Codex, but the approved run shares the service identity and can read its other ambient credentials and logged-in tool state; that visibility is an accepted risk, not credential isolation. One poller supports at most 12 repositories; split larger fleets across pollers with independent GitHub API budgets. See the CLI README for the full config schema and trust model.
+Setup is host-level, not per repo: every repo already carries the protocol (the labels ship in the declared GitHub settings via `github --apply`; the workflow and skills are synced). The polling host's infrastructure repository owns the service identity, writable HOME, PATH, token environment, lingering, and systemd deployment. Authenticate that identity for `codex`, put `gh` on the service PATH, provide a fine-grained PAT with issues/PRs/contents write on the watched repos, write a config file listing the repos plus the Codex model and reasoning effort, and adapt all four units emitted by `standards poller --print-units --config <path>` into the host's declarative configuration: a worker service and timer plus the lightweight acknowledgement service and timer that remain responsive while the worker runs. The approved Codex run inherits that PAT and uses authenticated `gh` for the PR review ledger, authorized PR metadata edits, and deferred issues. The poller still owns approval and claim labels, commit pushes, the final review report, and the ready transition so each publication is revalidated against the approved head. One poller supports at most 12 repositories; split larger fleets across pollers with independent GitHub API budgets. See the CLI README for the full config schema and trust model.
 
 ### Package the poller with Nix
 
@@ -95,25 +95,34 @@ Pin a released tag and, when the consumer already owns nixpkgs, make the standar
 
 ```nix
 inputs.standards = {
-  url = "github:davidvornholt/standards/v0.15.1";
+  url = "github:davidvornholt/standards/v0.17.3";
   inputs.nixpkgs.follows = "nixpkgs";
 };
 
 # In the NixOS module receiving `inputs` through specialArgs:
 let
   standardsCli = inputs.standards.packages.${pkgs.system}.standards-cli;
+  pollerPath = [
+    standardsCli
+    pkgs.codex
+    pkgs.gitMinimal
+    pkgs.gh
+    pkgs.nix
+  ];
 in
 {
   systemd.user.services.standards-poller.serviceConfig.ExecStart =
     "${standardsCli}/bin/standards poller --config ${pollerConfig}";
-  systemd.user.services.standards-poller.path = [
-    standardsCli
-    pkgs.codex
-    pkgs.gitMinimal
-    pkgs.nix
-  ];
+  systemd.user.services.standards-poller.path = pollerPath;
+  systemd.user.services.standards-poller-acknowledgements.serviceConfig.ExecStart =
+    "${standardsCli}/bin/standards poller --acknowledge-only --config ${pollerConfig}";
+  systemd.user.services.standards-poller-acknowledgements.path = pollerPath;
 }
 ```
+
+### Breaking migration to 0.17.0
+
+Poller Codex runs now receive the host's GitHub token and use `gh` for repository collaboration instead of converting every GitHub operation into a clarification or a poller-side deferred action. Before upgrading a polling host, add `gh` to the service PATH and confirm the existing fine-grained PAT grants Issues, Pull requests, and Contents write on every watched repository. There is no restricted-token fallback: a host that does not provide authenticated `gh` is misconfigured and review runs fail rather than silently returning to the old question-only behavior. Sealed review plans from the earlier protocol are rejected rather than migrated or partially published; their legacy output branches are ignored, so leave the approval in place and the review reruns on a fresh protocol-versioned branch.
 
 ### Track main or pin a version
 

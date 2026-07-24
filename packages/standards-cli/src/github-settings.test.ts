@@ -163,11 +163,20 @@ describe('loadGithubSettings rulesetEnforcement', () => {
     ]);
   });
 
-  it('rejects rulesetEnforcement in the canonical file', () => {
+  it.each([
+    ['opt-out', 'unavailable-on-plan'],
+    ['explicit enforcement', 'enforced'],
+    ['null', null],
+    ['true', true],
+    ['false', false],
+    ['number', 1],
+    ['object', {}],
+    ['array', []],
+  ] as const)('rejects canonical %s without validating its value', (_, value) => {
     const badCanonical = JSON.stringify({
       repository: {},
       rulesets: [],
-      rulesetEnforcement: 'unavailable-on-plan',
+      rulesetEnforcement: value,
     });
     const loaded = loadGithubSettings(badCanonical, emptySeam);
     expect(loaded.merged).toBeNull();

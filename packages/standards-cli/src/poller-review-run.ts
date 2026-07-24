@@ -1,14 +1,15 @@
 // One review job: a maintainer-approved draft PR gets a full review-fix
 // cycle — lens fan-out inside the Codex run, fixes as new commits — then the
-// poller posts the report, files deferred findings as issues, and flips the
-// PR to ready. GitHub writes stay in deterministic poller code; the agent
-// never holds credentials.
+// Codex maintains the GitHub review ledger and commits fixes, then the poller
+// verifies and pushes those commits, posts the final report, and flips the PR
+// ready.
 
-import { prRevision } from './poller-approval';
-import { acquireClaim } from './poller-claim';
+import { hasLabel } from './github-label-identity';
+import { approvalIsCurrent, prRevision } from './poller-approval';
+import { startClaim, withClaimReleasedOnFailure } from './poller-claim';
+import { runCodex } from './poller-codex';
 import { getIssue, type IssueItem } from './poller-github';
 import { getPullRequest } from './poller-github-pulls';
-import { addLabels } from './poller-github-write';
 import {
   failJob,
   type JobDeps,
@@ -21,6 +22,7 @@ import {
   REVIEW_FAILED,
   REVIEW_IN_PROGRESS,
 } from './poller-protocol';
+import { reviewEligibility } from './poller-review-eligibility';
 import { executeReviewJob } from './poller-review-execution';
 import {
   readSealedReviewPlan,
@@ -28,6 +30,7 @@ import {
 } from './poller-review-output';
 import { resumeReviewedJob } from './poller-review-publication';
 import { publishReviewPlan, readReviewPlan } from './poller-review-state';
+import { acknowledgeQueuedJob } from './poller-status';
 import { ensureCacheClone, localBranchExists } from './poller-workspace';
 
 const REVIEW_LABELS: JobLabels = {
@@ -46,21 +49,58 @@ const hasInvalidLocalOutput = (
 ): boolean =>
   plan === null && sealed === null && localBranchExists(cloneDir, branch);
 
+const currentReviewTarget = async (
+  token: string | null,
+  repo: string,
+  prNumber: number,
+  plan: Awaited<ReturnType<typeof readReviewPlan>>,
+): Promise<string | null> => {
+  const current = await getPullRequest(token, repo, prNumber);
+  if (
+    plan !== null &&
+    current.headSha !== plan.approvedHead &&
+    current.headSha !== plan.publishedHead
+  ) {
+    return null;
+  }
+  return prRevision(
+    current.baseRef,
+    current.baseSha,
+    plan === null ? current.headSha : plan.approvedHead,
+  );
+};
+
 export const runReviewJob = async (
   deps: JobDeps,
   prItem: IssueItem,
   allowCodex = true,
+  runAgent: typeof runCodex = runCodex,
 ): Promise<JobResult> => {
   const { config, token, repo } = deps;
-  const pr = await getPullRequest(token, repo, prItem.number);
-  let plan = await currentReviewPlan(deps, pr);
   const currentItem = await getIssue(token, repo, prItem.number);
-  const preamble = await jobPreamble(
-    deps,
-    currentItem,
-    REVIEW_LABELS,
-    prRevision(pr.baseRef, pr.baseSha, plan?.approvedHead ?? pr.headSha),
-  );
+  if (!hasLabel(currentItem.labels, APPROVED_FOR_REVIEW)) {
+    return {
+      lines: [`PR #${prItem.number}: approval no longer present; skipped`],
+      ranCodex: false,
+    };
+  }
+  const pr = await getPullRequest(token, repo, prItem.number);
+  const plan = await currentReviewPlan(deps, pr);
+  const readTarget = () => currentReviewTarget(token, repo, pr.number, plan);
+  const preamble = await jobPreamble(deps, currentItem, REVIEW_LABELS, {
+    approved: prRevision(
+      pr.baseRef,
+      pr.baseSha,
+      plan?.approvedHead ?? pr.headSha,
+    ),
+    readCurrent: readTarget,
+  });
+  if (preamble.kind === 'stale') {
+    return {
+      lines: [`PR #${prItem.number}: approval no longer present; skipped`],
+      ranCodex: false,
+    };
+  }
   if (preamble.kind === 'rejected') {
     return {
       lines: [`PR #${prItem.number}: approval rejected`],
@@ -73,30 +113,15 @@ export const runReviewJob = async (
       ranCodex: false,
     };
   }
-  if (!pr.draft && plan === null) {
-    await failJob(
-      deps,
-      REVIEW_LABELS,
-      pr.number,
-      'automated review requires a draft PR',
-    );
+  const eligibility = reviewEligibility({
+    repo,
+    pr,
+    hasPlan: plan !== null,
+  });
+  if (eligibility.kind === 'rejected') {
+    await failJob(deps, REVIEW_LABELS, pr.number, eligibility.message);
     return {
-      lines: [`PR #${pr.number}: rejected (not draft)`],
-      ranCodex: false,
-    };
-  }
-  // Fork PRs are out of scope: their head branch lives in a repository the
-  // poller must not push to, and pushing a same-named branch to the base repo
-  // would fake a review. Fail explicitly instead of pretending.
-  if (pr.headRepo !== repo) {
-    await failJob(
-      deps,
-      REVIEW_LABELS,
-      pr.number,
-      `this PR's head branch lives in ${pr.headRepo || 'an unknown repository'}; automated review runs only support same-repository branches`,
-    );
-    return {
-      lines: [`PR #${pr.number}: rejected (fork head)`],
+      lines: [`PR #${pr.number}: ${eligibility.result}`],
       ranCodex: false,
     };
   }
@@ -112,38 +137,48 @@ export const runReviewJob = async (
   if (hasInvalidLocalOutput(plan, sealed, cacheClone, outputBranch)) {
     throw new Error(`sealed output on ${outputBranch} is invalid`);
   }
+  if (
+    !(await approvalIsCurrent(
+      { token, repo, issueNumber: pr.number },
+      preamble.approval,
+      readTarget,
+    ))
+  ) {
+    return {
+      lines: [`PR #${pr.number}: approval generation changed; skipped`],
+      ranCodex: false,
+    };
+  }
   if (plan === null && sealed === null && !allowCodex) {
+    await acknowledgeQueuedJob(deps, pr.number, preamble.approval, 'review');
     return {
       lines: [`PR #${pr.number}: waiting for run capacity`],
       ranCodex: false,
     };
   }
-  await addLabels(token, repo, prItem.number, [REVIEW_IN_PROGRESS]);
-  const claim = await acquireClaim(
-    { token, repo, issueNumber: pr.number },
-    preamble.approval,
-    REVIEW_IN_PROGRESS,
-  );
+  const claim = await startClaim(deps, pr.number, preamble.approval, 'review');
   if (claim === null) {
     return {
       lines: [`PR #${pr.number}: another poller owns the claim`],
       ranCodex: false,
     };
   }
-  if (plan === null && sealed !== null) {
-    await publishReviewPlan(deps, pr, claim, sealed);
-    plan = sealed;
-  }
-  if (plan !== null) {
+  const resumablePlan = plan ?? sealed;
+  if (resumablePlan !== null) {
     return {
       lines: [
-        await resumeReviewedJob({
-          deps,
-          labels: REVIEW_LABELS,
-          pr,
-          claim,
-          plan,
-          cloneDir: cacheClone,
+        await withClaimReleasedOnFailure(deps, pr.number, claim, async () => {
+          if (plan === null) {
+            await publishReviewPlan(deps, pr, claim, resumablePlan);
+          }
+          return resumeReviewedJob({
+            deps,
+            labels: REVIEW_LABELS,
+            pr,
+            claim,
+            plan: resumablePlan,
+            cloneDir: cacheClone,
+          });
         }),
       ],
       ranCodex: false,
@@ -156,5 +191,6 @@ export const runReviewJob = async (
     claim,
     cacheClone,
     answers: preamble.answers,
+    runAgent,
   });
 };
