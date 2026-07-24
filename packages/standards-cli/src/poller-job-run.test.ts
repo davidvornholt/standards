@@ -63,10 +63,15 @@ describe('poller job entrypoints', () => {
       { body: rawIssue('Approved-For-Fix') },
       timeline('APPROVED-FOR-FIX'),
       { body: Object.fromEntries([['role_name', 'write']]) },
+      { body: rawIssue('Approved-For-Fix') },
+      timeline('APPROVED-FOR-FIX'),
+      { body: Object.fromEntries([['role_name', 'write']]) },
       { body: {} },
       { status: HTTP_CREATED, body: { id: 1 } },
     ]);
-    await expect(runFixJob(deps, item, 'main')).resolves.toEqual({
+    await expect(
+      runFixJob(deps, item, () => Promise.resolve('main')),
+    ).resolves.toEqual({
       lines: [`#${ISSUE_NUMBER}: approval rejected`],
       ranCodex: false,
     });
@@ -74,6 +79,7 @@ describe('poller job entrypoints', () => {
 
   it('runReviewJob rejects a non-draft PR before workspace or Codex work', async () => {
     installApi([
+      { body: rawIssue('Approved-For-Review') },
       {
         body: {
           ...Object.fromEntries([['node_id', 'PR_node']]),
@@ -89,7 +95,6 @@ describe('poller job entrypoints', () => {
         },
       },
       { body: [] }, // no durable review plan
-      { body: rawIssue('Approved-For-Review') },
       { body: rawIssue('Approved-For-Review') },
       timeline('APPROVED-FOR-REVIEW'),
       { body: Object.fromEntries([['role_name', 'maintain']]) },

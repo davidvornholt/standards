@@ -1,9 +1,8 @@
-// One fix job: a maintainer-approved issue becomes a verified draft PR, a
-// precise question, or an explicit failure — never silence. Every transition
-// is written back to GitHub so the next tick (or a human) resumes from there.
+// A maintainer-approved issue becomes a verified draft PR, question, or failure.
 
 import { join } from 'node:path';
-import { issueRevision } from './poller-approval';
+import { hasLabel } from './github-label-identity';
+import { approvalIsCurrent, issueRevision } from './poller-approval';
 import { acquireClaim } from './poller-claim';
 import { runCodex } from './poller-codex';
 import { handleNonFixedOutcome } from './poller-fix-outcome';
@@ -55,6 +54,11 @@ const hasInvalidLocalOutput = (
   branch: string,
 ): boolean => sealed === null && localBranchExists(cloneDir, branch);
 
+const result = (issueNumber: number, message: string): JobResult => ({
+  lines: [`#${issueNumber}: ${message}`],
+  ranCodex: false,
+});
+
 const assertSealedOwnership = (
   sealed: NonNullable<ReturnType<typeof readSealedFixOutput>>,
   issueNumber: number,
@@ -69,11 +73,14 @@ const assertSealedOwnership = (
 export const runFixJob = async (
   deps: JobDeps,
   issue: IssueItem,
-  defaultBranch: string,
+  resolveDefaultBranch: () => Promise<string>,
   allowCodex = true,
 ): Promise<JobResult> => {
   const { config, token, repo } = deps;
   const currentIssue = await getIssue(token, repo, issue.number);
+  if (!hasLabel(currentIssue.labels, APPROVED_FOR_FIX)) {
+    return result(issue.number, 'approval no longer present; skipped');
+  }
   const preamble = await jobPreamble(
     deps,
     currentIssue,
@@ -81,20 +88,15 @@ export const runFixJob = async (
     issueRevision(currentIssue),
   );
   if (preamble.kind === 'stale') {
-    return {
-      lines: [`#${issue.number}: approval no longer present; skipped`],
-      ranCodex: false,
-    };
+    return result(issue.number, 'approval no longer present; skipped');
   }
   if (preamble.kind === 'rejected') {
-    return { lines: [`#${issue.number}: approval rejected`], ranCodex: false };
+    return result(issue.number, 'approval rejected');
   }
   if (preamble.kind === 'waiting') {
-    return {
-      lines: [`#${issue.number}: waiting on an answer`],
-      ranCodex: false,
-    };
+    return result(issue.number, 'waiting on an answer');
   }
+  const defaultBranch = await resolveDefaultBranch();
   const cacheClone = ensureCacheClone(config.cacheDir, repo, token);
   const branch = branchNameForIssue(issue.number, preamble.approval.id);
   const sealed = readSealedFixOutput(cacheClone, branch);
@@ -103,12 +105,17 @@ export const runFixJob = async (
       `refusing to overwrite ${branch}: it is not valid sealed output for this approval`,
     );
   }
+  if (
+    !(await approvalIsCurrent(
+      { token, repo, issueNumber: issue.number },
+      preamble.approval,
+    ))
+  ) {
+    return result(issue.number, 'approval generation changed; skipped');
+  }
   if (sealed === null && !allowCodex) {
     await acknowledgeQueuedJob(deps, issue.number, preamble.approval, 'fix');
-    return {
-      lines: [`#${issue.number}: waiting for run capacity`],
-      ranCodex: false,
-    };
+    return result(issue.number, 'waiting for run capacity');
   }
   await addLabels(token, repo, issue.number, [FIX_IN_PROGRESS]);
   const claim = await acquireClaim(
@@ -117,10 +124,7 @@ export const runFixJob = async (
     FIX_IN_PROGRESS,
   );
   if (claim === null) {
-    return {
-      lines: [`#${issue.number}: another poller owns the claim`],
-      ranCodex: false,
-    };
+    return result(issue.number, 'another poller owns the claim');
   }
   const resumableJob = {
     deps,

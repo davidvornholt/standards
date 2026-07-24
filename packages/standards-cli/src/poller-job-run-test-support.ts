@@ -1,9 +1,31 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import type { ApprovalBinding } from './poller-approval';
 
 const REPO = 'owner/repo';
+const ISSUE_NUMBER = 7;
+
+export const createTestApproval = (
+  label: string,
+  target: string,
+): ApprovalBinding => {
+  const fields = {
+    repo: REPO,
+    issueNumber: ISSUE_NUMBER,
+    eventId: 101,
+    label,
+    actorLogin: 'maintainer',
+    approvedAt: '2026-07-18T10:00:00Z',
+    target,
+  };
+  return {
+    id: createHash('sha256').update(JSON.stringify(fields)).digest('hex'),
+    ...fields,
+  };
+};
 
 const git = (cwd: string, args: ReadonlyArray<string>): string =>
   execFileSync('git', ['-C', cwd, ...args], {

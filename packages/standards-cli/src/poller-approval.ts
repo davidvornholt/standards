@@ -29,6 +29,7 @@ export type ApprovalBindingResult =
     }
   | {
       readonly kind: 'rejected';
+      readonly generationId: string;
       readonly reason: string;
     };
 
@@ -40,6 +41,20 @@ type ApprovalContext = {
 
 const stableDigest = (value: unknown): string =>
   createHash('sha256').update(JSON.stringify(value)).digest('hex');
+
+const rejectionGenerationId = (
+  context: ApprovalContext,
+  label: string,
+  target: string,
+  event: Awaited<ReturnType<typeof lastLabelEvent>>,
+): string =>
+  stableDigest({
+    repo: context.repo,
+    issueNumber: context.issueNumber,
+    label,
+    target,
+    event,
+  });
 
 export const issueRevision = (issue: IssueItem): string =>
   `issue:${stableDigest({ title: issue.title, body: issue.body })}`;
@@ -72,6 +87,7 @@ export const readApprovalBinding = async (
   if (event === null) {
     return {
       kind: 'rejected',
+      generationId: rejectionGenerationId(context, label, target, event),
       reason: `no "${label}" label event found on ${context.repo}#${context.issueNumber}`,
     };
   }
@@ -83,6 +99,7 @@ export const readApprovalBinding = async (
   if (!isTrustedRole(role)) {
     return {
       kind: 'rejected',
+      generationId: rejectionGenerationId(context, label, target, event),
       reason: `"${label}" on ${context.repo}#${context.issueNumber} was applied by ${event.actorLogin} (role: ${role}); only admin or maintain roles may approve automation`,
     };
   }
@@ -99,4 +116,16 @@ export const readApprovalBinding = async (
     kind: 'approved',
     approval: { id: stableDigest(fields), ...fields },
   };
+};
+
+export const approvalIsCurrent = async (
+  context: ApprovalContext,
+  approval: ApprovalBinding,
+): Promise<boolean> => {
+  const current = await readApprovalBinding(
+    context,
+    approval.label,
+    approval.target,
+  );
+  return current.kind === 'approved' && current.approval.id === approval.id;
 };

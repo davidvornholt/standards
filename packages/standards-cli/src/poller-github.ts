@@ -1,8 +1,4 @@
-// Read-side GitHub helpers for the poller. Every function either returns a
-// narrow parsed shape or throws with the failing endpoint in the message; the
-// tick converts per-job throws into reported problems. Lists are always read
-// exhaustively (see github-paginate.ts) — the trust anchor is "the latest
-// label event", which a truncated page would silently falsify.
+// Read-side GitHub helpers return narrow parsed shapes or throw.
 
 import { apiError, HTTP_OK, request } from './github-api';
 import { hasLabel, labelIdentity } from './github-label-identity';
@@ -34,15 +30,24 @@ export type LabelEvent = {
 const asString = (value: unknown): string =>
   typeof value === 'string' ? value : '';
 
-const labelNames = (raw: unknown): ReadonlyArray<string> =>
-  Array.isArray(raw)
-    ? raw
-        .map((label) => (isRecord(label) ? asString(label.name) : ''))
-        .filter((name) => name.length > 0)
-    : [];
+const labelNames = (raw: unknown): ReadonlyArray<string> | null => {
+  if (
+    !(
+      Array.isArray(raw) &&
+      raw.every((label) => isRecord(label) && isNonEmptyString(label.name))
+    )
+  ) {
+    return null;
+  }
+  return raw.map((label) => (label as { readonly name: string }).name);
+};
 
 export const parseIssue = (raw: unknown): IssueItem | null => {
   if (!(isRecord(raw) && typeof raw.number === 'number')) {
+    return null;
+  }
+  const labels = labelNames(raw.labels);
+  if (labels === null) {
     return null;
   }
   return {
@@ -50,7 +55,7 @@ export const parseIssue = (raw: unknown): IssueItem | null => {
     title: asString(raw.title),
     body: asString(raw.body),
     isPullRequest: isRecord(raw.pull_request),
-    labels: labelNames(raw.labels),
+    labels,
     authorLogin: isRecord(raw.user) ? asString(raw.user.login) : '',
   };
 };
@@ -82,12 +87,15 @@ export const listOpenIssuesWithLabel = async (
     `/repos/${repo}/issues?state=open&labels=${encodeURIComponent(label)}`,
     `list ${repo} issues labeled ${label}`,
   );
-  return items
-    .map(parseIssue)
-    .filter(
-      (issue): issue is IssueItem =>
-        issue !== null && hasLabel(issue.labels, label),
-    );
+  return items.flatMap((raw, index) => {
+    const issue = parseIssue(raw);
+    if (issue === null) {
+      throw new Error(
+        `list ${repo} issues labeled ${label}: invalid issue at index ${index}`,
+      );
+    }
+    return hasLabel(issue.labels, label) ? [issue] : [];
+  });
 };
 
 export const listIssueComments = async (
@@ -154,9 +162,7 @@ export const lastLabelEvent = async (
   return latest;
 };
 
-// role_name distinguishes maintain from write; the legacy `permission` field
-// collapses both to "write" and cannot express the trust boundary. A 404
-// means "not a collaborator" — an untrusted answer, not an API failure.
+// role_name preserves the maintain/write trust boundary. A 404 is untrusted.
 export const collaboratorRole = async (
   token: string | null,
   repo: string,

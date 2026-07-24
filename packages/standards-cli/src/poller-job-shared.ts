@@ -65,6 +65,13 @@ export const jobPreamble = async (
     return { kind: 'stale' };
   }
   if (approval.kind === 'rejected') {
+    const current = await readApprovalBinding(trust, labels.approved, target);
+    if (
+      current.kind !== 'rejected' ||
+      current.generationId !== approval.generationId
+    ) {
+      return { kind: 'stale' };
+    }
     await removeLabel(deps.token, deps.repo, item.number, labels.approved);
     await createComment(
       deps.token,

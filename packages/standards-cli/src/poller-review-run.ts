@@ -4,7 +4,8 @@
 // verifies and pushes those commits, posts the final report, and flips the PR
 // ready.
 
-import { prRevision } from './poller-approval';
+import { hasLabel } from './github-label-identity';
+import { approvalIsCurrent, prRevision } from './poller-approval';
 import { acquireClaim } from './poller-claim';
 import { runCodex } from './poller-codex';
 import { getIssue, type IssueItem } from './poller-github';
@@ -56,9 +57,15 @@ export const runReviewJob = async (
   runAgent: typeof runCodex = runCodex,
 ): Promise<JobResult> => {
   const { config, token, repo } = deps;
+  const currentItem = await getIssue(token, repo, prItem.number);
+  if (!hasLabel(currentItem.labels, APPROVED_FOR_REVIEW)) {
+    return {
+      lines: [`PR #${prItem.number}: approval no longer present; skipped`],
+      ranCodex: false,
+    };
+  }
   const pr = await getPullRequest(token, repo, prItem.number);
   let plan = await currentReviewPlan(deps, pr);
-  const currentItem = await getIssue(token, repo, prItem.number);
   const preamble = await jobPreamble(
     deps,
     currentItem,
@@ -106,6 +113,17 @@ export const runReviewJob = async (
   const sealed = readSealedReviewPlan(cacheClone, outputBranch);
   if (hasInvalidLocalOutput(plan, sealed, cacheClone, outputBranch)) {
     throw new Error(`sealed output on ${outputBranch} is invalid`);
+  }
+  if (
+    !(await approvalIsCurrent(
+      { token, repo, issueNumber: pr.number },
+      preamble.approval,
+    ))
+  ) {
+    return {
+      lines: [`PR #${pr.number}: approval generation changed; skipped`],
+      ranCodex: false,
+    };
   }
   if (plan === null && sealed === null && !allowCodex) {
     await acknowledgeQueuedJob(deps, pr.number, preamble.approval, 'review');

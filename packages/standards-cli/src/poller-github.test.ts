@@ -42,3 +42,27 @@ it('discards stale label-filter results that do not carry the requested label', 
   ]);
   expect(calls).toHaveLength(1);
 });
+
+it.each([
+  ['missing', undefined],
+  ['null', null],
+  ['non-array', 'approved-for-fix'],
+  ['missing name', [{}]],
+  ['null name', [{ name: null }]],
+  ['partially malformed', [{ name: 'approved-for-fix' }, null]],
+] as const)('rejects a listing item with %s labels', async (_, labels) => {
+  const raw = issue(STALE_ISSUE_NUMBER, []);
+  const malformed =
+    labels === undefined
+      ? Object.fromEntries(
+          Object.entries(raw).filter(([key]) => key !== 'labels'),
+        )
+      : { ...raw, labels };
+  installApi([{ body: [malformed] }]);
+
+  await expect(
+    listOpenIssuesWithLabel('token', 'owner/repo', 'approved-for-fix'),
+  ).rejects.toThrow(
+    'list owner/repo issues labeled approved-for-fix: invalid issue at index 0',
+  );
+});
