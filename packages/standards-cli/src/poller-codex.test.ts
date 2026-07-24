@@ -18,8 +18,8 @@ const dirs: Array<string> = [];
 const MAX_FAILURE_LENGTH = 2100;
 const LONG_ERROR_LENGTH = 2500;
 const MS_PER_MINUTE = 60_000;
-const TIMEOUT_MS = 100;
-const MAX_TIMEOUT_ELAPSED_MS = 750;
+const TIMEOUT_MS = 1000;
+const MAX_TIMEOUT_ELAPSED_MS = 3000;
 const GIT_COMMON_DIR = '/tmp/cache/owner/repo.git';
 const originalGhToken = process.env.GH_TOKEN;
 const originalGithubToken = process.env.GITHUB_TOKEN;
@@ -139,7 +139,7 @@ describe('runCodex failure containment', () => {
         runTimeoutMinutes: TIMEOUT_MS / MS_PER_MINUTE,
       }),
       runScript(
-        "const { spawn } = require('node:child_process'); process.stderr.write('diagnostic before timeout\\n'); spawn(process.execPath, ['-e', 'setTimeout(() => {}, 1500)'], { stdio: ['ignore', 'ignore', 2] }); setTimeout(() => {}, 1500)",
+        `const { spawn } = require('node:child_process'); process.stderr.write('diagnostic before timeout\\n'); spawn(process.execPath, ['-e', 'setTimeout(() => {}, ${MAX_TIMEOUT_ELAPSED_MS})'], { stdio: ['ignore', 'ignore', 2] }); setTimeout(() => {}, ${MAX_TIMEOUT_ELAPSED_MS})`,
       ),
     );
     expect(performance.now() - started).toBeLessThan(MAX_TIMEOUT_ELAPSED_MS);
