@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+import { execFileSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -94,6 +95,25 @@ describe('runCodex', () => {
     expect(result.succeeded).toBeFalse();
     expect(result.failure).toContain('timed out');
     expect(result.failure).toContain('last process output');
+  });
+
+  it('streams stderr without the synchronous child-process buffer limit', () => {
+    const workDir = mkdtempSync(join(tmpdir(), 'poller-codex-'));
+    dirs.push(workDir);
+    const result = runCodex(runOptions(workDir), (_file, _args, options) =>
+      execFileSync(
+        process.execPath,
+        [
+          '-e',
+          "process.stderr.write('x'.repeat(2_000_000)); process.stderr.write('\\nROOT CAUSE: streamed safely\\n'); process.exit(1)",
+        ],
+        options,
+      ),
+    );
+    expect(result.succeeded).toBeFalse();
+    expect(result.failure).toContain('exit status 1');
+    expect(result.failure).toContain('ROOT CAUSE: streamed safely');
+    expect(result.failure).not.toContain('ENOBUFS');
   });
 
   it('preserves stderr before trailing whitespace', () => {
