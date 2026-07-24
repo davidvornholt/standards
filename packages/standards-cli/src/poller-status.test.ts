@@ -16,13 +16,13 @@ import {
   NEEDS_CLARIFICATION,
   QUEUE_METADATA_MARKER,
 } from './poller-protocol';
-import { acknowledgeQueuedJob, type PollerJobKind } from './poller-status';
+import type { PollerJobKind } from './poller-queue-marker';
+import { acknowledgeQueuedJob } from './poller-status';
 
 const originalFetch = globalThis.fetch;
 const REPO = 'owner/repo';
 const ISSUE_NUMBER = 7;
-const BASE_SHA = 'base';
-const HEAD_SHA = 'head';
+const SHAS = { base: 'base', head: 'head' };
 const APPROVED_AT = '2026-07-18T10:00:00Z';
 const APPROVAL_EVENT_ID = 101;
 const COMMENT_ID = 500;
@@ -59,14 +59,14 @@ const rawIssue = (
     : {}),
 });
 
-const pullRequest = (headSha = HEAD_SHA) => ({
+const pullRequest = (headSha = SHAS.head) => ({
   ...Object.fromEntries([['node_id', 'PR_node']]),
   head: {
     ref: 'feature',
     sha: headSha,
     repo: Object.fromEntries([['full_name', REPO]]),
   },
-  base: { ref: 'main', sha: BASE_SHA },
+  base: { ref: 'main', sha: SHAS.base },
 });
 
 const approval = (kind: PollerJobKind): ApprovalBinding => {
@@ -80,7 +80,7 @@ const approval = (kind: PollerJobKind): ApprovalBinding => {
     target:
       kind === 'fix'
         ? issueRevision(issue(kind, [approvalLabel(kind)]))
-        : prRevision('main', BASE_SHA, HEAD_SHA),
+        : prRevision('main', SHAS.base, SHAS.head),
   };
   return {
     id: createHash('sha256').update(JSON.stringify(fields)).digest('hex'),

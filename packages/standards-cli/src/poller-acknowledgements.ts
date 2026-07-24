@@ -8,8 +8,14 @@ import { type IssueItem, listOpenIssuesWithLabel } from './poller-github';
 import { getPullRequest } from './poller-github-pulls';
 import type { JobDeps } from './poller-job-shared';
 import { APPROVED_FOR_FIX, APPROVED_FOR_REVIEW } from './poller-protocol';
+import {
+  inspectQueuedAcknowledgement,
+  type PollerJobKind,
+} from './poller-queue-marker';
+import { reviewEligibility } from './poller-review-eligibility';
+import { parseReviewPlan } from './poller-review-output';
 import { readReviewPlan } from './poller-review-state';
-import { acknowledgeQueuedJob, type PollerJobKind } from './poller-status';
+import { acknowledgeQueuedJob } from './poller-status';
 import type { RoleCache } from './poller-trust';
 
 export type AcknowledgementReport = {
@@ -21,16 +27,48 @@ const approvalFor = async (
   deps: JobDeps,
   item: IssueItem,
   kind: PollerJobKind,
-) => {
-  let target = issueRevision(item);
-  if (kind === 'review') {
+): Promise<Awaited<ReturnType<typeof readApprovalBinding>> | null> => {
+  let target: string;
+  if (kind === 'fix') {
+    target = issueRevision(item);
+    if (
+      await inspectQueuedAcknowledgement({
+        deps,
+        item,
+        kind,
+        target,
+        blocksShortcut: () => false,
+      })
+    ) {
+      return null;
+    }
+  } else {
     const pr = await getPullRequest(deps.token, deps.repo, item.number);
+    const currentTarget = prRevision(pr.baseRef, pr.baseSha, pr.headSha);
+    if (
+      pr.draft &&
+      pr.headRepo === deps.repo &&
+      (await inspectQueuedAcknowledgement({
+        deps,
+        item,
+        kind,
+        target: currentTarget,
+        blocksShortcut: (comment) => parseReviewPlan(comment.body) !== null,
+      }))
+    ) {
+      return null;
+    }
     const plan = await readReviewPlan(deps, pr);
-    target = prRevision(
-      pr.baseRef,
-      pr.baseSha,
-      plan?.approvedHead ?? pr.headSha,
-    );
+    if (
+      reviewEligibility({
+        repo: deps.repo,
+        pr,
+        hasPlan: plan !== null,
+      }).kind !== 'eligible'
+    ) {
+      return null;
+    }
+    target = currentTarget;
   }
   return readApprovalBinding(
     {
@@ -56,6 +94,7 @@ const acknowledgeItems = async (options: {
       // biome-ignore lint/performance/noAwaitInLoops: acknowledgement writes are deliberately serialized to avoid GitHub secondary rate limits.
       const approval = await approvalFor(deps, item, kind);
       if (
+        approval !== null &&
         typeof approval !== 'string' &&
         (await acknowledgeQueuedJob(deps, item.number, approval, kind))
       ) {

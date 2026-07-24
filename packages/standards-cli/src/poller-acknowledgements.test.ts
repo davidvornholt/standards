@@ -77,7 +77,9 @@ const apiResponses = (
     : [{ body: [] }, { body: [issue] }];
   return [
     ...listResponses,
-    ...(isPullRequest ? [{ body: pullRequest }, { body: [] }] : []),
+    ...(isPullRequest ? [{ body: pullRequest }] : []),
+    { body: [] },
+    ...(isPullRequest ? [{ body: [] }] : []),
     { body: issue },
     {
       body: [
@@ -159,4 +161,5 @@ it.each([
   const body = (comment?.body as { readonly body?: unknown } | null)?.body;
   expect(body).toStartWith(heading);
   expect(body).toContain('You don’t need to do anything else.');
+  expect(body).toContain(`"eventId":${APPROVAL_EVENT_ID}`);
 });
