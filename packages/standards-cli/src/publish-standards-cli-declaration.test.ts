@@ -54,7 +54,11 @@ describe('standards CLI release declaration gating', () => {
     expect(publishJob().outputs).toMatchObject({
       declared: githubExpression('steps.declaration.outputs.declared'),
     });
-    expect(publishJob().outputs).not.toHaveProperty('version');
+    // Neither value crosses the job boundary: the release job reads `declared`,
+    // `sha` and `tag`, and every consumer of the rest reads the step outputs.
+    for (const dead of ['version', 'publish']) {
+      expect(publishJob().outputs).not.toHaveProperty(dead);
+    }
     expect(publishWorkflowJobs().release?.if).toBe(
       "needs.publish.result == 'success' && needs.publish.outputs.declared == 'true'",
     );
@@ -83,7 +87,9 @@ describe('standards CLI release completion guards', () => {
       'Verify the inherited release completed',
     );
     expect(completion.if).toBe("steps.declaration.outputs.declared == 'false'");
-    expect(stepEnvironment(completion).get('VERSION')).toBe(
+    const environment = stepEnvironment(completion);
+    expect([...environment.keys()].sort()).toEqual(['VERSION']);
+    expect(environment.get('VERSION')).toBe(
       githubExpression('steps.declaration.outputs.version'),
     );
     // The guard has to fail on a MISSING tag, so the negation is the assertion:
@@ -102,7 +108,9 @@ describe('standards CLI release completion guards', () => {
     expect(withdrawal.if).toBe(
       "steps.declaration.outputs.withdrawn_version != ''",
     );
-    expect(stepEnvironment(withdrawal).get('WITHDRAWN_VERSION')).toBe(
+    const environment = stepEnvironment(withdrawal);
+    expect([...environment.keys()].sort()).toEqual(['WITHDRAWN_VERSION']);
+    expect(environment.get('WITHDRAWN_VERSION')).toBe(
       githubExpression('steps.declaration.outputs.withdrawn_version'),
     );
     // The version at risk is the one being abandoned, not the one reverted to.
@@ -110,6 +118,11 @@ describe('standards CLI release completion guards', () => {
       'if ! git rev-parse -q --verify "refs/tags/v$WITHDRAWN_VERSION"',
     );
     expect(withdrawal.run).toContain('npm registry');
+    // Hand-tagging would skip provenance verification and leave no Release, so
+    // the message routes to the run that performs both.
+    expect(withdrawal.run).toContain(
+      're-run the failed Publish standards CLI run',
+    );
     expect(withdrawal.run).toContain('exit 1');
   });
 
@@ -122,16 +135,26 @@ describe('standards CLI release completion guards', () => {
     // a run that only recovers provenance must not be failed by it.
     expect(tip.if).toBe("steps.release.outputs.publish == 'true'");
     const names = workflowStepNames(publishJob());
-    expect(
-      names.indexOf('Verify the declaring commit is still the tip of main'),
-    ).toBe(names.indexOf('Publish package') - 1);
-    expect(names.indexOf('Determine release state')).toBeLessThan(
-      names.indexOf('Verify the declaring commit is still the tip of main'),
+    const tipIndex = names.indexOf(
+      'Verify the declaring commit is still the tip of main',
     );
-    expect(stepEnvironment(tip).get('PROVENANCE_SHA')).toBe(
+    // It reads `steps.release.outputs.publish`, so it has to follow the step
+    // that writes it; it is a cheap precondition of the pack and the publish, so
+    // it has to precede both — the publish is what an incoherent attestation
+    // would come from, the pack is the work a doomed run should not spend.
+    expect(names.indexOf('Determine release state')).toBeLessThan(tipIndex);
+    for (const guarded of ['Pack and inspect package', 'Publish package']) {
+      expect(tipIndex).toBeLessThan(names.indexOf(guarded));
+    }
+    const environment = stepEnvironment(tip);
+    expect([...environment.keys()].sort()).toEqual([
+      'PROVENANCE_SHA',
+      'RELEASE_SHA',
+    ]);
+    expect(environment.get('PROVENANCE_SHA')).toBe(
       githubExpression('github.sha'),
     );
-    expect(stepEnvironment(tip).get('RELEASE_SHA')).toBe(
+    expect(environment.get('RELEASE_SHA')).toBe(
       githubExpression('github.event.workflow_run.head_sha'),
     );
     expect(tip.run).toContain('"$PROVENANCE_SHA" != "$RELEASE_SHA"');

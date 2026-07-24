@@ -36,7 +36,6 @@ jobs:
       id-token: write
     outputs:
       declared: ${{ steps.declaration.outputs.declared }}
-      publish: ${{ steps.release.outputs.publish }}
       tag: ${{ steps.release.outputs.tag }}
       sha: ${{ github.event.workflow_run.head_sha }}
     steps:
@@ -138,7 +137,7 @@ jobs:
         run: |
           if ! git rev-parse -q --verify "refs/tags/v$WITHDRAWN_VERSION" \
             >/dev/null; then
-            echo "::error::This commit withdraws $WITHDRAWN_VERSION but tag v$WITHDRAWN_VERSION does not exist, so that release never completed. Check the npm registry for $PACKAGE_NAME@$WITHDRAWN_VERSION: if it is published, tag it at the commit that published it; if it is not, $WITHDRAWN_VERSION is free to declare again."
+            echo "::error::This commit withdraws $WITHDRAWN_VERSION but tag v$WITHDRAWN_VERSION does not exist, so that release never completed. Check the npm registry for $PACKAGE_NAME@$WITHDRAWN_VERSION: if it is published, re-run the failed Publish standards CLI run of the commit that declared $WITHDRAWN_VERSION, whose frozen GITHUB_SHA still names that commit, so it verifies the published provenance and reconciles both the tag and the Release; if it is not, $WITHDRAWN_VERSION is free to declare again."
             exit 1
           fi
 
@@ -205,6 +204,23 @@ jobs:
             echo "publish=$publish"
           } >>"$GITHUB_OUTPUT"
 
+      # npm builds provenance from GITHUB_SHA, which for a workflow_run event is
+      # the tip of the default branch, not the commit this run checked out and
+      # packages. They agree only while the declaring commit is still that tip.
+      # Publishing when they diverge would attest a tree the tarball does not
+      # contain, so this gates the publish rather than the declaration: a run
+      # that publishes nothing produces no attestation to get wrong.
+      - name: Verify the declaring commit is still the tip of main
+        if: steps.release.outputs.publish == 'true'
+        env:
+          PROVENANCE_SHA: ${{ github.sha }}
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          if [[ "$PROVENANCE_SHA" != "$RELEASE_SHA" ]]; then
+            echo "::error::npm provenance would attest $PROVENANCE_SHA but this run packages $RELEASE_SHA. Main advanced past the declaring commit, so declare a new version on current main instead of re-running this one."
+            exit 1
+          fi
+
       - name: Pack and inspect package
         id: package
         if: steps.release.outputs.publish == 'true'
@@ -223,23 +239,6 @@ jobs:
           fi
           tar -tzf "${artifacts[0]}"
           echo "artifact=${artifacts[0]}" >>"$GITHUB_OUTPUT"
-
-      # npm builds provenance from GITHUB_SHA, which for a workflow_run event is
-      # the tip of the default branch, not the commit this run checked out and
-      # packages. They agree only while the declaring commit is still that tip.
-      # Publishing when they diverge would attest a tree the tarball does not
-      # contain, so this gates the publish rather than the declaration: a run
-      # that publishes nothing produces no attestation to get wrong.
-      - name: Verify the declaring commit is still the tip of main
-        if: steps.release.outputs.publish == 'true'
-        env:
-          PROVENANCE_SHA: ${{ github.sha }}
-          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
-        run: |
-          if [[ "$PROVENANCE_SHA" != "$RELEASE_SHA" ]]; then
-            echo "::error::npm provenance would attest $PROVENANCE_SHA but this run packages $RELEASE_SHA. Main advanced past the declaring commit, so declare a new version on current main instead of re-running this one."
-            exit 1
-          fi
 
       - name: Publish package
         if: steps.release.outputs.publish == 'true'
