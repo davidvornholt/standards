@@ -55,6 +55,17 @@ const hasInvalidLocalOutput = (
   branch: string,
 ): boolean => sealed === null && localBranchExists(cloneDir, branch);
 
+const assertSealedOwnership = (
+  sealed: NonNullable<ReturnType<typeof readSealedFixOutput>>,
+  issueNumber: number,
+  approvalId: string,
+  branch: string,
+): void => {
+  if (sealed.issueNumber !== issueNumber || sealed.approvalId !== approvalId) {
+    throw new Error(`sealed output on ${branch} has invalid ownership`);
+  }
+};
+
 export const runFixJob = async (
   deps: JobDeps,
   issue: IssueItem,
@@ -69,6 +80,12 @@ export const runFixJob = async (
     FIX_LABELS,
     issueRevision(currentIssue),
   );
+  if (preamble.kind === 'stale') {
+    return {
+      lines: [`#${issue.number}: approval no longer present; skipped`],
+      ranCodex: false,
+    };
+  }
   if (preamble.kind === 'rejected') {
     return { lines: [`#${issue.number}: approval rejected`], ranCodex: false };
   }
@@ -114,12 +131,7 @@ export const runFixJob = async (
     cloneDir: cacheClone,
   };
   if (sealed !== null) {
-    if (
-      sealed.issueNumber !== issue.number ||
-      sealed.approvalId !== claim.approval.id
-    ) {
-      throw new Error(`sealed output on ${branch} has invalid ownership`);
-    }
+    assertSealedOwnership(sealed, issue.number, claim.approval.id, branch);
     return {
       lines: [await publishFixedOutput(resumableJob, FIX_LABELS, sealed, null)],
       ranCodex: false,

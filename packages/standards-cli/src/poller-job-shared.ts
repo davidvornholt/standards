@@ -36,6 +36,7 @@ export type JobLabels = {
 const FAILURE_SNIPPET_LIMIT = 4000;
 
 export type JobPreamble =
+  | { readonly kind: 'stale' }
   | { readonly kind: 'rejected' }
   | { readonly kind: 'waiting' }
   | {
@@ -60,13 +61,16 @@ export const jobPreamble = async (
     roleCache: deps.roleCache,
   };
   const approval = await readApprovalBinding(trust, labels.approved, target);
-  if (typeof approval === 'string') {
+  if (approval.kind === 'absent') {
+    return { kind: 'stale' };
+  }
+  if (approval.kind === 'rejected') {
     await removeLabel(deps.token, deps.repo, item.number, labels.approved);
     await createComment(
       deps.token,
       deps.repo,
       item.number,
-      `${FAILURE_MARKER}\nApproval not honored: ${approval}`,
+      `${FAILURE_MARKER}\nApproval not honored: ${approval.reason}`,
     );
     return { kind: 'rejected' };
   }
@@ -83,7 +87,11 @@ export const jobPreamble = async (
   if (hasLabel(item.labels, NEEDS_CLARIFICATION)) {
     await removeLabel(deps.token, deps.repo, item.number, NEEDS_CLARIFICATION);
   }
-  return { kind: 'go', answers: answers.answers, approval };
+  return {
+    kind: 'go',
+    answers: answers.answers,
+    approval: approval.approval,
+  };
 };
 
 export const failJob = async (

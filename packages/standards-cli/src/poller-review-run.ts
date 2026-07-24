@@ -65,6 +65,12 @@ export const runReviewJob = async (
     REVIEW_LABELS,
     prRevision(pr.baseRef, pr.baseSha, plan?.approvedHead ?? pr.headSha),
   );
+  if (preamble.kind === 'stale') {
+    return {
+      lines: [`PR #${prItem.number}: approval no longer present; skipped`],
+      ranCodex: false,
+    };
+  }
   if (preamble.kind === 'rejected') {
     return {
       lines: [`PR #${prItem.number}: approval rejected`],

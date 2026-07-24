@@ -5,7 +5,7 @@
 // label event", which a truncated page would silently falsify.
 
 import { apiError, HTTP_OK, request } from './github-api';
-import { labelIdentity } from './github-label-identity';
+import { hasLabel, labelIdentity } from './github-label-identity';
 import { listAllPages } from './github-paginate';
 import { isNonEmptyString, isRecord } from './github-settings-parse';
 
@@ -84,7 +84,10 @@ export const listOpenIssuesWithLabel = async (
   );
   return items
     .map(parseIssue)
-    .filter((issue): issue is IssueItem => issue !== null);
+    .filter(
+      (issue): issue is IssueItem =>
+        issue !== null && hasLabel(issue.labels, label),
+    );
 };
 
 export const listIssueComments = async (

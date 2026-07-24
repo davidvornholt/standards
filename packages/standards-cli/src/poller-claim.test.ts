@@ -96,14 +96,15 @@ ${JSON.stringify({
       { body: [labeled('approved-for-fix')] },
       role('admin'),
     ]);
-    const approval = await readApprovalBinding(
+    const approvalResult = await readApprovalBinding(
       context,
       'approved-for-fix',
       issueRevision(issue(['approved-for-fix'])),
     );
-    if (typeof approval === 'string') {
-      throw new Error(approval);
+    if (approvalResult.kind !== 'approved') {
+      throw new Error('test approval must be valid');
     }
+    const { approval } = approvalResult;
     const claim = {
       approval,
       claimLabel: 'fix-in-progress',
@@ -145,7 +146,7 @@ ${JSON.stringify({
         'approved-for-fix',
         issueRevision(issue([])),
       ),
-    ).toContain('not currently present');
+    ).toEqual({ kind: 'absent' });
     expect(calls).toHaveLength(1);
   });
 
@@ -160,7 +161,7 @@ ${JSON.stringify({
       'approved-for-fix',
       'issue:revision',
     );
-    expect(typeof approval).not.toBe('string');
+    expect(approval.kind).toBe('approved');
   });
 });
 
@@ -192,9 +193,9 @@ it('distinguishes same-second approval generations by timeline event ID', async 
     'approved-for-fix',
     'issue:revision',
   );
-  if (typeof first === 'string' || typeof second === 'string') {
+  if (first.kind !== 'approved' || second.kind !== 'approved') {
     throw new Error('test approvals must be valid');
   }
-  expect(first.approvedAt).toBe(second.approvedAt);
-  expect(first.id).not.toBe(second.id);
+  expect(first.approval.approvedAt).toBe(second.approval.approvedAt);
+  expect(first.approval.id).not.toBe(second.approval.id);
 });

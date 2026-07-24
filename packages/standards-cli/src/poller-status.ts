@@ -74,7 +74,8 @@ const isStillQueueable = async (
     target,
   );
   return (
-    typeof currentApproval !== 'string' && currentApproval.id === approval.id
+    currentApproval.kind === 'approved' &&
+    currentApproval.approval.id === approval.id
   );
 };
 

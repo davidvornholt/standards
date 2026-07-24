@@ -19,6 +19,19 @@ export type ApprovalBinding = {
   readonly target: string;
 };
 
+export type ApprovalBindingResult =
+  | {
+      readonly kind: 'approved';
+      readonly approval: ApprovalBinding;
+    }
+  | {
+      readonly kind: 'absent';
+    }
+  | {
+      readonly kind: 'rejected';
+      readonly reason: string;
+    };
+
 type ApprovalContext = {
   readonly token: string | null;
   readonly repo: string;
@@ -41,14 +54,14 @@ export const readApprovalBinding = async (
   context: ApprovalContext,
   label: string,
   target: string,
-): Promise<ApprovalBinding | string> => {
+): Promise<ApprovalBindingResult> => {
   const issue = await getIssue(
     context.token,
     context.repo,
     context.issueNumber,
   );
   if (!hasLabel(issue.labels, label)) {
-    return `"${label}" is not currently present on ${context.repo}#${context.issueNumber}`;
+    return { kind: 'absent' };
   }
   const event = await lastLabelEvent(
     context.token,
@@ -57,7 +70,10 @@ export const readApprovalBinding = async (
     label,
   );
   if (event === null) {
-    return `no "${label}" label event found on ${context.repo}#${context.issueNumber}`;
+    return {
+      kind: 'rejected',
+      reason: `no "${label}" label event found on ${context.repo}#${context.issueNumber}`,
+    };
   }
   const role = await collaboratorRole(
     context.token,
@@ -65,7 +81,10 @@ export const readApprovalBinding = async (
     event.actorLogin,
   );
   if (!isTrustedRole(role)) {
-    return `"${label}" on ${context.repo}#${context.issueNumber} was applied by ${event.actorLogin} (role: ${role}); only admin or maintain roles may approve automation`;
+    return {
+      kind: 'rejected',
+      reason: `"${label}" on ${context.repo}#${context.issueNumber} was applied by ${event.actorLogin} (role: ${role}); only admin or maintain roles may approve automation`,
+    };
   }
   const fields = {
     repo: context.repo,
@@ -76,5 +95,8 @@ export const readApprovalBinding = async (
     approvedAt: event.createdAt,
     target,
   };
-  return { id: stableDigest(fields), ...fields };
+  return {
+    kind: 'approved',
+    approval: { id: stableDigest(fields), ...fields },
+  };
 };

@@ -165,10 +165,13 @@ export const validateClaim = async (
     claim.approval.label,
     currentTarget,
   );
-  if (typeof current === 'string') {
-    return current;
+  if (current.kind === 'absent') {
+    return `"${claim.approval.label}" is not currently present`;
   }
-  if (current.id !== claim.approval.id) {
+  if (current.kind === 'rejected') {
+    return current.reason;
+  }
+  if (current.approval.id !== claim.approval.id) {
     return 'approval no longer matches the exact approved revision/head';
   }
   const issue = await getIssue(

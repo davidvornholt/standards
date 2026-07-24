@@ -91,9 +91,8 @@ const acknowledgeItems = async (options: {
       // biome-ignore lint/performance/noAwaitInLoops: acknowledgement writes are deliberately serialized to avoid GitHub secondary rate limits.
       const approval = await approvalFor(deps, item, kind);
       if (
-        approval !== null &&
-        typeof approval !== 'string' &&
-        (await acknowledgeQueuedJob(deps, item.number, approval, kind))
+        approval?.kind === 'approved' &&
+        (await acknowledgeQueuedJob(deps, item.number, approval.approval, kind))
       ) {
         lines.push(
           `${deps.repo} ${kind === 'fix' ? `#${item.number}` : `PR #${item.number}`}: acknowledged as queued`,
