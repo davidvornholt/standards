@@ -81,12 +81,12 @@ export const runFixJob = async (
   if (!hasLabel(currentIssue.labels, APPROVED_FOR_FIX)) {
     return result(issue.number, 'approval no longer present; skipped');
   }
-  const preamble = await jobPreamble(
-    deps,
-    currentIssue,
-    FIX_LABELS,
-    issueRevision(currentIssue),
-  );
+  const readTarget = async (): Promise<string> =>
+    issueRevision(await getIssue(token, repo, issue.number));
+  const preamble = await jobPreamble(deps, currentIssue, FIX_LABELS, {
+    approved: issueRevision(currentIssue),
+    readCurrent: readTarget,
+  });
   if (preamble.kind === 'stale') {
     return result(issue.number, 'approval no longer present; skipped');
   }
@@ -105,14 +105,11 @@ export const runFixJob = async (
       `refusing to overwrite ${branch}: it is not valid sealed output for this approval`,
     );
   }
-  const currentTarget = issueRevision(
-    await getIssue(token, repo, issue.number),
-  );
   if (
     !(await approvalIsCurrent(
       { token, repo, issueNumber: issue.number },
       preamble.approval,
-      currentTarget,
+      readTarget,
     ))
   ) {
     return result(issue.number, 'approval generation changed; skipped');

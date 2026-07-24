@@ -47,7 +47,10 @@ it('silently skips a candidate whose approval label disappeared after discovery'
     deps,
     { number: ISSUE_NUMBER, labels: ['approved-for-fix'] },
     labels,
-    'issue:approved',
+    {
+      approved: 'issue:approved',
+      readCurrent: () => Promise.resolve('issue:approved'),
+    },
   );
 
   expect(result).toEqual({ kind: 'stale' });
@@ -106,7 +109,10 @@ it('still rejects an approval label applied by an untrusted actor', async () => 
     deps,
     { number: ISSUE_NUMBER, labels: ['approved-for-fix'] },
     labels,
-    'issue:approved',
+    {
+      approved: 'issue:approved',
+      readCurrent: () => Promise.resolve('issue:approved'),
+    },
   );
 
   expect(result).toEqual({ kind: 'rejected' });
@@ -150,7 +156,10 @@ it('does not clean up rejected approval A after trusted approval B replaces it',
     deps,
     { number: ISSUE_NUMBER, labels: ['approved-for-fix'] },
     labels,
-    'issue:approved',
+    {
+      approved: 'issue:approved',
+      readCurrent: () => Promise.resolve('issue:approved'),
+    },
   );
 
   expect(result).toEqual({ kind: 'stale' });

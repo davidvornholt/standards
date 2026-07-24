@@ -55,8 +55,15 @@ const currentReviewTarget = async (
   repo: string,
   prNumber: number,
   plan: Awaited<ReturnType<typeof readReviewPlan>>,
-): Promise<string> => {
+): Promise<string | null> => {
   const current = await getPullRequest(token, repo, prNumber);
+  if (
+    plan !== null &&
+    current.headSha !== plan.approvedHead &&
+    current.headSha !== plan.publishedHead
+  ) {
+    return null;
+  }
   return prRevision(
     current.baseRef,
     current.baseSha,
@@ -80,12 +87,15 @@ export const runReviewJob = async (
   }
   const pr = await getPullRequest(token, repo, prItem.number);
   let plan = await currentReviewPlan(deps, pr);
-  const preamble = await jobPreamble(
-    deps,
-    currentItem,
-    REVIEW_LABELS,
-    prRevision(pr.baseRef, pr.baseSha, plan?.approvedHead ?? pr.headSha),
-  );
+  const readTarget = () => currentReviewTarget(token, repo, pr.number, plan);
+  const preamble = await jobPreamble(deps, currentItem, REVIEW_LABELS, {
+    approved: prRevision(
+      pr.baseRef,
+      pr.baseSha,
+      plan?.approvedHead ?? pr.headSha,
+    ),
+    readCurrent: readTarget,
+  });
   if (preamble.kind === 'stale') {
     return {
       lines: [`PR #${prItem.number}: approval no longer present; skipped`],
@@ -128,12 +138,11 @@ export const runReviewJob = async (
   if (hasInvalidLocalOutput(plan, sealed, cacheClone, outputBranch)) {
     throw new Error(`sealed output on ${outputBranch} is invalid`);
   }
-  const currentTarget = await currentReviewTarget(token, repo, pr.number, plan);
   if (
     !(await approvalIsCurrent(
       { token, repo, issueNumber: pr.number },
       preamble.approval,
-      currentTarget,
+      readTarget,
     ))
   ) {
     return {

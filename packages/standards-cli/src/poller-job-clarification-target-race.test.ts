@@ -5,45 +5,62 @@ import { parsePollerConfig } from './poller-config';
 import { runFixJob } from './poller-fix-run';
 import type { IssueItem } from './poller-github';
 import { createLocalPollerRepo } from './poller-job-run-test-support';
+import { QUESTION_MARKER } from './poller-protocol';
 import { runReviewJob } from './poller-review-run';
 
 const originalFetch = globalThis.fetch;
 const REPO = 'owner/repo';
 const ISSUE_NUMBER = 7;
-const SUPERSEDING_EVENT_ID = 102;
+const MOVED_HEAD = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 const roots: Array<string> = [];
+
+const createdAt = (value: string) =>
+  Object.fromEntries([['created_at', value]]);
 
 const item = (kind: 'fix' | 'review'): IssueItem => ({
   number: ISSUE_NUMBER,
   title: 'Title',
-  body: 'Body',
+  body: 'Approved body',
   isPullRequest: kind === 'review',
-  labels: [`approved-for-${kind}`],
+  labels: [`approved-for-${kind}`, 'needs-clarification'],
   authorLogin: 'reporter',
 });
 
-const rawIssue = (kind: 'fix' | 'review', approved = true) => ({
+const rawIssue = (kind: 'fix' | 'review', body = 'Approved body') => ({
   number: ISSUE_NUMBER,
   title: 'Title',
-  body: 'Body',
-  labels: approved ? [{ name: `approved-for-${kind}` }] : [],
+  body,
+  labels: [{ name: `approved-for-${kind}` }, { name: 'needs-clarification' }],
   user: { login: 'reporter' },
   ...(kind === 'review'
     ? Object.fromEntries([['pull_request', { url: 'x' }]])
     : {}),
 });
 
-const event = (kind: 'fix' | 'review', id = 101) => ({
-  id,
+const event = (kind: 'fix' | 'review') => ({
+  id: 101,
   event: 'labeled',
   label: { name: `approved-for-${kind}` },
   actor: { login: 'maintainer' },
-  ...Object.fromEntries([['created_at', '2026-07-18T10:00:00Z']]),
+  ...createdAt('2026-07-18T10:00:00Z'),
 });
 
-const role = {
-  body: Object.fromEntries([['role_name', 'admin']]),
-};
+const answers = [
+  {
+    id: 1,
+    body: `${QUESTION_MARKER}\nWhich approach?`,
+    user: { login: 'maintainer' },
+    ...createdAt('2026-07-18T11:00:00Z'),
+  },
+  {
+    id: 2,
+    body: 'Use the direct approach.',
+    user: { login: 'maintainer' },
+    ...createdAt('2026-07-18T11:05:00Z'),
+  },
+];
+
+const role = { body: Object.fromEntries([['role_name', 'admin']]) };
 
 const deps = (cacheDir: string) => {
   const parsed = parsePollerConfig(
@@ -73,7 +90,7 @@ afterEach(() => {
   }
 });
 
-it('skips a fix without writes when approval disappears before claim', async () => {
+it('keeps an answered fix target change write-free', async () => {
   const fixture = createLocalPollerRepo();
   roots.push(fixture.root);
   const calls = installApi([
@@ -81,62 +98,73 @@ it('skips a fix without writes when approval disappears before claim', async () 
     { body: rawIssue('fix') },
     { body: [event('fix')] },
     role,
-    { body: [] },
+    { body: answers },
+    role,
     { body: rawIssue('fix') },
     { body: [event('fix')] },
     role,
-    { body: rawIssue('fix') },
-    { body: rawIssue('fix', false) },
+    { body: rawIssue('fix', 'Changed body') },
   ]);
+  let resolverCalls = 0;
 
-  const result = await runFixJob(deps(fixture.cacheDir), item('fix'), () =>
-    Promise.resolve('main'),
-  );
+  const result = await runFixJob(deps(fixture.cacheDir), item('fix'), () => {
+    resolverCalls += 1;
+    return Promise.resolve('main');
+  });
 
   expect(result).toEqual({
-    lines: [`#${ISSUE_NUMBER}: approval generation changed; skipped`],
+    lines: [`#${ISSUE_NUMBER}: approval no longer present; skipped`],
     ranCodex: false,
   });
   expect(calls.every(({ method }) => method === 'GET')).toBe(true);
+  expect(resolverCalls).toBe(0);
 });
 
-it('skips a review without writes when approval is superseded before claim', async () => {
+it('keeps an answered review target change write-free', async () => {
   const fixture = createLocalPollerRepo();
   roots.push(fixture.root);
-  const pullRequest = {
+  const pullRequest = (headSha: string) => ({
     ...Object.fromEntries([['node_id', 'PR_node']]),
     title: 'Title',
     body: 'Body',
     draft: true,
     head: {
       ref: 'feature',
-      sha: fixture.headSha,
+      sha: headSha,
       repo: Object.fromEntries([['full_name', REPO]]),
     },
     base: { ref: 'main', sha: fixture.baseSha },
-  };
+  });
   const calls = installApi([
     { body: rawIssue('review') },
-    { body: pullRequest },
+    { body: pullRequest(fixture.headSha) },
     { body: [] },
     { body: rawIssue('review') },
     { body: [event('review')] },
     role,
-    { body: [] },
+    { body: answers },
+    role,
     { body: rawIssue('review') },
     { body: [event('review')] },
     role,
-    { body: pullRequest },
-    { body: rawIssue('review') },
-    { body: [event('review', SUPERSEDING_EVENT_ID)] },
-    role,
+    { body: pullRequest(MOVED_HEAD) },
   ]);
+  let agentCalls = 0;
 
-  const result = await runReviewJob(deps(fixture.cacheDir), item('review'));
+  const result = await runReviewJob(
+    deps(fixture.cacheDir),
+    item('review'),
+    true,
+    () => {
+      agentCalls += 1;
+      throw new Error('agent must not run');
+    },
+  );
 
   expect(result).toEqual({
-    lines: [`PR #${ISSUE_NUMBER}: approval generation changed; skipped`],
+    lines: [`PR #${ISSUE_NUMBER}: approval no longer present; skipped`],
     ranCodex: false,
   });
   expect(calls.every(({ method }) => method === 'GET')).toBe(true);
+  expect(agentCalls).toBe(0);
 });

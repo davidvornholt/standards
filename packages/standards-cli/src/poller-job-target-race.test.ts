@@ -83,10 +83,10 @@ it('skips a fix when its issue body changes before the first write', async () =>
     { body: [event('fix')] },
     role,
     { body: [] },
-    { body: changed },
-    { body: changed },
+    { body: rawIssue('fix') },
     { body: [event('fix')] },
     role,
+    { body: changed },
   ]);
 
   const result = await runFixJob(deps(fixture.cacheDir), item('fix'), () =>
@@ -94,7 +94,7 @@ it('skips a fix when its issue body changes before the first write', async () =>
   );
 
   expect(result).toEqual({
-    lines: [`#${ISSUE_NUMBER}: approval generation changed; skipped`],
+    lines: [`#${ISSUE_NUMBER}: approval no longer present; skipped`],
     ranCodex: false,
   });
   expect(calls.every(({ method }) => method === 'GET')).toBe(true);
@@ -123,10 +123,10 @@ it('skips a review when its PR head changes before the first write', async () =>
     { body: [event('review')] },
     role,
     { body: [] },
-    { body: pullRequest(MOVED_HEAD) },
     { body: rawIssue('review') },
     { body: [event('review')] },
     role,
+    { body: pullRequest(MOVED_HEAD) },
   ]);
   let agentCalls = 0;
 
@@ -141,7 +141,7 @@ it('skips a review when its PR head changes before the first write', async () =>
   );
 
   expect(result).toEqual({
-    lines: [`PR #${ISSUE_NUMBER}: approval generation changed; skipped`],
+    lines: [`PR #${ISSUE_NUMBER}: approval no longer present; skipped`],
     ranCodex: false,
   });
   expect(calls.every(({ method }) => method === 'GET')).toBe(true);

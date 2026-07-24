@@ -39,6 +39,8 @@ type ApprovalContext = {
   readonly issueNumber: number;
 };
 
+export type ApprovalTargetReader = () => Promise<string | null>;
+
 const stableDigest = (value: unknown): string =>
   createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
@@ -121,8 +123,15 @@ export const readApprovalBinding = async (
 export const approvalIsCurrent = async (
   context: ApprovalContext,
   approval: ApprovalBinding,
-  target: string,
+  readTarget: ApprovalTargetReader,
 ): Promise<boolean> => {
-  const current = await readApprovalBinding(context, approval.label, target);
-  return current.kind === 'approved' && current.approval.id === approval.id;
+  const current = await readApprovalBinding(
+    context,
+    approval.label,
+    approval.target,
+  );
+  if (current.kind !== 'approved' || current.approval.id !== approval.id) {
+    return false;
+  }
+  return (await readTarget()) === approval.target;
 };

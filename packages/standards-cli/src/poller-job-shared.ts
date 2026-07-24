@@ -3,7 +3,12 @@
 // approval/progress/failure labels the job family uses.
 
 import { hasLabel } from './github-label-identity';
-import { type ApprovalBinding, readApprovalBinding } from './poller-approval';
+import {
+  type ApprovalBinding,
+  type ApprovalTargetReader,
+  approvalIsCurrent,
+  readApprovalBinding,
+} from './poller-approval';
 import type { PollerConfig } from './poller-config';
 import { addLabels, createComment, removeLabel } from './poller-github-write';
 import {
@@ -31,6 +36,11 @@ export type JobLabels = {
   readonly failed: string;
 };
 
+type JobTarget = {
+  readonly approved: string;
+  readonly readCurrent: ApprovalTargetReader;
+};
+
 // Must exceed runCodex's failure string at its longest (its stderr snippet
 // plus the exit-cause prefix), so the diagnostic tail is never cut off.
 const FAILURE_SNIPPET_LIMIT = 4000;
@@ -52,7 +62,7 @@ export const jobPreamble = async (
   deps: JobDeps,
   item: { readonly number: number; readonly labels: ReadonlyArray<string> },
   labels: JobLabels,
-  target: string,
+  target: JobTarget,
 ): Promise<JobPreamble> => {
   const trust = {
     token: deps.token,
@@ -60,16 +70,27 @@ export const jobPreamble = async (
     issueNumber: item.number,
     roleCache: deps.roleCache,
   };
-  const approval = await readApprovalBinding(trust, labels.approved, target);
+  const approval = await readApprovalBinding(
+    trust,
+    labels.approved,
+    target.approved,
+  );
   if (approval.kind === 'absent') {
     return { kind: 'stale' };
   }
   if (approval.kind === 'rejected') {
-    const current = await readApprovalBinding(trust, labels.approved, target);
+    const current = await readApprovalBinding(
+      trust,
+      labels.approved,
+      target.approved,
+    );
     if (
       current.kind !== 'rejected' ||
       current.generationId !== approval.generationId
     ) {
+      return { kind: 'stale' };
+    }
+    if ((await target.readCurrent()) !== target.approved) {
       return { kind: 'stale' };
     }
     await removeLabel(deps.token, deps.repo, item.number, labels.approved);
@@ -82,6 +103,11 @@ export const jobPreamble = async (
     return { kind: 'rejected' };
   }
   const answers = await answerState(trust);
+  if (
+    !(await approvalIsCurrent(trust, approval.approval, target.readCurrent))
+  ) {
+    return { kind: 'stale' };
+  }
   if (answers.waiting) {
     if (!hasLabel(item.labels, NEEDS_CLARIFICATION)) {
       await addLabels(deps.token, deps.repo, item.number, [

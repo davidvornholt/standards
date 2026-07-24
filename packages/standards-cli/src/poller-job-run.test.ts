@@ -66,6 +66,7 @@ describe('poller job entrypoints', () => {
       { body: rawIssue('Approved-For-Fix') },
       timeline('APPROVED-FOR-FIX'),
       { body: Object.fromEntries([['role_name', 'write']]) },
+      { body: rawIssue('Approved-For-Fix') },
       { body: {} },
       { status: HTTP_CREATED, body: { id: 1 } },
     ]);
@@ -99,6 +100,23 @@ describe('poller job entrypoints', () => {
       timeline('APPROVED-FOR-REVIEW'),
       { body: Object.fromEntries([['role_name', 'maintain']]) },
       { body: [] }, // no prior question
+      { body: rawIssue('Approved-For-Review') },
+      timeline('APPROVED-FOR-REVIEW'),
+      { body: Object.fromEntries([['role_name', 'maintain']]) },
+      {
+        body: {
+          ...Object.fromEntries([['node_id', 'PR_node']]),
+          title: 'Title',
+          body: 'Body',
+          draft: false,
+          head: {
+            ref: 'feature',
+            sha: 'head',
+            repo: Object.fromEntries([['full_name', 'owner/repo']]),
+          },
+          base: { ref: 'main', sha: 'base' },
+        },
+      },
       { status: HTTP_CREATED, body: { id: 1 } },
       { body: {} },
       { body: {} },

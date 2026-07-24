@@ -152,6 +152,7 @@ describe('runPollerTick', () => {
         ],
       }, // cleanup generation
       { body: { role_name: 'write' } },
+      { body: issue(REJECTED_ISSUE, ['approved-for-fix']) }, // cleanup target
       { body: {} }, // DELETE approved-for-fix
       { status: HTTP_CREATED, body: { id: 1 } }, // POST explanation comment
     ]);
