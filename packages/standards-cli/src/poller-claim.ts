@@ -4,6 +4,7 @@ import { type ApprovalBinding, readApprovalBinding } from './poller-approval';
 import {
   type ClaimMarkerBinding,
   reconcileTrustedClaimElection,
+  reconcileTrustedClaimHistory,
 } from './poller-claim-reconciliation';
 import { hiddenCommentMetadata } from './poller-comment-metadata';
 import { getIssue, lastLabelEvent } from './poller-github';
@@ -91,6 +92,10 @@ export const startClaim = async (
 ): Promise<ClaimBinding | null> => {
   await reconcileExistingQueuedJob(deps, issueNumber, approval, kind);
   const claimLabel = inProgressLabelFor(kind);
+  await reconcileTrustedClaimHistory(
+    { token: deps.token, repo: deps.repo, issueNumber },
+    claimLabel,
+  );
   await addLabels(deps.token, deps.repo, issueNumber, [claimLabel]);
   return acquireClaim(
     { token: deps.token, repo: deps.repo, issueNumber },

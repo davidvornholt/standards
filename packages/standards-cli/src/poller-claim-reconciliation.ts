@@ -137,13 +137,20 @@ export const reconcileTrustedClaimElection = async (
 ): Promise<{
   readonly markerIds: ReadonlyArray<number>;
   readonly retainedId: number | null;
-}> =>
-  (await reconcileTrustedClaimGroups(context, binding.claimLabel)).get(
-    claimGroupKey(binding.approval.id, binding.claimEpoch),
-  ) ?? {
-    markerIds: [],
-    retainedId: null,
+}> => {
+  const markers = await trustedMarkers(
+    context,
+    (marker) =>
+      marker.approval.id === binding.approval.id &&
+      marker.claimLabel === binding.claimLabel &&
+      marker.claimEpoch === binding.claimEpoch,
+  );
+  const markerIds = markers.map(({ id }) => id);
+  return {
+    markerIds,
+    retainedId: await retainEarliestComment(context, markerIds),
   };
+};
 
 export const reconcileTrustedClaimHistory = async (
   context: ClaimContext,

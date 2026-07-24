@@ -1,7 +1,10 @@
 import { afterEach, expect, it } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { issueRevision } from './poller-approval';
-import { installPollerApiWithCommentDeletes } from './poller-comment-delete-test-support';
+import {
+  installPollerApiWithCommentDeletes,
+  installPollerApiWithFailingCommentDelete,
+} from './poller-comment-delete-test-support';
 import { hiddenCommentMetadata } from './poller-comment-metadata';
 import { parsePollerConfig } from './poller-config';
 import { sealFixOutput } from './poller-fix-output';
@@ -14,7 +17,11 @@ import {
   createTestApproval,
   pushRef,
 } from './poller-job-run-test-support';
-import { branchNameForIssue, QUEUE_METADATA_MARKER } from './poller-protocol';
+import {
+  branchNameForIssue,
+  CLAIM_METADATA_MARKER,
+  QUEUE_METADATA_MARKER,
+} from './poller-protocol';
 import { queueMarkerFor } from './poller-queue-marker';
 
 const originalFetch = globalThis.fetch;
@@ -22,6 +29,8 @@ const REPO = 'owner/repo';
 const ISSUE_NUMBER = 7;
 const EARLIEST_MARKER_ID = 10;
 const DUPLICATE_MARKER_ID = 11;
+const OLD_CLAIM_WINNER_ID = 20;
+const OLD_CLAIM_DUPLICATE_ID = 21;
 const roots: Array<string> = [];
 
 afterEach(() => {
@@ -101,4 +110,67 @@ it('reconciles existing fix queue markers before starting', async () => {
     true,
   );
   expect(deletedCommentIds).toEqual([DUPLICATE_MARKER_ID]);
+});
+
+it('leaves the job unclaimed when historical cleanup fails', async () => {
+  const fixture = createLocalPollerRepo();
+  roots.push(fixture.root);
+  const item: IssueItem = {
+    number: ISSUE_NUMBER,
+    title: 'Title',
+    body: 'Body',
+    isPullRequest: false,
+    labels: ['approved-for-fix'],
+    authorLogin: 'reporter',
+  };
+  const binding = createTestApproval('approved-for-fix', issueRevision(item));
+  const claimComment = (id: number) => ({
+    id,
+    body: hiddenCommentMetadata(CLAIM_METADATA_MARKER, {
+      approval: binding,
+      claimLabel: 'fix-in-progress',
+      claimEpoch: 'ended-epoch',
+      nonce: `nonce-${id}`,
+    }),
+    user: { login: 'poller' },
+    ...Object.fromEntries([['created_at', '2026-07-18T10:00:01Z']]),
+  });
+  const { calls, deletedCommentIds } = installPollerApiWithFailingCommentDelete(
+    {
+      baseSha: fixture.baseSha,
+      headSha: fixture.headSha,
+      isPullRequest: false,
+      initialComments: [
+        claimComment(OLD_CLAIM_WINNER_ID),
+        claimComment(OLD_CLAIM_DUPLICATE_ID),
+      ],
+    },
+  );
+  const parsed = parsePollerConfig(
+    {
+      repos: [REPO],
+      model: 'gpt-test',
+      reasoningEffort: 'high',
+      cacheDir: fixture.cacheDir,
+    },
+    '/tmp',
+  );
+  if (parsed.config === null) {
+    throw new Error('test config must parse');
+  }
+  await expect(
+    runFixJob(
+      {
+        config: parsed.config,
+        token: 'token',
+        repo: REPO,
+        roleCache: new Map(),
+      },
+      item,
+      () => Promise.resolve('main'),
+      true,
+    ),
+  ).rejects.toThrow(`delete comment ${OLD_CLAIM_DUPLICATE_ID}`);
+  expect(deletedCommentIds).toEqual([OLD_CLAIM_DUPLICATE_ID]);
+  expect(calls.every(({ method }) => method === 'GET')).toBe(true);
 });
