@@ -84,6 +84,7 @@
     "src/poller-codex-stderr.ts",
     "src/poller-commands.ts",
     "src/poller-comment-metadata.ts",
+    "src/poller-comment-reconciliation.ts",
     "src/poller-config.ts",
     "src/poller-fix-outcome.ts",
     "src/poller-fix-output.ts",

@@ -6,6 +6,7 @@ import {
   readApprovalBinding,
 } from './poller-approval';
 import { hiddenCommentMetadata } from './poller-comment-metadata';
+import { retainEarliestComment } from './poller-comment-reconciliation';
 import { getIssue } from './poller-github';
 import { getPullRequest } from './poller-github-pulls';
 import { createComment, deleteComment } from './poller-github-write';
@@ -94,16 +95,14 @@ export const acknowledgeQueuedJob = async (
   ) {
     return false;
   }
-  if (
-    (
-      await matchingTrustedQueueCommentIds(
-        deps,
-        issueNumber,
-        expected.approvalId,
-        kind,
-      )
-    ).length > 0
-  ) {
+  const existingMarkerIds = await matchingTrustedQueueCommentIds(
+    deps,
+    issueNumber,
+    expected.approvalId,
+    kind,
+  );
+  if (existingMarkerIds.length > 0) {
+    await retainEarliestComment(deps, existingMarkerIds);
     return false;
   }
   const markerId = await createComment(
@@ -115,16 +114,16 @@ export const acknowledgeQueuedJob = async (
       expected,
     )}`,
   );
-  const [winner] = [
-    ...(await matchingTrustedQueueCommentIds(
+  const winner = await retainEarliestComment(
+    deps,
+    await matchingTrustedQueueCommentIds(
       deps,
       issueNumber,
       expected.approvalId,
       kind,
-    )),
-  ].sort((left, right) => left - right);
+    ),
+  );
   if (winner !== markerId) {
-    await deleteComment(deps.token, deps.repo, markerId);
     return false;
   }
   if (!(await isStillQueueable(deps, issueNumber, approval, kind))) {

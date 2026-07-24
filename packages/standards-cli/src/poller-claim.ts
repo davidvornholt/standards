@@ -7,13 +7,17 @@ import {
   parseHiddenCommentMetadata,
 } from './poller-comment-metadata';
 import {
+  earliestCommentId,
+  retainEarliestComment,
+} from './poller-comment-reconciliation';
+import {
   collaboratorRole,
   getIssue,
   type IssueComment,
   lastLabelEvent,
   listIssueComments,
 } from './poller-github';
-import { createComment, deleteComment } from './poller-github-write';
+import { createComment } from './poller-github-write';
 import {
   CLAIM_METADATA_MARKER,
   FIX_IN_PROGRESS,
@@ -90,16 +94,16 @@ const parseMarker = (comment: IssueComment): ClaimMarker | null => {
   };
 };
 
-const winningMarkerId = async (
+const matchingTrustedMarkerIds = async (
   context: ClaimContext,
   binding: Omit<ClaimBinding, 'markerId'>,
-): Promise<number | null> => {
+): Promise<ReadonlyArray<number>> => {
   const comments = await listIssueComments(
     context.token,
     context.repo,
     context.issueNumber,
   );
-  let winner: number | null = null;
+  const markerIds: Array<number> = [];
   for (const comment of comments) {
     const marker = parseMarker(comment);
     const differs =
@@ -113,12 +117,12 @@ const winningMarkerId = async (
         context.repo,
         comment.authorLogin,
       );
-      if (isTrustedRole(role) && (winner === null || comment.id < winner)) {
-        winner = comment.id;
+      if (isTrustedRole(role)) {
+        markerIds.push(comment.id);
       }
     }
   }
-  return winner;
+  return markerIds;
 };
 
 export const acquireClaim = async (
@@ -147,9 +151,11 @@ export const acquireClaim = async (
     context.issueNumber,
     markerBody({ ...provisional, nonce }),
   );
-  const winner = await winningMarkerId(context, provisional);
+  const winner = await retainEarliestComment(
+    context,
+    await matchingTrustedMarkerIds(context, provisional),
+  );
   if (winner !== markerId) {
-    await deleteComment(context.token, context.repo, markerId);
     return null;
   }
   return { ...provisional, markerId };
@@ -182,7 +188,9 @@ export const validateClaim = async (
   if (!hasLabel(issue.labels, claim.claimLabel)) {
     return `"${claim.claimLabel}" is no longer present`;
   }
-  const winner = await winningMarkerId(context, claim);
+  const winner = earliestCommentId(
+    await matchingTrustedMarkerIds(context, claim),
+  );
   return winner === claim.markerId
     ? null
     : 'claim ownership changed or could not be proven';
