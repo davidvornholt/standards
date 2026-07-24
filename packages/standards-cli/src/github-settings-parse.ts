@@ -179,6 +179,7 @@ export const parseSettings = (
   // Only the opt-out value is accepted: enforcement is the default, and an
   // explicit "enforced" would be a second way to spell the same state.
   if (
+    allowedKeys.has('rulesetEnforcement') &&
     raw.rulesetEnforcement !== undefined &&
     raw.rulesetEnforcement !== ENFORCEMENT_OPT_OUT
   ) {
