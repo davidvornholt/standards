@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import type { ClaimBinding } from './poller-claim';
+import { type ClaimBinding, withClaimReleasedOnFailure } from './poller-claim';
 import type { runCodex } from './poller-codex';
 import type { PullRequest } from './poller-github-pulls';
 import {
@@ -95,14 +95,16 @@ export const executeReviewJob = async (options: {
     }
     return {
       lines: [
-        await finishReviewedJob({
-          deps,
-          labels,
-          pr,
-          claim,
-          workDir: workspace.dir,
-          outcome,
-        }),
+        await withClaimReleasedOnFailure(deps, pr.number, claim, () =>
+          finishReviewedJob({
+            deps,
+            labels,
+            pr,
+            claim,
+            workDir: workspace.dir,
+            outcome,
+          }),
+        ),
       ],
       ranCodex: true,
     };

@@ -6,7 +6,7 @@
 
 import { hasLabel } from './github-label-identity';
 import { approvalIsCurrent, prRevision } from './poller-approval';
-import { startClaim } from './poller-claim';
+import { startClaim, withClaimReleasedOnFailure } from './poller-claim';
 import { runCodex } from './poller-codex';
 import { getIssue, type IssueItem } from './poller-github';
 import { getPullRequest } from './poller-github-pulls';
@@ -85,7 +85,7 @@ export const runReviewJob = async (
     };
   }
   const pr = await getPullRequest(token, repo, prItem.number);
-  let plan = await currentReviewPlan(deps, pr);
+  const plan = await currentReviewPlan(deps, pr);
   const readTarget = () => currentReviewTarget(token, repo, pr.number, plan);
   const preamble = await jobPreamble(deps, currentItem, REVIEW_LABELS, {
     approved: prRevision(
@@ -163,20 +163,22 @@ export const runReviewJob = async (
       ranCodex: false,
     };
   }
-  if (plan === null && sealed !== null) {
-    await publishReviewPlan(deps, pr, claim, sealed);
-    plan = sealed;
-  }
-  if (plan !== null) {
+  const resumablePlan = plan ?? sealed;
+  if (resumablePlan !== null) {
     return {
       lines: [
-        await resumeReviewedJob({
-          deps,
-          labels: REVIEW_LABELS,
-          pr,
-          claim,
-          plan,
-          cloneDir: cacheClone,
+        await withClaimReleasedOnFailure(deps, pr.number, claim, async () => {
+          if (plan === null) {
+            await publishReviewPlan(deps, pr, claim, resumablePlan);
+          }
+          return resumeReviewedJob({
+            deps,
+            labels: REVIEW_LABELS,
+            pr,
+            claim,
+            plan: resumablePlan,
+            cloneDir: cacheClone,
+          });
         }),
       ],
       ranCodex: false,
