@@ -50,6 +50,20 @@ const hasInvalidLocalOutput = (
 ): boolean =>
   plan === null && sealed === null && localBranchExists(cloneDir, branch);
 
+const currentReviewTarget = async (
+  token: string | null,
+  repo: string,
+  prNumber: number,
+  plan: Awaited<ReturnType<typeof readReviewPlan>>,
+): Promise<string> => {
+  const current = await getPullRequest(token, repo, prNumber);
+  return prRevision(
+    current.baseRef,
+    current.baseSha,
+    plan === null ? current.headSha : plan.approvedHead,
+  );
+};
+
 export const runReviewJob = async (
   deps: JobDeps,
   prItem: IssueItem,
@@ -114,10 +128,12 @@ export const runReviewJob = async (
   if (hasInvalidLocalOutput(plan, sealed, cacheClone, outputBranch)) {
     throw new Error(`sealed output on ${outputBranch} is invalid`);
   }
+  const currentTarget = await currentReviewTarget(token, repo, pr.number, plan);
   if (
     !(await approvalIsCurrent(
       { token, repo, issueNumber: pr.number },
       preamble.approval,
+      currentTarget,
     ))
   ) {
     return {

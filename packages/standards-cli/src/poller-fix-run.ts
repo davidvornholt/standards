@@ -105,10 +105,14 @@ export const runFixJob = async (
       `refusing to overwrite ${branch}: it is not valid sealed output for this approval`,
     );
   }
+  const currentTarget = issueRevision(
+    await getIssue(token, repo, issue.number),
+  );
   if (
     !(await approvalIsCurrent(
       { token, repo, issueNumber: issue.number },
       preamble.approval,
+      currentTarget,
     ))
   ) {
     return result(issue.number, 'approval generation changed; skipped');

@@ -121,11 +121,8 @@ export const readApprovalBinding = async (
 export const approvalIsCurrent = async (
   context: ApprovalContext,
   approval: ApprovalBinding,
+  target: string,
 ): Promise<boolean> => {
-  const current = await readApprovalBinding(
-    context,
-    approval.label,
-    approval.target,
-  );
+  const current = await readApprovalBinding(context, approval.label, target);
   return current.kind === 'approved' && current.approval.id === approval.id;
 };

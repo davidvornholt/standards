@@ -10,31 +10,31 @@ import { runReviewJob } from './poller-review-run';
 const originalFetch = globalThis.fetch;
 const REPO = 'owner/repo';
 const ISSUE_NUMBER = 7;
-const SUPERSEDING_EVENT_ID = 102;
+const MOVED_HEAD = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 const roots: Array<string> = [];
 
 const item = (kind: 'fix' | 'review'): IssueItem => ({
   number: ISSUE_NUMBER,
   title: 'Title',
-  body: 'Body',
+  body: 'Approved body',
   isPullRequest: kind === 'review',
   labels: [`approved-for-${kind}`],
   authorLogin: 'reporter',
 });
 
-const rawIssue = (kind: 'fix' | 'review', approved = true) => ({
+const rawIssue = (kind: 'fix' | 'review', body = 'Approved body') => ({
   number: ISSUE_NUMBER,
   title: 'Title',
-  body: 'Body',
-  labels: approved ? [{ name: `approved-for-${kind}` }] : [],
+  body,
+  labels: [{ name: `approved-for-${kind}` }],
   user: { login: 'reporter' },
   ...(kind === 'review'
     ? Object.fromEntries([['pull_request', { url: 'x' }]])
     : {}),
 });
 
-const event = (kind: 'fix' | 'review', id = 101) => ({
-  id,
+const event = (kind: 'fix' | 'review') => ({
+  id: 101,
   event: 'labeled',
   label: { name: `approved-for-${kind}` },
   actor: { login: 'maintainer' },
@@ -73,17 +73,20 @@ afterEach(() => {
   }
 });
 
-it('skips a fix without writes when approval disappears before claim', async () => {
+it('skips a fix when its issue body changes before the first write', async () => {
   const fixture = createLocalPollerRepo();
   roots.push(fixture.root);
+  const changed = rawIssue('fix', 'Changed body');
   const calls = installApi([
     { body: rawIssue('fix') },
     { body: rawIssue('fix') },
     { body: [event('fix')] },
     role,
     { body: [] },
-    { body: rawIssue('fix', false) },
-    { body: rawIssue('fix', false) },
+    { body: changed },
+    { body: changed },
+    { body: [event('fix')] },
+    role,
   ]);
 
   const result = await runFixJob(deps(fixture.cacheDir), item('fix'), () =>
@@ -97,40 +100,50 @@ it('skips a fix without writes when approval disappears before claim', async () 
   expect(calls.every(({ method }) => method === 'GET')).toBe(true);
 });
 
-it('skips a review without writes when approval is superseded before claim', async () => {
+it('skips a review when its PR head changes before the first write', async () => {
   const fixture = createLocalPollerRepo();
   roots.push(fixture.root);
-  const pullRequest = {
+  const pullRequest = (headSha: string) => ({
     ...Object.fromEntries([['node_id', 'PR_node']]),
     title: 'Title',
     body: 'Body',
     draft: true,
     head: {
       ref: 'feature',
-      sha: fixture.headSha,
+      sha: headSha,
       repo: Object.fromEntries([['full_name', REPO]]),
     },
     base: { ref: 'main', sha: fixture.baseSha },
-  };
+  });
   const calls = installApi([
     { body: rawIssue('review') },
-    { body: pullRequest },
+    { body: pullRequest(fixture.headSha) },
     { body: [] },
     { body: rawIssue('review') },
     { body: [event('review')] },
     role,
     { body: [] },
-    { body: pullRequest },
+    { body: pullRequest(MOVED_HEAD) },
     { body: rawIssue('review') },
-    { body: [event('review', SUPERSEDING_EVENT_ID)] },
+    { body: [event('review')] },
     role,
   ]);
+  let agentCalls = 0;
 
-  const result = await runReviewJob(deps(fixture.cacheDir), item('review'));
+  const result = await runReviewJob(
+    deps(fixture.cacheDir),
+    item('review'),
+    true,
+    () => {
+      agentCalls += 1;
+      throw new Error('agent must not run');
+    },
+  );
 
   expect(result).toEqual({
     lines: [`PR #${ISSUE_NUMBER}: approval generation changed; skipped`],
     ranCodex: false,
   });
   expect(calls.every(({ method }) => method === 'GET')).toBe(true);
+  expect(agentCalls).toBe(0);
 });
