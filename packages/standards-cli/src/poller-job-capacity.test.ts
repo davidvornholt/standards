@@ -87,7 +87,7 @@ describe('poller entrypoints without Codex capacity', () => {
   it.each([
     'fix',
     'review',
-  ] as const)('leaves a fresh %s job unclaimed', async (kind) => {
+  ] as const)('acknowledges a fresh %s job once without claiming it', async (kind) => {
     const fixture = createLocalPollerRepo();
     roots.push(fixture.root);
     const isReview = kind === 'review';
@@ -99,9 +99,19 @@ describe('poller entrypoints without Codex capacity', () => {
     const result = isReview
       ? await runReviewJob(deps(fixture.cacheDir), issue(true), false)
       : await runFixJob(deps(fixture.cacheDir), issue(false), 'main', false);
+    const second = isReview
+      ? await runReviewJob(deps(fixture.cacheDir), issue(true), false)
+      : await runFixJob(deps(fixture.cacheDir), issue(false), 'main', false);
     expect(result.ranCodex).toBe(false);
+    expect(second.ranCodex).toBe(false);
     expect(result.lines[0]).toContain('waiting for run capacity');
-    expect(calls.every((call) => call.method === 'GET')).toBe(true);
+    const mutations = calls.filter((call) => call.method !== 'GET');
+    expect(mutations).toHaveLength(1);
+    const [comment] = mutations;
+    expect(comment?.method).toBe('POST');
+    const body = (comment?.body as { readonly body?: unknown } | null)?.body;
+    expect(body).toStartWith(isReview ? '**Review queued**' : '**Fix queued**');
+    expect(body).toContain('<!-- standards-poller:queue\n');
   });
 
   it('continues a sealed fix publication', async () => {

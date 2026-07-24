@@ -1,7 +1,13 @@
 // Write-side label and comment operations for the poller. Kept apart from the
 // read helpers so each module stays a single reviewable concern.
 
-import { apiError, HTTP_CREATED, HTTP_OK, request } from './github-api';
+import {
+  apiError,
+  HTTP_CREATED,
+  HTTP_NO_CONTENT,
+  HTTP_OK,
+  request,
+} from './github-api';
 import { isRecord } from './github-settings-parse';
 
 const HTTP_NOT_FOUND = 404;
@@ -84,4 +90,24 @@ export const createComment = async (
     throw new Error(apiError(`comment on ${repo}#${issueNumber}`, response));
   }
   return response.body.id;
+};
+
+export const deleteComment = async (
+  token: string | null,
+  repo: string,
+  commentId: number,
+): Promise<void> => {
+  const response = await request(
+    token,
+    'DELETE',
+    `/repos/${repo}/issues/comments/${commentId}`,
+  );
+  if (
+    response.status !== HTTP_NO_CONTENT &&
+    response.status !== HTTP_NOT_FOUND
+  ) {
+    throw new Error(
+      apiError(`delete comment ${commentId} in ${repo}`, response),
+    );
+  }
 };

@@ -6,6 +6,7 @@ import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { resolveToken } from './github-api';
+import { runPollerAcknowledgementTick } from './poller-acknowledgements';
 import { type PollerConfig, parsePollerConfig } from './poller-config';
 import { runPollerTick } from './poller-tick';
 import { runPollerPrintUnits } from './poller-units';
@@ -13,6 +14,7 @@ import { runPollerPrintUnits } from './poller-units';
 export type PollerCommandOptions = {
   readonly configPath: string | undefined;
   readonly printUnits: boolean;
+  readonly acknowledgeOnly: boolean;
 };
 
 const loadConfig = async (configPath: string): Promise<PollerConfig> => {
@@ -62,7 +64,9 @@ export const runPollerCommand = async (
     );
     return false;
   }
-  const { lines, problems } = await runPollerTick(config, token, Date.now());
+  const { lines, problems } = options.acknowledgeOnly
+    ? await runPollerAcknowledgementTick(config, token)
+    : await runPollerTick(config, token, Date.now());
   for (const line of lines) {
     console.log(`  ${line}`);
   }
@@ -72,7 +76,7 @@ export const runPollerCommand = async (
     return false;
   }
   console.log(
-    `standards poller: tick complete (${lines.length} event(s) across ${config.repos.length} repo(s))`,
+    `standards poller: ${options.acknowledgeOnly ? 'acknowledgement ' : ''}tick complete (${lines.length} event(s) across ${config.repos.length} repo(s))`,
   );
   return true;
 };

@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { hasLabel } from './github-label-identity';
+import { isRecord } from './github-settings-parse';
 import { type ApprovalBinding, readApprovalBinding } from './poller-approval';
+import {
+  hiddenCommentMetadata,
+  parseHiddenCommentMetadata,
+} from './poller-comment-metadata';
 import {
   collaboratorRole,
   getIssue,
@@ -8,8 +13,14 @@ import {
   lastLabelEvent,
   listIssueComments,
 } from './poller-github';
-import { createComment } from './poller-github-write';
-import { CLAIM_MARKER, isTrustedRole } from './poller-protocol';
+import { createComment, deleteComment } from './poller-github-write';
+import {
+  CLAIM_MARKER,
+  CLAIM_METADATA_MARKER,
+  FIX_IN_PROGRESS,
+  isTrustedRole,
+  REVIEW_IN_PROGRESS,
+} from './poller-protocol';
 
 export type ClaimBinding = {
   readonly approval: ApprovalBinding;
@@ -28,38 +39,68 @@ type ClaimContext = {
   readonly issueNumber: number;
 };
 
-const markerBody = (marker: ClaimMarker): string =>
-  `${CLAIM_MARKER}\n${JSON.stringify(marker)}`;
+const startedMessage = (claimLabel: string) => {
+  if (claimLabel === FIX_IN_PROGRESS) {
+    return '**Fix started**\n\nThe poller is working on this issue now. It’ll open a draft pull request when the fix is ready, or ask here if it needs your input.';
+  }
+  if (claimLabel === REVIEW_IN_PROGRESS) {
+    return '**Review started**\n\nThe poller is reviewing this pull request now. It’ll post the results and take the pull request out of draft when it’s finished, or ask here if it needs your input.';
+  }
+  throw new Error(`unsupported poller claim label: ${claimLabel}`);
+};
 
-const parseMarker = (comment: IssueComment): ClaimMarker | null => {
-  if (!comment.body.startsWith(`${CLAIM_MARKER}\n`)) {
+const markerBody = (marker: ClaimMarker): string =>
+  `${startedMessage(marker.claimLabel)}\n\n${hiddenCommentMetadata(
+    CLAIM_METADATA_MARKER,
+    marker,
+  )}`;
+
+const markerPayload = (body: string): unknown | null => {
+  const hidden = parseHiddenCommentMetadata(body, CLAIM_METADATA_MARKER);
+  if (hidden !== null) {
+    return hidden;
+  }
+  if (!body.startsWith(`${CLAIM_MARKER}\n`)) {
     return null;
   }
   try {
-    const raw = JSON.parse(comment.body.slice(CLAIM_MARKER.length + 1)) as {
-      readonly approval?: ApprovalBinding;
-      readonly claimLabel?: unknown;
-      readonly claimEpoch?: unknown;
-      readonly nonce?: unknown;
-    };
-    if (
-      typeof raw.claimLabel !== 'string' ||
-      typeof raw.claimEpoch !== 'string' ||
-      typeof raw.nonce !== 'string' ||
-      raw.approval === undefined ||
-      typeof raw.approval.id !== 'string'
-    ) {
-      return null;
-    }
-    return {
-      approval: raw.approval,
-      claimLabel: raw.claimLabel,
-      claimEpoch: raw.claimEpoch,
-      nonce: raw.nonce,
-    };
+    return JSON.parse(body.slice(CLAIM_MARKER.length + 1)) as unknown;
   } catch {
     return null;
   }
+};
+
+const isApprovalBinding = (value: unknown): value is ApprovalBinding =>
+  isRecord(value) &&
+  typeof value.id === 'string' &&
+  typeof value.repo === 'string' &&
+  typeof value.issueNumber === 'number' &&
+  typeof value.eventId === 'number' &&
+  typeof value.label === 'string' &&
+  typeof value.actorLogin === 'string' &&
+  typeof value.approvedAt === 'string' &&
+  typeof value.target === 'string';
+
+const parseMarker = (comment: IssueComment): ClaimMarker | null => {
+  const payload = markerPayload(comment.body);
+  if (!isRecord(payload)) {
+    return null;
+  }
+  const raw = payload;
+  if (
+    typeof raw.claimLabel !== 'string' ||
+    typeof raw.claimEpoch !== 'string' ||
+    typeof raw.nonce !== 'string' ||
+    !isApprovalBinding(raw.approval)
+  ) {
+    return null;
+  }
+  return {
+    approval: raw.approval,
+    claimLabel: raw.claimLabel,
+    claimEpoch: raw.claimEpoch,
+    nonce: raw.nonce,
+  };
 };
 
 const winningMarkerId = async (
@@ -120,7 +161,11 @@ export const acquireClaim = async (
     markerBody({ ...provisional, nonce }),
   );
   const winner = await winningMarkerId(context, provisional);
-  return winner === markerId ? { ...provisional, markerId } : null;
+  if (winner !== markerId) {
+    await deleteComment(context.token, context.repo, markerId);
+    return null;
+  }
+  return { ...provisional, markerId };
 };
 
 export const validateClaim = async (
