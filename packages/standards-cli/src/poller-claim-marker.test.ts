@@ -36,17 +36,12 @@ const labeled = {
   actor: { login: 'maintainer' },
   ...createdAt('2026-07-18T12:00:00Z'),
 };
-const markerBody = (
-  format: 'hidden' | 'legacy',
-  markerApproval: unknown,
-): string => {
+const markerBody = (markerApproval: unknown): string => {
   const payload = JSON.stringify({
     approval: markerApproval,
     ...claimFields,
   });
-  return format === 'hidden'
-    ? `<!-- standards-poller:claim\n${payload}\n-->`
-    : `<!-- standards-poller:claim -->\n${payload}`;
+  return `<!-- standards-poller:claim\n${payload}\n-->`;
 };
 const comment = (id: number, body: string, authorLogin: string): unknown => ({
   id,
@@ -75,10 +70,7 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-describe.each([
-  'hidden',
-  'legacy',
-] as const)('%s claim marker approval parsing', (format) => {
+describe('claim marker approval parsing', () => {
   it.each(
     malformedApprovals,
   )('ignores a malformed %s approval and elects the valid marker', async (_description, malformedApproval) => {
@@ -87,8 +79,8 @@ describe.each([
       { status: HTTP_CREATED, body: { id: validMarkerId } },
       {
         body: [
-          comment(10, markerBody(format, malformedApproval), 'untrusted-user'),
-          comment(validMarkerId, markerBody(format, approval), 'maintainer'),
+          comment(10, markerBody(malformedApproval), 'untrusted-user'),
+          comment(validMarkerId, markerBody(approval), 'maintainer'),
         ],
       },
       {

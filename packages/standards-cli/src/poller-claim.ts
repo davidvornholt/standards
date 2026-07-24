@@ -15,7 +15,6 @@ import {
 } from './poller-github';
 import { createComment, deleteComment } from './poller-github-write';
 import {
-  CLAIM_MARKER,
   CLAIM_METADATA_MARKER,
   FIX_IN_PROGRESS,
   isTrustedRole,
@@ -55,21 +54,6 @@ const markerBody = (marker: ClaimMarker): string =>
     marker,
   )}`;
 
-const markerPayload = (body: string): unknown | null => {
-  const hidden = parseHiddenCommentMetadata(body, CLAIM_METADATA_MARKER);
-  if (hidden !== null) {
-    return hidden;
-  }
-  if (!body.startsWith(`${CLAIM_MARKER}\n`)) {
-    return null;
-  }
-  try {
-    return JSON.parse(body.slice(CLAIM_MARKER.length + 1)) as unknown;
-  } catch {
-    return null;
-  }
-};
-
 const isApprovalBinding = (value: unknown): value is ApprovalBinding =>
   isRecord(value) &&
   typeof value.id === 'string' &&
@@ -82,7 +66,10 @@ const isApprovalBinding = (value: unknown): value is ApprovalBinding =>
   typeof value.target === 'string';
 
 const parseMarker = (comment: IssueComment): ClaimMarker | null => {
-  const payload = markerPayload(comment.body);
+  const payload = parseHiddenCommentMetadata(
+    comment.body,
+    CLAIM_METADATA_MARKER,
+  );
   if (!isRecord(payload)) {
     return null;
   }

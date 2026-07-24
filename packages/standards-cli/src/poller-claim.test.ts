@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import process from 'node:process';
 import { HTTP_CREATED, HTTP_NO_CONTENT, HTTP_OK } from './github-api';
 import { type ApiCall, installApi } from './github-commands-test-support';
 import { issueRevision, readApprovalBinding } from './poller-approval';
@@ -43,7 +42,6 @@ const context = {
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
-  process.env.GH_TOKEN = undefined;
 });
 
 describe('approval and claim bindings', () => {
@@ -60,12 +58,14 @@ describe('approval and claim bindings', () => {
     };
     const earlierMarker = {
       id: 10,
-      body: `<!-- standards-poller:claim -->\n${JSON.stringify({
-        approval,
-        claimLabel: 'fix-in-progress',
-        claimEpoch: '101',
-        nonce: 'earlier',
-      })}`,
+      body: `<!-- standards-poller:claim
+${JSON.stringify({
+  approval,
+  claimLabel: 'fix-in-progress',
+  claimEpoch: '101',
+  nonce: 'earlier',
+})}
+-->`,
       user: { login: 'maintainer' },
       ...createdAt('2026-07-18T12:00:01Z'),
     };
