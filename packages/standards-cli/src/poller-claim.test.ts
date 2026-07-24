@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import process from 'node:process';
-import { HTTP_CREATED, HTTP_OK } from './github-api';
+import { HTTP_CREATED, HTTP_NO_CONTENT, HTTP_OK } from './github-api';
 import { type ApiCall, installApi } from './github-commands-test-support';
 import { issueRevision, readApprovalBinding } from './poller-approval';
 import { acquireClaim, validateClaim } from './poller-claim';
@@ -43,7 +42,6 @@ const context = {
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
-  process.env.GH_TOKEN = undefined;
 });
 
 describe('approval and claim bindings', () => {
@@ -60,12 +58,14 @@ describe('approval and claim bindings', () => {
     };
     const earlierMarker = {
       id: 10,
-      body: `<!-- standards-poller:claim -->\n${JSON.stringify({
-        approval,
-        claimLabel: 'fix-in-progress',
-        claimEpoch: '101',
-        nonce: 'earlier',
-      })}`,
+      body: `<!-- standards-poller:claim
+${JSON.stringify({
+  approval,
+  claimLabel: 'fix-in-progress',
+  claimEpoch: '101',
+  nonce: 'earlier',
+})}
+-->`,
       user: { login: 'maintainer' },
       ...createdAt('2026-07-18T12:00:01Z'),
     };
@@ -84,6 +84,7 @@ describe('approval and claim bindings', () => {
       },
       role('maintain'),
       role('maintain'),
+      { status: HTTP_NO_CONTENT, body: null },
     ]);
 
     expect(await acquireClaim(context, approval, 'fix-in-progress')).toBeNull();
@@ -95,14 +96,15 @@ describe('approval and claim bindings', () => {
       { body: [labeled('approved-for-fix')] },
       role('admin'),
     ]);
-    const approval = await readApprovalBinding(
+    const approvalResult = await readApprovalBinding(
       context,
       'approved-for-fix',
       issueRevision(issue(['approved-for-fix'])),
     );
-    if (typeof approval === 'string') {
-      throw new Error(approval);
+    if (approvalResult.kind !== 'approved') {
+      throw new Error('test approval must be valid');
     }
+    const { approval } = approvalResult;
     const claim = {
       approval,
       claimLabel: 'fix-in-progress',
@@ -144,7 +146,7 @@ describe('approval and claim bindings', () => {
         'approved-for-fix',
         issueRevision(issue([])),
       ),
-    ).toContain('not currently present');
+    ).toEqual({ kind: 'absent' });
     expect(calls).toHaveLength(1);
   });
 
@@ -159,7 +161,7 @@ describe('approval and claim bindings', () => {
       'approved-for-fix',
       'issue:revision',
     );
-    expect(typeof approval).not.toBe('string');
+    expect(approval.kind).toBe('approved');
   });
 });
 
@@ -191,9 +193,9 @@ it('distinguishes same-second approval generations by timeline event ID', async 
     'approved-for-fix',
     'issue:revision',
   );
-  if (typeof first === 'string' || typeof second === 'string') {
+  if (first.kind !== 'approved' || second.kind !== 'approved') {
     throw new Error('test approvals must be valid');
   }
-  expect(first.approvedAt).toBe(second.approvedAt);
-  expect(first.id).not.toBe(second.id);
+  expect(first.approval.approvedAt).toBe(second.approval.approvedAt);
+  expect(first.approval.id).not.toBe(second.approval.id);
 });

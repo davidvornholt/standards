@@ -9,12 +9,32 @@ import { QUESTION_MARKER } from './poller-protocol';
 const originalFetch = globalThis.fetch;
 const config = {} as PollerConfig;
 const ISSUE_NUMBER = 8;
+const FIRST_APPROVAL_EVENT = 101;
+const SECOND_APPROVAL_EVENT = 102;
 const OLD_FAILURE_SNIPPET_LIMIT = 1500;
 const FAILURE_CONTEXT_LINE_COUNT = 50;
 const createdAt = (value: string): Record<string, string> =>
   Object.fromEntries([['created_at', value]]);
 const role = (value: string) => ({
   body: Object.fromEntries([['role_name', value]]),
+});
+const approvedIssue = {
+  number: ISSUE_NUMBER,
+  title: 'title',
+  body: 'body',
+  labels: [{ name: 'approved-for-fix' }],
+  user: { login: 'reporter' },
+};
+const approvalTimeline = (id: number) => ({
+  body: [
+    {
+      id,
+      event: 'labeled',
+      label: { name: 'approved-for-fix' },
+      actor: { login: 'maintainer' },
+      ...createdAt('2026-07-18T10:00:00Z'),
+    },
+  ],
 });
 const deps = {
   config,
@@ -40,26 +60,8 @@ describe('jobPreamble', () => {
       labels: ['approved-for-fix'],
     };
     installApi([
-      {
-        body: {
-          number: 8,
-          title: 'title',
-          body: 'body',
-          labels: [{ name: 'approved-for-fix' }],
-          user: { login: 'reporter' },
-        },
-      },
-      {
-        body: [
-          {
-            id: 101,
-            event: 'labeled',
-            label: { name: 'approved-for-fix' },
-            actor: { login: 'maintainer' },
-            ...createdAt('2026-07-18T10:00:00Z'),
-          },
-        ],
-      },
+      { body: approvedIssue },
+      approvalTimeline(FIRST_APPROVAL_EVENT),
       role('admin'),
       {
         body: [
@@ -71,6 +73,9 @@ describe('jobPreamble', () => {
           },
         ],
       },
+      role('admin'),
+      { body: approvedIssue },
+      approvalTimeline(FIRST_APPROVAL_EVENT),
       role('admin'),
       { body: {} }, // add needs-clarification
       { body: {} }, // remove absent in-progress
@@ -88,33 +93,18 @@ describe('jobPreamble', () => {
         inProgress: 'fix-in-progress',
         failed: 'fix-failed',
       },
-      'issue:approved',
+      {
+        approved: 'issue:approved',
+        readCurrent: () => Promise.resolve('issue:approved'),
+      },
     );
     expect(result).toEqual({ kind: 'waiting' });
   });
 
   it('requires the label repair write to succeed', () => {
     installApi([
-      {
-        body: {
-          number: 8,
-          title: 'title',
-          body: 'body',
-          labels: [{ name: 'approved-for-fix' }],
-          user: { login: 'reporter' },
-        },
-      },
-      {
-        body: [
-          {
-            id: 102,
-            event: 'labeled',
-            label: { name: 'approved-for-fix' },
-            actor: { login: 'maintainer' },
-            ...createdAt('2026-07-18T10:00:00Z'),
-          },
-        ],
-      },
+      { body: approvedIssue },
+      approvalTimeline(SECOND_APPROVAL_EVENT),
       role('admin'),
       {
         body: [
@@ -126,6 +116,9 @@ describe('jobPreamble', () => {
           },
         ],
       },
+      role('admin'),
+      { body: approvedIssue },
+      approvalTimeline(SECOND_APPROVAL_EVENT),
       role('admin'),
       { status: HTTP_CREATED, body: {} },
     ]);
@@ -143,7 +136,10 @@ describe('jobPreamble', () => {
           inProgress: 'fix-in-progress',
           failed: 'fix-failed',
         },
-        'issue:approved',
+        {
+          approved: 'issue:approved',
+          readCurrent: () => Promise.resolve('issue:approved'),
+        },
       ),
     ).rejects.toThrow('add needs-clarification');
   });

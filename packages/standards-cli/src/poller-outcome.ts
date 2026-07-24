@@ -8,11 +8,23 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isNonEmptyString, isRecord } from './github-settings-parse';
 import {
-  type DeferredFinding,
   type FixOutcome,
   OUTCOME_FILE,
   type ReviewOutcome,
+  type ReviewThreadResolution,
 } from './poller-protocol';
+
+const hasExactKeys = (
+  value: Readonly<Record<string, unknown>>,
+  expected: ReadonlyArray<string>,
+): boolean => {
+  const actual = Object.keys(value).sort();
+  const sortedExpected = [...expected].sort();
+  return (
+    actual.length === sortedExpected.length &&
+    actual.every((key, index) => key === sortedExpected[index])
+  );
+};
 
 const readOutcomeRaw = async (workDir: string): Promise<unknown | null> => {
   const path = join(workDir, OUTCOME_FILE);
@@ -93,44 +105,74 @@ export const readReviewOutcome = async (
     return null;
   }
   const status = raw.status as ReviewOutcome['status'];
-  if (status === 'question' && !isNonEmptyString(raw.question)) {
+  if (
+    status === 'question' &&
+    !(
+      hasExactKeys(raw, ['question', 'status', 'summary']) &&
+      isNonEmptyString(raw.question)
+    )
+  ) {
     return null;
   }
-  if (status === 'reviewed' && !isNonEmptyString(raw.report)) {
+  if (status === 'question') {
+    return {
+      status,
+      summary: raw.summary,
+      question: raw.question as string,
+    };
+  }
+  if (status === 'cannot-review' && !hasExactKeys(raw, ['status', 'summary'])) {
     return null;
   }
-  const deferred = parseDeferred(raw.deferred);
-  if (deferred === null) {
+  if (status === 'cannot-review') {
+    return {
+      status,
+      summary: raw.summary,
+    };
+  }
+  const threadsToResolve = parseThreadsToResolve(raw.threadsToResolve);
+  if (
+    !(
+      hasExactKeys(raw, ['report', 'status', 'summary', 'threadsToResolve']) &&
+      isNonEmptyString(raw.report)
+    ) ||
+    threadsToResolve === null
+  ) {
     return null;
   }
   return {
     status,
     summary: raw.summary,
-    question: typeof raw.question === 'string' ? raw.question : undefined,
-    report: typeof raw.report === 'string' ? raw.report : undefined,
-    deferred,
+    report: raw.report,
+    threadsToResolve,
   };
 };
 
-const parseDeferred = (raw: unknown): ReadonlyArray<DeferredFinding> | null => {
-  if (raw === undefined) {
-    return [];
-  }
+const parseThreadsToResolve = (
+  raw: unknown,
+): ReadonlyArray<ReviewThreadResolution> | null => {
   if (!Array.isArray(raw)) {
     return null;
   }
-  const deferred: Array<DeferredFinding> = [];
+  const result: Array<ReviewThreadResolution> = [];
+  const ids = new Set<string>();
   for (const entry of raw) {
     if (
       !(
         isRecord(entry) &&
-        isNonEmptyString(entry.title) &&
-        isNonEmptyString(entry.body)
-      )
+        hasExactKeys(entry, ['threadId', 'verificationReply']) &&
+        isNonEmptyString(entry.threadId) &&
+        isNonEmptyString(entry.verificationReply)
+      ) ||
+      ids.has(entry.threadId)
     ) {
       return null;
     }
-    deferred.push({ title: entry.title, body: entry.body });
+    ids.add(entry.threadId);
+    result.push({
+      threadId: entry.threadId,
+      verificationReply: entry.verificationReply,
+    });
   }
-  return deferred;
+  return result;
 };

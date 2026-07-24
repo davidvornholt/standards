@@ -84,7 +84,7 @@ export const finishReviewedJob = async (options: {
   readonly pr: PullRequest;
   readonly claim: ClaimBinding;
   readonly workDir: string;
-  readonly outcome: ReviewOutcome;
+  readonly outcome: Extract<ReviewOutcome, { readonly status: 'reviewed' }>;
 }): Promise<string> => {
   const { deps, labels, pr, claim, workDir, outcome } = options;
   const commits = commitCount(workDir, pr.headSha);
@@ -110,9 +110,9 @@ export const finishReviewedJob = async (options: {
     publishedHead: headSha(workDir),
     baseRef: pr.baseRef,
     baseSha: pr.baseSha,
-    report: outcome.report ?? '',
+    report: outcome.report,
     commits,
-    deferred: outcome.deferred ?? [],
+    threadsToResolve: outcome.threadsToResolve,
   };
   const outputBranch = outputBranchFor(plan);
   const sealedHead = sealReviewPlan(workDir, plan);

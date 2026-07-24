@@ -70,34 +70,67 @@ describe('readFixOutcome', () => {
 });
 
 describe('readReviewOutcome', () => {
-  it('accepts a reviewed outcome with deferred findings', async () => {
+  it('accepts a reviewed outcome with its report', async () => {
     const outcome = await readReviewOutcome(
       workDirWithOutcome({
         status: 'reviewed',
-        summary: 'Two fixes, one deferral.',
+        summary: 'Two fixes.',
         report: '## Review\n...',
-        deferred: [{ title: 'fix(x): tighten y', body: 'Evidence: ...' }],
+        threadsToResolve: [
+          {
+            threadId: 'PRRT_thread',
+            verificationReply: 'Fixed in abc123; focused tests pass.',
+          },
+        ],
       }),
     );
-    expect(outcome?.deferred).toHaveLength(1);
+    expect(outcome).toEqual({
+      status: 'reviewed',
+      summary: 'Two fixes.',
+      report: '## Review\n...',
+      threadsToResolve: [
+        {
+          threadId: 'PRRT_thread',
+          verificationReply: 'Fixed in abc123; focused tests pass.',
+        },
+      ],
+    });
   });
 
-  it('rejects a reviewed outcome without a report', async () => {
-    expect(
-      await readReviewOutcome(
-        workDirWithOutcome({ status: 'reviewed', summary: 'done' }),
-      ),
-    ).toBeNull();
-  });
-
-  it('rejects malformed deferred entries', async () => {
+  it('rejects reviewed outcomes without the exact thread-resolution shape', async () => {
     expect(
       await readReviewOutcome(
         workDirWithOutcome({
           status: 'reviewed',
           summary: 'done',
-          report: 'r',
-          deferred: [{ title: 'only-a-title' }],
+          report: 'Report',
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      await readReviewOutcome(
+        workDirWithOutcome({
+          status: 'reviewed',
+          summary: 'done',
+          report: 'Report',
+          threadsToResolve: [
+            {
+              threadId: 'PRRT_thread',
+              verificationReply: 'Evidence',
+              extra: true,
+            },
+          ],
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      await readReviewOutcome(
+        workDirWithOutcome({
+          status: 'reviewed',
+          summary: 'done',
+          report: 'Report',
+          threadsToResolve: [],
+          deferred: [],
         }),
       ),
     ).toBeNull();
