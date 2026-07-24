@@ -1,4 +1,5 @@
 import { afterEach, expect, it } from 'bun:test';
+import { Buffer } from 'node:buffer';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -22,7 +23,16 @@ const plan: ReviewPublicationPlan = {
   baseSha: '3333333333333333333333333333333333333333',
   report: 'Reviewed.',
   commits: 1,
+  threadsToResolve: [
+    {
+      threadId: 'PRRT_thread',
+      verificationReply: 'Fixed the boundary and ran the focused test.',
+    },
+  ],
 };
+
+const markerForRaw = (raw: unknown): string =>
+  `<!-- standards-poller:review-output\n${Buffer.from(JSON.stringify(raw)).toString('base64url')}\n-->`;
 
 afterEach(() => {
   for (const dir of dirs.splice(0)) {
@@ -145,5 +155,35 @@ it('rejects malformed markers', () => {
   expect(parseReviewPlan('no marker')).toBeNull();
   expect(
     parseReviewPlan('<!-- standards-poller:review-output\nbm90LWpzb24\n-->'),
+  ).toBeNull();
+});
+
+it('rejects legacy, unknown, and malformed plan fields', () => {
+  const { threadsToResolve: _, ...legacy } = plan;
+  expect(parseReviewPlan(markerForRaw({ ...legacy, deferred: [] }))).toBeNull();
+  expect(
+    parseReviewPlan(markerForRaw({ ...plan, unknownProtocolField: true })),
+  ).toBeNull();
+  expect(
+    parseReviewPlan(
+      markerForRaw({
+        ...plan,
+        threadsToResolve: [
+          {
+            threadId: 'PRRT_thread',
+            verificationReply: 'Evidence',
+            extra: true,
+          },
+        ],
+      }),
+    ),
+  ).toBeNull();
+  expect(
+    parseReviewPlan(
+      markerForRaw({
+        ...plan,
+        threadsToResolve: [plan.threadsToResolve[0], plan.threadsToResolve[0]],
+      }),
+    ),
   ).toBeNull();
 });

@@ -171,6 +171,7 @@ describe('poller entrypoints without Codex capacity', () => {
       baseSha: fixture.baseSha,
       report: 'Reviewed.',
       commits: 0,
+      threadsToResolve: [],
     };
     checkout(fixture.source, fixture.headSha);
     const sealedHead = sealReviewPlan(fixture.source, plan);

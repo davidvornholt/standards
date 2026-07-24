@@ -122,7 +122,7 @@ in
 
 ### Breaking migration to 0.17.0
 
-Poller Codex runs now receive the host's GitHub token and use `gh` for repository collaboration instead of converting every GitHub operation into a clarification or a poller-side deferred action. Before upgrading a polling host, add `gh` to the service PATH and confirm the existing fine-grained PAT grants Issues, Pull requests, and Contents write on every watched repository. There is no restricted-token fallback: a host that does not provide authenticated `gh` is misconfigured and review runs fail rather than silently returning to the old question-only behavior.
+Poller Codex runs now receive the host's GitHub token and use `gh` for repository collaboration instead of converting every GitHub operation into a clarification or a poller-side deferred action. Before upgrading a polling host, add `gh` to the service PATH and confirm the existing fine-grained PAT grants Issues, Pull requests, and Contents write on every watched repository. There is no restricted-token fallback: a host that does not provide authenticated `gh` is misconfigured and review runs fail rather than silently returning to the old question-only behavior. Sealed review plans from the earlier protocol are rejected rather than migrated or partially published; leave the approval in place so the review reruns under the new protocol.
 
 ### Track main or pin a version
 

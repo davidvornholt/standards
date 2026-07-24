@@ -1,13 +1,13 @@
 import { Buffer } from 'node:buffer';
 import { createHash } from 'node:crypto';
-import { isRecord } from './github-settings-parse';
 import {
   assertCleanOutputWorktree,
   commitCountBetween,
   isAncestor,
-  isGitObjectId,
   singleParentOf,
 } from './poller-output-integrity';
+import type { ReviewThreadResolution } from './poller-protocol';
+import { parseReviewPlanValue } from './poller-review-plan-parse';
 import { runGit } from './poller-workspace';
 
 const REVIEW_OUTPUT_MARKER = '<!-- standards-poller:review-output\n';
@@ -25,6 +25,7 @@ export type ReviewPublicationPlan = {
   readonly baseSha: string;
   readonly report: string;
   readonly commits: number;
+  readonly threadsToResolve: ReadonlyArray<ReviewThreadResolution>;
 };
 
 export const reviewPlanMarker = (plan: ReviewPublicationPlan): string =>
@@ -44,26 +45,7 @@ export const parseReviewPlan = (body: string): ReviewPublicationPlan | null => {
     const raw = JSON.parse(
       Buffer.from(body.slice(encodedStart, end), 'base64url').toString('utf8'),
     ) as unknown;
-    if (
-      !isRecord(raw) ||
-      typeof raw.repo !== 'string' ||
-      typeof raw.prNumber !== 'number' ||
-      typeof raw.approvalId !== 'string' ||
-      typeof raw.approvedHead !== 'string' ||
-      typeof raw.publishedHead !== 'string' ||
-      typeof raw.baseRef !== 'string' ||
-      typeof raw.baseSha !== 'string' ||
-      !isGitObjectId(raw.approvedHead) ||
-      !isGitObjectId(raw.publishedHead) ||
-      !isGitObjectId(raw.baseSha) ||
-      typeof raw.report !== 'string' ||
-      typeof raw.commits !== 'number' ||
-      !Number.isInteger(raw.commits) ||
-      raw.commits < 0
-    ) {
-      return null;
-    }
-    return raw as ReviewPublicationPlan;
+    return parseReviewPlanValue(raw);
   } catch {
     return null;
   }

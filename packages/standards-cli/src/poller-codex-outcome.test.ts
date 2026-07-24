@@ -76,15 +76,62 @@ describe('readReviewOutcome', () => {
         status: 'reviewed',
         summary: 'Two fixes.',
         report: '## Review\n...',
+        threadsToResolve: [
+          {
+            threadId: 'PRRT_thread',
+            verificationReply: 'Fixed in abc123; focused tests pass.',
+          },
+        ],
       }),
     );
-    expect(outcome?.status).toBe('reviewed');
+    expect(outcome).toEqual({
+      status: 'reviewed',
+      summary: 'Two fixes.',
+      report: '## Review\n...',
+      threadsToResolve: [
+        {
+          threadId: 'PRRT_thread',
+          verificationReply: 'Fixed in abc123; focused tests pass.',
+        },
+      ],
+    });
   });
 
-  it('rejects a reviewed outcome without a report', async () => {
+  it('rejects reviewed outcomes without the exact thread-resolution shape', async () => {
     expect(
       await readReviewOutcome(
-        workDirWithOutcome({ status: 'reviewed', summary: 'done' }),
+        workDirWithOutcome({
+          status: 'reviewed',
+          summary: 'done',
+          report: 'Report',
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      await readReviewOutcome(
+        workDirWithOutcome({
+          status: 'reviewed',
+          summary: 'done',
+          report: 'Report',
+          threadsToResolve: [
+            {
+              threadId: 'PRRT_thread',
+              verificationReply: 'Evidence',
+              extra: true,
+            },
+          ],
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      await readReviewOutcome(
+        workDirWithOutcome({
+          status: 'reviewed',
+          summary: 'done',
+          report: 'Report',
+          threadsToResolve: [],
+          deferred: [],
+        }),
       ),
     ).toBeNull();
   });

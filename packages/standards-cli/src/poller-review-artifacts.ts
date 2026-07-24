@@ -14,6 +14,7 @@ import {
 import { isTrustedRole } from './poller-protocol';
 import type { ReviewPublicationPlan } from './poller-review-output';
 import { validateReviewClaim } from './poller-review-state';
+import { publishReviewThreadResolutions } from './poller-review-threads';
 
 const reviewMarker = (plan: ReviewPublicationPlan): string =>
   `<!-- standards-poller:review repo=${plan.repo} pr=${plan.prNumber} approval=${plan.approvalId} -->`;
@@ -39,6 +40,7 @@ export const publishReviewArtifacts = async (options: {
   readonly plan: ReviewPublicationPlan;
 }): Promise<string> => {
   const { deps, labels, pr, claim, plan } = options;
+  await publishReviewThreadResolutions({ deps, pr, claim, plan });
   const marker = reviewMarker(plan);
   const reviewExists = await hasTrustedAuthor(
     deps,

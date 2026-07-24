@@ -1,16 +1,11 @@
-import { afterEach, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { type ApiCall, installApi } from './github-commands-test-support';
 import { prRevision } from './poller-approval';
 import { hiddenCommentMetadata } from './poller-comment-metadata';
 import type { JobDeps } from './poller-job-shared';
 import { CLAIM_METADATA_MARKER } from './poller-protocol';
-import { publishReviewArtifacts } from './poller-review-artifacts';
 import type { ReviewPublicationPlan } from './poller-review-output';
 
-const originalFetch = globalThis.fetch;
-const PR_NUMBER = 4;
-const RELEASE_LABEL_COUNT = 3;
+export const PR_NUMBER = 4;
 const approvalFields = {
   repo: 'owner/repo',
   issueNumber: PR_NUMBER,
@@ -20,17 +15,21 @@ const approvalFields = {
   approvedAt: '2026-07-18T10:00:00Z',
   target: prRevision('main', 'base', 'head'),
 };
-const approval = {
+export const approval = {
   id: createHash('sha256').update(JSON.stringify(approvalFields)).digest('hex'),
   ...approvalFields,
 };
-const claim = {
+export const claim = {
   approval,
   claimLabel: 'review-in-progress',
   claimEpoch: '2026-07-18T11:00:00Z',
   markerId: 9,
 };
-const plan: ReviewPublicationPlan = {
+export const resolution = {
+  threadId: 'PRRT_thread',
+  verificationReply: 'Fixed in the reviewed head; focused tests pass.',
+};
+export const plan: ReviewPublicationPlan = {
   repo: 'owner/repo',
   prNumber: PR_NUMBER,
   approvalId: approval.id,
@@ -40,14 +39,14 @@ const plan: ReviewPublicationPlan = {
   baseSha: 'base',
   report: 'Report',
   commits: 0,
-  threadsToResolve: [],
+  threadsToResolve: [resolution],
 };
-const deps = {
+export const deps = {
   token: 'token',
   repo: 'owner/repo',
   roleCache: new Map(),
 } as JobDeps;
-const pr = {
+export const pr = {
   number: PR_NUMBER,
   title: 'Title',
   body: 'Body',
@@ -57,18 +56,43 @@ const pr = {
   baseRef: 'main',
   baseSha: 'base',
   nodeId: 'PR_node',
-  draft: false,
+  draft: true,
 };
 
-afterEach(() => {
-  globalThis.fetch = originalFetch;
+export const threadResponse = (
+  options: {
+    readonly body?: string;
+    readonly isResolved?: boolean;
+    readonly prNumber?: number;
+    readonly repo?: string;
+  } = {},
+) => ({
+  body: {
+    data: {
+      node: {
+        id: resolution.threadId,
+        isResolved: options.isResolved ?? false,
+        pullRequest: {
+          number: options.prNumber ?? PR_NUMBER,
+          repository: { nameWithOwner: options.repo ?? 'owner/repo' },
+        },
+        comments: {
+          nodes:
+            options.body === undefined
+              ? []
+              : [{ body: options.body, viewerDidAuthor: true }],
+          pageInfo: { hasNextPage: false, endCursor: null },
+        },
+      },
+    },
+  },
 });
 
-const validationResponses = () => [
+export const validationResponses = () => [
   {
     body: {
       ...Object.fromEntries([['node_id', 'PR_node']]),
-      draft: false,
+      draft: true,
       head: {
         ref: 'feature',
         sha: 'head',
@@ -80,7 +104,10 @@ const validationResponses = () => [
   {
     body: {
       number: PR_NUMBER,
+      title: 'Title',
+      body: 'Body',
       labels: [{ name: 'approved-for-review' }],
+      user: { login: 'author' },
     },
   },
   {
@@ -98,7 +125,10 @@ const validationResponses = () => [
   {
     body: {
       number: PR_NUMBER,
+      title: 'Title',
+      body: 'Body',
       labels: [{ name: 'review-in-progress' }],
+      user: { login: 'author' },
     },
   },
   {
@@ -117,44 +147,3 @@ const validationResponses = () => [
   },
   { body: Object.fromEntries([['role_name', 'admin']]) },
 ];
-
-it('replays a fully published ready review without duplicate artifacts', async () => {
-  const calls: ReadonlyArray<ApiCall> = installApi([
-    {
-      body: [
-        {
-          body: `<!-- standards-poller:review repo=${plan.repo} pr=${plan.prNumber} approval=${approval.id} -->`,
-          ...Object.fromEntries([['commit_id', 'head']]),
-          user: { login: 'outsider' },
-        },
-        {
-          body: `<!-- standards-poller:review repo=${plan.repo} pr=${plan.prNumber} approval=${approval.id} -->`,
-          ...Object.fromEntries([['commit_id', 'head']]),
-          user: { login: 'poller' },
-        },
-      ],
-    },
-    { body: Object.fromEntries([['role_name', 'write']]) },
-    { body: Object.fromEntries([['role_name', 'admin']]) },
-    ...validationResponses(),
-    ...validationResponses(),
-    { body: {} },
-    { body: {} },
-    { body: {} },
-  ]);
-  await publishReviewArtifacts({
-    deps,
-    labels: {
-      approved: 'approved-for-review',
-      inProgress: 'review-in-progress',
-      failed: 'review-failed',
-    },
-    pr,
-    claim,
-    plan,
-  });
-  expect(calls.filter((call) => call.method === 'POST')).toEqual([]);
-  expect(calls.filter((call) => call.method === 'DELETE')).toHaveLength(
-    RELEASE_LABEL_COUNT,
-  );
-});
