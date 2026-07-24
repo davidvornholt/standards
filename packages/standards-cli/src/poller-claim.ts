@@ -8,7 +8,12 @@ import {
 } from './poller-claim-reconciliation';
 import { hiddenCommentMetadata } from './poller-comment-metadata';
 import { getIssue, lastLabelEvent } from './poller-github';
-import { addLabels, createComment, deleteComment } from './poller-github-write';
+import {
+  addLabels,
+  createComment,
+  deleteComment,
+  removeLabel,
+} from './poller-github-write';
 import type { JobDeps } from './poller-job-shared';
 import {
   CLAIM_METADATA_MARKER,
@@ -135,4 +140,37 @@ export const validateClaim = async (
   return election.retainedId === claim.markerId
     ? null
     : 'claim ownership changed or could not be proven';
+};
+
+const errorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
+export const withClaimReleasedOnFailure = async <Result>(
+  deps: JobDeps,
+  issueNumber: number,
+  claim: ClaimBinding,
+  operation: () => Promise<Result>,
+): Promise<Result> => {
+  try {
+    return await operation();
+  } catch (operationError) {
+    try {
+      const problem = await validateClaim(
+        { token: deps.token, repo: deps.repo, issueNumber },
+        claim,
+        claim.approval.target,
+      );
+      if (problem === null) {
+        await removeLabel(deps.token, deps.repo, issueNumber, claim.claimLabel);
+      }
+    } catch (releaseError) {
+      throw new Error(
+        `${errorMessage(operationError)}; releasing the claim for an automatic retry also failed: ${errorMessage(releaseError)}`,
+        {
+          cause: releaseError,
+        },
+      );
+    }
+    throw operationError;
+  }
 };

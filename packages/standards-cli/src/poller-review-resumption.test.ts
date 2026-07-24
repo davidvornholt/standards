@@ -16,6 +16,7 @@ import {
   sealReviewPlan,
 } from './poller-review-output';
 import { runReviewJob } from './poller-review-run';
+import { failGitHubRequestOnce } from './poller-transient-failure-test-support';
 
 const originalFetch = globalThis.fetch;
 const REPO = 'owner/repo';
@@ -104,4 +105,65 @@ it('continues a sealed review publication without Codex capacity', async () => {
         ).startsWith('**Review queued**'),
     ),
   ).toBe(false);
+});
+
+it('releases a failed sealed review publication for the next tick', async () => {
+  const fixture = createLocalPollerRepo();
+  roots.push(fixture.root);
+  const item: IssueItem = {
+    number: ISSUE_NUMBER,
+    title: 'Title',
+    body: 'Body',
+    isPullRequest: true,
+    labels: ['approved-for-review'],
+    authorLogin: 'reporter',
+  };
+  const binding = createTestApproval(
+    'approved-for-review',
+    prRevision('main', fixture.baseSha, fixture.headSha),
+  );
+  const plan: ReviewPublicationPlan = {
+    repo: REPO,
+    prNumber: ISSUE_NUMBER,
+    approvalId: binding.id,
+    approvedHead: fixture.headSha,
+    publishedHead: fixture.headSha,
+    baseRef: 'main',
+    baseSha: fixture.baseSha,
+    report: 'Reviewed.',
+    commits: 0,
+    threadsToResolve: [],
+  };
+  checkout(fixture.source, fixture.headSha);
+  const sealedHead = sealReviewPlan(fixture.source, plan);
+  pushRef(fixture.source, reviewOutputBranch(plan), sealedHead);
+  const failedCalls = installPollerApi({
+    baseSha: fixture.baseSha,
+    headSha: fixture.headSha,
+    isPullRequest: true,
+  });
+  failGitHubRequestOnce('POST', '/graphql');
+
+  await expect(
+    runReviewJob(deps(fixture.cacheDir), item, false),
+  ).rejects.toThrow('mark PR ready for review');
+  expect(
+    failedCalls.some(
+      (call) =>
+        call.method === 'DELETE' &&
+        call.path.endsWith('/labels/review-in-progress'),
+    ),
+  ).toBe(true);
+
+  installPollerApi({
+    baseSha: fixture.baseSha,
+    headSha: fixture.headSha,
+    isPullRequest: true,
+  });
+  await expect(
+    runReviewJob(deps(fixture.cacheDir), item, false),
+  ).resolves.toEqual({
+    lines: [`PR #${ISSUE_NUMBER}: reviewed (0 fix commit(s)), marked ready`],
+    ranCodex: false,
+  });
 });

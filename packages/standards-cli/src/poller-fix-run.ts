@@ -3,7 +3,7 @@
 import { join } from 'node:path';
 import { hasLabel } from './github-label-identity';
 import { approvalIsCurrent, issueRevision } from './poller-approval';
-import { startClaim } from './poller-claim';
+import { startClaim, withClaimReleasedOnFailure } from './poller-claim';
 import { runCodex } from './poller-codex';
 import { handleNonFixedOutcome } from './poller-fix-outcome';
 import { readSealedFixOutput } from './poller-fix-output';
@@ -132,7 +132,11 @@ export const runFixJob = async (
   if (sealed !== null) {
     assertSealedOwnership(sealed, issue.number, claim.approval.id, branch);
     return {
-      lines: [await publishFixedOutput(resumableJob, FIX_LABELS, sealed, null)],
+      lines: [
+        await withClaimReleasedOnFailure(deps, issue.number, claim, () =>
+          publishFixedOutput(resumableJob, FIX_LABELS, sealed, null),
+        ),
+      ],
       ranCodex: false,
     };
   }
@@ -180,8 +184,13 @@ export const runFixJob = async (
       };
     }
     const nonFixed = await handleNonFixedOutcome(job, FIX_LABELS, outcome);
+    const message =
+      nonFixed ??
+      (await withClaimReleasedOnFailure(deps, issue.number, claim, () =>
+        finishFixedJob(job, FIX_LABELS, outcome),
+      ));
     return {
-      lines: [nonFixed ?? (await finishFixedJob(job, FIX_LABELS, outcome))],
+      lines: [message],
       ranCodex: true,
     };
   } finally {
