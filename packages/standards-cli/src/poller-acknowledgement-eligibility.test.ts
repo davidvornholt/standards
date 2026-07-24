@@ -67,7 +67,7 @@ const plan: ReviewPublicationPlan = {
   baseSha: BASE_SHA,
   report: 'Reviewed.',
   commits: 0,
-  deferred: [],
+  threadsToResolve: [],
 };
 
 const planComment = {

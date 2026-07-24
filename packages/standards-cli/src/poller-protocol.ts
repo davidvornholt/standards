@@ -41,18 +41,27 @@ export type FixOutcome = {
   readonly prBody?: string;
 };
 
-export type DeferredFinding = {
-  readonly title: string;
-  readonly body: string;
+export type ReviewThreadResolution = {
+  readonly threadId: string;
+  readonly verificationReply: string;
 };
 
-export type ReviewOutcome = {
-  readonly status: 'reviewed' | 'question' | 'cannot-review';
-  readonly summary: string;
-  readonly question?: string;
-  readonly report?: string;
-  readonly deferred?: ReadonlyArray<DeferredFinding>;
-};
+export type ReviewOutcome =
+  | {
+      readonly status: 'reviewed';
+      readonly summary: string;
+      readonly report: string;
+      readonly threadsToResolve: ReadonlyArray<ReviewThreadResolution>;
+    }
+  | {
+      readonly status: 'question';
+      readonly summary: string;
+      readonly question: string;
+    }
+  | {
+      readonly status: 'cannot-review';
+      readonly summary: string;
+    };
 
 // Paths the automation must never modify in a consumer repository. Canonical
 // synced files come from the repo's own sync-standards.lock; the rest are the

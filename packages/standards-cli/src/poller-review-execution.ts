@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import type { ClaimBinding } from './poller-claim';
-import { runCodex } from './poller-codex';
+import type { runCodex } from './poller-codex';
 import type { PullRequest } from './poller-github-pulls';
 import {
   askQuestion,
@@ -22,8 +22,9 @@ export const executeReviewJob = async (options: {
   readonly claim: ClaimBinding;
   readonly cacheClone: string;
   readonly answers: ReadonlyArray<string>;
+  readonly runAgent: typeof runCodex;
 }): Promise<JobResult> => {
-  const { deps, labels, pr, claim, cacheClone, answers } = options;
+  const { deps, labels, pr, claim, cacheClone, answers, runAgent } = options;
   const reviewBase = mergeBase(cacheClone, pr.baseSha, pr.headSha);
   const workspace = createWorktree(
     cacheClone,
@@ -36,7 +37,7 @@ export const executeReviewJob = async (options: {
     ),
   );
   try {
-    const run = runCodex({
+    const run = runAgent({
       workDir: workspace.dir,
       gitCommonDir: cacheClone,
       prompt: reviewPrompt({
@@ -44,6 +45,8 @@ export const executeReviewJob = async (options: {
         prNumber: pr.number,
         title: pr.title,
         baseSha: reviewBase,
+        headSha: pr.headSha,
+        approvalId: claim.approval.id,
         answers,
       }),
       config: deps.config,
@@ -62,7 +65,7 @@ export const executeReviewJob = async (options: {
         baseSha: pr.baseSha,
         report: '',
         commits: 0,
-        deferred: [],
+        threadsToResolve: [],
       },
       expectedHead: pr.headSha,
       requireDraft: true,

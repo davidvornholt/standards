@@ -149,6 +149,7 @@ export const runFixJob = async (
         issueNumber: issue.number,
         title: currentIssue.title,
         body: currentIssue.body,
+        approvalId: claim.approval.id,
         answers: preamble.answers,
       }),
       config,

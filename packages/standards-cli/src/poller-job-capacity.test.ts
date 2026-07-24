@@ -171,7 +171,7 @@ describe('poller entrypoints without Codex capacity', () => {
       baseSha: fixture.baseSha,
       report: 'Reviewed.',
       commits: 0,
-      deferred: [],
+      threadsToResolve: [],
     };
     checkout(fixture.source, fixture.headSha);
     const sealedHead = sealReviewPlan(fixture.source, plan);
@@ -183,9 +183,7 @@ describe('poller entrypoints without Codex capacity', () => {
     });
     const result = await runReviewJob(deps(fixture.cacheDir), item, false);
     expect(result).toEqual({
-      lines: [
-        `PR #${ISSUE_NUMBER}: reviewed (0 fix commit(s), 0 deferred issue(s)), marked ready`,
-      ],
+      lines: [`PR #${ISSUE_NUMBER}: reviewed (0 fix commit(s)), marked ready`],
       ranCodex: false,
     });
     expect(

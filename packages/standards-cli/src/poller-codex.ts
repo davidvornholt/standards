@@ -51,17 +51,11 @@ const exitCause = (details: Record<string, unknown>): string => {
   return 'unknown exit cause';
 };
 
-// Remove the poller's direct GitHub token variables so an approved Codex run
-// cannot trivially bypass the protected-path and trust checks with API writes.
-// The shared service identity is not credential-isolated: auth state and other
-// ambient credentials in HOME remain readable as an explicitly accepted risk.
-const agentEnv = (): Record<string, string | undefined> => {
-  const env = { ...process.env };
-  env.GH_TOKEN = undefined;
-  env.GITHUB_TOKEN = undefined;
-  env.STANDARDS_POLLER_GIT_TOKEN = undefined;
-  return env;
-};
+// Codex deliberately inherits the poller's authenticated GitHub environment.
+// The agent uses `gh` for review-fix ledger operations and PR metadata, while
+// the poller still owns verified commit publication, labels, and ready/merge
+// transitions.
+const agentEnv = (): Record<string, string | undefined> => ({ ...process.env });
 
 export const runCodex = (
   options: CodexRunOptions,
