@@ -1,21 +1,7 @@
-// Codex invocation for poller jobs. The agent runs headless inside the job
-// worktree and hands results back through the outcome file — never stdout,
-// which is unreliable once agent tools are active. The poller then verifies
-// effects (commits, diffs, gates) instead of trusting the narration.
-
-import { execFileSync } from 'node:child_process';
-import {
-  closeSync,
-  fstatSync,
-  mkdtempSync,
-  openSync,
-  readSync,
-  rmSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
+import { type ChildProcess, spawn } from 'node:child_process';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
-import { isRecord } from './github-settings-parse';
 import type { PollerConfig } from './poller-config';
 import { OUTCOME_DIR } from './poller-protocol';
 
@@ -23,10 +9,9 @@ const MS_PER_SECOND = 1000;
 const SECONDS_PER_MINUTE = 60;
 const MS_PER_MINUTE = SECONDS_PER_MINUTE * MS_PER_SECOND;
 const STDERR_SNIPPET_LIMIT = 2000;
-const UTF8_MAX_BYTES_PER_CHARACTER = 4;
-const STDERR_READ_LIMIT = STDERR_SNIPPET_LIMIT * UTF8_MAX_BYTES_PER_CHARACTER;
-const STDERR_SCAN_CHUNK_SIZE = 8192;
-const ASCII_WHITESPACE = new Set(Buffer.from('\t\n\v\f\r '));
+const STDERR_RETAINED_LIMIT = STDERR_SNIPPET_LIMIT * 2;
+const LOW_SURROGATE_MIN = 0xdc_00;
+const LOW_SURROGATE_MAX = 0xdf_ff;
 
 export type CodexRunResult = {
   readonly succeeded: boolean;
@@ -37,14 +22,14 @@ type CodexExecutor = (
   file: string,
   args: ReadonlyArray<string>,
   options: {
-    readonly encoding: 'utf8';
     readonly timeout: number;
-    readonly stdio: ['ignore', 'ignore', number];
+    readonly stdio: ['ignore', 'ignore', 'pipe'];
     readonly env: Record<string, string | undefined>;
   },
-) => unknown;
+) => ChildProcess;
 
-const defaultExecutor: CodexExecutor = execFileSync;
+const defaultExecutor: CodexExecutor = (file, args, options) =>
+  spawn(file, [...args], options);
 
 type CodexRunOptions = {
   readonly workDir: string;
@@ -53,106 +38,158 @@ type CodexRunOptions = {
   readonly config: PollerConfig;
 };
 
-const exitCause = (details: Record<string, unknown>): string => {
-  if (typeof details.status === 'number') {
-    return `exit status ${details.status}`;
+const exitCause = (
+  status: number | null,
+  signal: NodeJS.Signals | null,
+): string => {
+  if (status !== null) {
+    return `exit status ${status}`;
   }
-  if (typeof details.signal === 'string') {
-    return `signal ${details.signal}`;
-  }
-  return 'unknown exit cause';
+  return signal === null ? 'unknown exit cause' : `signal ${signal}`;
 };
 
-// Codex deliberately inherits the poller's authenticated GitHub environment.
-// The agent uses `gh` for review-fix ledger operations and PR metadata, while
-// the poller still owns verified commit publication, labels, and ready/merge
-// transitions.
-const agentEnv = (): Record<string, string | undefined> => ({ ...process.env });
-
-const stderrSnippet = (fd: number): string => {
-  let end = fstatSync(fd).size;
-  const scan = Buffer.allocUnsafe(STDERR_SCAN_CHUNK_SIZE);
-  while (end > 0) {
-    const length = Math.min(end, scan.length);
-    const start = end - length;
-    readSync(fd, scan, 0, length, start);
-    let index = length - 1;
-    while (index >= 0 && ASCII_WHITESPACE.has(scan[index] ?? 0)) {
-      index -= 1;
-    }
-    if (index >= 0) {
-      end = start + index + 1;
-      break;
-    }
-    end = start;
+const unicodeSafeTail = (value: string, limit: number): string => {
+  let start = Math.max(0, value.length - limit);
+  const first = value.charCodeAt(start);
+  if (first >= LOW_SURROGATE_MIN && first <= LOW_SURROGATE_MAX) {
+    start += 1;
   }
-  const start = Math.max(0, end - STDERR_READ_LIMIT);
-  const tail = Buffer.allocUnsafe(end - start);
-  readSync(fd, tail, 0, tail.length, start);
-  return tail.toString('utf8').trim().slice(-STDERR_SNIPPET_LIMIT);
+  return value.slice(start);
 };
 
-export const runCodex = (
+const stderrCapture = () => {
+  const decoder = new TextDecoder();
+  let retained = '';
+  let pendingWhitespace = '';
+  const appendText = (text: string): void => {
+    const content = text.trimEnd();
+    if (content === '') {
+      pendingWhitespace = unicodeSafeTail(
+        pendingWhitespace + text,
+        STDERR_RETAINED_LIMIT,
+      );
+      return;
+    }
+    retained = unicodeSafeTail(
+      retained + pendingWhitespace + content,
+      STDERR_RETAINED_LIMIT,
+    );
+    pendingWhitespace = unicodeSafeTail(
+      text.slice(content.length),
+      STDERR_RETAINED_LIMIT,
+    );
+  };
+  return {
+    append: (chunk: Buffer): void => {
+      appendText(decoder.decode(chunk, { stream: true }));
+    },
+    finish: (): string => {
+      appendText(decoder.decode());
+      return unicodeSafeTail(retained.trim(), STDERR_SNIPPET_LIMIT);
+    },
+  };
+};
+
+const failureResult = (cause: string, stderr = ''): CodexRunResult => ({
+  succeeded: false,
+  failure:
+    stderr === ''
+      ? `codex exec failed: ${cause}`
+      : `codex exec failed (${cause}):\n${stderr}`,
+});
+
+const errorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
+const awaitChild = (
+  child: ChildProcess,
+  capture: ReturnType<typeof stderrCapture>,
+): Promise<CodexRunResult> =>
+  new Promise((resolve) => {
+    let settled = false;
+    let captureFailure: string | null = null;
+    const settle = (result: CodexRunResult): void => {
+      if (!settled) {
+        settled = true;
+        resolve(result);
+      }
+    };
+    child.stderr?.on('data', (chunk: Buffer) => {
+      try {
+        capture.append(chunk);
+      } catch (error) {
+        captureFailure = errorMessage(error);
+      }
+    });
+    child.stderr?.on('error', (error) => {
+      captureFailure = errorMessage(error);
+    });
+    child.once('error', (error) => {
+      settle(failureResult(errorMessage(error)));
+    });
+    child.once('close', (status, signal) => {
+      if (status === 0) {
+        settle({ succeeded: true, failure: null });
+        return;
+      }
+      let stderr = '';
+      try {
+        stderr = capture.finish();
+      } catch (error) {
+        captureFailure = errorMessage(error);
+      }
+      if (stderr === '' && captureFailure !== null) {
+        stderr = `stderr capture failed: ${captureFailure}`;
+      }
+      settle(failureResult(exitCause(status, signal), stderr));
+    });
+  });
+
+export const runCodex = async (
   options: CodexRunOptions,
   execute: CodexExecutor = defaultExecutor,
-): CodexRunResult => {
+): Promise<CodexRunResult> => {
   const { workDir, gitCommonDir, prompt, config } = options;
-  rmSync(join(workDir, OUTCOME_DIR), { recursive: true, force: true });
-  const logDir = mkdtempSync(join(tmpdir(), 'standards-poller-codex-'));
-  const stderrFd = openSync(join(logDir, 'stderr.log'), 'w+');
   try {
-    try {
-      execute(
-        'codex',
-        [
-          'exec',
-          '--cd',
-          workDir,
-          '--sandbox',
-          'workspace-write',
-          '--add-dir',
-          gitCommonDir,
-          '-c',
-          'sandbox_workspace_write.network_access=true',
-          '-m',
-          config.model,
-          '-c',
-          `model_reasoning_effort=${JSON.stringify(config.reasoningEffort)}`,
-          ...config.extraCodexArgs,
-          prompt,
-        ],
-        {
-          encoding: 'utf8',
-          timeout: config.runTimeoutMinutes * MS_PER_MINUTE,
-          stdio: ['ignore', 'ignore', stderrFd],
-          env: agentEnv(),
-        },
-      );
-      return { succeeded: true, failure: null };
-    } catch (error) {
-      const details: Record<string, unknown> = isRecord(error) ? error : {};
-      const captured = stderrSnippet(stderrFd);
-      let stderr = captured;
-      if (stderr === '' && typeof details.stderr === 'string') {
-        stderr = details.stderr.trim().slice(-STDERR_SNIPPET_LIMIT);
-      }
-      const message = error instanceof Error ? error.message : String(error);
-      // Node's "Command failed" message echoes the full command line, and the
-      // prompt embedded in it would push stderr past the failure-comment
-      // snippet limit — report the exit cause instead of the echoed command.
-      const cause = message.startsWith('Command failed')
-        ? exitCause(details)
-        : message;
-      return {
-        succeeded: false,
-        failure:
-          stderr === ''
-            ? `codex exec failed: ${cause}`
-            : `codex exec failed (${cause}):\n${stderr}`,
-      };
-    }
-  } finally {
-    closeSync(stderrFd);
-    rmSync(logDir, { recursive: true, force: true });
+    rmSync(join(workDir, OUTCOME_DIR), { recursive: true, force: true });
+  } catch (error) {
+    return failureResult(
+      `could not prepare the outcome directory: ${errorMessage(error)}`,
+    );
   }
+  let child: ChildProcess;
+  try {
+    child = execute(
+      'codex',
+      [
+        'exec',
+        '--cd',
+        workDir,
+        '--sandbox',
+        'workspace-write',
+        '--add-dir',
+        gitCommonDir,
+        '-c',
+        'sandbox_workspace_write.network_access=true',
+        '-m',
+        config.model,
+        '-c',
+        `model_reasoning_effort=${JSON.stringify(config.reasoningEffort)}`,
+        ...config.extraCodexArgs,
+        prompt,
+      ],
+      {
+        timeout: config.runTimeoutMinutes * MS_PER_MINUTE,
+        stdio: ['ignore', 'ignore', 'pipe'],
+        env: { ...process.env },
+      },
+    );
+  } catch (error) {
+    return failureResult(errorMessage(error));
+  }
+  if (child.stderr === null) {
+    child.kill();
+    return failureResult('stderr capture was not available');
+  }
+  return await awaitChild(child, stderrCapture());
 };

@@ -158,7 +158,7 @@ export const runFixJob = async (
     workspace,
   };
   try {
-    const run = runCodex({
+    const run = await runCodex({
       workDir: workspace.dir,
       gitCommonDir: cacheClone,
       prompt: fixPrompt({
