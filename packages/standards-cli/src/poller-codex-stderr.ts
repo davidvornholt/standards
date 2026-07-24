@@ -1,5 +1,12 @@
 const STDERR_SNIPPET_LIMIT = 2000;
 const STDERR_RETAINED_LIMIT = STDERR_SNIPPET_LIMIT * 2;
+const CAPTURE_FAILURE_DETAIL_LIMIT = 800;
+const CAPTURE_FAILURE_PREFIX = 'stderr capture failed: ';
+const STDERR_WITH_CAPTURE_FAILURE_LIMIT =
+  STDERR_SNIPPET_LIMIT -
+  CAPTURE_FAILURE_PREFIX.length -
+  CAPTURE_FAILURE_DETAIL_LIMIT -
+  '\n'.length;
 const LOW_SURROGATE_MIN = 0xdc_00;
 const LOW_SURROGATE_MAX = 0xdf_ff;
 
@@ -52,9 +59,10 @@ export const withCaptureFailure = (
   if (captureFailure === null) {
     return stderr;
   }
-  const failure = `stderr capture failed: ${captureFailure}`;
-  return unicodeSafeTail(
-    stderr === '' ? failure : `${stderr}\n${failure}`,
-    STDERR_SNIPPET_LIMIT,
-  );
+  const retained = unicodeSafeTail(stderr, STDERR_WITH_CAPTURE_FAILURE_LIMIT);
+  const failure = `${CAPTURE_FAILURE_PREFIX}${unicodeSafeTail(
+    captureFailure,
+    CAPTURE_FAILURE_DETAIL_LIMIT,
+  )}`;
+  return retained === '' ? failure : `${retained}\n${failure}`;
 };

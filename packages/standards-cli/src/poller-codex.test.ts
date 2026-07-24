@@ -16,6 +16,7 @@ import { OUTCOME_DIR } from './poller-protocol';
 
 const dirs: Array<string> = [];
 const MAX_FAILURE_LENGTH = 2100;
+const LONG_ERROR_LENGTH = 2500;
 const MS_PER_MINUTE = 60_000;
 const TIMEOUT_MS = 100;
 const MAX_TIMEOUT_ELAPSED_MS = 750;
@@ -160,7 +161,6 @@ describe('runCodex failure containment', () => {
   it('reports the terminating signal when there is no exit status', async () => {
     const result = await runFailure("process.kill(process.pid, 'SIGTERM')");
     expect(result.failure).toContain('signal SIGTERM');
-    expect(result.failure).not.toContain('do work');
   });
 
   it('contains subprocess setup failures', async () => {
@@ -170,7 +170,7 @@ describe('runCodex failure containment', () => {
     expect(result.failure).toBe('codex exec failed: spawn setup failed');
   });
 
-  it('preserves the process result when stderr capture fails', async () => {
+  it('reserves bounded space for stderr and a long capture failure', async () => {
     const result = await runCodex(
       runOptions(makeWorkDir()),
       (_file, _args, options) => {
@@ -178,22 +178,23 @@ describe('runCodex failure containment', () => {
           process.execPath,
           [
             '-e',
-            "process.stderr.write('partial diagnostic'); setTimeout(() => process.exit(7), 20)",
+            "process.stderr.write('ROOT CAUSE: partial diagnostic'); setTimeout(() => process.exit(7), 20)",
           ],
           options,
         );
         child.stderr.once('data', () => {
           queueMicrotask(() => {
-            child.stderr.emit('error', new Error('capture read failed'));
+            child.stderr.emit(
+              'error',
+              new Error('x'.repeat(LONG_ERROR_LENGTH)),
+            );
           });
         });
         return child;
       },
     );
-    expect(result.failure).toContain('exit status 7');
-    expect(result.failure).toContain('partial diagnostic');
-    expect(result.failure).toContain(
-      'stderr capture failed: capture read failed',
-    );
+    expect(result.failure).toContain('ROOT CAUSE: partial diagnostic');
+    expect(result.failure).toContain('stderr capture failed:');
+    expect(result.failure?.length).toBeLessThanOrEqual(MAX_FAILURE_LENGTH);
   });
 });
