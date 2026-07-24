@@ -14,7 +14,8 @@ import {
   resolveReviewThread,
 } from './poller-review-thread-write';
 
-const OPERATION_ID = /^[a-f0-9]{64}$/u;
+const AGENT_REVIEW_THREAD_MARKER =
+  /<!-- standards-poller:review-thread approval=(?<approval>[a-f0-9]{64}) operation=(?:[a-f0-9]{64}) -->/gu;
 
 export const agentReviewThreadMarker = (
   approvalId: string,
@@ -23,20 +24,9 @@ export const agentReviewThreadMarker = (
   `<!-- standards-poller:review-thread approval=${approvalId} operation=${operationId} -->`;
 
 const hasAgentCreationMarker = (body: string, approvalId: string): boolean =>
-  body
-    .split('<!-- standards-poller:review-thread approval=')
-    .slice(1)
-    .some((suffix) => {
-      const [marker] = suffix.split(' -->');
-      const [approval, operation, ...extra] =
-        marker?.split(' operation=') ?? [];
-      return (
-        extra.length === 0 &&
-        approval === approvalId &&
-        operation !== undefined &&
-        OPERATION_ID.test(operation)
-      );
-    });
+  [...body.matchAll(AGENT_REVIEW_THREAD_MARKER)].some(
+    (marker) => marker.groups?.approval === approvalId,
+  );
 
 export const threadResolutionMarker = (
   plan: ReviewPublicationPlan,

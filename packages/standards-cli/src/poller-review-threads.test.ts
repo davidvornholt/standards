@@ -120,6 +120,24 @@ it.each([
       creationBody: `Finding.\n\n<!-- standards-poller:review-thread approval=${'f'.repeat(SHA_LENGTH)} operation=${'a'.repeat(SHA_LENGTH)} -->`,
     },
   ],
+  [
+    'truncated-marker',
+    {
+      creationBody: `Finding.\n\n<!-- standards-poller:review-thread approval=${plan.approvalId} operation=${'a'.repeat(SHA_LENGTH)}`,
+    },
+  ],
+  [
+    'marker-with-trailing-fields',
+    {
+      creationBody: `Finding.\n\n<!-- standards-poller:review-thread approval=${plan.approvalId} operation=${'a'.repeat(SHA_LENGTH)} scope=foreign -->`,
+    },
+  ],
+  [
+    'marker-with-embedded-operation',
+    {
+      creationBody: `Finding.\n\n<!-- standards-poller:review-thread approval=${plan.approvalId} operation=prefix-${'a'.repeat(SHA_LENGTH)} -->`,
+    },
+  ],
 ] as const)('rejects a %s same-PR thread before writing', async (_, options) => {
   const calls = installApi([threadResponse(options)]);
 
