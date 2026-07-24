@@ -134,7 +134,7 @@ it('reruns Codex on v2 when a legacy plan and output branch exist', async () => 
           summary: 'Legacy protocol rerun reached Codex.',
         }),
       );
-      return { succeeded: true, failure: null };
+      return Promise.resolve({ succeeded: true, failure: null });
     },
   );
 

@@ -37,7 +37,7 @@ export const executeReviewJob = async (options: {
     ),
   );
   try {
-    const run = runAgent({
+    const run = await runAgent({
       workDir: workspace.dir,
       gitCommonDir: cacheClone,
       prompt: reviewPrompt({
