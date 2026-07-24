@@ -145,6 +145,29 @@ export const validateClaim = async (
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
+const releaseOwnedClaim = async (
+  deps: JobDeps,
+  issueNumber: number,
+  claim: ClaimBinding,
+): Promise<void> => {
+  const context = { token: deps.token, repo: deps.repo, issueNumber };
+  const election = await reconcileTrustedClaimElection(context, claim);
+  const issue = await getIssue(deps.token, deps.repo, issueNumber);
+  const event = await lastLabelEvent(
+    deps.token,
+    deps.repo,
+    issueNumber,
+    claim.claimLabel,
+  );
+  if (
+    election.retainedId === claim.markerId &&
+    hasLabel(issue.labels, claim.claimLabel) &&
+    String(event?.id) === claim.claimEpoch
+  ) {
+    await removeLabel(deps.token, deps.repo, issueNumber, claim.claimLabel);
+  }
+};
+
 export const withClaimReleasedOnFailure = async <Result>(
   deps: JobDeps,
   issueNumber: number,
@@ -155,14 +178,7 @@ export const withClaimReleasedOnFailure = async <Result>(
     return await operation();
   } catch (operationError) {
     try {
-      const problem = await validateClaim(
-        { token: deps.token, repo: deps.repo, issueNumber },
-        claim,
-        claim.approval.target,
-      );
-      if (problem === null) {
-        await removeLabel(deps.token, deps.repo, issueNumber, claim.claimLabel);
-      }
+      await releaseOwnedClaim(deps, issueNumber, claim);
     } catch (releaseError) {
       throw new Error(
         `${errorMessage(operationError)}; releasing the claim for an automatic retry also failed: ${errorMessage(releaseError)}`,
