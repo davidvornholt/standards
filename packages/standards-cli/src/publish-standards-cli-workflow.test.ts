@@ -5,7 +5,7 @@ import {
   githubExpression,
   publishWorkflowJobs,
   workflowStep,
-} from './publish-workflow-fixture';
+} from './publish-workflow-test-support';
 
 const PACKAGE_PATH = join(import.meta.dir, '../package.json');
 

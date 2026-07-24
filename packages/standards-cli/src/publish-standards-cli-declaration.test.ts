@@ -2,9 +2,10 @@ import { describe, expect, it } from 'bun:test';
 import {
   githubExpression,
   publishWorkflowJobs,
-  stepEnvironmentEntries,
+  stepEnvironment,
   workflowStep,
-} from './publish-workflow-fixture';
+  workflowStepNames,
+} from './publish-workflow-test-support';
 
 const publishJob = () => publishWorkflowJobs().publish ?? {};
 
@@ -25,14 +26,35 @@ describe('standards CLI release declaration gating', () => {
       const body = declaration.run?.slice(declaration.run.indexOf(arm)) ?? '';
       expect(body.slice(0, body.indexOf(';;'))).toContain('declared=false');
     }
-    expect(declaration.run).toContain('echo "declared=$declared"');
+  });
+
+  it('publishes the values every downstream guard consumes', () => {
+    const declaration = workflowStep(
+      publishJob(),
+      'Determine release declaration',
+    );
+    for (const output of [
+      'echo "declared=$declared"',
+      'echo "version=$version"',
+      'echo "withdrawn_version=$withdrawn_version"',
+    ]) {
+      expect(declaration.run).toContain(output);
+    }
+    // Only the withdrawn arm names a version to check; every other arm has to
+    // leave the output empty so the withdrawal guard stays skipped.
+    const withdrawnArm =
+      declaration.run?.slice(declaration.run.indexOf('withdrawn)')) ?? '';
+    expect(withdrawnArm.slice(0, withdrawnArm.indexOf(';;'))).toContain(
+      'withdrawn_version="$previous_version"',
+    );
+    expect(declaration.run).toContain('withdrawn_version=\n');
   });
 
   it('carries the declaration into the job outputs that gate the release', () => {
     expect(publishJob().outputs).toMatchObject({
       declared: githubExpression('steps.declaration.outputs.declared'),
-      version: githubExpression('steps.declaration.outputs.version'),
     });
+    expect(publishJob().outputs).not.toHaveProperty('version');
     expect(publishWorkflowJobs().release?.if).toBe(
       "needs.publish.result == 'success' && needs.publish.outputs.declared == 'true'",
     );
@@ -52,15 +74,43 @@ describe('standards CLI release declaration gating', () => {
       'registry.npmjs.org',
     );
   });
+});
 
+describe('standards CLI release completion guards', () => {
   it('fails an inherited version whose release never produced its tag', () => {
     const completion = workflowStep(
       publishJob(),
       'Verify the inherited release completed',
     );
     expect(completion.if).toBe("steps.declaration.outputs.declared == 'false'");
-    expect(completion.run).toContain('refs/tags/v$VERSION');
+    expect(stepEnvironment(completion).get('VERSION')).toBe(
+      githubExpression('steps.declaration.outputs.version'),
+    );
+    // The guard has to fail on a MISSING tag, so the negation is the assertion:
+    // without it the sense inverts and stranded releases sail through.
+    expect(completion.run).toContain(
+      'if ! git rev-parse -q --verify "refs/tags/v$VERSION"',
+    );
     expect(completion.run).toContain('exit 1');
+  });
+
+  it('fails a withdrawal whose withdrawn release never produced its tag', () => {
+    const withdrawal = workflowStep(
+      publishJob(),
+      'Verify the withdrawn release completed',
+    );
+    expect(withdrawal.if).toBe(
+      "steps.declaration.outputs.withdrawn_version != ''",
+    );
+    expect(stepEnvironment(withdrawal).get('WITHDRAWN_VERSION')).toBe(
+      githubExpression('steps.declaration.outputs.withdrawn_version'),
+    );
+    // The version at risk is the one being abandoned, not the one reverted to.
+    expect(withdrawal.run).toContain(
+      'if ! git rev-parse -q --verify "refs/tags/v$WITHDRAWN_VERSION"',
+    );
+    expect(withdrawal.run).toContain('npm registry');
+    expect(withdrawal.run).toContain('exit 1');
   });
 
   it('refuses to publish once main advanced past the declaring commit', () => {
@@ -68,11 +118,22 @@ describe('standards CLI release declaration gating', () => {
       publishJob(),
       'Verify the declaring commit is still the tip of main',
     );
-    expect(tip.if).toBe("steps.declaration.outputs.declared == 'true'");
-    expect(stepEnvironmentEntries(tip)).toEqual([
-      ['PROVENANCE_SHA', githubExpression('github.sha')],
-      ['RELEASE_SHA', githubExpression('github.event.workflow_run.head_sha')],
-    ]);
+    // The property protected is a precondition of publishing, not of declaring:
+    // a run that only recovers provenance must not be failed by it.
+    expect(tip.if).toBe("steps.release.outputs.publish == 'true'");
+    const names = workflowStepNames(publishJob());
+    expect(
+      names.indexOf('Verify the declaring commit is still the tip of main'),
+    ).toBe(names.indexOf('Publish package') - 1);
+    expect(names.indexOf('Determine release state')).toBeLessThan(
+      names.indexOf('Verify the declaring commit is still the tip of main'),
+    );
+    expect(stepEnvironment(tip).get('PROVENANCE_SHA')).toBe(
+      githubExpression('github.sha'),
+    );
+    expect(stepEnvironment(tip).get('RELEASE_SHA')).toBe(
+      githubExpression('github.event.workflow_run.head_sha'),
+    );
     expect(tip.run).toContain('"$PROVENANCE_SHA" != "$RELEASE_SHA"');
     expect(tip.run).toContain('exit 1');
   });

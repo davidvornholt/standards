@@ -57,13 +57,23 @@ export const workflowStep = (job: WorkflowJob, name: string): WorkflowStep => {
   return match;
 };
 
-// Asserting entries instead of an object literal keeps the environment names
-// exactly as the workflow spells them without inventing camelCase test keys.
-export const stepEnvironmentEntries = (
+export const workflowStepNames = (job: WorkflowJob): ReadonlyArray<string> => {
+  if (!Array.isArray(job.steps)) {
+    throw new Error('Workflow job must contain steps');
+  }
+  return job.steps.map((candidate: WorkflowStep) =>
+    typeof candidate.name === 'string' ? candidate.name : '',
+  );
+};
+
+// A Map keeps the environment names exactly as the workflow spells them without
+// inventing camelCase test keys, and without pinning the order two YAML keys
+// happen to appear in, which carries no behavior.
+export const stepEnvironment = (
   step: WorkflowStep,
-): ReadonlyArray<readonly [string, unknown]> => {
+): ReadonlyMap<string, unknown> => {
   if (typeof step.env !== 'object' || step.env === null) {
     throw new Error('Workflow step must declare an environment');
   }
-  return Object.entries(step.env);
+  return new Map(Object.entries(step.env));
 };
