@@ -77,15 +77,17 @@ const runQueue = async (options: {
         // biome-ignore lint/performance/noAwaitInLoops: jobs are heavyweight Codex runs and the shared run budget is the concurrency cap.
         result = await runners.review(job.deps, job.item, allowCodex);
       } else {
-        let defaultBranch = defaultBranches.get(job.deps.repo);
-        if (defaultBranch === undefined) {
-          defaultBranch = await repoDefaultBranch(token, job.deps.repo);
-          defaultBranches.set(job.deps.repo, defaultBranch);
-        }
         result = await runners.fix(
           job.deps,
           job.item,
-          defaultBranch,
+          async () => {
+            let branch = defaultBranches.get(job.deps.repo);
+            if (branch === undefined) {
+              branch = await repoDefaultBranch(token, job.deps.repo);
+              defaultBranches.set(job.deps.repo, branch);
+            }
+            return branch;
+          },
           allowCodex,
         );
       }

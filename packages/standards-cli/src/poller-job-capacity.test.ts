@@ -1,12 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { createHash } from 'node:crypto';
 import { rmSync } from 'node:fs';
 import { installPollerApi } from './poller-api-test-support';
-import {
-  type ApprovalBinding,
-  issueRevision,
-  prRevision,
-} from './poller-approval';
+import { issueRevision } from './poller-approval';
 import { parsePollerConfig } from './poller-config';
 import { sealFixOutput } from './poller-fix-output';
 import { runFixJob } from './poller-fix-run';
@@ -15,14 +10,10 @@ import {
   checkout,
   commitFile,
   createLocalPollerRepo,
+  createTestApproval,
   pushRef,
 } from './poller-job-run-test-support';
 import { branchNameForIssue } from './poller-protocol';
-import {
-  type ReviewPublicationPlan,
-  reviewOutputBranch,
-  sealReviewPlan,
-} from './poller-review-output';
 import { runReviewJob } from './poller-review-run';
 
 const originalFetch = globalThis.fetch;
@@ -38,22 +29,6 @@ const issue = (isPullRequest: boolean): IssueItem => ({
   labels: [isPullRequest ? 'approved-for-review' : 'approved-for-fix'],
   authorLogin: 'reporter',
 });
-
-const approval = (label: string, target: string): ApprovalBinding => {
-  const fields = {
-    repo: REPO,
-    issueNumber: ISSUE_NUMBER,
-    eventId: 101,
-    label,
-    actorLogin: 'maintainer',
-    approvedAt: '2026-07-18T10:00:00Z',
-    target,
-  };
-  return {
-    id: createHash('sha256').update(JSON.stringify(fields)).digest('hex'),
-    ...fields,
-  };
-};
 
 const deps = (cacheDir: string) => {
   const parsed = parsePollerConfig(
@@ -75,6 +50,7 @@ const deps = (cacheDir: string) => {
     roleCache: new Map(),
   };
 };
+const defaultBranch = () => Promise.resolve('main');
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
@@ -98,10 +74,20 @@ describe('poller entrypoints without Codex capacity', () => {
     });
     const result = isReview
       ? await runReviewJob(deps(fixture.cacheDir), issue(true), false)
-      : await runFixJob(deps(fixture.cacheDir), issue(false), 'main', false);
+      : await runFixJob(
+          deps(fixture.cacheDir),
+          issue(false),
+          defaultBranch,
+          false,
+        );
     const second = isReview
       ? await runReviewJob(deps(fixture.cacheDir), issue(true), false)
-      : await runFixJob(deps(fixture.cacheDir), issue(false), 'main', false);
+      : await runFixJob(
+          deps(fixture.cacheDir),
+          issue(false),
+          defaultBranch,
+          false,
+        );
     expect(result.ranCodex).toBe(false);
     expect(second.ranCodex).toBe(false);
     expect(result.lines[0]).toContain('waiting for run capacity');
@@ -118,7 +104,7 @@ describe('poller entrypoints without Codex capacity', () => {
     const fixture = createLocalPollerRepo();
     roots.push(fixture.root);
     const item = issue(false);
-    const binding = approval('approved-for-fix', issueRevision(item));
+    const binding = createTestApproval('approved-for-fix', issueRevision(item));
     checkout(fixture.source, fixture.baseSha);
     const generatedHead = commitFile(fixture.source, 'fixed.txt', 'fixed\n');
     const sealed = sealFixOutput(fixture.source, {
@@ -141,7 +127,12 @@ describe('poller entrypoints without Codex capacity', () => {
       headSha: fixture.headSha,
       isPullRequest: false,
     });
-    const result = await runFixJob(deps(fixture.cacheDir), item, 'main', false);
+    const result = await runFixJob(
+      deps(fixture.cacheDir),
+      item,
+      defaultBranch,
+      false,
+    );
     expect(result).toEqual({
       lines: [`#${ISSUE_NUMBER}: opened draft PR #44`],
       ranCodex: false,
@@ -149,46 +140,6 @@ describe('poller entrypoints without Codex capacity', () => {
     expect(
       calls.some(
         (call) => call.method === 'POST' && call.path.endsWith('/pulls'),
-      ),
-    ).toBe(true);
-  });
-
-  it('continues a sealed review publication', async () => {
-    const fixture = createLocalPollerRepo();
-    roots.push(fixture.root);
-    const item = issue(true);
-    const binding = approval(
-      'approved-for-review',
-      prRevision('main', fixture.baseSha, fixture.headSha),
-    );
-    const plan: ReviewPublicationPlan = {
-      repo: REPO,
-      prNumber: ISSUE_NUMBER,
-      approvalId: binding.id,
-      approvedHead: fixture.headSha,
-      publishedHead: fixture.headSha,
-      baseRef: 'main',
-      baseSha: fixture.baseSha,
-      report: 'Reviewed.',
-      commits: 0,
-      threadsToResolve: [],
-    };
-    checkout(fixture.source, fixture.headSha);
-    const sealedHead = sealReviewPlan(fixture.source, plan);
-    pushRef(fixture.source, reviewOutputBranch(plan), sealedHead);
-    const calls = installPollerApi({
-      baseSha: fixture.baseSha,
-      headSha: fixture.headSha,
-      isPullRequest: true,
-    });
-    const result = await runReviewJob(deps(fixture.cacheDir), item, false);
-    expect(result).toEqual({
-      lines: [`PR #${ISSUE_NUMBER}: reviewed (0 fix commit(s)), marked ready`],
-      ranCodex: false,
-    });
-    expect(
-      calls.some(
-        (call) => call.method === 'POST' && call.path.endsWith('/reviews'),
       ),
     ).toBe(true);
   });

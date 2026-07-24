@@ -74,7 +74,8 @@ const isStillQueueable = async (
     target,
   );
   return (
-    typeof currentApproval !== 'string' && currentApproval.id === approval.id
+    currentApproval.kind === 'approved' &&
+    currentApproval.approval.id === approval.id
   );
 };
 
@@ -87,6 +88,7 @@ export const acknowledgeQueuedJob = async (
   const expected = queueMarkerFor(approval, kind);
   const current = await getIssue(deps.token, deps.repo, issueNumber);
   if (
+    !hasLabel(current.labels, approvalLabelFor(kind)) ||
     hasLabel(current.labels, inProgressLabelFor(kind)) ||
     hasLabel(current.labels, NEEDS_CLARIFICATION)
   ) {

@@ -1,5 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import process from 'node:process';
+import { afterEach, describe, expect, it } from 'bun:test';
 import { HTTP_CREATED } from './github-api';
 import {
   type ApiCall,
@@ -33,13 +32,8 @@ const config = (
   return parsed.config;
 };
 
-beforeEach(() => {
-  process.env.GH_TOKEN = 'test-token';
-});
-
 afterEach(() => {
   globalThis.fetch = originalFetch;
-  process.env.GH_TOKEN = undefined;
 });
 
 const issue = (
@@ -131,7 +125,6 @@ describe('runPollerTick', () => {
           },
         ],
       }, // scheduling timestamp
-      { body: { default_branch: 'main' } },
       { body: issue(REJECTED_ISSUE, ['approved-for-fix']) }, // current issue
       { body: issue(REJECTED_ISSUE, ['approved-for-fix']) }, // approval presence
       {
@@ -146,6 +139,20 @@ describe('runPollerTick', () => {
         ],
       },
       { body: { role_name: 'write' } },
+      { body: issue(REJECTED_ISSUE, ['approved-for-fix']) }, // cleanup presence
+      {
+        body: [
+          {
+            id: 104,
+            event: 'labeled',
+            label: { name: 'approved-for-fix' },
+            actor: { login: 'drive-by' },
+            created_at: '2026-07-18T11:30:00Z',
+          },
+        ],
+      }, // cleanup generation
+      { body: { role_name: 'write' } },
+      { body: issue(REJECTED_ISSUE, ['approved-for-fix']) }, // cleanup target
       { body: {} }, // DELETE approved-for-fix
       { status: HTTP_CREATED, body: { id: 1 } }, // POST explanation comment
     ]);
