@@ -19,7 +19,7 @@ export type TrustContext = {
   readonly roleCache: RoleCache;
 };
 
-const cachedRole = async (
+export const cachedCollaboratorRole = async (
   context: TrustContext,
   username: string,
 ): Promise<string> => {
@@ -53,7 +53,7 @@ const lastTrustedQuestionIndex = async (
     const comment = comments[index];
     if (comment !== undefined && hasQuestionMarker(comment)) {
       // biome-ignore lint/performance/noAwaitInLoops: role lookups go through the shared per-tick cache; parallel lookups would race it and duplicate API reads.
-      const role = await cachedRole(context, comment.authorLogin);
+      const role = await cachedCollaboratorRole(context, comment.authorLogin);
       if (isTrustedRole(role)) {
         return index;
       }
@@ -87,7 +87,7 @@ export const answerState = async (
     );
   for (const comment of candidates) {
     // biome-ignore lint/performance/noAwaitInLoops: role lookups go through the shared per-tick cache; parallel lookups would race it and duplicate API reads.
-    const role = await cachedRole(context, comment.authorLogin);
+    const role = await cachedCollaboratorRole(context, comment.authorLogin);
     if (isTrustedRole(role)) {
       answers.push(comment.body);
     }

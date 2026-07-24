@@ -88,6 +88,7 @@ type CliOptions = {
   readonly profile: StructureProfile;
   readonly config: string | undefined;
   readonly printUnits: boolean;
+  readonly acknowledgeOnly: boolean;
 };
 
 const sha256 = (buf: Buffer): string =>
@@ -327,13 +328,6 @@ const reportMirror = (result: MirrorResult, dryRun: boolean): void => {
         `  would overwrite ${result.tampered.length} locally-modified canonical file(s): ${result.tampered.join(', ')}`,
       );
     }
-    const changes =
-      result.created.length + result.updated.length + result.deleted.length;
-    console.log(
-      changes === 0
-        ? 'dry run: already in sync; no changes'
-        : `dry run: ${result.created.length} to create, ${result.updated.length} to update, ${result.deleted.length} to delete`,
-    );
     return;
   }
   for (const rel of result.deleted) {
@@ -344,6 +338,22 @@ const reportMirror = (result: MirrorResult, dryRun: boolean): void => {
       `  overwrote ${result.tampered.length} locally-modified canonical file(s): ${result.tampered.join(', ')}`,
     );
   }
+};
+
+const reportDryRunSummary = (
+  result: MirrorResult,
+  generated: boolean,
+): void => {
+  const changes =
+    result.created.length +
+    result.updated.length +
+    result.deleted.length +
+    Number(generated);
+  console.log(
+    changes === 0
+      ? 'dry run: already in sync; no changes'
+      : `dry run: ${result.created.length} to create, ${result.updated.length} to update, ${result.deleted.length} to delete, ${Number(generated)} to generate`,
+  );
 };
 
 const seedTargets = (
@@ -421,8 +431,13 @@ const runSync = async (
     dryRun,
   });
   reportMirror(result, dryRun);
-  await applyProspectiveDependabot(consumer, prospectiveDependabot, dryRun);
+  const generated = await applyProspectiveDependabot(
+    consumer,
+    prospectiveDependabot,
+    dryRun,
+  );
   if (dryRun) {
+    reportDryRunSummary(result, generated);
     return;
   }
   await writeLock(consumer, {
@@ -611,16 +626,17 @@ const applyProspectiveDependabot = async (
   consumer: string,
   prospective: ProspectiveDependabot,
   dryRun: boolean,
-): Promise<void> => {
+): Promise<boolean> => {
   if (prospective.current === prospective.composed) {
-    return;
+    return false;
   }
   if (dryRun) {
     console.log(`  would generate ${DEPENDABOT_FILE}`);
-    return;
+    return true;
   }
   await writeComposedDependabot(consumer, prospective.composed);
   console.log(`  generated ${DEPENDABOT_FILE}`);
+  return true;
 };
 
 const runDependabotCheck = async (consumer: string): Promise<boolean> => {
@@ -755,7 +771,9 @@ Options:
   --apply          With github: converge the live repository (needs admin auth)
   --write          With dependabot: regenerate the composed .github/dependabot.yml
   --config <path>  With poller: the host-level poller config file (required)
-  --print-units    With poller: print declarative systemd unit content without touching the host`;
+  --print-units    With poller: print declarative systemd unit content without touching the host
+  --acknowledge-only
+                   With poller: acknowledge queued requests without starting work`;
 
 const commandFromArg = (arg: string): Command => {
   if (
@@ -811,6 +829,7 @@ type ParsedFlags = {
   readonly profile: StructureProfile | undefined;
   readonly config: string | undefined;
   readonly printUnits: boolean;
+  readonly acknowledgeOnly: boolean;
 };
 
 const assertPollerOptionUsage = (flags: ParsedFlags): void => {
@@ -819,6 +838,14 @@ const assertPollerOptionUsage = (flags: ParsedFlags): void => {
   }
   if (flags.printUnits && flags.command !== 'poller') {
     throw new Error('--print-units is only valid with the poller command');
+  }
+  if (flags.acknowledgeOnly && flags.command !== 'poller') {
+    throw new Error('--acknowledge-only is only valid with the poller command');
+  }
+  if (flags.acknowledgeOnly && flags.printUnits) {
+    throw new Error(
+      'poller accepts only one of --acknowledge-only or --print-units',
+    );
   }
 };
 
@@ -864,12 +891,16 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
   let profile: StructureProfile | undefined;
   let config: string | undefined;
   let printUnits = false;
+  let acknowledgeOnly = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     switch (arg) {
       case '--apply':
         apply = true;
+        break;
+      case '--acknowledge-only':
+        acknowledgeOnly = true;
         break;
       case '--config':
         config = nextOptionValue(argv, index);
@@ -921,6 +952,7 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
     profile,
     config,
     printUnits,
+    acknowledgeOnly,
   });
 
   return {
@@ -934,6 +966,7 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
     profile: profile ?? 'consumer',
     config,
     printUnits,
+    acknowledgeOnly,
   };
 };
 
@@ -1164,6 +1197,7 @@ const main = async (): Promise<void> => {
     profile,
     config,
     printUnits,
+    acknowledgeOnly,
   } = parseArgs(process.argv.slice(2));
 
   if (command === undefined) {
@@ -1194,7 +1228,13 @@ const main = async (): Promise<void> => {
   }
 
   if (command === 'poller') {
-    if (!(await runPollerCommand({ configPath: config, printUnits }))) {
+    if (
+      !(await runPollerCommand({
+        configPath: config,
+        printUnits,
+        acknowledgeOnly,
+      }))
+    ) {
       process.exitCode = 1;
     }
     return;

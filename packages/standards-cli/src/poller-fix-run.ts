@@ -1,10 +1,9 @@
-// One fix job: a maintainer-approved issue becomes a verified draft PR, a
-// precise question, or an explicit failure — never silence. Every transition
-// is written back to GitHub so the next tick (or a human) resumes from there.
+// A maintainer-approved issue becomes a verified draft PR, question, or failure.
 
 import { join } from 'node:path';
-import { issueRevision } from './poller-approval';
-import { acquireClaim } from './poller-claim';
+import { hasLabel } from './github-label-identity';
+import { approvalIsCurrent, issueRevision } from './poller-approval';
+import { startClaim, withClaimReleasedOnFailure } from './poller-claim';
 import { runCodex } from './poller-codex';
 import { handleNonFixedOutcome } from './poller-fix-outcome';
 import { readSealedFixOutput } from './poller-fix-output';
@@ -15,7 +14,6 @@ import {
   validateFixClaim,
 } from './poller-fix-publication';
 import { getIssue, type IssueItem } from './poller-github';
-import { addLabels } from './poller-github-write';
 import {
   failJob,
   type JobDeps,
@@ -31,6 +29,7 @@ import {
   FIX_FAILED,
   FIX_IN_PROGRESS,
 } from './poller-protocol';
+import { acknowledgeQueuedJob } from './poller-status';
 import {
   createWorktree,
   ensureCacheClone,
@@ -54,29 +53,49 @@ const hasInvalidLocalOutput = (
   branch: string,
 ): boolean => sealed === null && localBranchExists(cloneDir, branch);
 
+const result = (issueNumber: number, message: string): JobResult => ({
+  lines: [`#${issueNumber}: ${message}`],
+  ranCodex: false,
+});
+
+const assertSealedOwnership = (
+  sealed: NonNullable<ReturnType<typeof readSealedFixOutput>>,
+  issueNumber: number,
+  approvalId: string,
+  branch: string,
+): void => {
+  if (sealed.issueNumber !== issueNumber || sealed.approvalId !== approvalId) {
+    throw new Error(`sealed output on ${branch} has invalid ownership`);
+  }
+};
+
 export const runFixJob = async (
   deps: JobDeps,
   issue: IssueItem,
-  defaultBranch: string,
+  resolveDefaultBranch: () => Promise<string>,
   allowCodex = true,
 ): Promise<JobResult> => {
   const { config, token, repo } = deps;
   const currentIssue = await getIssue(token, repo, issue.number);
-  const preamble = await jobPreamble(
-    deps,
-    currentIssue,
-    FIX_LABELS,
-    issueRevision(currentIssue),
-  );
+  if (!hasLabel(currentIssue.labels, APPROVED_FOR_FIX)) {
+    return result(issue.number, 'approval no longer present; skipped');
+  }
+  const readTarget = async (): Promise<string> =>
+    issueRevision(await getIssue(token, repo, issue.number));
+  const preamble = await jobPreamble(deps, currentIssue, FIX_LABELS, {
+    approved: issueRevision(currentIssue),
+    readCurrent: readTarget,
+  });
+  if (preamble.kind === 'stale') {
+    return result(issue.number, 'approval no longer present; skipped');
+  }
   if (preamble.kind === 'rejected') {
-    return { lines: [`#${issue.number}: approval rejected`], ranCodex: false };
+    return result(issue.number, 'approval rejected');
   }
   if (preamble.kind === 'waiting') {
-    return {
-      lines: [`#${issue.number}: waiting on an answer`],
-      ranCodex: false,
-    };
+    return result(issue.number, 'waiting on an answer');
   }
+  const defaultBranch = await resolveDefaultBranch();
   const cacheClone = ensureCacheClone(config.cacheDir, repo, token);
   const branch = branchNameForIssue(issue.number, preamble.approval.id);
   const sealed = readSealedFixOutput(cacheClone, branch);
@@ -85,23 +104,22 @@ export const runFixJob = async (
       `refusing to overwrite ${branch}: it is not valid sealed output for this approval`,
     );
   }
-  if (sealed === null && !allowCodex) {
-    return {
-      lines: [`#${issue.number}: waiting for run capacity`],
-      ranCodex: false,
-    };
+  if (
+    !(await approvalIsCurrent(
+      { token, repo, issueNumber: issue.number },
+      preamble.approval,
+      readTarget,
+    ))
+  ) {
+    return result(issue.number, 'approval generation changed; skipped');
   }
-  await addLabels(token, repo, issue.number, [FIX_IN_PROGRESS]);
-  const claim = await acquireClaim(
-    { token, repo, issueNumber: issue.number },
-    preamble.approval,
-    FIX_IN_PROGRESS,
-  );
+  if (sealed === null && !allowCodex) {
+    await acknowledgeQueuedJob(deps, issue.number, preamble.approval, 'fix');
+    return result(issue.number, 'waiting for run capacity');
+  }
+  const claim = await startClaim(deps, issue.number, preamble.approval, 'fix');
   if (claim === null) {
-    return {
-      lines: [`#${issue.number}: another poller owns the claim`],
-      ranCodex: false,
-    };
+    return result(issue.number, 'another poller owns the claim');
   }
   const resumableJob = {
     deps,
@@ -112,14 +130,13 @@ export const runFixJob = async (
     cloneDir: cacheClone,
   };
   if (sealed !== null) {
-    if (
-      sealed.issueNumber !== issue.number ||
-      sealed.approvalId !== claim.approval.id
-    ) {
-      throw new Error(`sealed output on ${branch} has invalid ownership`);
-    }
+    assertSealedOwnership(sealed, issue.number, claim.approval.id, branch);
     return {
-      lines: [await publishFixedOutput(resumableJob, FIX_LABELS, sealed, null)],
+      lines: [
+        await withClaimReleasedOnFailure(deps, issue.number, claim, () =>
+          publishFixedOutput(resumableJob, FIX_LABELS, sealed, null),
+        ),
+      ],
       ranCodex: false,
     };
   }
@@ -139,7 +156,7 @@ export const runFixJob = async (
     workspace,
   };
   try {
-    const run = runCodex({
+    const run = await runCodex({
       workDir: workspace.dir,
       gitCommonDir: cacheClone,
       prompt: fixPrompt({
@@ -147,6 +164,7 @@ export const runFixJob = async (
         issueNumber: issue.number,
         title: currentIssue.title,
         body: currentIssue.body,
+        approvalId: claim.approval.id,
         answers: preamble.answers,
       }),
       config,
@@ -166,8 +184,13 @@ export const runFixJob = async (
       };
     }
     const nonFixed = await handleNonFixedOutcome(job, FIX_LABELS, outcome);
+    const message =
+      nonFixed ??
+      (await withClaimReleasedOnFailure(deps, issue.number, claim, () =>
+        finishFixedJob(job, FIX_LABELS, outcome),
+      ));
     return {
-      lines: [nonFixed ?? (await finishFixedJob(job, FIX_LABELS, outcome))],
+      lines: [message],
       ranCodex: true,
     };
   } finally {

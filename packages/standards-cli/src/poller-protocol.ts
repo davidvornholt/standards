@@ -16,7 +16,8 @@ export const DEFERRED_FINDING = 'deferred-finding';
 // questions and failure reports apart from human conversation.
 export const QUESTION_MARKER = '<!-- standards-poller:question -->';
 export const FAILURE_MARKER = '<!-- standards-poller:failure -->';
-export const CLAIM_MARKER = '<!-- standards-poller:claim -->';
+export const CLAIM_METADATA_MARKER = 'standards-poller:claim';
+export const QUEUE_METADATA_MARKER = 'standards-poller:queue';
 export const FIX_OUTPUT_MARKER = 'standards-poller:fix-output';
 
 // Repository roles trusted to approve automation and answer its questions.
@@ -40,18 +41,27 @@ export type FixOutcome = {
   readonly prBody?: string;
 };
 
-export type DeferredFinding = {
-  readonly title: string;
-  readonly body: string;
+export type ReviewThreadResolution = {
+  readonly threadId: string;
+  readonly verificationReply: string;
 };
 
-export type ReviewOutcome = {
-  readonly status: 'reviewed' | 'question' | 'cannot-review';
-  readonly summary: string;
-  readonly question?: string;
-  readonly report?: string;
-  readonly deferred?: ReadonlyArray<DeferredFinding>;
-};
+export type ReviewOutcome =
+  | {
+      readonly status: 'reviewed';
+      readonly summary: string;
+      readonly report: string;
+      readonly threadsToResolve: ReadonlyArray<ReviewThreadResolution>;
+    }
+  | {
+      readonly status: 'question';
+      readonly summary: string;
+      readonly question: string;
+    }
+  | {
+      readonly status: 'cannot-review';
+      readonly summary: string;
+    };
 
 // Paths the automation must never modify in a consumer repository. Canonical
 // synced files come from the repo's own sync-standards.lock; the rest are the

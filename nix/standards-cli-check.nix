@@ -51,6 +51,7 @@ runCommand "standards-cli-check-${standardsCli.version}"
       '}' >"$pollerConfig"
     standards poller --print-units --config "$pollerConfig" >"$TMPDIR/units.txt"
     grep -F "standards-poller.service" "$TMPDIR/units.txt"
+    grep -F "standards-poller-acknowledgements.service" "$TMPDIR/units.txt"
     grep -F "standards-poller.timer" "$TMPDIR/units.txt"
 
     mkdir "$out"

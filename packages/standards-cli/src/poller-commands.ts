@@ -2,10 +2,12 @@
 // it reports what it did and fails loudly when any repository could not be
 // processed, so a red systemd unit is the durable signal that jobs stalled.
 
-import { existsSync } from 'node:fs';
+import { accessSync, constants, existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
+import process from 'node:process';
 import { resolveToken } from './github-api';
+import { runPollerAcknowledgementTick } from './poller-acknowledgements';
 import { type PollerConfig, parsePollerConfig } from './poller-config';
 import { runPollerTick } from './poller-tick';
 import { runPollerPrintUnits } from './poller-units';
@@ -13,6 +15,7 @@ import { runPollerPrintUnits } from './poller-units';
 export type PollerCommandOptions = {
   readonly configPath: string | undefined;
   readonly printUnits: boolean;
+  readonly acknowledgeOnly: boolean;
 };
 
 const loadConfig = async (configPath: string): Promise<PollerConfig> => {
@@ -40,6 +43,16 @@ const loadConfig = async (configPath: string): Promise<PollerConfig> => {
   return config;
 };
 
+const hasExecutableOnPath = (name: string): boolean =>
+  (process.env.PATH ?? '').split(delimiter).some((directory) => {
+    try {
+      accessSync(join(directory, name), constants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+
 export const runPollerCommand = async (
   options: PollerCommandOptions,
 ): Promise<boolean> => {
@@ -58,11 +71,19 @@ export const runPollerCommand = async (
   const token = resolveToken();
   if (token === null) {
     console.error(
-      'standards poller: no GitHub token (GH_TOKEN, GITHUB_TOKEN, or gh auth); the poller cannot label, push, or open PRs anonymously',
+      'standards poller: no GitHub token (GH_TOKEN, GITHUB_TOKEN, or gh auth); the poller and its Codex runs cannot collaborate on GitHub anonymously',
     );
     return false;
   }
-  const { lines, problems } = await runPollerTick(config, token, Date.now());
+  if (!(options.acknowledgeOnly || hasExecutableOnPath('gh'))) {
+    console.error(
+      'standards poller: gh is required on PATH for authenticated Codex GitHub access',
+    );
+    return false;
+  }
+  const { lines, problems } = options.acknowledgeOnly
+    ? await runPollerAcknowledgementTick(config, token)
+    : await runPollerTick(config, token, Date.now());
   for (const line of lines) {
     console.log(`  ${line}`);
   }
@@ -72,7 +93,7 @@ export const runPollerCommand = async (
     return false;
   }
   console.log(
-    `standards poller: tick complete (${lines.length} event(s) across ${config.repos.length} repo(s))`,
+    `standards poller: ${options.acknowledgeOnly ? 'acknowledgement ' : ''}tick complete (${lines.length} event(s) across ${config.repos.length} repo(s))`,
   );
   return true;
 };

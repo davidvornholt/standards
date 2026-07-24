@@ -43,7 +43,10 @@ export const readReviewPlan = async (
           APPROVED_FOR_REVIEW,
           prRevision(plan.baseRef, plan.baseSha, plan.approvedHead),
         );
-        if (typeof binding !== 'string' && binding.id === plan.approvalId) {
+        if (
+          binding.kind === 'approved' &&
+          binding.approval.id === plan.approvalId
+        ) {
           currentPlans.push(plan);
         }
       }

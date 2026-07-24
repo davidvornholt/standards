@@ -1,10 +1,11 @@
 import { afterEach, expect, it } from 'bun:test';
 import { installApi } from './github-commands-test-support';
 import { parsePollerConfig } from './poller-config';
-import { runPollerTick } from './poller-tick';
+import { runPollerTick, type TickJobRunners } from './poller-tick';
 
 const originalFetch = globalThis.fetch;
 const NOW = Date.parse('2026-07-18T12:00:00Z');
+const STALE_PR_NUMBER = 144;
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
@@ -79,4 +80,47 @@ it('runs the oldest job globally and still offers later recovery work', async ()
   });
   expect(ran).toEqual(['fix:1:true', 'review:2:false']);
   expect(report.problems).toEqual([]);
+});
+
+it('silently ignores stale label-filter results on repeated ticks', async () => {
+  const parsed = parsePollerConfig(
+    {
+      repos: ['owner/repo'],
+      model: 'gpt-test',
+      reasoningEffort: 'high',
+    },
+    '/tmp',
+  );
+  if (parsed.config === null) {
+    throw new Error('test config must parse');
+  }
+  const staleReview = {
+    ...issue(STALE_PR_NUMBER, 'approved-for-review', true),
+    labels: [],
+  };
+  installApi([
+    { body: [] },
+    { body: [] },
+    { body: [staleReview] },
+    { body: [] },
+    { body: [] },
+    { body: [] },
+    { body: [staleReview] },
+    { body: [] },
+  ]);
+  const ran: Array<number> = [];
+  const runners: TickJobRunners = {
+    review: (_deps, item) => {
+      ran.push(item.number);
+      return Promise.resolve({ lines: [], ranCodex: true });
+    },
+    fix: () => Promise.resolve({ lines: [], ranCodex: true }),
+  };
+
+  const first = await runPollerTick(parsed.config, 'test-token', NOW, runners);
+  const second = await runPollerTick(parsed.config, 'test-token', NOW, runners);
+
+  expect(ran).toEqual([]);
+  expect(first.problems).toEqual([]);
+  expect(second.problems).toEqual([]);
 });
