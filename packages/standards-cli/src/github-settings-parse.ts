@@ -1,8 +1,7 @@
-// Shape parsing for a single declarative GitHub settings file: the canonical
-// `.github/settings.json` or the repo-owned `.github/settings.local.json`
-// extension. Seam merging lives in github-settings.ts, drift comparison in
-// github-diff.ts, and the API interaction in github-api.ts. Like cli.ts, this
-// module is zero-dependency so `bunx` can execute the published package.
+// Parse one GitHub settings file: canonical `.github/settings.json` or the
+// repo-owned `.github/settings.local.json` extension. Seam merging, drift
+// comparison, and API interaction live in dedicated modules. This module stays
+// zero-dependency so `bunx` can execute the published package.
 
 import { labelIdentity } from './github-label-identity';
 
