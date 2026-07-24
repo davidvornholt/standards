@@ -81,6 +81,7 @@
     "src/poller-acknowledgements.ts",
     "src/poller-claim.ts",
     "src/poller-codex.ts",
+    "src/poller-codex-stderr.ts",
     "src/poller-commands.ts",
     "src/poller-comment-metadata.ts",
     "src/poller-config.ts",

@@ -2,16 +2,13 @@ import { type ChildProcess, spawn } from 'node:child_process';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
+import { createStderrCapture, withCaptureFailure } from './poller-codex-stderr';
 import type { PollerConfig } from './poller-config';
 import { OUTCOME_DIR } from './poller-protocol';
 
 const MS_PER_SECOND = 1000;
 const SECONDS_PER_MINUTE = 60;
 const MS_PER_MINUTE = SECONDS_PER_MINUTE * MS_PER_SECOND;
-const STDERR_SNIPPET_LIMIT = 2000;
-const STDERR_RETAINED_LIMIT = STDERR_SNIPPET_LIMIT * 2;
-const LOW_SURROGATE_MIN = 0xdc_00;
-const LOW_SURROGATE_MAX = 0xdf_ff;
 
 export type CodexRunResult = {
   readonly succeeded: boolean;
@@ -22,7 +19,7 @@ type CodexExecutor = (
   file: string,
   args: ReadonlyArray<string>,
   options: {
-    readonly timeout: number;
+    readonly detached: true;
     readonly stdio: ['ignore', 'ignore', 'pipe'];
     readonly env: Record<string, string | undefined>;
   },
@@ -48,48 +45,6 @@ const exitCause = (
   return signal === null ? 'unknown exit cause' : `signal ${signal}`;
 };
 
-const unicodeSafeTail = (value: string, limit: number): string => {
-  let start = Math.max(0, value.length - limit);
-  const first = value.charCodeAt(start);
-  if (first >= LOW_SURROGATE_MIN && first <= LOW_SURROGATE_MAX) {
-    start += 1;
-  }
-  return value.slice(start);
-};
-
-const stderrCapture = () => {
-  const decoder = new TextDecoder();
-  let retained = '';
-  let pendingWhitespace = '';
-  const appendText = (text: string): void => {
-    const content = text.trimEnd();
-    if (content === '') {
-      pendingWhitespace = unicodeSafeTail(
-        pendingWhitespace + text,
-        STDERR_RETAINED_LIMIT,
-      );
-      return;
-    }
-    retained = unicodeSafeTail(
-      retained + pendingWhitespace + content,
-      STDERR_RETAINED_LIMIT,
-    );
-    pendingWhitespace = unicodeSafeTail(
-      text.slice(content.length),
-      STDERR_RETAINED_LIMIT,
-    );
-  };
-  return {
-    append: (chunk: Buffer): void => {
-      appendText(decoder.decode(chunk, { stream: true }));
-    },
-    finish: (): string => {
-      appendText(decoder.decode());
-      return unicodeSafeTail(retained.trim(), STDERR_SNIPPET_LIMIT);
-    },
-  };
-};
-
 const failureResult = (cause: string, stderr = ''): CodexRunResult => ({
   succeeded: false,
   failure:
@@ -101,9 +56,30 @@ const failureResult = (cause: string, stderr = ''): CodexRunResult => ({
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
+const timeoutCause = (timeout: number): string => {
+  if (timeout % MS_PER_MINUTE !== 0) {
+    return `timed out after ${timeout} ms`;
+  }
+  const minutes = timeout / MS_PER_MINUTE;
+  return `timed out after ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
+};
+
+const terminateProcessTree = (child: ChildProcess): void => {
+  try {
+    if (process.platform === 'win32' || child.pid === undefined) {
+      child.kill('SIGKILL');
+    } else {
+      process.kill(-child.pid, 'SIGKILL');
+    }
+  } catch {
+    // The process may have exited between the timeout and the kill.
+  }
+};
+
 const awaitChild = (
   child: ChildProcess,
-  capture: ReturnType<typeof stderrCapture>,
+  capture: ReturnType<typeof createStderrCapture>,
+  timeout: number,
 ): Promise<CodexRunResult> =>
   new Promise((resolve) => {
     let settled = false;
@@ -111,8 +87,18 @@ const awaitChild = (
     const settle = (result: CodexRunResult): void => {
       if (!settled) {
         settled = true;
+        clearTimeout(timer);
         resolve(result);
       }
+    };
+    const failed = (cause: string): void => {
+      let stderr = '';
+      try {
+        stderr = capture.finish();
+      } catch (error) {
+        captureFailure = errorMessage(error);
+      }
+      settle(failureResult(cause, withCaptureFailure(stderr, captureFailure)));
     };
     child.stderr?.on('data', (chunk: Buffer) => {
       try {
@@ -125,24 +111,20 @@ const awaitChild = (
       captureFailure = errorMessage(error);
     });
     child.once('error', (error) => {
-      settle(failureResult(errorMessage(error)));
+      failed(errorMessage(error));
     });
     child.once('close', (status, signal) => {
       if (status === 0) {
         settle({ succeeded: true, failure: null });
         return;
       }
-      let stderr = '';
-      try {
-        stderr = capture.finish();
-      } catch (error) {
-        captureFailure = errorMessage(error);
-      }
-      if (stderr === '' && captureFailure !== null) {
-        stderr = `stderr capture failed: ${captureFailure}`;
-      }
-      settle(failureResult(exitCause(status, signal), stderr));
+      failed(exitCause(status, signal));
     });
+    const timer = setTimeout(() => {
+      terminateProcessTree(child);
+      child.stderr?.destroy();
+      failed(timeoutCause(timeout));
+    }, timeout);
   });
 
 export const runCodex = async (
@@ -179,7 +161,7 @@ export const runCodex = async (
         prompt,
       ],
       {
-        timeout: config.runTimeoutMinutes * MS_PER_MINUTE,
+        detached: true,
         stdio: ['ignore', 'ignore', 'pipe'],
         env: { ...process.env },
       },
@@ -191,5 +173,9 @@ export const runCodex = async (
     child.kill();
     return failureResult('stderr capture was not available');
   }
-  return await awaitChild(child, stderrCapture());
+  return await awaitChild(
+    child,
+    createStderrCapture(),
+    config.runTimeoutMinutes * MS_PER_MINUTE,
+  );
 };

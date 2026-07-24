@@ -15,8 +15,10 @@ import type { PollerConfig } from './poller-config';
 import { OUTCOME_DIR } from './poller-protocol';
 
 const dirs: Array<string> = [];
-const EXPECTED_TIMEOUT_MS = 120_000;
 const MAX_FAILURE_LENGTH = 2100;
+const MS_PER_MINUTE = 60_000;
+const TIMEOUT_MS = 100;
+const MAX_TIMEOUT_ELAPSED_MS = 750;
 const GIT_COMMON_DIR = '/tmp/cache/owner/repo.git';
 const originalGhToken = process.env.GH_TOKEN;
 const originalGithubToken = process.env.GITHUB_TOKEN;
@@ -32,11 +34,15 @@ const config = {
   cacheDir: '/tmp',
 } satisfies PollerConfig;
 
-const runOptions = (workDir: string, prompt = 'do work') => ({
+const runOptions = (
+  workDir: string,
+  prompt = 'do work',
+  pollerConfig = config,
+) => ({
   workDir,
   gitCommonDir: GIT_COMMON_DIR,
   prompt,
-  config,
+  config: pollerConfig,
 });
 
 const runScript =
@@ -50,6 +56,9 @@ const makeWorkDir = (): string => {
   return dir;
 };
 
+const runFailure = (source: string, prompt = 'do work') =>
+  runCodex(runOptions(makeWorkDir(), prompt), runScript(source));
+
 afterEach(() => {
   for (const dir of dirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
@@ -60,56 +69,42 @@ afterEach(() => {
 });
 
 describe('runCodex', () => {
-  it('cleans stale output, preserves GitHub auth, and applies the timeout', async () => {
+  it('cleans stale output and preserves GitHub auth', async () => {
     const dir = makeWorkDir();
     mkdirSync(join(dir, OUTCOME_DIR));
     writeFileSync(join(dir, OUTCOME_DIR, 'stale'), 'x');
     process.env.GH_TOKEN = 'gh-secret';
     process.env.GITHUB_TOKEN = 'github-secret';
     process.env.STANDARDS_POLLER_GIT_TOKEN = 'git-secret';
-    let captured:
-      | {
-          readonly args: ReadonlyArray<string>;
-          readonly timeout: number;
-          readonly env: Record<string, string | undefined>;
-        }
-      | undefined;
+    let capturedArgs: ReadonlyArray<string> = [];
+    let capturedEnv: Record<string, string | undefined> = {};
     const result = await runCodex(runOptions(dir), (_file, args, options) => {
-      captured = {
-        args,
-        timeout: options.timeout,
-        env: options.env,
-      };
+      capturedArgs = args;
+      capturedEnv = options.env;
       return spawn(process.execPath, ['-e', ''], options);
     });
     expect(result).toEqual({ succeeded: true, failure: null });
-    const capturedArgs = captured?.args ?? [];
     expect(capturedArgs).toContain('--ephemeral');
     const addDirIndex = capturedArgs.indexOf('--add-dir');
     expect(addDirIndex).toBeGreaterThan(-1);
     expect(capturedArgs[addDirIndex + 1]).toBe(GIT_COMMON_DIR);
-    expect(captured?.timeout).toBe(EXPECTED_TIMEOUT_MS);
-    expect(captured?.env.GH_TOKEN).toBe('gh-secret');
-    expect(captured?.env.GITHUB_TOKEN).toBe('github-secret');
-    expect(captured?.env.STANDARDS_POLLER_GIT_TOKEN).toBe('git-secret');
+    expect(capturedEnv.GH_TOKEN).toBe('gh-secret');
+    expect(capturedEnv.GITHUB_TOKEN).toBe('github-secret');
+    expect(capturedEnv.STANDARDS_POLLER_GIT_TOKEN).toBe('git-secret');
     expect(existsSync(join(dir, OUTCOME_DIR))).toBeFalse();
   });
 
   it('returns process stderr for failures', async () => {
-    const result = await runCodex(
-      runOptions(makeWorkDir()),
-      runScript("process.stderr.write('last process output'); process.exit(1)"),
+    const result = await runFailure(
+      "process.stderr.write('last process output'); process.exit(1)",
     );
     expect(result.failure).toContain('exit status 1');
     expect(result.failure).toContain('last process output');
   });
 
   it('keeps only a bounded tail while continuously draining stderr', async () => {
-    const result = await runCodex(
-      runOptions(makeWorkDir()),
-      runScript(
-        "const { writeSync } = require('node:fs'); const chunk = 'x'.repeat(100_000); for (let index = 0; index < 200; index += 1) writeSync(2, chunk); writeSync(2, '\\nROOT CAUSE: streamed safely\\n'); process.exit(1)",
-      ),
+    const result = await runFailure(
+      "const { writeSync } = require('node:fs'); const chunk = 'x'.repeat(100_000); for (let index = 0; index < 200; index += 1) writeSync(2, chunk); writeSync(2, '\\nROOT CAUSE: streamed safely\\n'); process.exit(1)",
     );
     expect(result.failure).toContain('exit status 1');
     expect(result.failure).toContain('ROOT CAUSE: streamed safely');
@@ -118,25 +113,44 @@ describe('runCodex', () => {
   });
 
   it('preserves stderr before long Unicode trailing whitespace', async () => {
-    const result = await runCodex(
-      runOptions(makeWorkDir()),
-      runScript(
-        "process.stderr.write('ROOT CAUSE: model requires a newer CLI\\n'); process.stderr.write('\\u2003'.repeat(20_000)); process.exit(1)",
-      ),
+    const result = await runFailure(
+      "process.stderr.write('ROOT CAUSE: model requires a newer CLI\\n'); process.stderr.write('\\u2003'.repeat(20_000)); process.exit(1)",
     );
     expect(result.failure).toContain('ROOT CAUSE: model requires a newer CLI');
+    expect(result.failure).not.toContain('\uFFFD');
+  });
+
+  it('ignores an incomplete UTF-8 sequence after Unicode whitespace', async () => {
+    const result = await runFailure(
+      "const { writeSync } = require('node:fs'); writeSync(2, Buffer.from('ROOT CAUSE: keep me\\n')); writeSync(2, Buffer.from('\\u2003'.repeat(10_000))); writeSync(2, Buffer.from([0xe2])); process.exit(1)",
+    );
+    expect(result.failure).toContain('ROOT CAUSE: keep me');
     expect(result.failure).not.toContain('\uFFFD');
   });
 });
 
 describe('runCodex failure containment', () => {
+  it('bounds a timeout when a descendant inherits stderr', async () => {
+    const started = performance.now();
+    const result = await runCodex(
+      runOptions(makeWorkDir(), 'do work', {
+        ...config,
+        runTimeoutMinutes: TIMEOUT_MS / MS_PER_MINUTE,
+      }),
+      runScript(
+        "const { spawn } = require('node:child_process'); process.stderr.write('diagnostic before timeout\\n'); spawn(process.execPath, ['-e', 'setTimeout(() => {}, 1500)'], { stdio: ['ignore', 'ignore', 2] }); setTimeout(() => {}, 1500)",
+      ),
+    );
+    expect(performance.now() - started).toBeLessThan(MAX_TIMEOUT_ELAPSED_MS);
+    expect(result.failure).toContain(`timed out after ${TIMEOUT_MS} ms`);
+    expect(result.failure).toContain('diagnostic before timeout');
+  });
+
   it('does not echo the prompt in a process failure', async () => {
     const prompt = 'a very long agent prompt';
-    const result = await runCodex(
-      runOptions(makeWorkDir(), prompt),
-      runScript(
-        "process.stderr.write('ERROR: model requires a newer CLI'); process.exit(1)",
-      ),
+    const result = await runFailure(
+      "process.stderr.write('ERROR: model requires a newer CLI'); process.exit(1)",
+      prompt,
     );
     expect(result.failure).toContain('exit status 1');
     expect(result.failure).toContain('ERROR: model requires a newer CLI');
@@ -144,10 +158,7 @@ describe('runCodex failure containment', () => {
   });
 
   it('reports the terminating signal when there is no exit status', async () => {
-    const result = await runCodex(
-      runOptions(makeWorkDir()),
-      runScript("process.kill(process.pid, 'SIGTERM')"),
-    );
+    const result = await runFailure("process.kill(process.pid, 'SIGTERM')");
     expect(result.failure).toContain('signal SIGTERM');
     expect(result.failure).not.toContain('do work');
   });
@@ -156,10 +167,7 @@ describe('runCodex failure containment', () => {
     const result = await runCodex(runOptions(makeWorkDir()), () => {
       throw new Error('spawn setup failed');
     });
-    expect(result).toEqual({
-      succeeded: false,
-      failure: 'codex exec failed: spawn setup failed',
-    });
+    expect(result.failure).toBe('codex exec failed: spawn setup failed');
   });
 
   it('preserves the process result when stderr capture fails', async () => {
@@ -168,16 +176,22 @@ describe('runCodex failure containment', () => {
       (_file, _args, options) => {
         const child = spawn(
           process.execPath,
-          ['-e', 'setTimeout(() => process.exit(7), 20)'],
+          [
+            '-e',
+            "process.stderr.write('partial diagnostic'); setTimeout(() => process.exit(7), 20)",
+          ],
           options,
         );
-        queueMicrotask(() => {
-          child.stderr.emit('error', new Error('capture read failed'));
+        child.stderr.once('data', () => {
+          queueMicrotask(() => {
+            child.stderr.emit('error', new Error('capture read failed'));
+          });
         });
         return child;
       },
     );
     expect(result.failure).toContain('exit status 7');
+    expect(result.failure).toContain('partial diagnostic');
     expect(result.failure).toContain(
       'stderr capture failed: capture read failed',
     );
