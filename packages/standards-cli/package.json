@@ -107,6 +107,7 @@
     "src/poller-review-plan-parse.ts",
     "src/poller-review-state.ts",
     "src/poller-review-thread-api.ts",
+    "src/poller-review-thread-write.ts",
     "src/poller-review-threads.ts",
     "src/poller-review-validation.ts",
     "src/poller-schedule.ts",

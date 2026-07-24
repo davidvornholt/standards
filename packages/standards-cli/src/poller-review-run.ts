@@ -6,6 +6,7 @@
 
 import { prRevision } from './poller-approval';
 import { acquireClaim } from './poller-claim';
+import { runCodex } from './poller-codex';
 import { getIssue, type IssueItem } from './poller-github';
 import { getPullRequest } from './poller-github-pulls';
 import { addLabels } from './poller-github-write';
@@ -52,6 +53,7 @@ export const runReviewJob = async (
   deps: JobDeps,
   prItem: IssueItem,
   allowCodex = true,
+  runAgent: typeof runCodex = runCodex,
 ): Promise<JobResult> => {
   const { config, token, repo } = deps;
   const pr = await getPullRequest(token, repo, prItem.number);
@@ -144,5 +146,6 @@ export const runReviewJob = async (
     claim,
     cacheClone,
     answers: preamble.answers,
+    runAgent,
   });
 };

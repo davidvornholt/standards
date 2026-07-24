@@ -1,20 +1,19 @@
 import { apiError, HTTP_OK, request } from './github-api';
 import { isRecord } from './github-settings-parse';
 
+export type ReviewThreadComment = {
+  readonly body: string;
+  readonly viewerDidAuthor: boolean;
+};
+
 export type ReviewThread = {
   readonly id: string;
   readonly repo: string;
   readonly prNumber: number;
   readonly isResolved: boolean;
+  readonly creation: ReviewThreadComment | null;
   readonly viewerAuthoredBodies: ReadonlyArray<string>;
 };
-
-const REPLY_MUTATION =
-  // biome-ignore lint/security/noSecrets: a GraphQL mutation string, not a credential.
-  'mutation($id: ID!, $body: String!) { addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $id, body: $body }) { comment { id } } }';
-
-const RESOLVE_MUTATION =
-  'mutation($id: ID!) { resolveReviewThread(input: { threadId: $id }) { thread { id isResolved } } }';
 
 const asRecord = (
   value: unknown,
@@ -62,13 +61,15 @@ const numberField = (
   return field;
 };
 
-const viewerAuthoredComment = (
+const reviewThreadComment = (
   value: unknown,
   context: string,
-): string | null => {
+): ReviewThreadComment => {
   const comment = asRecord(value, context);
-  const body = stringField(comment, 'body', context);
-  return booleanField(comment, 'viewerDidAuthor', context) ? body : null;
+  return {
+    body: stringField(comment, 'body', context),
+    viewerDidAuthor: booleanField(comment, 'viewerDidAuthor', context),
+  };
 };
 
 const readThreadPage = async (
@@ -104,11 +105,13 @@ const readThreadPage = async (
   if (!Array.isArray(comments.nodes)) {
     throw new Error(`${context}: expected thread comments`);
   }
+  const parsedComments = comments.nodes.map((comment) =>
+    reviewThreadComment(comment, context),
+  );
   const viewerAuthoredBodies: Array<string> = [];
-  for (const comment of comments.nodes) {
-    const authored = viewerAuthoredComment(comment, context);
-    if (authored !== null) {
-      viewerAuthoredBodies.push(authored);
+  for (const comment of parsedComments) {
+    if (comment.viewerDidAuthor) {
+      viewerAuthoredBodies.push(comment.body);
     }
   }
   const hasNextPage = booleanField(pageInfo, 'hasNextPage', context);
@@ -122,6 +125,7 @@ const readThreadPage = async (
       repo: stringField(repository, 'nameWithOwner', context),
       prNumber: numberField(pullRequest, 'number', context),
       isResolved: booleanField(node, 'isResolved', context),
+      creation: parsedComments[0] ?? null,
       viewerAuthoredBodies,
     },
     nextCursor: hasNextPage ? (endCursor as string) : null,
@@ -146,10 +150,12 @@ export const readReviewThread = async (
     ) {
       throw new Error(`read review thread ${threadId}: identity changed`);
     }
-    combined = {
-      ...page.thread,
-      viewerAuthoredBodies,
-    };
+    if (combined === null) {
+      combined = { ...page.thread, viewerAuthoredBodies };
+    } else if (combined.creation === null && page.thread.creation !== null) {
+      const existing = combined as ReviewThread;
+      combined = { ...existing, creation: page.thread.creation };
+    }
     viewerAuthoredBodies.push(...page.thread.viewerAuthoredBodies);
     after = page.nextCursor;
   } while (after !== null);
@@ -158,36 +164,3 @@ export const readReviewThread = async (
   }
   return combined;
 };
-
-const mutateThread = async (
-  token: string | null,
-  operation: 'reply' | 'resolve',
-  threadId: string,
-  body?: string,
-): Promise<void> => {
-  const replying = operation === 'reply';
-  const response = await request(token, 'POST', '/graphql', {
-    query: replying ? REPLY_MUTATION : RESOLVE_MUTATION,
-    variables: replying ? { id: threadId, body } : { id: threadId },
-  });
-  if (
-    response.status !== HTTP_OK ||
-    !isRecord(response.body) ||
-    response.body.errors !== undefined
-  ) {
-    throw new Error(
-      apiError(`${operation} review thread ${threadId}`, response),
-    );
-  }
-};
-
-export const replyToReviewThread = (
-  token: string | null,
-  threadId: string,
-  body: string,
-): Promise<void> => mutateThread(token, 'reply', threadId, body);
-
-export const resolveReviewThread = (
-  token: string | null,
-  threadId: string,
-): Promise<void> => mutateThread(token, 'resolve', threadId);

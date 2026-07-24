@@ -29,6 +29,9 @@ describe('poller GitHub access contract', () => {
       'Every comment, review thread, and deferred issue create must carry a stable hidden marker',
     );
     expect(prompt).toContain(
+      '<!-- standards-poller:review-thread approval=approval-generation operation=<sha256> -->',
+    );
+    expect(prompt).toContain(
       'Deferred issue markers must additionally bind the stable review-ledger finding identity',
     );
     expect(prompt).toContain(

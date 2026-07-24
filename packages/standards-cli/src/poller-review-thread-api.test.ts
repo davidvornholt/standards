@@ -1,10 +1,10 @@
 import { afterEach, expect, it } from 'bun:test';
 import { type ApiCall, installApi } from './github-commands-test-support';
+import { readReviewThread } from './poller-review-thread-api';
 import {
-  readReviewThread,
   replyToReviewThread,
   resolveReviewThread,
-} from './poller-review-thread-api';
+} from './poller-review-thread-write';
 
 const originalFetch = globalThis.fetch;
 const threadPage = (
@@ -47,6 +47,7 @@ it('reads every thread-comment page for replay marker lookup', async () => {
     repo: 'owner/repo',
     prNumber: 4,
     isResolved: false,
+    creation: { body: 'other', viewerDidAuthor: false },
     viewerAuthoredBodies: ['mine'],
   });
   expect(calls.map((call) => call.body)).toEqual([
@@ -95,5 +96,36 @@ it('uses the review-thread reply and resolve mutations', async () => {
   );
   expect(calls[1]?.body).toEqual(
     expect.objectContaining({ variables: { id: 'PRRT_thread' } }),
+  );
+});
+
+it.each([
+  ['null data', { data: null }],
+  ['missing data', {}],
+  [
+    'wrong thread',
+    {
+      data: {
+        resolveReviewThread: {
+          thread: { id: 'PRRT_other', isResolved: true },
+        },
+      },
+    },
+  ],
+  [
+    'unresolved thread',
+    {
+      data: {
+        resolveReviewThread: {
+          thread: { id: 'PRRT_thread', isResolved: false },
+        },
+      },
+    },
+  ],
+])('rejects a resolve mutation with %s', async (_, body) => {
+  installApi([{ body }]);
+
+  await expect(resolveReviewThread('token', 'PRRT_thread')).rejects.toThrow(
+    'resolve review thread PRRT_thread',
   );
 });

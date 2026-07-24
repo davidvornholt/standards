@@ -4,8 +4,10 @@ import { hiddenCommentMetadata } from './poller-comment-metadata';
 import type { JobDeps } from './poller-job-shared';
 import { CLAIM_METADATA_MARKER } from './poller-protocol';
 import type { ReviewPublicationPlan } from './poller-review-output';
+import { agentReviewThreadMarker } from './poller-review-threads';
 
 export const PR_NUMBER = 4;
+const SHA_LENGTH = 64;
 const approvalFields = {
   repo: 'owner/repo',
   issueNumber: PR_NUMBER,
@@ -62,6 +64,8 @@ export const pr = {
 export const threadResponse = (
   options: {
     readonly body?: string;
+    readonly creationBody?: string;
+    readonly creationViewerDidAuthor?: boolean;
     readonly isResolved?: boolean;
     readonly prNumber?: number;
     readonly repo?: string;
@@ -77,10 +81,17 @@ export const threadResponse = (
           repository: { nameWithOwner: options.repo ?? 'owner/repo' },
         },
         comments: {
-          nodes:
-            options.body === undefined
+          nodes: [
+            {
+              body:
+                options.creationBody ??
+                `Finding.\n\n${agentReviewThreadMarker(approval.id, 'a'.repeat(SHA_LENGTH))}`,
+              viewerDidAuthor: options.creationViewerDidAuthor ?? true,
+            },
+            ...(options.body === undefined
               ? []
-              : [{ body: options.body, viewerDidAuthor: true }],
+              : [{ body: options.body, viewerDidAuthor: true }]),
+          ],
           pageInfo: { hasNextPage: false, endCursor: null },
         },
       },

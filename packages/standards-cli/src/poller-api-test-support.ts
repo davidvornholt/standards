@@ -8,9 +8,9 @@ const CLAIM_COMMENT_START = 500;
 type PollerApiOptions = {
   readonly baseSha: string;
   readonly headSha: string;
+  readonly initialComments?: ReadonlyArray<Record<string, unknown>>;
   readonly isPullRequest: boolean;
 };
-
 type ApiState = PollerApiOptions & {
   readonly comments: Array<Record<string, unknown>>;
   readonly labels: Set<string>;
@@ -166,7 +166,7 @@ export const installPollerApi = (
   const calls: Array<ApiCall> = [];
   const state: ApiState = {
     ...options,
-    comments: [],
+    comments: [...(options.initialComments ?? [])],
     draft: true,
     labels: new Set([
       options.isPullRequest ? 'approved-for-review' : 'approved-for-fix',

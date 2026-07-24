@@ -14,6 +14,7 @@ const REVIEW_OUTPUT_MARKER = '<!-- standards-poller:review-output\n';
 const REVIEW_OUTPUT_END = '\n-->';
 const REVIEW_COMMIT_MARKER = 'standards-poller:review-output';
 const OUTPUT_BRANCH_DIGEST_LENGTH = 16;
+const REVIEW_OUTPUT_PROTOCOL_VERSION = 2;
 
 export type ReviewPublicationPlan = {
   readonly repo: string;
@@ -60,11 +61,18 @@ export const reviewOutputBranch = (
   const { repo, prNumber, baseSha, approvedHead, approvalId } = identity;
   const generation = createHash('sha256')
     .update(
-      JSON.stringify({ repo, prNumber, baseSha, approvedHead, approvalId }),
+      JSON.stringify({
+        protocol: REVIEW_OUTPUT_PROTOCOL_VERSION,
+        repo,
+        prNumber,
+        baseSha,
+        approvedHead,
+        approvalId,
+      }),
     )
     .digest('hex')
     .slice(0, OUTPUT_BRANCH_DIGEST_LENGTH);
-  return `poller/review-pr-${prNumber}-${generation}`;
+  return `poller/review-v${REVIEW_OUTPUT_PROTOCOL_VERSION}-pr-${prNumber}-${generation}`;
 };
 
 const commitMessage = (plan: ReviewPublicationPlan): string =>

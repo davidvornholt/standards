@@ -8,9 +8,35 @@ import { validateReviewClaim } from './poller-review-state';
 import {
   type ReviewThread,
   readReviewThread,
+} from './poller-review-thread-api';
+import {
   replyToReviewThread,
   resolveReviewThread,
-} from './poller-review-thread-api';
+} from './poller-review-thread-write';
+
+const OPERATION_ID = /^[a-f0-9]{64}$/u;
+
+export const agentReviewThreadMarker = (
+  approvalId: string,
+  operationId: string,
+): string =>
+  `<!-- standards-poller:review-thread approval=${approvalId} operation=${operationId} -->`;
+
+const hasAgentCreationMarker = (body: string, approvalId: string): boolean =>
+  body
+    .split('<!-- standards-poller:review-thread approval=')
+    .slice(1)
+    .some((suffix) => {
+      const [marker] = suffix.split(' -->');
+      const [approval, operation, ...extra] =
+        marker?.split(' operation=') ?? [];
+      return (
+        extra.length === 0 &&
+        approval === approvalId &&
+        operation !== undefined &&
+        OPERATION_ID.test(operation)
+      );
+    });
 
 export const threadResolutionMarker = (
   plan: ReviewPublicationPlan,
@@ -37,6 +63,15 @@ const assertThreadTarget = (
   if (thread.repo !== plan.repo || thread.prNumber !== plan.prNumber) {
     throw new Error(
       `publication blocked: review thread ${thread.id} belongs to ${thread.repo}#${thread.prNumber}`,
+    );
+  }
+  if (
+    thread.creation === null ||
+    !thread.creation.viewerDidAuthor ||
+    !hasAgentCreationMarker(thread.creation.body, plan.approvalId)
+  ) {
+    throw new Error(
+      `publication blocked: review thread ${thread.id} was not created by this approval generation`,
     );
   }
 };
@@ -82,6 +117,13 @@ export const publishReviewThreadResolutions = async (options: {
         requireDraft: true,
       });
       await resolveReviewThread(deps.token, resolution.threadId);
+    }
+    thread = await readReviewThread(deps.token, resolution.threadId);
+    assertThreadTarget(thread, plan);
+    if (!thread.isResolved) {
+      throw new Error(
+        `publication blocked: review thread ${resolution.threadId} remained unresolved`,
+      );
     }
   }
 };
