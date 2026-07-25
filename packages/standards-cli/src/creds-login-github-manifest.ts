@@ -10,13 +10,19 @@ import { isRecord } from './github-settings-parse';
 
 export const MANIFEST_STATE_BYTES = 32;
 
-// Root-credential ceiling: everything the broker may ever delegate. Actual
-// grants are narrowed per installation token at mint time.
-const DEFAULT_PERMISSIONS = Object.fromEntries(
-  'administration actions contents issues pull_requests secrets workflows'
-    .split(' ')
-    .map((permission) => [permission, 'write']),
-);
+// Root-credential ceiling: everything the broker may ever delegate. The
+// `permission-*` inputs a workflow passes when minting are a request, not a
+// constraint — anything holding the durable private key can request the whole
+// ceiling — so this, not those inputs, is the blast radius of the App identity
+// sitting in every consumer's secrets/ci.yaml. It therefore lists only grants a
+// workflow actually uses today; widening it is a deliberate edit here plus a
+// settings-page change on the existing App, not a default to grow into.
+const DEFAULT_PERMISSIONS = {
+  actions: 'read',
+  contents: 'write',
+  metadata: 'read',
+  pull_requests: 'write',
+} as const;
 
 export const buildAppManifest = (
   name: string,

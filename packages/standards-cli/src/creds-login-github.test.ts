@@ -31,9 +31,14 @@ describe('GitHub App manifest flow', () => {
       url: 'https://example.invalid/unused',
       active: false,
     });
-    expect(manifest.default_permissions).toMatchObject({
+    // Exact, not a subset: the ceiling is the App's blast radius, so an
+    // added grant has to be argued for in review rather than slipping past a
+    // partial match.
+    expect(manifest.default_permissions).toEqual({
+      actions: 'read',
       contents: 'write',
-      secrets: 'write',
+      metadata: 'read',
+      pull_requests: 'write',
     });
   });
 
