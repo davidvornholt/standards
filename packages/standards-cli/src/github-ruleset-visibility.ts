@@ -46,7 +46,7 @@ const INSTALLATION_DEAD_END =
 
 const COUNT_MATCHED_ADVICE = `GitHub reports the declared number of bypass actors but withholds their identities, so the repository is probably fine and only a local run with admin auth can confirm it. ${INSTALLATION_DEAD_END}`;
 
-const NOTHING_ANSWERED_ADVICE = `Neither REST nor the GraphQL bypass-actor count answered for this ruleset, so nothing at all is known about who may bypass it; verify locally with admin auth. ${INSTALLATION_DEAD_END}`;
+const NOTHING_ANSWERED_ADVICE = `Neither REST nor the GraphQL bypass-actor count answered for the ruleset(s) listed, so nothing at all is known about who may bypass them; verify locally with admin auth. ${INSTALLATION_DEAD_END}`;
 
 // The two no-failure remedies differ per ruleset, so the fields are partitioned
 // rather than reported under whichever advice one of them happened to match: a

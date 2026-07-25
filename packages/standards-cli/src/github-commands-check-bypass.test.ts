@@ -173,12 +173,12 @@ describe('runGithubCheck when GraphQL answers 200 but not for this ruleset', () 
     [
       'the answered page holds another ruleset',
       graphqlBody(countedNode(0, OTHER_RULESET_ID)),
-      'Neither REST nor the GraphQL bypass-actor count answered for this ruleset',
+      'Neither REST nor the GraphQL bypass-actor count answered for the ruleset(s) listed',
     ],
     [
       'the node carrying its id is org-owned',
       graphqlBody(countedNode(0, RULESET_ID, 'Organization')),
-      'Neither REST nor the GraphQL bypass-actor count answered for this ruleset',
+      'Neither REST nor the GraphQL bypass-actor count answered for the ruleset(s) listed',
     ],
     // The highest-severity shape in the whole fallback: HTTP 200, a `data` that
     // looks like a verified empty list, and an errors array saying the field
