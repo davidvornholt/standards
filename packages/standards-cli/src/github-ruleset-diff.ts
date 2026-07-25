@@ -100,15 +100,14 @@ export const diffRuleset = (
   const drifted: Array<string> = [];
   const unverifiable: Array<UnverifiableRulesetField> = [];
   for (const key of RULESET_COMPARED_KEYS) {
-    if (declared[key] === undefined) {
-      continue;
-    }
-    if (live[key] === undefined) {
-      unverifiable.push({ key, name });
-    } else if (!subsetMatches(declared[key], live[key])) {
-      drifted.push(
-        `ruleset "${name}": ${key} differs from the declared configuration${bypassActorCountDetail(key, declared[key], live[key])}`,
-      );
+    if (declared[key] !== undefined) {
+      if (live[key] === undefined) {
+        unverifiable.push({ key, name });
+      } else if (!subsetMatches(declared[key], live[key])) {
+        drifted.push(
+          `ruleset "${name}": ${key} differs from the declared configuration${bypassActorCountDetail(key, declared[key], live[key])}`,
+        );
+      }
     }
   }
   drifted.push(...diffRules(name, declared, live));
@@ -156,14 +155,13 @@ export const diffRulesets = (
   for (const ruleset of declared) {
     const group = liveByName.get(String(ruleset.name)) ?? [];
     const [only] = group;
-    if (group.length > 1) {
-      continue;
-    }
+    // A colliding name is reported below and compared against nothing: no live
+    // ruleset in the group can be the declared one without picking a winner.
     if (only === undefined) {
       drifted.push(
         `ruleset "${ruleset.name}" is declared but missing on GitHub`,
       );
-    } else {
+    } else if (group.length === 1) {
       const diff = diffRuleset(ruleset, only);
       drifted.push(...diff.drifted);
       unverifiable.push(...diff.unverifiable);

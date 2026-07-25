@@ -22,9 +22,13 @@ const declaredRuleset = JSON.parse(
   '{"name":"Protect main","target":"branch","enforcement":"active","conditions":{"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}},"bypass_actors":[],"rules":[{"type":"deletion"},{"type":"pull_request","parameters":{"required_approving_review_count":0,"allowed_merge_methods":["squash"]}}]}',
 ) as Record<string, unknown>;
 
-const actor = JSON.parse('{"actor_id":5,"actor_type":"RepositoryRole"}') as {
-  readonly actor_id: number;
-};
+const actor = JSON.parse(
+  '{"actor_id":5,"actor_type":"RepositoryRole"}',
+) as Readonly<Record<string, unknown>>;
+
+const otherActor = JSON.parse(
+  '{"actor_id":9,"actor_type":"RepositoryRole"}',
+) as Readonly<Record<string, unknown>>;
 
 const changedRules = JSON.parse(
   '[{"type":"pull_request","parameters":{"required_approving_review_count":1,"allowed_merge_methods":["squash"]}},{"type":"creation"}]',
@@ -49,9 +53,7 @@ describe('diffRuleset', () => {
   // themselves.
   it('omits the counts when the lists differ only in identity', () => {
     const declared = { ...declaredRuleset, [BYPASS_ACTORS_KEY]: [actor] };
-    const live = liveRuleset({
-      [BYPASS_ACTORS_KEY]: [{ ...actor, actor_id: 9 }],
-    });
+    const live = liveRuleset({ [BYPASS_ACTORS_KEY]: [otherActor] });
     expect(diffRuleset(declared, live).drifted).toEqual([
       'ruleset "Protect main": bypass_actors differs from the declared configuration',
     ]);

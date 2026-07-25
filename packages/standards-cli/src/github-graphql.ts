@@ -45,7 +45,7 @@ const queryRepository = async (
       failure: apiError('querying the GraphQL API', response),
     };
   }
-  const errors = response.body.errors;
+  const { errors } = response.body;
   if (Array.isArray(errors) && errors.length > 0) {
     return {
       repository: null,
@@ -88,15 +88,14 @@ export const fetchMergeSettingsViaGraphql = async (
   if (mapped.length === 0) {
     return {};
   }
-  const answer = await queryRepository(
+  const { repository } = await queryRepository(
     token,
     repo,
     mapped.map((key) => GRAPHQL_MERGE_FIELDS.get(key)).join(' '),
   );
-  if (answer.repository === null) {
+  if (repository === null) {
     return {};
   }
-  const repository = answer.repository;
   return Object.fromEntries(
     mapped
       .map((key) => [key, repository[GRAPHQL_MERGE_FIELDS.get(key) ?? '']])
