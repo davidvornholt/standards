@@ -57,6 +57,9 @@ describe('readFixOutcome', () => {
     ['wrong issue', 'Handles expiry.\n\nFixes #8'],
     ['an issue-number prefix', 'Handles expiry.\n\nFixes #70'],
     ['non-closing reference', 'Handles expiry; see #7.'],
+    ['inline-code reference', 'Use a footer like `Fixes #7`.'],
+    ['fenced-code reference', 'Example:\n\n```markdown\nFixes #7\n```'],
+    ['HTML-comment reference', '<!-- Fixes #7 -->'],
   ])('rejects a fixed outcome with %s', async (_name, prBody) => {
     const outcome = await readFixOutcome(
       workDirWithOutcome({

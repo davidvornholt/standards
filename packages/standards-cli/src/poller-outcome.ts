@@ -7,6 +7,7 @@ import { existsSync, rmSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isNonEmptyString, isRecord } from './github-settings-parse';
+import { hasClosingReferenceToIssue } from './poller-closing-reference';
 import {
   type FixOutcome,
   OUTCOME_FILE,
@@ -56,16 +57,6 @@ const REVIEW_STATUSES: ReadonlySet<string> = new Set([
 // Conventional Commit subject: consumers lint PR titles in CI, so a
 // malformed title is caught here instead of as a red check later.
 const PR_TITLE_PATTERN = /^[a-z]+(?:\([^)]+\))?!?: .+/u;
-const CLOSING_KEYWORD_PATTERN = String.raw`\b(?:close(?:s|d)?|fix(?:es|ed)?|resolve(?:s|d)?):?[ \t]+#`;
-
-export const hasClosingReferenceToIssue = (
-  body: string,
-  issueNumber: number,
-): boolean =>
-  new RegExp(
-    `${CLOSING_KEYWORD_PATTERN}${issueNumber}(?![0-9A-Za-z_-])`,
-    'iu',
-  ).test(body);
 
 export const readFixOutcome = async (
   workDir: string,

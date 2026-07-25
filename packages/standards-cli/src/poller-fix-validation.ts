@@ -1,7 +1,7 @@
 import { join } from 'node:path';
+import { hasClosingReferenceToIssue } from './poller-closing-reference';
 import type { SealedFixOutput } from './poller-fix-output';
 import type { JobDeps } from './poller-job-shared';
-import { hasClosingReferenceToIssue } from './poller-outcome';
 import {
   changedPathsBetween,
   commitCountBetween,
