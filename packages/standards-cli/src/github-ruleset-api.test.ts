@@ -32,8 +32,7 @@ const detail = (id: number, name: string): unknown =>
 
 const requests = (
   calls: ReadonlyArray<{ readonly path: string; readonly search: string }>,
-) =>
-  calls.map(({ path, search }) => `${path}${search}`);
+) => calls.map(({ path, search }) => `${path}${search}`);
 
 describe('fetchLiveRulesets', () => {
   // The failure T4 describes: an org page fills page one and the repository's

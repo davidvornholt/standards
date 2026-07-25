@@ -63,12 +63,18 @@ const hiddenBypassActorsProblems = (
       `The GraphQL bypass-actor count did not answer (${outcome.failure}), so this is a failed request rather than a permission gap: re-run the check, and if it keeps failing verify locally with admin auth`,
     );
   }
-  const counted = fields.filter((field) => outcome.countedNames.has(field.name));
+  const counted = fields.filter((field) =>
+    outcome.countedNames.has(field.name),
+  );
   const unanswered = fields.filter(
     (field) => !outcome.countedNames.has(field.name),
   );
   return [
-    ...unverifiableProblem(SCOPE, counted.map(fieldLabel), COUNT_MATCHED_ADVICE),
+    ...unverifiableProblem(
+      SCOPE,
+      counted.map(fieldLabel),
+      COUNT_MATCHED_ADVICE,
+    ),
     ...unverifiableProblem(
       SCOPE,
       unanswered.map(fieldLabel),
