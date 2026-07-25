@@ -54,6 +54,8 @@
     "src/creds-store-lock.ts",
     "src/dependabot-compose-input.ts",
     "src/dependabot-compose.ts",
+    "src/dependabot-directory-character-class.ts",
+    "src/dependabot-directory-normalize.ts",
     "src/dependabot-directory-overlap.ts",
     "src/dependabot-inspect.ts",
     "src/dependabot-update.ts",

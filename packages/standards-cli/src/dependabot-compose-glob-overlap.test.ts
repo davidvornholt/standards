@@ -36,14 +36,29 @@ describe('Dependabot directory glob overlap', () => {
       '    directories: ["/packages/*"]',
     ],
     [
-      'canonical recursive glob',
-      '    directories: ["/packages/**"]',
+      'canonical recursive globstar',
+      '    directories: ["/packages/**/*"]',
       '    directory: /packages/a/nested',
     ],
     [
-      'local recursive glob',
+      'local recursive globstar',
       '    directory: /packages/a/nested',
-      '    directories: ["/packages/**"]',
+      '    directories: ["/packages/**/*"]',
+    ],
+    [
+      'question mark glob',
+      '    directories: ["/packages/?"]',
+      '    directory: /packages/a',
+    ],
+    [
+      'character range glob',
+      '    directories: ["/packages/[a-c]"]',
+      '    directory: /packages/b',
+    ],
+    [
+      'negated character set glob',
+      '    directories: ["/packages/[!ab]"]',
+      '    directory: /packages/c',
     ],
   ])('rejects %s overlapping a concrete target', (_label, baseTarget, localTarget) => {
     const result = composeDependabot(
@@ -88,6 +103,73 @@ describe('Dependabot directory glob overlap', () => {
     );
     expect(result.problems).toEqual([]);
     expect(result.composed).not.toBeNull();
+  });
+});
+
+describe('Dependabot Ruby glob compatibility', () => {
+  it.each([
+    ['/packages/**', '/packages/a/nested'],
+    ['/packages/a**b', '/packages/a/x/b'],
+  ])('keeps non-recursive %s separate from %s', (glob, concrete) => {
+    const result = composeDependabot(
+      baseWithTarget(`    directories: ["${glob}"]`),
+      localWithTarget(`    directory: ${concrete}`),
+    );
+    expect(result.problems).toEqual([]);
+    expect(result.composed).not.toBeNull();
+  });
+
+  it.each([
+    ['/packages/**/nested', '/packages/nested'],
+    ['/packages/**/nested', '/packages/a/nested'],
+  ])('recognizes %s as intersecting %s', (glob, concrete) => {
+    const result = composeDependabot(
+      baseWithTarget(`    directories: ["${glob}"]`),
+      localWithTarget(`    directory: ${concrete}`),
+    );
+    expect(result.problems.join('\n')).toContain(
+      'overlaps .github/dependabot.base.yml updates[0]',
+    );
+  });
+
+  it.each([
+    ["    directories: ['/packages/\\*']", '    directory: /packages/*'],
+    [
+      "    directories: ['/packages/\\?']",
+      '    directories: ["/packages/[?]"]',
+    ],
+  ])('honors escaped metacharacters', (baseTarget, localTarget) => {
+    const result = composeDependabot(
+      baseWithTarget(baseTarget),
+      localWithTarget(localTarget),
+    );
+    expect(result.problems.join('\n')).toContain(
+      'overlaps .github/dependabot.base.yml updates[0]',
+    );
+  });
+
+  it.each([
+    [
+      '    directory: /packages/a',
+      '    directory: packages/x/../a',
+      'matches a canonical block',
+    ],
+    [
+      '    directory: /packages//a/',
+      '    directory: packages/a',
+      'matches a canonical block',
+    ],
+    [
+      '    directories: ["/packages//./*"]',
+      '    directory: packages/a/',
+      'overlaps .github/dependabot.base.yml updates[0]',
+    ],
+  ])('compares normalized target spellings', (baseTarget, localTarget, expectedProblem) => {
+    const result = composeDependabot(
+      baseWithTarget(baseTarget),
+      localWithTarget(localTarget),
+    );
+    expect(result.problems.join('\n')).toContain(expectedProblem);
   });
 
   it('does not treat wildcard characters under directory as globs', () => {
