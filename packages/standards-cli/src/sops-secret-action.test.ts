@@ -99,6 +99,7 @@ describe('fallback-eligible failures', () => {
     );
     expect(actionRun.curlCalled).toBe(scenario.failsAt !== 'setup');
     expect(actionRun.sopsExecuted).toBe(scenario.failsAt === 'resolve');
+    expect(actionRun.sopsBinaryPresent).toBe(scenario.failsAt === 'resolve');
   });
 
   it.each(rows)('fails closed in fail mode when %s', (_label, scenario) => {
@@ -115,6 +116,7 @@ describe('fallback-eligible failures', () => {
     );
     expect(actionRun.curlCalled).toBe(scenario.failsAt !== 'setup');
     expect(actionRun.sopsExecuted).toBe(scenario.failsAt === 'resolve');
+    expect(actionRun.sopsBinaryPresent).toBe(scenario.failsAt === 'resolve');
   });
 
   it.each([
@@ -152,19 +154,26 @@ describe('canonical SOPS secret action script behavior', () => {
 
 describe('caller configuration errors', () => {
   it.each([
-    ['env-name is not a valid variable name', { envName: 'GH TOKEN' }],
-    ['failure-mode is not a supported mode', { failureMode: 'warn' }],
+    [
+      'env-name is not a valid variable name',
+      { envName: 'GH TOKEN' },
+      '::error::env-name must be a valid environment variable name\n',
+    ],
+    [
+      'failure-mode is not a supported mode',
+      { ageKey: '', failureMode: 'warn' },
+      '::error::failure-mode must be either fail or fallback\n',
+    ],
   ] as ReadonlyArray<
-    readonly [string, SopsActionOptions]
-  >)('fails closed even with a usable fallback when %s', (_label, options) => {
-    const actionRun = runSopsAction({ ageKey: '', ...options });
+    readonly [string, SopsActionOptions, string]
+  >)('fails closed even with a usable fallback when %s', (_label, options, expectedError) => {
+    const actionRun = runSopsAction(options);
 
     expect(actionRun.result.status).toBe(1);
     expect(actionRun.environment).toBe('');
     expect(actionRun.output).toBe('');
-    expect(`${actionRun.result.stdout}${actionRun.result.stderr}`).toContain(
-      '::error::',
-    );
+    expect(actionRun.result.stdout).toBe(expectedError);
+    expect(actionRun.result.stderr).toBe('');
   });
 
   it('rejects an empty fallback value before the environment boundary', () => {
