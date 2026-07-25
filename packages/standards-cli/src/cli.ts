@@ -38,6 +38,10 @@ import {
   managedEntryDigestInput,
   writeManagedEntry,
 } from './managed-files';
+import {
+  symlinkedAncestor,
+  unlockedPathsUnder,
+} from './managed-path-ownership';
 import { runPollerCommand } from './poller-commands';
 import { collectStructureProblems } from './structure-check';
 import type { StructureProfile } from './structure-profile';
@@ -47,6 +51,10 @@ const DEFAULT_UPSTREAM = 'github:davidvornholt/standards';
 
 // Characters of a sha256 hex digest shown in drift reports; enough to identify.
 const HASH_PREVIEW_LENGTH = 12;
+
+// Unmanaged paths named as examples in a collision refusal, which also reports
+// the full count.
+const COLLISION_SAMPLE = 3;
 
 const GITHUB_PREFIX = 'github:';
 const SKIP_GITHUB_CHECK_ENV = 'STANDARDS_SKIP_GITHUB_CHECK';
@@ -116,22 +124,37 @@ const assertSafeRelativePath = (path: string, label: string): void => {
   }
 };
 
+// `C:/Windows` is absolute on Windows and relative to POSIX `isAbsolute`, so a
+// drive-qualified target written with forward slashes would escape a consumer
+// synced on Linux. Managed targets are POSIX-relative on every platform.
+const DRIVE_QUALIFIED = /^[A-Za-z]:/u;
+
 // A managed symlink is mirrored verbatim into every consumer, so its target
 // must resolve inside the consumer repository rather than at the host
-// filesystem around it.
-const assertSafeSymlinkTarget = (rel: string, target: string): void => {
+// filesystem around it. Returns the problem instead of throwing, so a command
+// can report every offending link before it writes anything.
+const symlinkTargetProblem = (rel: string, target: string): string | null => {
   const resolved = posix.normalize(posix.join(posix.dirname(rel), target));
   if (
     target.length === 0 ||
-    isAbsolute(target) ||
+    posix.isAbsolute(target) ||
+    DRIVE_QUALIFIED.test(target) ||
     target.includes('\\') ||
     resolved.split('/').includes('..')
   ) {
-    throw new Error(
-      `canonical symlink ${rel} must point inside the repository: ${target}`,
-    );
+    return `canonical symlink ${rel} must point inside the repository: ${target}`;
   }
+  return null;
 };
+
+const symlinkTargetProblems = (
+  entries: ReadonlyMap<string, ManagedEntry>,
+): ReadonlyArray<string> =>
+  [...entries]
+    .map(([rel, entry]) =>
+      entry.kind === 'symlink' ? symlinkTargetProblem(rel, entry.target) : null,
+    )
+    .filter((problem): problem is string => problem !== null);
 
 const parseManifest = (raw: unknown): Manifest => {
   if (typeof raw !== 'object' || raw === null) {
@@ -270,22 +293,126 @@ type MirrorResult = {
   readonly updated: ReadonlyArray<string>;
   readonly deleted: ReadonlyArray<string>;
   readonly tampered: ReadonlyArray<string>;
+  // Locked paths the prune pass deliberately left on disk, each with the reason
+  // the operator needs in order to finish the job by hand.
+  readonly retained: ReadonlyArray<string>;
 };
 
 type MirrorOptions = {
-  readonly manifest: Manifest;
-  readonly srcDir: string;
+  readonly upstream: ReadonlyMap<string, ManagedEntry>;
   readonly consumer: string;
   readonly previous: Record<string, string>;
   readonly dryRun: boolean;
+};
+
+// Everything init/sync must know before its first write: an escaping canonical
+// link target, and a destination the engine never managed that is a directory
+// full of consumer work. Both are decided from data already in hand, and both
+// are reported together so one run surfaces every offending path.
+const mirrorPreconditionProblems = async (
+  consumer: string,
+  upstream: ReadonlyMap<string, ManagedEntry>,
+  previous: Record<string, string>,
+): Promise<ReadonlyArray<string>> => {
+  const locked = new Set(Object.keys(previous));
+  const collisions = await Promise.all(
+    [...upstream.keys()].map(async (rel) => {
+      if (locked.has(rel)) {
+        return null;
+      }
+      const current = await inspectManagedPath(join(consumer, rel));
+      if (current?.kind !== 'directory') {
+        return null;
+      }
+      const unlocked = await unlockedPathsUnder(consumer, rel, locked);
+      return unlocked.length === 0
+        ? null
+        : `${rel} is a directory holding ${unlocked.length} path(s) this repository does not manage (${unlocked.slice(0, COLLISION_SAMPLE).join(', ')}); move or delete them, then re-run`;
+    }),
+  );
+  return [
+    ...symlinkTargetProblems(upstream),
+    ...collisions.filter((problem): problem is string => problem !== null),
+  ];
+};
+
+const assertNoProblems = (
+  problems: ReadonlyArray<string>,
+  headline: string,
+): void => {
+  if (problems.length > 0) {
+    throw new Error(
+      [`${headline}:`, ...problems.map((problem) => `  - ${problem}`)].join(
+        '\n',
+      ),
+    );
+  }
+};
+
+type PruneOutcome =
+  | { readonly kind: 'absent' }
+  | { readonly kind: 'delete'; readonly rel: string }
+  | { readonly kind: 'retain'; readonly note: string };
+
+// Two things the prune pass must never do: resolve through a symlink it (or an
+// older CLI's lock) put in the parent chain, and recursively delete a
+// destination the consumer turned into a directory.
+const pruneOutcome = async (
+  consumer: string,
+  rel: string,
+): Promise<PruneOutcome> => {
+  const ancestor = await symlinkedAncestor(consumer, rel);
+  if (ancestor !== null) {
+    return {
+      kind: 'retain',
+      note: `${rel}: stale lock entry below the symlink ${ancestor}; not deleting through it`,
+    };
+  }
+  const current = await inspectManagedPath(join(consumer, rel));
+  if (current === null) {
+    return { kind: 'absent' };
+  }
+  if (current.kind === 'directory') {
+    return {
+      kind: 'retain',
+      note: `${rel}: removed upstream but now a directory this repository does not manage; delete it yourself if you no longer want it`,
+    };
+  }
+  return { kind: 'delete', rel };
+};
+
+// Remove the locked paths that vanished upstream. Retained paths are reported
+// and left alone; the lock drops them either way, so the next run is clean.
+const prune = async (
+  consumer: string,
+  removable: ReadonlyArray<string>,
+  dryRun: boolean,
+): Promise<{
+  readonly deleted: ReadonlyArray<string>;
+  readonly retained: ReadonlyArray<string>;
+}> => {
+  const outcomes = await Promise.all(
+    removable.map((rel) => pruneOutcome(consumer, rel)),
+  );
+  const deleted = outcomes.flatMap((outcome) =>
+    outcome.kind === 'delete' ? [outcome.rel] : [],
+  );
+  const retained = outcomes.flatMap((outcome) =>
+    outcome.kind === 'retain' ? [outcome.note] : [],
+  );
+  if (!dryRun) {
+    await Promise.all(
+      deleted.map((rel) => rm(join(consumer, rel), { force: true })),
+    );
+  }
+  return { deleted, retained };
 };
 
 // Mirror managed files into the consumer, deleting any previously-locked file
 // that no longer exists upstream (three-way reconcile against the lock). When
 // `dryRun` is set nothing is written or deleted; the returned plan is reported.
 const mirror = async ({
-  manifest,
-  srcDir,
+  upstream,
   consumer,
   previous,
   dryRun,
@@ -293,7 +420,10 @@ const mirror = async ({
   for (const rel of Object.keys(previous)) {
     assertSafeRelativePath(rel, 'sync-standards.lock file');
   }
-  const upstream = await listManagedFiles(srcDir, manifest.paths);
+  assertNoProblems(
+    await mirrorPreconditionProblems(consumer, upstream, previous),
+    'cannot mirror canonical files',
+  );
   const next: Record<string, string> = {};
   const created: Array<string> = [];
   const updated: Array<string> = [];
@@ -301,9 +431,6 @@ const mirror = async ({
   await Promise.all(
     [...upstream].map(async ([rel, entry]) => {
       const dest = join(consumer, rel);
-      if (entry.kind === 'symlink') {
-        assertSafeSymlinkTarget(rel, entry.target);
-      }
       const hash = sha256(await managedEntryDigestInput(entry));
       const current = await inspectManagedPath(dest);
       const currentHash =
@@ -321,26 +448,24 @@ const mirror = async ({
       }
       if (!dryRun) {
         await mkdir(dirname(dest), { recursive: true });
+        // Engine-owned by the precondition above: only a path the lock already
+        // recorded can be a directory here, so replacing it restores the
+        // managed shape rather than destroying consumer work.
+        if (current?.kind === 'directory') {
+          await rm(dest, { recursive: true, force: true });
+        }
         await writeManagedEntry(dest, entry);
       }
       next[rel] = hash;
     }),
   );
-  // `existsSync` would miss a broken link, and a locked path a consumer turned
-  // into a directory still has to go.
-  const removable = Object.keys(previous).filter((rel) => !(rel in next));
-  const present = await Promise.all(
-    removable.map((rel) => inspectManagedPath(join(consumer, rel))),
+  // `existsSync` would miss a broken link, so the prune pass lstats instead.
+  const { deleted, retained } = await prune(
+    consumer,
+    Object.keys(previous).filter((rel) => !(rel in next)),
+    dryRun,
   );
-  const deleted = removable.filter((_, index) => present[index] !== null);
-  if (!dryRun) {
-    await Promise.all(
-      deleted.map((rel) =>
-        rm(join(consumer, rel), { recursive: true, force: true }),
-      ),
-    );
-  }
-  return { files: next, created, updated, deleted, tampered };
+  return { files: next, created, updated, deleted, tampered, retained };
 };
 
 // Print what a mirror did (or, for a dry run, would do). Real syncs stay quiet
@@ -356,6 +481,9 @@ const reportMirror = (result: MirrorResult, dryRun: boolean): void => {
     for (const rel of result.deleted) {
       console.log(`  would delete ${rel} (removed upstream)`);
     }
+    for (const note of result.retained) {
+      console.log(`  left in place ${note}`);
+    }
     if (result.tampered.length > 0) {
       console.log(
         `  would overwrite ${result.tampered.length} locally-modified canonical file(s): ${result.tampered.join(', ')}`,
@@ -365,6 +493,9 @@ const reportMirror = (result: MirrorResult, dryRun: boolean): void => {
   }
   for (const rel of result.deleted) {
     console.log(`  deleted ${rel} (removed upstream)`);
+  }
+  for (const note of result.retained) {
+    console.log(`  left in place ${note}`);
   }
   if (result.tampered.length > 0) {
     console.log(
@@ -404,21 +535,29 @@ const runInit = async (
 ): Promise<void> => {
   const seeds = await seedTargets(src.dir, manifest.seedDir);
   assertDisjoint(manifest.paths, [...seeds.keys()]);
+  const upstream = await listManagedFiles(src.dir, manifest.paths);
+  // Seeds are written before the mirror, so both halves of the payload must
+  // clear their preconditions here for `init` to refuse before writing anything.
+  assertNoProblems(
+    [
+      ...symlinkTargetProblems(seeds),
+      ...(await mirrorPreconditionProblems(consumer, upstream, {})),
+    ],
+    'cannot initialize from this source',
+  );
   const prospectiveDependabot = await prepareProspectiveDependabot(
-    manifest,
-    src.dir,
+    upstream,
     consumer,
     seeds.get(DEPENDABOT_LOCAL_FILE) ?? null,
   );
   await Promise.all(
     [...seeds].map(async ([rel, entry]) => {
       const dest = join(consumer, rel);
-      if (existsSync(dest)) {
+      // `existsSync` reports a broken link as absent, and seeding over one would
+      // write the seed through it into whatever the link names.
+      if ((await inspectManagedPath(dest)) !== null) {
         console.log(`  kept ${rel} (already present)`);
         return;
-      }
-      if (entry.kind === 'symlink') {
-        assertSafeSymlinkTarget(rel, entry.target);
       }
       await mkdir(dirname(dest), { recursive: true });
       await writeManagedEntry(dest, entry);
@@ -426,8 +565,7 @@ const runInit = async (
     }),
   );
   const result = await mirror({
-    manifest,
-    srcDir: src.dir,
+    upstream,
     consumer,
     previous: {},
     dryRun: false,
@@ -452,16 +590,15 @@ const runSync = async (
 ): Promise<void> => {
   const seeds = await seedTargets(src.dir, manifest.seedDir);
   assertDisjoint(manifest.paths, [...seeds.keys()]);
+  const upstream = await listManagedFiles(src.dir, manifest.paths);
   const prospectiveDependabot = await prepareProspectiveDependabot(
-    manifest,
-    src.dir,
+    upstream,
     consumer,
     null,
   );
   const lock = await readLock(consumer);
   const result = await mirror({
-    manifest,
-    srcDir: src.dir,
+    upstream,
     consumer,
     previous: lock?.files ?? {},
     dryRun,
@@ -628,12 +765,10 @@ type ProspectiveDependabot = {
 // file. For init, an existing overlay wins; otherwise the overlay seed is what
 // the command is about to install.
 const prepareProspectiveDependabot = async (
-  manifest: Manifest,
-  srcDir: string,
+  incoming: ReadonlyMap<string, ManagedEntry>,
   consumer: string,
   localSeed: ManagedEntry | null,
 ): Promise<ProspectiveDependabot> => {
-  const incoming = await listManagedFiles(srcDir, manifest.paths);
   const base = incoming.get(DEPENDABOT_BASE_FILE);
   if (base === undefined || base.kind !== 'file') {
     throw new Error(

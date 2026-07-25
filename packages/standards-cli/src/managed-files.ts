@@ -119,6 +119,10 @@ export const managedEntryDigestInput = (
   return readFile(entry.absolutePath);
 };
 
+// Plant one managed entry, replacing a file or a link that occupies the
+// destination. Never recursive: a directory at the destination is unbounded
+// consumer content, so removing it is the caller's decision to make explicitly
+// once it has proven the path was engine-owned.
 export const writeManagedEntry = async (
   dest: string,
   entry: ManagedEntry,
@@ -127,13 +131,18 @@ export const writeManagedEntry = async (
     throw new Error(`cannot mirror a directory as a managed path: ${dest}`);
   }
   const existing = await inspectManagedPath(dest);
+  if (existing?.kind === 'directory') {
+    throw new Error(
+      `refusing to replace the directory ${dest} with a managed ${entry.kind}; move or delete it first`,
+    );
+  }
   // `symlink` refuses an existing path, and writing a file through a stale link
   // would clobber that link's target instead of replacing the managed path.
   if (
     existing !== null &&
-    (entry.kind === 'symlink' || existing.kind !== 'file')
+    (entry.kind === 'symlink' || existing.kind === 'symlink')
   ) {
-    await rm(dest, { recursive: true, force: true });
+    await rm(dest, { force: true });
   }
   if (entry.kind === 'symlink') {
     await symlink(entry.target, dest);
