@@ -9,8 +9,14 @@ export type CharacterMatcher =
 
 type CharacterRange = readonly [number, number];
 
+type ClassValue = {
+  readonly escaped: boolean;
+  readonly value: number;
+};
+
 const BEFORE_SLASH = '/'.codePointAt(0) ?? 0;
 const AFTER_SLASH = BEFORE_SLASH + 1;
+const HYPHEN = '-'.codePointAt(0) ?? 0;
 const MAXIMUM_CODE_POINT = 0x10_ff_ff;
 
 const NON_SLASH_RANGES: ReadonlyArray<CharacterRange> = [
@@ -90,32 +96,43 @@ export const parseCharacterClass = (
   if (negated) {
     cursor += 1;
   }
-  const values: Array<number> = [];
-  if (characters[cursor] === ']') {
-    values.push(']'.codePointAt(0) ?? 0);
-    cursor += 1;
-  }
+  const values: Array<ClassValue> = [];
   for (
     ;
     cursor < characters.length && characters[cursor] !== ']';
     cursor += 1
   ) {
+    let escaped = false;
     if (characters[cursor] === '\\' && characters[cursor + 1] !== undefined) {
       cursor += 1;
+      escaped = true;
     }
-    values.push(characters[cursor]?.codePointAt(0) ?? 0);
+    values.push({
+      escaped,
+      value: characters[cursor]?.codePointAt(0) ?? 0,
+    });
   }
   if (characters[cursor] !== ']') {
     return null;
   }
   const ranges: Array<CharacterRange> = [];
   for (let index = 0; index < values.length; index += 1) {
-    if (index + 2 < values.length && values[index + 1] === '-'.codePointAt(0)) {
-      ranges.push([values[index] ?? 0, values[index + 2] ?? 0]);
+    const startValue = values[index]?.value ?? 0;
+    const separator = values[index + 1];
+    const endValue = values[index + 2]?.value ?? 0;
+    if (
+      index + 2 < values.length &&
+      separator?.value === HYPHEN &&
+      !separator.escaped
+    ) {
+      if (startValue <= endValue) {
+        ranges.push([startValue, endValue]);
+      } else {
+        ranges.push([startValue, startValue], [endValue, endValue]);
+      }
       index += 2;
     } else {
-      const value = values[index] ?? 0;
-      ranges.push([value, value]);
+      ranges.push([startValue, startValue]);
     }
   }
   return { end: cursor, matcher: { kind: 'class', ranges, negated } };
