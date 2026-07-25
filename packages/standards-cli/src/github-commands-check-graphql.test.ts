@@ -1,19 +1,22 @@
-// REST omits merge settings for read-only viewers and ruleset bypass actors
-// for anything short of an administrator; the check retries both over GraphQL
-// so a read-only PAT stays sufficient, and a brokered installation token stays
-// sufficient as far as the bypass-actor *count* goes — a declared non-empty
-// list still fails closed, because GraphQL withholds the identities that would
-// verify it.
+// REST omits repository merge settings for read-only viewers, so the check
+// retries the invisible keys over GraphQL and a read-only PAT stays sufficient.
+// The ruleset bypass-actor fallback that shares the same query helper is
+// covered in github-commands-check-bypass.test.ts.
+//
+// The fetch stub answers by call order, so these tests pin the exact request
+// sequence: the GraphQL retry belongs between the repository read and the
+// ruleset reads, and must happen exactly once.
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import process from 'node:process';
 import { runGithubCheck } from './github-commands';
 import {
+  type ApiCall,
   captureConsole,
   cleanup,
   createConsumer,
+  graphqlQuery,
   installApi,
-  liveRepository,
   liveRulesetSummary,
 } from './github-commands-test-support';
 
@@ -47,14 +50,29 @@ const consumer = (
   return path;
 };
 
+const RULESET_ID = 7;
+
 const restHidden = JSON.parse('{"private":false}') as unknown;
 const liveRuleset = {
-  id: 7,
+  id: RULESET_ID,
   name: 'Protect main',
   target: 'branch',
   enforcement: 'active',
   rules: [],
 };
+
+// The merge-settings retry is the second request and happens once: the
+// repository read, the GraphQL retry for the keys REST hid, then the ruleset
+// reads. Nothing declares a bypass list here, so no ruleset query follows.
+const EXPECTED_SEQUENCE = [
+  'GET /repos/owner/repo',
+  'POST /graphql',
+  'GET /repos/owner/repo/rulesets',
+  `GET /repos/owner/repo/rulesets/${String(RULESET_ID)}`,
+];
+
+const sequence = (calls: ReadonlyArray<ApiCall>): ReadonlyArray<string> =>
+  calls.map(({ method, path }) => `${method} ${path}`);
 
 describe('runGithubCheck GraphQL merge-settings fallback', () => {
   it('verifies REST-hidden merge settings over GraphQL', async () => {
@@ -70,14 +88,17 @@ describe('runGithubCheck GraphQL merge-settings fallback', () => {
     ]);
 
     expect(await runGithubCheck(consumer())).toBe(true);
-    expect(calls.map(({ method, path }) => `${method} ${path}`)).toContain(
-      'POST /graphql',
-    );
+    expect(sequence(calls)).toEqual(EXPECTED_SEQUENCE);
+    const query = graphqlQuery(calls[1]);
+    expect(query).toContain('autoMergeAllowed');
+    // The bypass-actor fallback has its own selection; asking for rulesets here
+    // would spend the one retry on the wrong question.
+    expect(query).not.toContain('bypassActors');
     expect(output.errors).toEqual([]);
   });
 
   it('reports drift surfaced by the GraphQL fallback', async () => {
-    installApi([
+    const calls = installApi([
       { body: restHidden },
       {
         body: JSON.parse(
@@ -89,88 +110,9 @@ describe('runGithubCheck GraphQL merge-settings fallback', () => {
     ]);
 
     expect(await runGithubCheck(consumer())).toBe(false);
+    expect(sequence(calls)).toEqual(EXPECTED_SEQUENCE);
     expect(output.errors.join('\n')).toContain(
       'repository setting "allow_auto_merge" is false on GitHub, declared true',
-    );
-  });
-});
-
-// REST answers a ruleset without its `bypass_actors` key for any viewer short
-// of an administrator, and for a GitHub App installation token at every
-// permission level.
-// `bypassActors(first: 1)` cross-checks the count against its own node list,
-// and the count is joined to the REST ruleset by `databaseId`. The nodes are
-// null because GraphQL withholds the identities from exactly the tokens this
-// fallback exists for.
-const bypassCounts = (totalCount: number): unknown =>
-  JSON.parse(
-    `{"data":{"repository":{"rulesets":{"nodes":[{"databaseId":7,"source":{"__typename":"Repository"},"bypassActors":{"totalCount":${String(totalCount)},"nodes":${totalCount === 0 ? '[]' : '[null]'}}}]}}}}`,
-  ) as unknown;
-
-const declaredActor = JSON.parse(
-  '{"actor_id":5,"actor_type":"RepositoryRole","bypass_mode":"always"}',
-) as Readonly<Record<string, unknown>>;
-
-describe('runGithubCheck GraphQL bypass-actor fallback', () => {
-  it('verifies a declared-empty bypass list from the GraphQL count', async () => {
-    const calls = installApi([
-      { body: liveRepository(false, true) },
-      { body: [liveRulesetSummary()] },
-      { body: liveRuleset },
-      { body: bypassCounts(0) },
-    ]);
-
-    expect(await runGithubCheck(consumer([]))).toBe(true);
-    expect(output.errors).toEqual([]);
-    const query = String(
-      (calls.at(-1)?.body as { readonly query: unknown }).query,
-    );
-    // Org-inherited rulesets are outside this declaration's authority, so the
-    // count must come from the repository's own rulesets alone.
-    expect(query).toContain('includeParents: false');
-    expect(query).toContain('bypassActors');
-  });
-
-  it('reports an undeclared bypass actor as drift, not as a visibility gap', async () => {
-    installApi([
-      { body: liveRepository(false, true) },
-      { body: [liveRulesetSummary()] },
-      { body: liveRuleset },
-      { body: bypassCounts(1) },
-    ]);
-
-    expect(await runGithubCheck(consumer([]))).toBe(false);
-    expect(output.errors.join('\n')).toContain(
-      'ruleset "Protect main": bypass_actors differs from the declared configuration',
-    );
-    expect(output.errors.join('\n')).not.toContain('not visible to this token');
-  });
-
-  it('fails closed when a declared non-empty list matches only in count', async () => {
-    installApi([
-      { body: liveRepository(false, true) },
-      { body: [liveRulesetSummary()] },
-      { body: liveRuleset },
-      { body: bypassCounts(1) },
-    ]);
-
-    expect(await runGithubCheck(consumer([declaredActor]))).toBe(false);
-    expect(output.errors.join('\n')).toContain(
-      'ruleset field(s) not visible to this token, so the gate cannot verify: ruleset "Protect main": bypass_actors',
-    );
-  });
-
-  it('fails closed when GraphQL answers nothing', async () => {
-    installApi([
-      { body: liveRepository(false, true) },
-      { body: [liveRulesetSummary()] },
-      { body: liveRuleset },
-      { status: 401, body: JSON.parse('{"message":"Bad credentials"}') },
-    ]);
-
-    expect(await runGithubCheck(consumer([]))).toBe(false);
-    expect(output.errors.join('\n')).toContain(
-      'ruleset field(s) not visible to this token, so the gate cannot verify: ruleset "Protect main": bypass_actors',
     );
   });
 });
