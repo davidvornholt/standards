@@ -1,13 +1,21 @@
-// REST omits merge settings for read-only viewers; the check retries the
-// invisible keys over GraphQL so a read-only PAT stays sufficient.
+// REST omits repository merge settings for read-only viewers, so the check
+// retries the invisible keys over GraphQL and a read-only PAT stays sufficient.
+// The ruleset bypass-actor fallback that shares the same query helper is
+// covered in github-commands-check-bypass.test.ts.
+//
+// The fetch stub answers by call order, so these tests pin the exact request
+// sequence: the GraphQL retry belongs between the repository read and the
+// ruleset reads, and must happen exactly once.
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import process from 'node:process';
 import { runGithubCheck } from './github-commands';
 import {
+  type ApiCall,
   captureConsole,
   cleanup,
   createConsumer,
+  graphqlQuery,
   installApi,
   liveRulesetSummary,
 } from './github-commands-test-support';
@@ -40,14 +48,29 @@ const consumer = (): string => {
   return path;
 };
 
+const RULESET_ID = 7;
+
 const restHidden = JSON.parse('{"private":false}') as unknown;
 const liveRuleset = {
-  id: 7,
+  id: RULESET_ID,
   name: 'Protect main',
   target: 'branch',
   enforcement: 'active',
   rules: [],
 };
+
+// The merge-settings retry is the second request and happens once: the
+// repository read, the GraphQL retry for the keys REST hid, then the ruleset
+// reads. Nothing declares a bypass list here, so no ruleset query follows.
+const EXPECTED_SEQUENCE = [
+  'GET /repos/owner/repo',
+  'POST /graphql',
+  'GET /repos/owner/repo/rulesets',
+  `GET /repos/owner/repo/rulesets/${String(RULESET_ID)}`,
+];
+
+const sequence = (calls: ReadonlyArray<ApiCall>): ReadonlyArray<string> =>
+  calls.map(({ method, path }) => `${method} ${path}`);
 
 describe('runGithubCheck GraphQL merge-settings fallback', () => {
   it('verifies REST-hidden merge settings over GraphQL', async () => {
@@ -63,14 +86,17 @@ describe('runGithubCheck GraphQL merge-settings fallback', () => {
     ]);
 
     expect(await runGithubCheck(consumer())).toBe(true);
-    expect(calls.map(({ method, path }) => `${method} ${path}`)).toContain(
-      'POST /graphql',
-    );
+    expect(sequence(calls)).toEqual(EXPECTED_SEQUENCE);
+    const query = graphqlQuery(calls[1]);
+    expect(query).toContain('autoMergeAllowed');
+    // The bypass-actor fallback has its own selection; asking for rulesets here
+    // would spend the one retry on the wrong question.
+    expect(query).not.toContain('bypassActors');
     expect(output.errors).toEqual([]);
   });
 
   it('reports drift surfaced by the GraphQL fallback', async () => {
-    installApi([
+    const calls = installApi([
       { body: restHidden },
       {
         body: JSON.parse(
@@ -82,6 +108,7 @@ describe('runGithubCheck GraphQL merge-settings fallback', () => {
     ]);
 
     expect(await runGithubCheck(consumer())).toBe(false);
+    expect(sequence(calls)).toEqual(EXPECTED_SEQUENCE);
     expect(output.errors.join('\n')).toContain(
       'repository setting "allow_auto_merge" is false on GitHub, declared true',
     );
