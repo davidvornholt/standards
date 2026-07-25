@@ -246,8 +246,12 @@ const sparseCheckoutPaths = (step: string): ReadonlyArray<string> => {
     .filter((line) => line.length > 0);
 };
 
-const canonicalWorkflowPaths = (): ReadonlyArray<string> => {
-  const syncManifest: unknown = JSON.parse(readFileSync(SYNC_MANIFEST, 'utf8'));
+const canonicalWorkflowPaths = (
+  syncManifestPath = SYNC_MANIFEST,
+): ReadonlyArray<string> => {
+  const syncManifest: unknown = JSON.parse(
+    readFileSync(syncManifestPath, 'utf8'),
+  );
   if (
     typeof syncManifest !== 'object' ||
     syncManifest === null ||
@@ -260,8 +264,73 @@ const canonicalWorkflowPaths = (): ReadonlyArray<string> => {
     (path): path is string =>
       typeof path === 'string' &&
       path.startsWith('.github/workflows/') &&
-      path.endsWith('.yml'),
+      (path.endsWith('.yml') || path.endsWith('.yaml')),
   );
+};
+
+const inspectCanonicalWorkflowRunnerBoundaries = (
+  upstream: string,
+  syncManifestPath: string,
+): {
+  readonly configurableRunnerOccurrences: number;
+  readonly fixedRunnerJobDefinitions: ReadonlyArray<{
+    readonly definition: string;
+    readonly id: string;
+  }>;
+  readonly fixedRunnerJobs: Readonly<Record<string, unknown>>;
+  readonly qualityRunner: unknown;
+  readonly workflowPaths: ReadonlyArray<string>;
+} => {
+  const workflowPaths = canonicalWorkflowPaths(syncManifestPath);
+  let configurableRunnerOccurrences = 0;
+  let qualityRunner: unknown;
+  const fixedRunnerJobs: Record<string, unknown> = {};
+  const fixedRunnerJobDefinitions: Array<{
+    readonly definition: string;
+    readonly id: string;
+  }> = [];
+  for (const workflowPath of workflowPaths) {
+    const absolutePath = join(upstream, workflowPath);
+    const workflow = readFileSync(absolutePath, 'utf8');
+    configurableRunnerOccurrences +=
+      workflow.match(/vars\.CI_RUNNER/gu)?.length ?? 0;
+    for (const [jobName, job] of Object.entries(yamlJobs(absolutePath))) {
+      const isConfigurableQuality =
+        workflowPath === '.github/workflows/standards.yml' &&
+        jobName === 'quality';
+      if (isConfigurableQuality) {
+        qualityRunner = job['runs-on'];
+      } else {
+        const id = `${workflowPath}:${jobName}`;
+        fixedRunnerJobs[id] = job['runs-on'];
+        fixedRunnerJobDefinitions.push({
+          definition: JSON.stringify(job),
+          id,
+        });
+      }
+    }
+  }
+  return {
+    configurableRunnerOccurrences,
+    fixedRunnerJobDefinitions,
+    fixedRunnerJobs,
+    qualityRunner,
+    workflowPaths,
+  };
+};
+
+const assertFixedRunnerJobsDoNotUseConfigurableRunner = (
+  jobDefinitions: ReadonlyArray<{
+    readonly definition: string;
+    readonly id: string;
+  }>,
+): void => {
+  const violation = jobDefinitions.find(({ definition }) =>
+    definition.includes('vars.CI_RUNNER'),
+  );
+  if (violation !== undefined) {
+    throw new Error(`${violation.id} must use a fixed runner`);
+  }
 };
 
 const productionWorkflowPaths = (
@@ -2078,7 +2147,16 @@ describe('canonical standards workflow Nix aggregation', () => {
 
 describe('canonical workflow runner boundaries', () => {
   it('reserves the configurable runner for Standards quality only', () => {
-    const workflowPaths = canonicalWorkflowPaths();
+    const {
+      configurableRunnerOccurrences,
+      fixedRunnerJobDefinitions,
+      fixedRunnerJobs,
+      qualityRunner,
+      workflowPaths,
+    } = inspectCanonicalWorkflowRunnerBoundaries(
+      ACTUAL_UPSTREAM,
+      SYNC_MANIFEST,
+    );
     expect(workflowPaths.toSorted()).toEqual([
       '.github/workflows/notify-pause.yml',
       '.github/workflows/pr-title.yml',
@@ -2086,27 +2164,6 @@ describe('canonical workflow runner boundaries', () => {
       '.github/workflows/standards.yml',
     ]);
 
-    let configurableRunnerOccurrences = 0;
-    let qualityRunner: unknown;
-    const fixedRunnerJobs: Record<string, unknown> = {};
-    const fixedRunnerJobDefinitions: Array<string> = [];
-    for (const workflowPath of workflowPaths) {
-      const absolutePath = join(ACTUAL_UPSTREAM, workflowPath);
-      const workflow = readFileSync(absolutePath, 'utf8');
-      configurableRunnerOccurrences +=
-        workflow.match(/vars\.CI_RUNNER/gu)?.length ?? 0;
-      for (const [jobName, job] of Object.entries(yamlJobs(absolutePath))) {
-        const isConfigurableQuality =
-          workflowPath === '.github/workflows/standards.yml' &&
-          jobName === 'quality';
-        if (isConfigurableQuality) {
-          qualityRunner = job['runs-on'];
-        } else {
-          fixedRunnerJobs[`${workflowPath}:${jobName}`] = job['runs-on'];
-          fixedRunnerJobDefinitions.push(JSON.stringify(job));
-        }
-      }
-    }
     expect(qualityRunner).toContain('vars.CI_RUNNER');
     expect(qualityRunner).toContain('ubuntu-latest');
     expect(fixedRunnerJobs).toEqual({
@@ -2119,10 +2176,50 @@ describe('canonical workflow runner boundaries', () => {
       '.github/workflows/standards.yml:nix-discovery': 'ubuntu-latest',
       '.github/workflows/standards.yml:nix': githubMatrixExpression('runner'),
     });
-    expect(fixedRunnerJobDefinitions.join('\n')).not.toContain(
-      'vars.CI_RUNNER',
-    );
+    expect(() =>
+      assertFixedRunnerJobsDoNotUseConfigurableRunner(
+        fixedRunnerJobDefinitions,
+      ),
+    ).not.toThrow();
     expect(configurableRunnerOccurrences).toBe(1);
+  });
+
+  it('rejects configurable runners in manifest-owned .yaml workflows', () => {
+    const fixture = mkTmp('canonical-yaml-runner-boundary-');
+    const manifestPath = join(fixture, 'sync-standards.json');
+    write(
+      fixture,
+      'sync-standards.json',
+      JSON.stringify({
+        paths: ['.github/workflows/additional-check.yaml'],
+      }),
+    );
+    write(
+      fixture,
+      '.github/workflows/additional-check.yaml',
+      [
+        'jobs:',
+        '  additional-check:',
+        `    runs-on: ${githubExpression("vars.CI_RUNNER || 'ubuntu-latest'")}`,
+        '',
+      ].join('\n'),
+    );
+
+    const inspection = inspectCanonicalWorkflowRunnerBoundaries(
+      fixture,
+      manifestPath,
+    );
+
+    expect(inspection.workflowPaths).toEqual([
+      '.github/workflows/additional-check.yaml',
+    ]);
+    expect(() =>
+      assertFixedRunnerJobsDoNotUseConfigurableRunner(
+        inspection.fixedRunnerJobDefinitions,
+      ),
+    ).toThrow(
+      '.github/workflows/additional-check.yaml:additional-check must use a fixed runner',
+    );
   });
 });
 
