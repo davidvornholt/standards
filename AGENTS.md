@@ -22,9 +22,10 @@ Do not build backwards compatibility by default: migrate every call site and del
 
 Before generating code, inspect the `description` frontmatter for every local skill at `.agents/skills/<name>/SKILL.md`.
 
-## Pull requests
+## Pull requests and issues
 
 - Changes land on main through squash-merged PRs. The PR title becomes the commit subject on main, so it must be a Conventional Commit subject (`<type>(scope): <imperative description>`); CI lints it. Branch commit messages carry no format requirement.
+- Open every issue and pull request description with a few sentences the decider can triage from, written to the questioning standard above: for an issue, what goes wrong in practice and what it costs to leave it alone; for a pull request, what changes about the product's behavior and why it was worth doing. Listing what the code now does is not that statement. Keep the technical evidence, file references, and verification below it, where the reader who needs them will look.
 
 ## Package management
 
