@@ -170,7 +170,7 @@ describe('Standards sync broker documentation contract', () => {
     expect(rootReadme).toContain('`bun.lock`');
     expect(rootReadme).not.toContain('current 0.12 workflow');
     expect(rootReadme).toContain(
-      'current broker-credential cutover raises the minimum again to 0.14.0',
+      'current brokered settings-verification cutover raises the minimum again to 0.18.0',
     );
   });
 });
