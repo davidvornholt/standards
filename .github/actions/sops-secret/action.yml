@@ -160,16 +160,19 @@ runs:
         fi
 
         line_break_count=$(LC_ALL=C tr -cd '\r\n' < "$value_file" | wc -c)
+        mask_value() {
+          local escaped_value=${1//'%'/'%25'}
+          escaped_value=${escaped_value//$'\r'/'%0D'}
+          printf '%s\n' "::add-mask::$escaped_value"
+        }
         if [ "$line_break_count" -eq 0 ]; then
           value=$(< "$value_file")
-          printf '%s\n' "::add-mask::$value"
+          mask_value "$value"
           printf '%s=%s\n' "$SOPS_ENV_NAME" "$value" >> "$GITHUB_ENV"
         else
           while IFS= read -r line || [ -n "$line" ]; do
             if [ -n "$line" ]; then
-              escaped_line=${line//'%'/'%25'}
-              escaped_line=${escaped_line//$'\r'/'%0D'}
-              printf '%s\n' "::add-mask::$escaped_line"
+              mask_value "$line"
             fi
           done < "$value_file"
 

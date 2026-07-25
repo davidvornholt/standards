@@ -2,13 +2,13 @@
 
 This file is the root operating contract for agents in this repository. Keep root instructions for non-negotiable constraints; put specialized workflows in `.agents/skills/*/SKILL.md`.
 
-Quality gates (lint, types, tests, a11y) are deliberately strict so agents can verify changes mechanically instead of declaring them done. Strengthen gates when you can; never weaken one to make a change pass. CI gating jobs must fail closed — a gate that errors or cannot find the run it depends on fails, never passes by default — and a deploy job must not run unless the quality gate passed for the exact commit being deployed.
+Never weaken a quality gate (lint, types, tests, a11y) to make a change pass; strengthen one when you can. CI gating jobs must fail closed — a gate that errors or cannot find the run it depends on fails, never passes by default — and a deploy job must not run unless the quality gate passed for the exact commit being deployed.
 
 Check an expensive or irreversible operation's cheap preconditions before starting it — unlike validation, which must still gather and report all errors together.
 
-Treat duplication as a design signal: when a change needs to copy configuration, environment, or logic that another component already owns, stop — the responsibility is probably misplaced. Fix the owner or move the need instead of pasting the copy; if the duplication seems forced by the architecture, surface that instead of proceeding.
+When a change needs to copy configuration, environment, or logic another component already owns, fix the owner or move the need instead of pasting the copy. If the architecture seems to force the duplication, surface that instead of proceeding.
 
-Do not build backwards compatibility by default: internal code has no external consumers, so migrate every call site and delete the old shape in the same change — no deprecated aliases, versioned copies, or compat-only optional parameters. Compatibility matters only at durable boundaries (persisted data, wire formats, deployed config/secret shapes, external consumers); when a change crosses one, surface the breakage and let the user decide.
+Do not build backwards compatibility by default: migrate every call site and delete the old shape in the same change — no deprecated aliases, versioned copies, or compat-only optional parameters. Compatibility matters only at durable boundaries (persisted data, wire formats, deployed config/secret shapes, external consumers); when a change crosses one, surface the breakage and let the user decide.
 
 ## Research first
 
@@ -32,20 +32,16 @@ Before generating code, inspect the `description` frontmatter for every local sk
 
 ## Monorepo structure
 
-- App-local code lives in `apps/*`; shared/foundational code lives in `packages/*`.
-- Put code where ownership is clearest. Keep single-app code in the owning app unless there is an intentional shared contract.
+- App-local code lives in `apps/*`; shared/foundational code lives in `packages/*`. Keep single-app code in the owning app unless there is an intentional shared contract.
 - Package names must use the real project alias: `@<actual-project-name>/<package-name>`. Canonical packages synced from the template repo use the `@davidvornholt` scope instead; do not edit them locally — changes go to the template.
 - Use package aliases for workspace imports. Never import another package through relative paths.
-- Do not add `index.ts` barrel files in apps, features, shared folders, or packages.
+- Do not add `index.ts` barrel files.
 
 ## Architecture boundaries
 
 - Entrypoints route, parse initial inputs, wire Effect layers, and bridge to runtime/UI.
-- Business logic belongs in app-local `src/features/*` or intentional shared packages.
-- App-local shared infrastructure belongs in `src/shared/*`.
-- Dependency flow is one-way: `entrypoint -> features -> shared -> packages`.
-- Features may depend on `src/shared/*` and packages, but not sibling features.
-- `src/shared/*` must not import from `src/features/*`; `packages/*` must not import from `apps/*`.
+- Business logic belongs in app-local `src/features/*` or intentional shared packages; app-local shared infrastructure belongs in `src/shared/*`.
+- Dependency flow is one-way: `entrypoint -> features -> shared -> packages`. Features must not import sibling features.
 - Prefer colocated tests next to the files they protect.
 - A file genuinely clearer as a single boundary file — static data, generated-style schema/config, broad test/config coverage — may exceed the 200-line lint limit via a scoped `biome.jsonc` override plus an entry in `docs/quality/no-excessive-lines-per-file-exceptions.md`.
 
@@ -56,18 +52,17 @@ Before generating code, inspect the `description` frontmatter for every local sk
 
 ## Workspace scripts
 
-- Operational scripts belong to the owning workspace. Put the real command in that workspace's `package.json`, and keep root scripts minimal: the quality gates plus narrowly useful filtered Turbo convenience aliases.
+- Operational scripts belong to the owning workspace's `package.json`. Keep root scripts minimal: the quality gates plus narrowly useful filtered Turbo convenience aliases.
 - Operator workflows that span the repo rather than one workspace — secrets management, derived dev env generation — live in the canonical root `justfile`. Repo-specific recipes and modules belong in a repo-owned `local.just`, which the canonical justfile imports when present.
 
 ## Linting
 
-- Fix lint findings in the code. Never resolve them by downgrading or disabling rules globally, and never add an inline Biome suppression without a stated reason.
-- Per-file overrides are the escape hatch of last resort: scope them to the narrowest paths and the specific rule that genuinely cannot apply.
+- Fix lint findings in the code, never by downgrading or disabling rules globally, and never with an inline Biome suppression that lacks a stated reason.
+- Per-file overrides are the escape hatch of last resort: narrowest path, specific rule that genuinely cannot apply.
 
 ## Configuration and secrets
 
-- Secret values live only in SOPS-encrypted YAML targets.
-- Non-secret configuration lives in plain config next to its consumer. A value is secret if leaking it enables impersonation, data access, or cost; otherwise it is configuration.
+- Secret values live only in SOPS-encrypted YAML targets. A value is secret if leaking it enables impersonation, data access, or cost; otherwise it is configuration and lives in plain config next to its consumer.
 - Each workspace under `apps/*` or `packages/*` maintains a `README.md` documenting every configuration value and secret it consumes — requiredness, behavior, defaults. Mirror the secret shape in the matching `*.example.yaml` (`secrets/dev.example.yaml`, `secrets/ci.example.yaml`, `infra/hosts/<host>/secrets.example.yaml`).
 - Dev secrets in `secrets/dev.yaml` are keyed by workspace (`apps.<name>`, `packages.<name>`); `just dev-env-generate` derives each workspace's generated `.env.local` from them. Never edit generated env files by hand.
 - Provider credentials (Cloudflare API tokens, GitHub automation credentials) are minted with `bun standards creds`, which writes values directly into SOPS targets — do not ask the operator to create tokens in provider dashboards for needs the broker covers; see the declarative-infra skill's secrets reference.
@@ -78,31 +73,27 @@ Before generating code, inspect the `description` frontmatter for every local sk
 - Prefer inline exports, such as `export const value = ...`. Default exports are allowed only where framework conventions require them (Next.js `page.tsx`, `layout.tsx`, `loading.tsx`, `error.tsx`, `route.ts`), via a scoped lint override.
 - Use `kebab-case` file and folder names.
 - Prefer `readonly`, `ReadonlyArray<T>`, and arrow functions assigned to `const`. `function*` is allowed for Effect generators.
-- Mark a property or parameter optional (`?`) only when a real call site omits it or its default is actually exercised. Do not add `?` defensively or for backwards compatibility.
+- Mark a property or parameter optional (`?`) only when a real call site omits it or its default is actually exercised; never defensively.
 
 ## Effect standards
 
-- Use Effect for application logic, async work, recoverable errors, and validation.
-- Do not `throw` for expected failures; return typed Effect errors.
-- Recoverable Effect errors must be specific `Data.TaggedError` classes with stable `_tag` values and actionable `message` fields.
-- Internal logic should not use `async/await`; use `Effect.gen`.
-- Prefer Effect combinators for Effectful branching when they make control flow clearer.
+- Required for async work, concurrency, retries, timeouts, resource acquisition, cancellation, and injected dependencies; at service boundaries the error and requirement channels are the contract.
+- Not required for total synchronous logic or UI components, which stay plain and consume Effect at the boundary.
+- Never `throw` for expected failures; return typed Effect errors. Recoverable errors are `Data.TaggedError` classes with stable `_tag` values and actionable `message` fields.
+- A workspace may opt out wholesale only for a stated architectural reason recorded in `AGENTS.local.md`; do not mix idioms inside one workspace.
 
 ## Writing style
 
-- Use sentence case where sensible for reader-facing text, including UI text, button labels, command-style actions, and Markdown headings, while preserving proper nouns, acronyms, filenames, package names, and domain terms.
+- Use sentence case for reader-facing text — UI copy, labels, command-style actions, Markdown headings — preserving proper nouns, acronyms, filenames, package names, and domain terms.
 - Prefer self-documenting code; comment only non-obvious intent.
 - Do not hard-wrap Markdown prose; keep each paragraph or list item on one logical line.
 
 ## Testing
 
-- UI/page wiring should have a small, meaningful test surface when logic, state, error, or empty-state behavior changes.
-- Prefer tests that protect behavior, state transitions, data contracts, accessibility-relevant states, and regression-prone cases.
+- Test behavior, state transitions, data contracts, accessibility-relevant states, and regression-prone cases — including UI/page wiring when its logic, state, error, or empty-state behavior changes.
 - Do not add tests that only pin trivial copy, labels, static literals, or states the type system already makes unrepresentable.
 
 ## Definition of done
-
-Use this as a feedback loop.
 
 1. Add or update tests for behavior you changed.
 2. Search for stale references to changed concepts, names, paths, configuration, secrets, commands, public APIs, error types, or architectural patterns. Update docs and SOPS secret examples when needed.
