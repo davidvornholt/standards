@@ -1,6 +1,7 @@
 // Drift comparison between declared GitHub settings (github-settings.ts) and
 // the live state returned by the GitHub API. Pure logic; no network.
 
+import { BYPASS_ACTORS_KEY } from './github-bypass-actors';
 import { isRecord } from './github-settings-parse';
 
 export type SettingsDiff = {
@@ -45,7 +46,7 @@ const RULESET_COMPARED_KEYS = [
   'target',
   'enforcement',
   'conditions',
-  'bypass_actors',
+  BYPASS_ACTORS_KEY,
 ] as const;
 
 const diffRules = (

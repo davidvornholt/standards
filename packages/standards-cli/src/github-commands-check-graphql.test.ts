@@ -1,5 +1,6 @@
-// REST omits merge settings for read-only viewers; the check retries the
-// invisible keys over GraphQL so a read-only PAT stays sufficient.
+// REST omits merge settings for read-only viewers and ruleset bypass actors
+// for anything short of an administrator; the check retries both over GraphQL
+// so a read-only PAT and a brokered installation token stay sufficient.
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import process from 'node:process';
@@ -9,6 +10,7 @@ import {
   cleanup,
   createConsumer,
   installApi,
+  liveRepository,
   liveRulesetSummary,
 } from './github-commands-test-support';
 
@@ -34,8 +36,10 @@ afterEach(() => {
   process.env.GITHUB_TOKEN = originalGithubToken;
 });
 
-const consumer = (): string => {
-  const path = createConsumer({ optOut: false });
+const consumer = (
+  bypassActors?: ReadonlyArray<Readonly<Record<string, unknown>>>,
+): string => {
+  const path = createConsumer({ bypassActors, optOut: false });
   temporaryPaths.push(path);
   return path;
 };
@@ -84,6 +88,82 @@ describe('runGithubCheck GraphQL merge-settings fallback', () => {
     expect(await runGithubCheck(consumer())).toBe(false);
     expect(output.errors.join('\n')).toContain(
       'repository setting "allow_auto_merge" is false on GitHub, declared true',
+    );
+  });
+});
+
+// REST answers a ruleset without its `bypass_actors` key for any viewer short
+// of an administrator, and for a GitHub App installation token at every
+// permission level.
+const bypassCounts = (totalCount: number): unknown =>
+  JSON.parse(
+    `{"data":{"repository":{"rulesets":{"nodes":[{"name":"Protect main","source":{"__typename":"Repository"},"bypassActors":{"totalCount":${String(totalCount)}}}]}}}}`,
+  ) as unknown;
+
+const declaredActor = JSON.parse(
+  '{"actor_id":5,"actor_type":"RepositoryRole","bypass_mode":"always"}',
+) as Readonly<Record<string, unknown>>;
+
+describe('runGithubCheck GraphQL bypass-actor fallback', () => {
+  it('verifies a declared-empty bypass list from the GraphQL count', async () => {
+    const calls = installApi([
+      { body: liveRepository(false, true) },
+      { body: [liveRulesetSummary()] },
+      { body: liveRuleset },
+      { body: bypassCounts(0) },
+    ]);
+
+    expect(await runGithubCheck(consumer([]))).toBe(true);
+    expect(output.errors).toEqual([]);
+    const query = String(
+      (calls.at(-1)?.body as { readonly query: unknown }).query,
+    );
+    // Org-inherited rulesets are outside this declaration's authority, so the
+    // count must come from the repository's own rulesets alone.
+    expect(query).toContain('includeParents: false');
+    expect(query).toContain('bypassActors');
+  });
+
+  it('reports an undeclared bypass actor as drift, not as a visibility gap', async () => {
+    installApi([
+      { body: liveRepository(false, true) },
+      { body: [liveRulesetSummary()] },
+      { body: liveRuleset },
+      { body: bypassCounts(1) },
+    ]);
+
+    expect(await runGithubCheck(consumer([]))).toBe(false);
+    expect(output.errors.join('\n')).toContain(
+      'ruleset "Protect main": bypass_actors differs from the declared configuration',
+    );
+    expect(output.errors.join('\n')).not.toContain('not visible to this token');
+  });
+
+  it('fails closed when a declared non-empty list matches only in count', async () => {
+    installApi([
+      { body: liveRepository(false, true) },
+      { body: [liveRulesetSummary()] },
+      { body: liveRuleset },
+      { body: bypassCounts(1) },
+    ]);
+
+    expect(await runGithubCheck(consumer([declaredActor]))).toBe(false);
+    expect(output.errors.join('\n')).toContain(
+      'ruleset field(s) not visible to this token, so the gate cannot verify: ruleset "Protect main": bypass_actors',
+    );
+  });
+
+  it('fails closed when GraphQL answers nothing', async () => {
+    installApi([
+      { body: liveRepository(false, true) },
+      { body: [liveRulesetSummary()] },
+      { body: liveRuleset },
+      { status: 401, body: JSON.parse('{"message":"Bad credentials"}') },
+    ]);
+
+    expect(await runGithubCheck(consumer([]))).toBe(false);
+    expect(output.errors.join('\n')).toContain(
+      'ruleset field(s) not visible to this token, so the gate cannot verify: ruleset "Protect main": bypass_actors',
     );
   });
 });

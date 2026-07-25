@@ -296,6 +296,7 @@
         "packages/standards-cli/src/dev-env-document.test.ts",
         "packages/standards-cli/src/dev-env-dotenv.test.ts",
         "packages/standards-cli/src/dev-env.test.ts",
+        "packages/standards-cli/src/github-bypass-actors.test.ts",
         "packages/standards-cli/src/github-diff.test.ts",
         "packages/standards-cli/src/github-settings.test.ts",
         "packages/standards-cli/src/poller-tick.test.ts",

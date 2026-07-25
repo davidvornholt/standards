@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { HTTP_OK } from './github-api';
+import { BYPASS_ACTORS_KEY } from './github-bypass-actors';
 
 export const OPT_OUT_NOTICE =
   'standards github: rulesets are declared unenforceable on this GitHub plan (.github/settings.local.json "rulesetEnforcement"); the default branch is NOT protected, and plan-gated repository settings ("allow_auto_merge") are skipped. After upgrading the plan, remove the declaration, then run `bun standards github --apply`.';
@@ -16,6 +17,7 @@ const canonical = JSON.parse(
 
 export const createConsumer = (
   options: {
+    readonly bypassActors?: ReadonlyArray<Readonly<Record<string, unknown>>>;
     readonly labels?: ReadonlyArray<{
       readonly color: string;
       readonly description: string;
@@ -27,9 +29,16 @@ export const createConsumer = (
 ): string => {
   const consumer = mkdtempSync(join(tmpdir(), 'github-commands-'));
   mkdirSync(join(consumer, '.github'));
+  const rulesets = (
+    canonical.rulesets as ReadonlyArray<Readonly<Record<string, unknown>>>
+  ).map((ruleset) =>
+    options.bypassActors === undefined
+      ? ruleset
+      : { ...ruleset, [BYPASS_ACTORS_KEY]: options.bypassActors },
+  );
   writeFileSync(
     join(consumer, '.github/settings.json'),
-    JSON.stringify({ ...canonical, labels: options.labels ?? [] }),
+    JSON.stringify({ ...canonical, rulesets, labels: options.labels ?? [] }),
   );
   writeFileSync(
     join(consumer, '.github/settings.local.json'),

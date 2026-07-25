@@ -5,7 +5,6 @@
 import {
   apiError,
   fetchLiveRulesets,
-  fetchMergeSettingsViaGraphql,
   HTTP_FORBIDDEN,
   HTTP_OK,
   HTTP_UNAUTHORIZED,
@@ -14,11 +13,19 @@ import {
   resolveToken,
 } from './github-api';
 import {
+  isHiddenBypassActorsProblem,
+  resolveHiddenBypassActors,
+} from './github-bypass-actors';
+import {
   enforceableRepositorySettings,
   optOutEligibilityProblem,
   unverifiableProblem,
 } from './github-command-shared';
 import { diffRepositorySettings, diffRulesets } from './github-diff';
+import {
+  fetchBypassActorCountsViaGraphql,
+  fetchMergeSettingsViaGraphql,
+} from './github-graphql';
 import { diffLabels, fetchLiveLabels } from './github-labels';
 import { GithubListResponseError } from './github-paginate';
 import { type GithubSettings, isRecord } from './github-settings-parse';
@@ -90,9 +97,26 @@ const rulesetDrift = async (
     return [live.problem ?? 'unable to read rulesets'];
   }
   const diff = diffRulesets(declared.rulesets, live.rulesets);
+  if (!diff.unverifiable.some(isHiddenBypassActorsProblem)) {
+    return [
+      ...diff.drifted,
+      ...unverifiableProblem('ruleset field(s)', diff.unverifiable),
+    ];
+  }
+  // REST hides bypass actors from every non-admin token and from installation
+  // tokens outright; retry the hidden lists as GraphQL counts before failing
+  // the gate.
+  const rediff = diffRulesets(
+    declared.rulesets,
+    resolveHiddenBypassActors(
+      declared.rulesets,
+      live.rulesets,
+      await fetchBypassActorCountsViaGraphql(token, repo),
+    ),
+  );
   return [
-    ...diff.drifted,
-    ...unverifiableProblem('ruleset field(s)', diff.unverifiable),
+    ...rediff.drifted,
+    ...unverifiableProblem('ruleset field(s)', rediff.unverifiable),
   ];
 };
 
