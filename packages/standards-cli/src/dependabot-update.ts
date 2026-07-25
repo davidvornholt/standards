@@ -1,3 +1,8 @@
+import {
+  isDependabotGlob,
+  normalizeDependabotDirectory,
+} from './dependabot-directory-normalize';
+import { directoriesOverlap } from './dependabot-directory-overlap';
 import { isNonEmptyString, isRecord } from './github-settings-parse';
 
 export type UpdateBlock = Record<string, unknown>;
@@ -6,6 +11,8 @@ export type UpdateTarget = {
   readonly ecosystem: string;
   readonly targetBranch: string | null;
   readonly directories: ReadonlyArray<string>;
+  readonly normalizedDirectories: ReadonlyArray<string>;
+  readonly globDirectories: ReadonlySet<string>;
 };
 
 const listOfNonEmptyStrings = (
@@ -72,6 +79,7 @@ export const updateTarget = (
   block: UpdateBlock,
   label: string,
   problems: Array<string>,
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Target validation deliberately gathers every independent configuration problem.
 ): UpdateTarget | null => {
   const ecosystem = block['package-ecosystem'];
   if (!isNonEmptyString(ecosystem)) {
@@ -103,6 +111,9 @@ export const updateTarget = (
     ? [directory as string]
     : (directories as ReadonlyArray<string>);
   const normalized = [...new Set(rawDirectories)].sort();
+  const normalizedDirectories = [
+    ...new Set(normalized.map(normalizeDependabotDirectory)),
+  ].sort();
   if (
     !hasDirectory &&
     Array.isArray(directories) &&
@@ -120,6 +131,10 @@ export const updateTarget = (
     ecosystem,
     targetBranch: targetBranch ?? null,
     directories: normalized,
+    normalizedDirectories,
+    globDirectories: new Set(
+      hasDirectories ? normalizedDirectories.filter(isDependabotGlob) : [],
+    ),
   };
 };
 
@@ -135,9 +150,13 @@ export const sameUpdateTarget = (
   right: UpdateTarget,
 ): boolean =>
   sameUpdateScope(left, right) &&
-  left.directories.length === right.directories.length &&
-  left.directories.every(
-    (directory, index) => directory === right.directories[index],
+  left.normalizedDirectories.length === right.normalizedDirectories.length &&
+  left.normalizedDirectories.every(
+    (directory, index) => directory === right.normalizedDirectories[index],
+  ) &&
+  left.globDirectories.size === right.globDirectories.size &&
+  [...left.globDirectories].every((directory) =>
+    right.globDirectories.has(directory),
   );
 
 export const overlapsUpdateTarget = (
@@ -145,7 +164,16 @@ export const overlapsUpdateTarget = (
   right: UpdateTarget,
 ): boolean =>
   sameUpdateScope(left, right) &&
-  left.directories.some((directory) => right.directories.includes(directory));
+  left.normalizedDirectories.some((leftDirectory) =>
+    right.normalizedDirectories.some((rightDirectory) =>
+      directoriesOverlap(
+        leftDirectory,
+        left.globDirectories.has(leftDirectory),
+        rightDirectory,
+        right.globDirectories.has(rightDirectory),
+      ),
+    ),
+  );
 
 export const updateTargetDescription = (target: UpdateTarget): string => {
   const branch =
