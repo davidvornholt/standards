@@ -35,7 +35,7 @@ import {
 import { type GithubSettings, isRecord } from './github-settings-parse';
 
 const LABEL_VISIBILITY_PROBLEM =
-  'declared labels not visible to this token, so the gate cannot verify them. In CI, use a valid ci.github_settings_read_token from secrets/ci.yaml with read-only "Issues" access (or "Pull requests" read); locally use a token with one of those permissions';
+  'declared labels not visible to this token, so the gate cannot verify them. In CI, mint a broker installation token from ci.broker_app in secrets/ci.yaml with read-only "Issues" access (or "Pull requests" read); locally use a token with one of those permissions';
 const PERMISSION_DENIAL_MESSAGES: ReadonlySet<string> = new Set([
   'Resource not accessible by integration',
   'Resource not accessible by personal access token',

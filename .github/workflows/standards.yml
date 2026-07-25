@@ -177,10 +177,13 @@ jobs:
       - name: Build Nix check
         run: nix build ".#checks.${{ matrix.system }}.standards-cli" -L
 
-  # The settings-read PAT is isolated from all repository-controlled executable
-  # code. The checkout contains only declarative settings inputs and the
-  # encrypted token source; the CLI is a published, checksum-pinned artifact
-  # installed under RUNNER_TEMP from direct, checksum-pinned release URLs.
+  # The settings-read identity is a short-lived broker installation token, so no
+  # durable settings-capable credential exists to leak. The checkout carries the
+  # declarative settings inputs, the encrypted broker App identity, and the
+  # canonical SOPS resolver, and nothing else; the CLI that consumes the token is
+  # a published, checksum-pinned artifact installed under RUNNER_TEMP from
+  # direct, checksum-pinned release URLs, and the App identity is unset before it
+  # runs.
   github-settings:
     runs-on: ubuntu-latest
     permissions:
@@ -192,6 +195,7 @@ jobs:
         with:
           persist-credentials: false
           sparse-checkout: |
+            .github/actions/sops-secret/action.yml
             .github/settings.json
             .github/settings.local.json
             secrets/ci.yaml
@@ -234,45 +238,61 @@ jobs:
           echo "$yaml_sha  $yaml_archive" | sha512sum --check --quiet
           tar -xzf "$yaml_archive" -C "$cli_root/node_modules/yaml" --strip-components=1
 
-      # GitHub hides ruleset bypass actors from the workflow token, so this
-      # resolves a repository-scoped fine-grained PAT with read-only
-      # Administration and Issues access. Missing secret state deliberately
-      # falls back to the workflow token, which can read labels but still fails
-      # closed on settings hidden without Administration access.
+      # Fallback mode rather than fail: a repo that has not provisioned the
+      # broker App yet still runs the gate on the workflow token. The sentinel
+      # only satisfies the resolver's non-empty contract; `used-fallback` is what
+      # the mint step reads, so an unresolved identity never reaches minting.
+      - name: Resolve broker App id
+        id: broker-app-id
+        uses: ./.github/actions/sops-secret
+        with:
+          age-key: ${{ secrets.SOPS_AGE_KEY }}
+          secret-file: secrets/ci.yaml
+          secret-key: broker_app.app_id
+          env-name: BROKER_APP_ID
+          failure-mode: fallback
+          fallback-value: unresolved
+
+      - name: Resolve broker App private key
+        id: broker-private-key
+        uses: ./.github/actions/sops-secret
+        with:
+          age-key: ${{ secrets.SOPS_AGE_KEY }}
+          secret-file: secrets/ci.yaml
+          secret-key: broker_app.private_key
+          env-name: BROKER_APP_PRIVATE_KEY
+          failure-mode: fallback
+          fallback-value: unresolved
+
+      # GitHub hides ruleset bypass actors from tokens without Administration
+      # access, so the gate reads through a broker installation token scoped to
+      # this repository and expiring in an hour. Minting fails the job: a
+      # resolved App identity that cannot produce a token is a broken
+      # configuration, not a repo that never had one.
+      - name: Mint a settings-read token
+        id: broker-token
+        if: steps.broker-app-id.outputs.used-fallback == 'false' && steps.broker-private-key.outputs.used-fallback == 'false'
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ env.BROKER_APP_ID }}
+          private-key: ${{ env.BROKER_APP_PRIVATE_KEY }}
+          permission-administration: read
+          permission-issues: read
+
+      # Missing broker state deliberately falls back to the workflow token,
+      # which can read labels but still fails closed on settings hidden without
+      # Administration access.
       - name: Check GitHub settings
         env:
+          BROKER_TOKEN: ${{ steps.broker-token.outputs.token }}
           FALLBACK_TOKEN: ${{ github.token }}
-          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
         run: |
           set -euo pipefail
-          value="$FALLBACK_TOKEN"
-          used_fallback=true
-
-          if [ -n "$SOPS_AGE_KEY" ] && [ -f secrets/ci.yaml ]; then
-            sops_version=v3.13.2
-            case "$(uname -m)" in
-              x86_64) arch=amd64; sops_sha=154dfe4cd70554bdd82b98e4cd4acf191d43d01ead6f00a73477aa44c4ac42ef ;;
-              aarch64) arch=arm64; sops_sha=78abf2e15c86250a1553ae6f53aba96be6b2a8126f160b1534959add3467ad76 ;;
-              *)
-                echo "::error::No pinned SOPS binary for runner architecture $(uname -m)"
-                exit 1
-                ;;
-            esac
-            sops="$RUNNER_TEMP/sops"
-            curl -sfLo "$sops" "https://github.com/getsops/sops/releases/download/${sops_version}/sops-${sops_version}.linux.${arch}"
-            echo "$sops_sha  $sops" | sha256sum --check --quiet
-            chmod +x "$sops"
-            if extracted=$("$sops" decrypt --extract '["ci"]["github_settings_read_token"]' secrets/ci.yaml) \
-              && [ -n "$extracted" ] \
-              && [[ "$extracted" != *$'\n'* ]] \
-              && [[ "$extracted" != *$'\r'* ]]; then
-              value="$extracted"
-              used_fallback=false
-            else
-              echo "::warning::ci.github_settings_read_token is not a readable non-empty single-line string in secrets/ci.yaml; using the workflow token"
-            fi
-          else
-            echo "::warning::SOPS_AGE_KEY or secrets/ci.yaml is unavailable; using the workflow token"
+          value="$BROKER_TOKEN"
+          if [ -z "$value" ]; then
+            value="$FALLBACK_TOKEN"
+            echo "::warning::No broker installation token was minted; using the workflow token"
+            echo "ci.broker_app is not resolvable from secrets/ci.yaml; the GitHub settings gate will fail on settings the workflow token cannot see."
           fi
 
           if [ -z "$value" ] || [[ "$value" == *$'\n'* ]] || [[ "$value" == *$'\r'* ]]; then
@@ -280,10 +300,7 @@ jobs:
             exit 1
           fi
           echo "::add-mask::$value"
-          if [ "$used_fallback" = true ]; then
-            echo "ci.github_settings_read_token is not readable from secrets/ci.yaml; the GitHub settings gate will fail on settings the workflow token cannot see."
-          fi
-          unset SOPS_AGE_KEY FALLBACK_TOKEN
+          unset BROKER_APP_ID BROKER_APP_PRIVATE_KEY BROKER_TOKEN FALLBACK_TOKEN
           cd "$RUNNER_TEMP/standards-cli"
           GH_TOKEN="$value" "$RUNNER_TEMP/standards-bin/bun" \
             package/src/cli.ts github --check --dir "$GITHUB_WORKSPACE"

@@ -19,6 +19,7 @@ export const MANIFEST_STATE_BYTES = 32;
 // settings-page change on the existing App, not a default to grow into.
 const DEFAULT_PERMISSIONS = {
   actions: 'read',
+  administration: 'read',
   contents: 'write',
   issues: 'write',
   metadata: 'read',

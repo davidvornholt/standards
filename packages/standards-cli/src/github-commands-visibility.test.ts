@@ -81,7 +81,7 @@ describe('runGithubCheck fail-closed visibility', () => {
     expect(calls.map(({ path }) => path)).toEqual(['/repos/owner/repo/labels']);
     const errors = output.errors.join('\n');
     expect(errors).toContain('declared labels not visible to this token');
-    expect(errors).toContain('ci.github_settings_read_token');
+    expect(errors).toContain('ci.broker_app in secrets/ci.yaml');
     expect(errors).toContain('read-only "Issues" access');
     expect(errors).toContain('"Pull requests" read');
     expect(errors).not.toContain('GitHub API unreachable');
@@ -140,7 +140,7 @@ describe('runGithubCheck fail-closed visibility', () => {
     expect(errors).toContain(
       'repository setting(s) not visible to this token, so the gate cannot verify: allow_auto_merge; allow_merge_commit; allow_rebase_merge; allow_squash_merge; delete_branch_on_merge',
     );
-    expect(errors).toContain('ci.github_settings_read_token');
+    expect(errors).toContain('ci.broker_app in secrets/ci.yaml');
   });
 
   it('fails when a declared ruleset field is invisible to the token', async () => {
