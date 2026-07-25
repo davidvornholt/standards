@@ -67,7 +67,10 @@ export const createConsumer = (
 
 export type ApiCall = {
   readonly method: string;
+  // Without the query string, so a sequence assertion reads as a list of
+  // endpoints. `search` carries the pagination cursor for callers that need it.
   readonly path: string;
+  readonly search: string;
   readonly body: unknown;
 };
 
@@ -118,9 +121,11 @@ export const installApi = (
       return Promise.reject(new Error('unexpected GitHub API request'));
     }
     const rawBody = typeof init?.body === 'string' ? init.body : null;
+    const url = new URL(String(input));
     calls.push({
       method: init?.method ?? 'GET',
-      path: new URL(String(input)).pathname,
+      path: url.pathname,
+      search: url.search,
       body: rawBody === null ? null : (JSON.parse(rawBody) as unknown),
     });
     return Promise.resolve(

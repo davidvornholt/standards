@@ -46,7 +46,7 @@ describe('runGithubCheck', () => {
 
     expect(await runGithubCheck(consumer())).toBe(true);
     expect(calls).toEqual([
-      { method: 'GET', path: '/repos/owner/repo', body: null },
+      { method: 'GET', path: '/repos/owner/repo', search: '', body: null },
     ]);
     expect(output.logs).toEqual([
       OPT_OUT_NOTICE,
@@ -60,7 +60,7 @@ describe('runGithubCheck', () => {
 
     expect(await runGithubCheck(consumer())).toBe(false);
     expect(calls).toEqual([
-      { method: 'GET', path: '/repos/owner/repo', body: null },
+      { method: 'GET', path: '/repos/owner/repo', search: '', body: null },
     ]);
     expect(output.logs).toEqual([OPT_OUT_NOTICE]);
     expect(output.errors.join('\n')).toContain(
