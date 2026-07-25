@@ -30,7 +30,9 @@ const detail = (id: number, name: string): unknown =>
     `{"id":${String(id)},"name":"${name}","target":"branch","enforcement":"active","rules":[]}`,
   );
 
-const requests = (calls: ReadonlyArray<{ path: string; search: string }>) =>
+const requests = (
+  calls: ReadonlyArray<{ readonly path: string; readonly search: string }>,
+) =>
   calls.map(({ path, search }) => `${path}${search}`);
 
 describe('fetchLiveRulesets', () => {

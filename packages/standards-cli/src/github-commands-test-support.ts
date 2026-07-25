@@ -75,12 +75,13 @@ export type ApiCall = {
 };
 
 // Reading `.query` straight off a captured body throws a bare TypeError when
-// the call carried none, which hides which request actually went out. Reporting
-// the whole call instead keeps the assertion readable.
+// the call carried none, and stringifying a missing key yields the literal
+// "undefined"; both hide which request actually went out. Reporting the whole
+// call instead keeps the assertion readable.
 export const graphqlQuery = (call: ApiCall | undefined): string =>
-  isRecord(call?.body)
-    ? String(call.body.query)
-    : `no GraphQL request body in ${JSON.stringify(call)}`;
+  isRecord(call?.body) && typeof call.body.query === 'string'
+    ? call.body.query
+    : `no GraphQL query in ${JSON.stringify(call)}`;
 
 export const liveRepository = (
   isPrivate: boolean,

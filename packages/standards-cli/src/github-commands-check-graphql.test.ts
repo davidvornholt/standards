@@ -42,10 +42,8 @@ afterEach(() => {
   process.env.GITHUB_TOKEN = originalGithubToken;
 });
 
-const consumer = (
-  bypassActors?: ReadonlyArray<Readonly<Record<string, unknown>>>,
-): string => {
-  const path = createConsumer({ bypassActors, optOut: false });
+const consumer = (): string => {
+  const path = createConsumer({ optOut: false });
   temporaryPaths.push(path);
   return path;
 };
