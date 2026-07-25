@@ -68,7 +68,7 @@ it('releases a failed sealed fix publication for the next tick', async () => {
     issueNumber: ISSUE_NUMBER,
     approvalId: binding.id,
     title: 'fix(poller): recover output',
-    body: `Recovered.\n\nFixes #${ISSUE_NUMBER}`,
+    body: `Use \`<!--\` literally.\n\nFixes #${ISSUE_NUMBER}`,
     baseSha: fixture.baseSha,
     commits: 1,
   });
