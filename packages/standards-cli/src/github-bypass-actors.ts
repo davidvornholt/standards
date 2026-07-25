@@ -2,12 +2,7 @@
 // answers for tokens that cannot read the actors themselves. Pure logic; the
 // GraphQL call lives in github-graphql.ts.
 
-export const BYPASS_ACTORS_KEY = 'bypass_actors';
-
-// Tells a hidden bypass-actor list apart from any other invisible ruleset
-// field, so callers can retry only that one over GraphQL.
-export const isHiddenBypassActorsProblem = (problem: string): boolean =>
-  problem.endsWith(`: ${BYPASS_ACTORS_KEY}`);
+import { BYPASS_ACTORS_KEY } from './github-ruleset-diff';
 
 // Stand-ins for bypass actors GraphQL counted but would not name. They exist
 // only to carry the count into the ordinary length comparison, so they are
@@ -23,10 +18,15 @@ const unreadableBypassActors = (count: number): ReadonlyArray<unknown> =>
 // A matching non-zero count proves nothing about *which* actors bypass, so the
 // field stays hidden and the gate fails closed on it. A list REST already
 // answered is authoritative and never replaced.
+//
+// The counts are joined by ruleset id, the one identifier both APIs agree on:
+// names are not unique on the live side, so joining on them could pin one
+// ruleset's list from another ruleset's count. A live ruleset carrying no
+// numeric id gets no count and stays hidden.
 export const resolveHiddenBypassActors = (
   declared: ReadonlyArray<Readonly<Record<string, unknown>>>,
   live: ReadonlyArray<Readonly<Record<string, unknown>>>,
-  counts: ReadonlyMap<string, number>,
+  counts: ReadonlyMap<number, number>,
 ): ReadonlyArray<Readonly<Record<string, unknown>>> => {
   const declaredCounts = new Map(
     declared
@@ -37,12 +37,12 @@ export const resolveHiddenBypassActors = (
       ]),
   );
   return live.map((ruleset) => {
-    const name = String(ruleset.name);
-    const count = counts.get(name);
+    const count =
+      typeof ruleset.id === 'number' ? counts.get(ruleset.id) : undefined;
     if (ruleset[BYPASS_ACTORS_KEY] !== undefined || count === undefined) {
       return ruleset;
     }
-    return count > 0 && count === declaredCounts.get(name)
+    return count > 0 && count === declaredCounts.get(String(ruleset.name))
       ? ruleset
       : { ...ruleset, [BYPASS_ACTORS_KEY]: unreadableBypassActors(count) };
   });

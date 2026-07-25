@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { HTTP_OK } from './github-api';
-import { BYPASS_ACTORS_KEY } from './github-bypass-actors';
+import { BYPASS_ACTORS_KEY } from './github-ruleset-diff';
 
 export const OPT_OUT_NOTICE =
   'standards github: rulesets are declared unenforceable on this GitHub plan (.github/settings.local.json "rulesetEnforcement"); the default branch is NOT protected, and plan-gated repository settings ("allow_auto_merge") are skipped. After upgrading the plan, remove the declaration, then run `bun standards github --apply`.';

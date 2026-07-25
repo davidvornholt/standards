@@ -1,6 +1,9 @@
 // REST omits merge settings for read-only viewers and ruleset bypass actors
 // for anything short of an administrator; the check retries both over GraphQL
-// so a read-only PAT and a brokered installation token stay sufficient.
+// so a read-only PAT stays sufficient, and a brokered installation token stays
+// sufficient as far as the bypass-actor *count* goes — a declared non-empty
+// list still fails closed, because GraphQL withholds the identities that would
+// verify it.
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import process from 'node:process';
@@ -95,9 +98,13 @@ describe('runGithubCheck GraphQL merge-settings fallback', () => {
 // REST answers a ruleset without its `bypass_actors` key for any viewer short
 // of an administrator, and for a GitHub App installation token at every
 // permission level.
+// `bypassActors(first: 1)` cross-checks the count against its own node list,
+// and the count is joined to the REST ruleset by `databaseId`. The nodes are
+// null because GraphQL withholds the identities from exactly the tokens this
+// fallback exists for.
 const bypassCounts = (totalCount: number): unknown =>
   JSON.parse(
-    `{"data":{"repository":{"rulesets":{"nodes":[{"name":"Protect main","source":{"__typename":"Repository"},"bypassActors":{"totalCount":${String(totalCount)}}}]}}}}`,
+    `{"data":{"repository":{"rulesets":{"nodes":[{"databaseId":7,"source":{"__typename":"Repository"},"bypassActors":{"totalCount":${String(totalCount)},"nodes":${totalCount === 0 ? '[]' : '[null]'}}}]}}}}`,
   ) as unknown;
 
 const declaredActor = JSON.parse(
