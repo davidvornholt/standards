@@ -13,80 +13,17 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
+import { cleanupTmpDirs, mkTmp, write } from './cli-test-support';
 import {
-  cleanupTmpDirs,
-  mkTmp,
-  type RunResult,
-  runProcess,
-  write,
-} from './cli-test-support';
+  buildUpstream,
+  engineFor,
+  LINK,
+  lockedPaths,
+  SKILL,
+  TARGET,
+} from './managed-files-symlink-test-support';
 
-const ENGINE = join(import.meta.dir, 'cli.ts');
-const LINK = '.claude/skills';
-const TARGET = '../.agents/skills';
-const SKILL = '.agents/skills/probe/SKILL.md';
-
-const run = (cwd: string, args: ReadonlyArray<string>): RunResult =>
-  runProcess('bun', cwd, [ENGINE, ...args], { ...process.env });
-
-// An upstream whose managed payload is a skills directory plus a symlink that
-// points at it from the directory Claude Code actually scans.
-const buildUpstream = (target: string = TARGET): string => {
-  const up = mkTmp('symlink-up-');
-  write(
-    up,
-    'sync-standards.json',
-    JSON.stringify({
-      upstream: up,
-      seedDir: 'template',
-      paths: [
-        'sync-standards.json',
-        '.github/dependabot.base.yml',
-        '.agents/skills',
-        LINK,
-      ],
-    }),
-  );
-  write(up, 'template/seed.txt', 'seed original\n');
-  write(
-    up,
-    '.github/dependabot.base.yml',
-    [
-      'version: 2',
-      'updates:',
-      '  - package-ecosystem: bun',
-      '    directory: /',
-      '    schedule:',
-      '      interval: weekly',
-      '  - package-ecosystem: github-actions',
-      '    directory: /',
-      '    schedule:',
-      '      interval: weekly',
-      '',
-    ].join('\n'),
-  );
-  write(up, SKILL, '---\nname: probe\n---\n');
-  mkdirSync(join(up, '.claude'), { recursive: true });
-  symlinkSync(target, join(up, LINK));
-  return up;
-};
-
-const initConsumer = (up: string): { consumer: string; result: RunResult } => {
-  const consumer = mkTmp('symlink-cons-');
-  return {
-    consumer,
-    result: run(consumer, ['init', '--from', up, '--dir', consumer]),
-  };
-};
-
-const lockedPaths = (consumer: string): ReadonlyArray<string> =>
-  Object.keys(
-    (
-      JSON.parse(
-        readFileSync(join(consumer, 'sync-standards.lock'), 'utf8'),
-      ) as { files: Record<string, string> }
-    ).files,
-  );
+const { initConsumer, run } = engineFor({ ...process.env });
 
 afterEach(cleanupTmpDirs);
 
@@ -149,15 +86,40 @@ describe('symlinks as managed paths', () => {
     expect(readlinkSync(join(consumer, LINK))).toBe(TARGET);
   });
 
-  it('refuses a canonical symlink whose target escapes the repository', () => {
-    const { consumer, result } = initConsumer(buildUpstream('../../../etc'));
+  it('replaces a link at a managed file instead of writing through it', () => {
+    const up = buildUpstream();
+    const { consumer } = initConsumer(up);
+    const outside = mkTmp('outside-');
+    write(outside, 'secret.txt', 'untouched\n');
+    rmSync(join(consumer, SKILL));
+    symlinkSync(join(outside, 'secret.txt'), join(consumer, SKILL));
 
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain(
-      `canonical symlink ${LINK} must point inside the repository`,
+    const result = run(consumer, ['sync', '--from', up, '--dir', consumer]);
+
+    expect(result.status).toBe(0);
+    expect(lstatSync(join(consumer, SKILL)).isSymbolicLink()).toBe(false);
+    expect(readFileSync(join(consumer, SKILL), 'utf8')).toContain(
+      'name: probe',
     );
-    expect(lstatSync(join(consumer, LINK), { throwIfNoEntry: false })).toBe(
-      undefined,
+    // Canonical content must never travel through a link to an outside file.
+    expect(readFileSync(join(outside, 'secret.txt'), 'utf8')).toBe(
+      'untouched\n',
     );
+  });
+
+  it('keeps a consumer skill that lives beside the managed ones', () => {
+    const up = buildUpstream();
+    const { consumer } = initConsumer(up);
+    write(consumer, '.agents/skills/mine/SKILL.md', 'name: mine\n');
+
+    const result = run(consumer, ['sync', '--from', up, '--dir', consumer]);
+
+    expect(result.status).toBe(0);
+    // The documented seam: an unmanaged sibling under a managed directory is
+    // never locked, so it survives sync and surfaces through the link.
+    expect(
+      readFileSync(join(consumer, LINK, 'mine/SKILL.md'), 'utf8'),
+    ).toContain('name: mine');
+    expect(lockedPaths(consumer)).not.toContain('.agents/skills/mine/SKILL.md');
   });
 });
