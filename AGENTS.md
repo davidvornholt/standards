@@ -13,8 +13,8 @@ Do not build backwards compatibility by default: migrate every call site and del
 ## Research first
 
 - Ask before broad product, UX, architectural, naming, workflow, scope, or business-logic decisions.
-- Never ask for something the repository can answer. Read the code first, and carry what you found into the question rather than asking the decider to supply it; ask only for the intent, preference, or priority the code cannot reveal.
 - Write every question for a decider who has read none of the code: state what is at stake as product behavior, cost, risk, or effort; give each option a plain-language consequence instead of a technical label; and recommend one, with the reason. Name an implementation detail only when the decision genuinely turns on it, and explain it in the same breath.
+- A question the decider can only answer by knowing how some other part of the system already works must carry that background with it, explained from scratch in the same plain terms. Never assume prior knowledge of any part of the codebase; supply what the decision depends on before asking them to choose.
 - Propose before changing CI workflows, quality gates, or canonical synced files, even to unblock a failure. The file class is the trigger, not whether the change feels architectural.
 - Prefer cleaner architecture when justified. Do not preserve messy code only to avoid churn.
 
