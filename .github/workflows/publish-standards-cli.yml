@@ -35,9 +35,8 @@ jobs:
       contents: read
       id-token: write
     outputs:
-      publish: ${{ steps.release.outputs.publish }}
+      declared: ${{ steps.declaration.outputs.declared }}
       tag: ${{ steps.release.outputs.tag }}
-      version: ${{ steps.release.outputs.version }}
       sha: ${{ github.event.workflow_run.head_sha }}
     steps:
       - name: Checkout tested commit
@@ -57,11 +56,6 @@ jobs:
             exit 1
           fi
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: ${{ env.BUN_VERSION }}
-
       - name: Setup Node for npm trusted publishing
         uses: actions/setup-node@v7
         with:
@@ -69,11 +63,101 @@ jobs:
           package-manager-cache: false
           registry-url: https://registry.npmjs.org
 
+      # The release is the merge commit that changes the manifest version. A
+      # commit that inherits or withdraws a version an earlier commit declared
+      # releases nothing itself, so it publishes nothing and contacts no
+      # registry; the guards below only check that the release it stands on
+      # actually completed, from tags this checkout already carries.
+      - name: Determine release declaration
+        id: declaration
+        env:
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          version="$(jq -er '.version | select(type == "string")' "$PACKAGE_PATH")"
+          parent="$(git rev-parse --verify "$RELEASE_SHA^" 2>/dev/null || true)"
+          if [[ -z "$parent" ]]; then
+            echo "::error::Tested commit $RELEASE_SHA has no parent to compare its release declaration against"
+            exit 1
+          fi
+          show_error="$RUNNER_TEMP/git-show-parent-manifest.err"
+          if ! previous_manifest="$(git show "$parent:$PACKAGE_PATH" \
+            2>"$show_error")"; then
+            echo "::error::Cannot read $PACKAGE_PATH at parent commit $parent: $(<"$show_error")"
+            exit 1
+          fi
+          previous_version="$(jq -er '.version | select(type == "string")' \
+            <<<"$previous_manifest")"
+          declaration_action="$(node \
+            packages/standards-cli/scripts/release-recovery.ts \
+            declaration "$version" "$previous_version")"
+          withdrawn_version=
+          case "$declaration_action" in
+            declared) declared=true ;;
+            unchanged)
+              declared=false
+              echo "$PACKAGE_PATH still declares $version; no release to publish"
+              ;;
+            withdrawn)
+              declared=false
+              withdrawn_version="$previous_version"
+              echo "$PACKAGE_PATH withdrew $previous_version back to $version; no release to publish"
+              ;;
+            *)
+              echo "::error::Unexpected release declaration action: $declaration_action"
+              exit 1
+              ;;
+          esac
+          {
+            echo "declared=$declared"
+            echo "version=$version"
+            echo "withdrawn_version=$withdrawn_version"
+          } >>"$GITHUB_OUTPUT"
+
+      # An inherited version whose own release never completed would otherwise
+      # be skipped in silence by every later commit. The tag is written last, so
+      # its absence is the durable evidence that the release is unfinished.
+      - name: Verify the inherited release completed
+        if: steps.declaration.outputs.declared == 'false'
+        env:
+          VERSION: ${{ steps.declaration.outputs.version }}
+        run: |
+          if ! git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+            echo "::error::$PACKAGE_PATH declares $VERSION but tag v$VERSION does not exist, so that release never completed. If $VERSION reached npm, re-run the declaring commit's failed Publish standards CLI run: it verifies the published provenance and writes the tag. If it did not, that version is spent, so declare a new version on current main."
+            exit 1
+          fi
+
+      # A revert withdraws its parent's declaration, and no later commit ever
+      # mentions that version again. Whether it reached npm before its release
+      # job died cannot be told from this checkout, so an untagged withdrawal is
+      # ambiguous rather than clean and has to fail closed here.
+      - name: Verify the withdrawn release completed
+        if: steps.declaration.outputs.withdrawn_version != ''
+        env:
+          WITHDRAWN_VERSION: ${{ steps.declaration.outputs.withdrawn_version }}
+        run: |
+          if ! git rev-parse -q --verify "refs/tags/v$WITHDRAWN_VERSION" \
+            >/dev/null; then
+            echo "::error::This commit withdraws $WITHDRAWN_VERSION but tag v$WITHDRAWN_VERSION does not exist, so that release never completed. Check the npm registry for $PACKAGE_NAME@$WITHDRAWN_VERSION: if it is published, re-run the failed Publish standards CLI run of the commit that declared $WITHDRAWN_VERSION, whose frozen GITHUB_SHA still names that commit, so it verifies the published provenance and reconciles both the tag and the Release; if it is not, $WITHDRAWN_VERSION is free to declare again."
+            exit 1
+          fi
+
+      - name: Setup Bun
+        if: steps.declaration.outputs.declared == 'true'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
       - name: Install release dependencies
+        if: steps.declaration.outputs.declared == 'true'
         run: bun install --frozen-lockfile --ignore-scripts
 
+      # The declaration step already proved the version is a stable SemVer, so
+      # this step consumes that value instead of re-validating its shape.
       - name: Determine release state
         id: release
+        if: steps.declaration.outputs.declared == 'true'
+        env:
+          VERSION: ${{ steps.declaration.outputs.version }}
         run: |
           name="$(jq -er '.name | select(type == "string")' "$PACKAGE_PATH")"
           if [[ "$name" != "$PACKAGE_NAME" ]]; then
@@ -81,11 +165,7 @@ jobs:
             exit 1
           fi
 
-          version="$(jq -er '.version | select(type == "string")' "$PACKAGE_PATH")"
-          if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-            echo "::error::$PACKAGE_PATH version must be a stable SemVer; received $version"
-            exit 1
-          fi
+          version="$VERSION"
 
           encoded_name="${PACKAGE_NAME/@/%40}"
           encoded_name="${encoded_name//\//%2F}"
@@ -120,10 +200,26 @@ jobs:
           esac
 
           {
-            echo "version=$version"
             echo "tag=v$version"
             echo "publish=$publish"
           } >>"$GITHUB_OUTPUT"
+
+      # npm builds provenance from GITHUB_SHA, which for a workflow_run event is
+      # the tip of the default branch, not the commit this run checked out and
+      # packages. They agree only while the declaring commit is still that tip.
+      # Publishing when they diverge would attest a tree the tarball does not
+      # contain, so this gates the publish rather than the declaration: a run
+      # that publishes nothing produces no attestation to get wrong.
+      - name: Verify the declaring commit is still the tip of main
+        if: steps.release.outputs.publish == 'true'
+        env:
+          PROVENANCE_SHA: ${{ github.sha }}
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          if [[ "$PROVENANCE_SHA" != "$RELEASE_SHA" ]]; then
+            echo "::error::npm provenance would attest $PROVENANCE_SHA but this run packages $RELEASE_SHA. Main advanced past the declaring commit, so declare a new version on current main instead of re-running this one."
+            exit 1
+          fi
 
       - name: Pack and inspect package
         id: package
@@ -156,11 +252,16 @@ jobs:
           --tag latest
           --registry=https://registry.npmjs.org
 
+      # Reached when the declaring commit already published to npm and a later
+      # step failed. Nothing is published on this path, so the tip check does not
+      # run and the attested commit is not this run's to control: verifying that
+      # the published attestation names RELEASE_SHA is what binds the tag and
+      # Release this run is about to assert.
       - name: Verify existing package provenance
         if: steps.release.outputs.publish == 'false'
         env:
           RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
-          VERSION: ${{ steps.release.outputs.version }}
+          VERSION: ${{ steps.declaration.outputs.version }}
         run: |
           audit_dir="$RUNNER_TEMP/standards-cli-provenance-audit"
           npm install \
@@ -202,7 +303,9 @@ jobs:
 
   release:
     needs: publish
-    if: needs.publish.result == 'success'
+    if: >-
+      needs.publish.result == 'success' &&
+      needs.publish.outputs.declared == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

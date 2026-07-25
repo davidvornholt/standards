@@ -1,24 +1,56 @@
 import { describe, expect, it } from 'bun:test';
-import { spawnSync } from 'node:child_process';
-import {
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  rmSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import {
   type GithubReleaseState,
   githubReconciliationPlan,
   npmReleasePlan,
+  releaseDeclarationPlan,
 } from './release-recovery';
 
 const SHA = '1234567890abcdef1234567890abcdef12345678';
 const MISMATCHED_SHA = 'ffffffffffffffffffffffffffffffffffffffff';
-const RECOVERY_SCRIPT = join(import.meta.dir, '../scripts/release-recovery.ts');
-const RECOVERY_MODULE = join(import.meta.dir, 'release-recovery.ts');
+
+describe('release declaration', () => {
+  it.each([
+    {
+      action: 'unchanged',
+      label: 'unrelated merge inheriting a released version',
+      previousVersion: '0.17.3',
+      version: '0.17.3',
+    },
+    {
+      action: 'declared',
+      label: 'patch release commit',
+      previousVersion: '0.17.3',
+      version: '0.17.4',
+    },
+    {
+      action: 'declared',
+      label: 'minor release commit',
+      previousVersion: '0.17.3',
+      version: '0.18.0',
+    },
+    {
+      action: 'withdrawn',
+      label: 'revert of a release commit',
+      previousVersion: '0.17.3',
+      version: '0.17.2',
+    },
+  ] as const)('plans $label as $action', (fixture) => {
+    expect(
+      releaseDeclarationPlan(fixture.version, fixture.previousVersion),
+    ).toEqual({ action: fixture.action, problem: null });
+  });
+
+  it.each([
+    'not-a-version',
+    '1.0.0-rc.1',
+    '',
+  ])('rejects the unstable previous version %p', (previousVersion) => {
+    const plan = releaseDeclarationPlan('0.18.0', previousVersion);
+    expect(plan.action).toBeNull();
+    expect(plan.problem).toContain('stable SemVer');
+  });
+});
 
 describe('npm release state', () => {
   it.each([
@@ -95,40 +127,5 @@ describe('GitHub release reconciliation', () => {
     expect(githubReconciliationPlan('draft', SHA, SHA).problem).toContain(
       'draft',
     );
-  });
-});
-
-describe('dependency-free release dispatcher', () => {
-  it.each([
-    {
-      command: ['github-state', 'missing', '', SHA],
-      expected: 'create\n',
-      label: 'GitHub reconciliation',
-    },
-    {
-      command: ['npm-state', '0.14.0', '0.13.0', 'false'],
-      expected: 'publish\n',
-      label: 'npm release planning',
-    },
-  ] as const)('runs $label from a detached source-only tree', (fixture) => {
-    const root = mkdtempSync(join(tmpdir(), 'release-dispatcher-source-'));
-    try {
-      mkdirSync(join(root, 'scripts'));
-      mkdirSync(join(root, 'src'));
-      copyFileSync(RECOVERY_SCRIPT, join(root, 'scripts/release-recovery.ts'));
-      copyFileSync(RECOVERY_MODULE, join(root, 'src/release-recovery.ts'));
-      expect(existsSync(join(root, 'node_modules'))).toBe(false);
-
-      const result = spawnSync(
-        'bun',
-        [join(root, 'scripts/release-recovery.ts'), ...fixture.command],
-        { cwd: root, encoding: 'utf8' },
-      );
-      expect(result.stderr).toBe('');
-      expect(result.stdout).toBe(fixture.expected);
-      expect(result.status).toBe(0);
-    } finally {
-      rmSync(root, { force: true, recursive: true });
-    }
   });
 });

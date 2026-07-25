@@ -5,6 +5,13 @@ export type NpmReleasePlan =
   | { readonly action: 'publish' | 'recover'; readonly problem: null }
   | { readonly action: null; readonly problem: string };
 
+export type ReleaseDeclarationPlan =
+  | {
+      readonly action: 'declared' | 'unchanged' | 'withdrawn';
+      readonly problem: null;
+    }
+  | { readonly action: null; readonly problem: string };
+
 export type GithubReleaseState = 'draft' | 'missing' | 'published' | 'tag-only';
 
 export type ReconciliationPlan =
@@ -52,6 +59,32 @@ const compareStableSemver = (left: string, right: string) => {
     }
   }
   return 0;
+};
+
+// The merge commit that changes the manifest version is the release. Later
+// commits leave the version alone and must not republish, retag, or re-verify
+// a release they did not declare.
+export const releaseDeclarationPlan = (
+  version: string,
+  previousVersion: string,
+): ReleaseDeclarationPlan => {
+  const order = compareStableSemver(version, previousVersion);
+  if (order === null) {
+    return {
+      action: null,
+      problem: `Manifest and previously declared versions must be stable SemVer values; received ${version} and ${previousVersion}`,
+    };
+  }
+  if (order === 0) {
+    return { action: 'unchanged', problem: null };
+  }
+  // Reverting a release commit walks the manifest backwards. That withdraws a
+  // declaration rather than making one, so it releases nothing and is not an
+  // error; the next release has to climb past whatever npm already carries.
+  if (order < 0) {
+    return { action: 'withdrawn', problem: null };
+  }
+  return { action: 'declared', problem: null };
 };
 
 export const npmReleasePlan = (
