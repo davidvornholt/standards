@@ -52,6 +52,19 @@ describe('readFixOutcome', () => {
     expect(outcome?.status).toBe('fixed');
   });
 
+  it('accepts a footer after a same-line triple-backtick code span', async () => {
+    const outcome = await readFixOutcome(
+      workDirWithOutcome({
+        status: 'fixed',
+        summary: 'Corrected the boundary check.',
+        prTitle: 'fix(auth): reject expired session tokens',
+        prBody: '``` must be paired with ```\n\nFixes #7',
+      }),
+      ISSUE_NUMBER,
+    );
+    expect(outcome?.status).toBe('fixed');
+  });
+
   it.each([
     ['missing reference', 'Handles expiry.'],
     ['wrong issue', 'Handles expiry.\n\nFixes #8'],
@@ -60,6 +73,11 @@ describe('readFixOutcome', () => {
     ['inline-code reference', 'Use a footer like `Fixes #7`.'],
     ['fenced-code reference', 'Example:\n\n```markdown\nFixes #7\n```'],
     ['HTML-comment reference', '<!-- Fixes #7 -->'],
+    ['multi-line HTML-comment reference', '<!--\nFixes #7\n-->'],
+    ['one-backtick multi-line code span', '`\nFixes #7\n`'],
+    ['two-backtick multi-line code span', '``\nFixes #7\n``'],
+    ['unclosed HTML-comment footer', '<!--\nFixes #7'],
+    ['unclosed fenced-code footer', '```markdown\nFixes #7'],
   ])('rejects a fixed outcome with %s', async (_name, prBody) => {
     const outcome = await readFixOutcome(
       workDirWithOutcome({

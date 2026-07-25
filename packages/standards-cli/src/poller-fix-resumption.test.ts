@@ -137,7 +137,7 @@ it('rejects non-operative closing text before publishing resumed output', async 
     issueNumber: ISSUE_NUMBER,
     approvalId: binding.id,
     title: 'fix(poller): recover output',
-    body: `Example:\n\n\`\`\`markdown\nFixes #${ISSUE_NUMBER}\n\`\`\``,
+    body: `<!--\nFixes #${ISSUE_NUMBER}\n-->`,
     baseSha: fixture.baseSha,
     commits: 1,
   });
