@@ -13,10 +13,17 @@ Do not build backwards compatibility by default: migrate every call site and del
 ## Research first
 
 - Ask before broad product, UX, architectural, naming, workflow, scope, or business-logic decisions.
-- Write every question for a decider who has read none of the code: state what is at stake as product behavior, cost, risk, or effort; give each option a plain-language consequence instead of a technical label; and recommend one, with the reason.
-- A question the decider can only answer by knowing how some other part of the system already works must carry that background with it, explained from scratch in the same plain terms. Never assume prior knowledge of any part of the codebase; supply what the decision depends on before asking them to choose.
 - Propose before changing CI workflows, quality gates, or canonical synced files, even to unblock a failure. The file class is the trigger, not whether the change feels architectural.
 - Prefer cleaner architecture when justified. Do not preserve messy code only to avoid churn.
+
+## Writing for the decider
+
+Questions, issue descriptions, and pull request descriptions are read by someone who directs product intent and has read none of the code. They decide from what you wrote whether work is worth doing, continuing, or fixing. Every agent writes them to this standard, whatever tool, skill, or workflow it is running under.
+
+- Lead with what is at stake, as product behavior, cost, risk, or effort. For an issue: what goes wrong in practice, who it affects, and what it costs to leave alone. For a pull request: what changes about the product's behavior and why it was worth doing. For a question: where each option leads, with one recommended and the reason given. Restating what the code does is none of these.
+- Carry the background the reader needs. Where following it depends on how some other part of the system already works, explain that part from scratch in the same plain terms. Never assume prior knowledge of any part of the codebase.
+- Keep sentences short and give each one a single idea. Technical terms are allowed and often clearer than the alternative: name the thing, then say in plain words what it is the first time it appears. Replacing a name with a long description is not plain language; it makes the sentence harder to follow, not easier.
+- Keep the technical evidence, file references, and verification below that opening, where the reader who needs them will look.
 
 ## Skill routing
 
@@ -25,7 +32,7 @@ Before generating code, inspect the `description` frontmatter for every local sk
 ## Pull requests and issues
 
 - Changes land on main through squash-merged PRs. The PR title becomes the commit subject on main, so it must be a Conventional Commit subject (`<type>(scope): <imperative description>`); CI lints it. Branch commit messages carry no format requirement.
-- Open every issue and pull request description with a few sentences the decider can triage from, written to the questioning standard above: for an issue, what goes wrong in practice and what it costs to leave it alone; for a pull request, what changes about the product's behavior and why it was worth doing. Listing what the code now does is not that statement. Keep the technical evidence, file references, and verification below it, where the reader who needs them will look.
+- Every issue and pull request description opens with the statement "Writing for the decider" requires, before any other section.
 
 ## Package management
 
@@ -87,7 +94,6 @@ Before generating code, inspect the `description` frontmatter for every local sk
 
 ## Writing style
 
-- Anything the decider reads to make a call — a question, an issue, a pull request description — must be understandable by someone who has not read the code. Keep sentences short and give each one a single idea. Technical terms are allowed and often clearer than the alternative: name the thing, then say in plain words what it is the first time it appears. Replacing a name with a long description is not plain language; it makes the sentence harder to follow, not easier.
 - Use sentence case for reader-facing text — UI copy, labels, command-style actions, Markdown headings — preserving proper nouns, acronyms, filenames, package names, and domain terms.
 - Prefer self-documenting code; comment only non-obvious intent.
 - Do not hard-wrap Markdown prose; keep each paragraph or list item on one logical line.
