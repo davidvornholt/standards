@@ -47,9 +47,22 @@ describe('forbiddenDiffPaths', () => {
     ).toEqual(['biome.jsonc', 'turbo.json', 'package.json']);
   });
 
-  it('detects workspace quality-script rewrites but permits dependency edits', () => {
+  it.each([
+    'build',
+    'build:storybook',
+    'check',
+    'check:fix',
+    'check-types',
+    'check-types:watch',
+    'lint',
+    'lint:fix',
+    'test',
+    'test:a11y',
+    'typecheck',
+    'typecheck:watch',
+  ])('detects a workspace %s script rewrite', (script) => {
     const before = JSON.stringify({
-      scripts: { test: 'bun test', dev: 'vite' },
+      scripts: { [script]: 'real command', dev: 'vite' },
       dependencies: { react: '1' },
     });
     expect(
@@ -57,17 +70,24 @@ describe('forbiddenDiffPaths', () => {
         'apps/web/package.json',
         before,
         JSON.stringify({
-          scripts: { test: 'true', dev: 'vite' },
+          scripts: { [script]: 'true', dev: 'vite' },
           dependencies: { react: '1' },
         }),
       ),
     ).toBe(true);
+  });
+
+  it('permits workspace dependency edits', () => {
+    const before = JSON.stringify({
+      scripts: { 'check-types': 'tsc --noEmit', build: 'next build' },
+      dependencies: { react: '1' },
+    });
     expect(
       changesWorkspaceQualityScripts(
         'apps/web/package.json',
         before,
         JSON.stringify({
-          scripts: { test: 'bun test', dev: 'vite' },
+          scripts: { 'check-types': 'tsc --noEmit', build: 'next build' },
           dependencies: { react: '2' },
         }),
       ),

@@ -76,7 +76,8 @@ const GATE_WIRING_FILES: ReadonlySet<string> = new Set([
 const HOST_SECRETS_FILE = /(?:^|\/)secrets\.yaml$/u;
 const WORKSPACE_GATE_CONFIG =
   /(?:^|\/)(?:biome\.jsonc|turbo\.json|tsconfig(?:\.[^.]+)?\.json|vitest\.config\.[cm]?[jt]s|playwright\.config\.[cm]?[jt]s)$/u;
-const QUALITY_SCRIPT = /^(?:check|lint|test|typecheck)(?::|$)/u;
+const QUALITY_SCRIPT =
+  /^(?:build|check|check-types|lint|test|typecheck)(?::|$)/u;
 const WORKSPACE_MANIFEST = /^(?:apps|packages)\/[^/]+\/package\.json$/u;
 
 const isEncryptedSecret = (path: string): boolean =>
