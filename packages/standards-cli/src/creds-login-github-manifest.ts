@@ -20,6 +20,7 @@ export const MANIFEST_STATE_BYTES = 32;
 const DEFAULT_PERMISSIONS = {
   actions: 'read',
   contents: 'write',
+  issues: 'write',
   metadata: 'read',
   pull_requests: 'write',
 } as const;

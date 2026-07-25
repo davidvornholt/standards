@@ -37,6 +37,7 @@ describe('GitHub App manifest flow', () => {
     expect(manifest.default_permissions).toEqual({
       actions: 'read',
       contents: 'write',
+      issues: 'write',
       metadata: 'read',
       pull_requests: 'write',
     });
