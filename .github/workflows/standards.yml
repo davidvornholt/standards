@@ -264,9 +264,14 @@ jobs:
           failure-mode: fallback
           fallback-value: unresolved
 
-      # GitHub hides ruleset bypass actors from tokens without Administration
-      # access, so the gate reads through a broker installation token scoped to
-      # this repository and expiring in an hour. Minting fails the job: a
+      # Administration read is not what makes ruleset bypass actors readable:
+      # REST withholds them from an installation token at every permission
+      # level, so a declared-empty list is verified through the GraphQL
+      # bypass-actor count instead. It is requested as the broadest settings
+      # read a repository-scoped token can hold, because a private repository is
+      # not guaranteed to serve declared settings to a metadata-only view;
+      # Issues read is what declared-label reads need. The minted token reaches
+      # only this repository and expires in an hour. Minting fails the job: a
       # resolved App identity that cannot produce a token is a broken
       # configuration, not a repo that never had one.
       - name: Mint a settings-read token
@@ -280,8 +285,10 @@ jobs:
           permission-issues: read
 
       # Missing broker state deliberately falls back to the workflow token,
-      # which can read labels but still fails closed on settings hidden without
-      # Administration access.
+      # which holds only contents and issues read. That is often enough to pass,
+      # so the fallback is a degraded credential rather than a guaranteed
+      # failure; the gate stays fail-closed on any declared state that read
+      # cannot reach.
       - name: Check GitHub settings
         env:
           BROKER_TOKEN: ${{ steps.broker-token.outputs.token }}
@@ -292,7 +299,7 @@ jobs:
           if [ -z "$value" ]; then
             value="$FALLBACK_TOKEN"
             echo "::warning::No broker installation token was minted; using the workflow token"
-            echo "ci.broker_app is not resolvable from secrets/ci.yaml; the GitHub settings gate will fail on settings the workflow token cannot see."
+            echo "ci.broker_app is not resolvable from secrets/ci.yaml, so this run verifies with the workflow token's contents and issues read instead of the intended broker token. A green result therefore proves less; declared state that read cannot reach fails the gate rather than passing unverified. Provision the broker App to restore the intended settings visibility."
           fi
 
           if [ -z "$value" ] || [[ "$value" == *$'\n'* ]] || [[ "$value" == *$'\r'* ]]; then
