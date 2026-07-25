@@ -68,6 +68,27 @@ describe('rulesetVisibilityProblems', () => {
     );
   });
 
+  // One ruleset being counted says nothing about another: reporting them
+  // together would tell the reader the uncounted one is probably fine.
+  it('splits counted rulesets from ones GraphQL never answered for', () => {
+    const problems = rulesetVisibilityProblems(
+      [
+        { key: BYPASS_ACTORS_KEY, name: 'Protect main' },
+        { key: BYPASS_ACTORS_KEY, name: 'Protect release' },
+      ],
+      { countedNames: new Set(['Protect main']), failure: null },
+    );
+    expect(problems).toHaveLength(2);
+    const [counted, unanswered] = problems;
+    expect(counted).toContain('ruleset "Protect main": bypass_actors');
+    expect(counted).not.toContain('Protect release');
+    expect(counted).toContain('withholds their identities');
+    expect(unanswered).toContain('ruleset "Protect release": bypass_actors');
+    expect(unanswered).not.toContain('Protect main');
+    expect(unanswered).toContain('Neither REST nor the GraphQL bypass-actor');
+    expect(unanswered).not.toContain('probably fine');
+  });
+
   // The two gaps need different remedies, so they must not share one message.
   it('reports a hidden bypass list separately from other hidden fields', () => {
     const problems = rulesetVisibilityProblems(

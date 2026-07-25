@@ -44,17 +44,37 @@ export const GRAPHQL_NOT_CONSULTED: BypassCountOutcome = {
 const INSTALLATION_DEAD_END =
   "A GitHub App installation token cannot read bypass_actors over REST at any permission level, so widening the App's permissions will not help";
 
-const hiddenBypassActorsAdvice = (
+const COUNT_MATCHED_ADVICE = `GitHub reports the declared number of bypass actors but withholds their identities, so the repository is probably fine and only a local run with admin auth can confirm it. ${INSTALLATION_DEAD_END}`;
+
+const NOTHING_ANSWERED_ADVICE = `Neither REST nor the GraphQL bypass-actor count answered for this ruleset, so nothing at all is known about who may bypass it; verify locally with admin auth. ${INSTALLATION_DEAD_END}`;
+
+// The two no-failure remedies differ per ruleset, so the fields are partitioned
+// rather than reported under whichever advice one of them happened to match: a
+// ruleset GraphQL never answered for must never be described as probably fine
+// because a sibling ruleset was counted.
+const hiddenBypassActorsProblems = (
   fields: ReadonlyArray<UnverifiableRulesetField>,
   outcome: BypassCountOutcome,
-): string => {
+): ReadonlyArray<string> => {
   if (outcome.failure !== null) {
-    return `The GraphQL bypass-actor count did not answer (${outcome.failure}), so this is a failed request rather than a permission gap: re-run the check, and if it keeps failing verify locally with admin auth`;
+    return unverifiableProblem(
+      SCOPE,
+      fields.map(fieldLabel),
+      `The GraphQL bypass-actor count did not answer (${outcome.failure}), so this is a failed request rather than a permission gap: re-run the check, and if it keeps failing verify locally with admin auth`,
+    );
   }
-  if (fields.some((field) => outcome.countedNames.has(field.name))) {
-    return `GitHub reports the declared number of bypass actors but withholds their identities, so the repository is probably fine and only a local run with admin auth can confirm it. ${INSTALLATION_DEAD_END}`;
-  }
-  return `Neither REST nor the GraphQL bypass-actor count answered for this ruleset, so nothing at all is known about who may bypass it; verify locally with admin auth. ${INSTALLATION_DEAD_END}`;
+  const counted = fields.filter((field) => outcome.countedNames.has(field.name));
+  const unanswered = fields.filter(
+    (field) => !outcome.countedNames.has(field.name),
+  );
+  return [
+    ...unverifiableProblem(SCOPE, counted.map(fieldLabel), COUNT_MATCHED_ADVICE),
+    ...unverifiableProblem(
+      SCOPE,
+      unanswered.map(fieldLabel),
+      NOTHING_ANSWERED_ADVICE,
+    ),
+  ];
 };
 
 export const rulesetVisibilityProblems = (
@@ -69,10 +89,6 @@ export const rulesetVisibilityProblems = (
       others.map(fieldLabel),
       ADMIN_VISIBILITY_ADVICE,
     ),
-    ...unverifiableProblem(
-      SCOPE,
-      hidden.map(fieldLabel),
-      hiddenBypassActorsAdvice(hidden, outcome),
-    ),
+    ...hiddenBypassActorsProblems(hidden, outcome),
   ];
 };
