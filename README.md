@@ -11,7 +11,7 @@ Quality gates are deliberately strict so that **agents can verify their work mec
 ## What's inside
 
 - **`AGENTS.md`** — the single source of truth for the agent operating contract. `CLAUDE.md` is only a pointer to it; project-specific rules live in a repo's own `AGENTS.local.md`.
-- **`.agents/skills/**`** — dual-target skills that work in both Claude Code (`SKILL.md`) and Codex (`agents/openai.yaml`).
+- **`.agents/skills/**`** — dual-target skills that work in both Claude Code (`SKILL.md`) and Codex (`agents/openai.yaml`). `.claude/skills` is a synced symlink to that directory, so Claude Code's native skill discovery finds the same files at the only path it scans, without a second copy of them.
 - **`biome.base.jsonc`** — every applicable Biome rule domain and group at `error`, with each opt-out documented inline. Repos extend it from a thin `biome.jsonc` wrapper.
 - **`packages/typescript-config`, `packages/a11y-testing`** — the shared TS config and the Playwright + Axe (WCAG 2.2 AA) test harness, under a stable `@davidvornholt` scope.
 - **`.github/settings.json`** — the declared GitHub repository state: squash-only merging (merge commits and rebases disabled), auto-merge, delete-branch-on-merge, squash commit shape, and the default-branch ruleset (PR required, `check` status required, linear history, no bypass). `standards github --apply` converges the live repo; `standards check` fails on drift.

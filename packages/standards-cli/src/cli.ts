@@ -13,7 +13,7 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
-import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, posix, resolve } from 'node:path';
 import process from 'node:process';
@@ -32,7 +32,11 @@ import { loadGithubSettings } from './github-settings';
 import { isNonEmptyString, isRecord } from './github-settings-parse';
 import {
   findManagedFilesContainingBiomeDirectiveToken,
+  inspectManagedPath,
   listManagedFiles,
+  type ManagedEntry,
+  managedEntryDigestInput,
+  writeManagedEntry,
 } from './managed-files';
 import { runPollerCommand } from './poller-commands';
 import { collectStructureProblems } from './structure-check';
@@ -108,6 +112,23 @@ const assertSafeRelativePath = (path: string, label: string): void => {
   ) {
     throw new Error(
       `${label} must be a normalized repository-relative path: ${path}`,
+    );
+  }
+};
+
+// A managed symlink is mirrored verbatim into every consumer, so its target
+// must resolve inside the consumer repository rather than at the host
+// filesystem around it.
+const assertSafeSymlinkTarget = (rel: string, target: string): void => {
+  const resolved = posix.normalize(posix.join(posix.dirname(rel), target));
+  if (
+    target.length === 0 ||
+    isAbsolute(target) ||
+    target.includes('\\') ||
+    resolved.split('/').includes('..')
+  ) {
+    throw new Error(
+      `canonical symlink ${rel} must point inside the repository: ${target}`,
     );
   }
 };
@@ -278,13 +299,17 @@ const mirror = async ({
   const updated: Array<string> = [];
   const tampered: Array<string> = [];
   await Promise.all(
-    [...upstream].map(async ([rel, abs]) => {
+    [...upstream].map(async ([rel, entry]) => {
       const dest = join(consumer, rel);
-      const buf = await readFile(abs);
-      const hash = sha256(buf);
-      const currentHash = existsSync(dest)
-        ? sha256(await readFile(dest))
-        : null;
+      if (entry.kind === 'symlink') {
+        assertSafeSymlinkTarget(rel, entry.target);
+      }
+      const hash = sha256(await managedEntryDigestInput(entry));
+      const current = await inspectManagedPath(dest);
+      const currentHash =
+        current === null
+          ? null
+          : sha256(await managedEntryDigestInput(current));
       const prev = previous[rel];
       if (prev !== undefined && currentHash !== null && currentHash !== prev) {
         tampered.push(rel);
@@ -296,16 +321,24 @@ const mirror = async ({
       }
       if (!dryRun) {
         await mkdir(dirname(dest), { recursive: true });
-        await writeFile(dest, buf);
+        await writeManagedEntry(dest, entry);
       }
       next[rel] = hash;
     }),
   );
-  const deleted = Object.keys(previous).filter(
-    (rel) => !(rel in next) && existsSync(join(consumer, rel)),
+  // `existsSync` would miss a broken link, and a locked path a consumer turned
+  // into a directory still has to go.
+  const removable = Object.keys(previous).filter((rel) => !(rel in next));
+  const present = await Promise.all(
+    removable.map((rel) => inspectManagedPath(join(consumer, rel))),
   );
+  const deleted = removable.filter((_, index) => present[index] !== null);
   if (!dryRun) {
-    await Promise.all(deleted.map((rel) => rm(join(consumer, rel))));
+    await Promise.all(
+      deleted.map((rel) =>
+        rm(join(consumer, rel), { recursive: true, force: true }),
+      ),
+    );
   }
   return { files: next, created, updated, deleted, tampered };
 };
@@ -359,7 +392,7 @@ const reportDryRunSummary = (
 const seedTargets = (
   srcDir: string,
   seedDir: string,
-): Promise<ReadonlyMap<string, string>> => {
+): Promise<ReadonlyMap<string, ManagedEntry>> => {
   const root = join(srcDir, seedDir);
   return listManagedFiles(root, ['.']);
 };
@@ -378,14 +411,17 @@ const runInit = async (
     seeds.get(DEPENDABOT_LOCAL_FILE) ?? null,
   );
   await Promise.all(
-    [...seeds].map(async ([rel, abs]) => {
+    [...seeds].map(async ([rel, entry]) => {
       const dest = join(consumer, rel);
       if (existsSync(dest)) {
         console.log(`  kept ${rel} (already present)`);
         return;
       }
+      if (entry.kind === 'symlink') {
+        assertSafeSymlinkTarget(rel, entry.target);
+      }
       await mkdir(dirname(dest), { recursive: true });
-      await cp(abs, dest);
+      await writeManagedEntry(dest, entry);
       console.log(`  seeded ${rel}`);
     }),
   );
@@ -468,10 +504,11 @@ const runCheck = async (consumer: string): Promise<boolean> => {
   const results = await Promise.all(
     Object.entries(lock.files).map(async ([rel, hash]) => {
       const dest = join(consumer, rel);
-      if (!existsSync(dest)) {
+      const entry = await inspectManagedPath(dest);
+      if (entry === null) {
         return `  missing:  ${rel}`;
       }
-      const current = sha256(await readFile(dest));
+      const current = sha256(await managedEntryDigestInput(entry));
       if (current !== hash) {
         return `  modified: ${rel} (expected ${hash.slice(0, HASH_PREVIEW_LENGTH)}, found ${current.slice(0, HASH_PREVIEW_LENGTH)})`;
       }
@@ -594,11 +631,11 @@ const prepareProspectiveDependabot = async (
   manifest: Manifest,
   srcDir: string,
   consumer: string,
-  localSeed: string | null,
+  localSeed: ManagedEntry | null,
 ): Promise<ProspectiveDependabot> => {
   const incoming = await listManagedFiles(srcDir, manifest.paths);
-  const basePath = incoming.get(DEPENDABOT_BASE_FILE);
-  if (basePath === undefined) {
+  const base = incoming.get(DEPENDABOT_BASE_FILE);
+  if (base === undefined || base.kind !== 'file') {
     throw new Error(
       `source content must manage ${DEPENDABOT_BASE_FILE}; @davidvornholt/standards 0.10.1 requires a 0.10.1-compatible content ref`,
     );
@@ -608,10 +645,12 @@ const prepareProspectiveDependabot = async (
   );
   const local =
     existingLocal ??
-    (localSeed === null ? null : await readFile(localSeed, 'utf8'));
+    (localSeed === null || localSeed.kind !== 'file'
+      ? null
+      : await readFile(localSeed.absolutePath, 'utf8'));
   const current = await readTextIfPresent(join(consumer, DEPENDABOT_FILE));
   const sources = {
-    base: await readFile(basePath, 'utf8'),
+    base: await readFile(base.absolutePath, 'utf8'),
     local,
     current,
   };

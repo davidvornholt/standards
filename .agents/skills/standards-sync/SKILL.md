@@ -15,6 +15,14 @@ Reusable engineering standards live in one upstream repo, `davidvornholt/standar
 - **Bucket 2 — repo-owned (seeded once or created by the consumer, then diverges).** Seeded files are written from the template's seed dir during `init`; other designated seams can be created when needed. `sync` never touches either kind. Examples: `biome.jsonc`, `AGENTS.local.md`, `local.just`, `.github/dependabot.local.yml`, `.sops.yaml`, `secrets/*`, root `package.json`, `turbo.json`, `README.md`.
 - **Bucket 3 — generated (engine-owned output).** Recomposed by every `init`/`sync` (and by `dependabot --write`) from a bucket-1 source plus a bucket-2 seam; hand edits are drift that `check` flags. Currently: `.github/dependabot.yml`, composed from `.github/dependabot.base.yml` + `.github/dependabot.local.yml`.
 
+## Symlinks are first-class managed paths
+
+A bucket-1 path may be a symlink. The engine mirrors the link itself and never follows it: the lock records the link target in place of a content hash, and `sync` recreates the link in each consumer. A linked directory therefore stays one copy on disk instead of being duplicated under both names. `check` reads a retargeted link — or a link a consumer replaced with a real directory — as drift, exactly as it reads an edited file, and `init`/`sync` refuse a canonical link whose target would resolve outside the repository before writing anything.
+
+`.claude/skills -> ../.agents/skills` is the case this exists for: skills stay at the tool-agnostic `.agents/skills` path that Codex and the `AGENTS.md` routing rule use, while Claude Code discovers them natively at the only path it scans.
+
+Known limitation: git materializes symlinks on Windows only when the checkout sets `core.symlinks=true`. Without it git writes a plain text file containing the link target, and Claude Code finds no skills there.
+
 ## Per-repo variation goes through a seam, never a local edit
 
 Because bucket-1 files are byte-identical everywhere, every legitimate per-repo customization uses a designated extension seam — extend, never patch:
