@@ -140,7 +140,14 @@ describe('runGithubCheck fail-closed visibility', () => {
     expect(errors).toContain(
       'repository setting(s) not visible to this token, so the gate cannot verify: allow_auto_merge; allow_merge_commit; allow_rebase_merge; allow_squash_merge; delete_branch_on_merge',
     );
-    expect(errors).toContain('ci.broker_app in secrets/ci.yaml');
+    // The remedy names admin auth rather than a broader broker token: a probe
+    // found no read-only permission that reveals this to an installation
+    // token, so sending CI after one would cost a settings change and change
+    // nothing.
+    expect(errors).toContain(
+      'Use a user-scoped token with read access to repository administration',
+    );
+    expect(errors).toContain('widening its read access is not the fix');
   });
 
   it('fails when a declared ruleset field is invisible to the token', async () => {

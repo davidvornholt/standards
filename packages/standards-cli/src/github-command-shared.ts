@@ -33,7 +33,7 @@ export const optOutEligibilityProblem = (
     : null;
 
 export const ADMIN_VISIBILITY_ADVICE =
-  'Use a token with read access to repository administration (in CI: the broker installation token minted from ci.broker_app in secrets/ci.yaml), or verify locally with admin auth';
+  'Use a user-scoped token with read access to repository administration, or verify locally with admin auth; no read-only permission reveals this to the CI broker installation token, so widening its read access is not the fix';
 
 // Declared state the token cannot see is a gate failure, not a pass with a
 // log line: a gate that cannot perform its comparison fails closed. The advice

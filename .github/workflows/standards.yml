@@ -264,16 +264,18 @@ jobs:
           failure-mode: fallback
           fallback-value: unresolved
 
-      # Administration read is not what makes ruleset bypass actors readable:
-      # REST withholds them from an installation token at every permission
-      # level, so a declared-empty list is verified through the GraphQL
-      # bypass-actor count instead. It is requested as the broadest settings
-      # read a repository-scoped token can hold, because a private repository is
-      # not guaranteed to serve declared settings to a metadata-only view;
-      # Issues read is what declared-label reads need. The minted token reaches
-      # only this repository and expires in an hour. Minting fails the job: a
-      # resolved App identity that cannot produce a token is a broken
-      # configuration, not a repo that never had one.
+      # Issues read is what declared-label reads need; every other setting the
+      # gate compares rides on the implicit Metadata read. Administration read
+      # is deliberately absent: a probe against a private repository found a
+      # metadata-only installation token already lists rulesets and answers the
+      # GraphQL merge settings and bypass-actor counts, and adding
+      # Administration changed no response — REST withholds ruleset
+      # bypass_actors and repository merge settings from an installation token
+      # at every permission level. Asking for it would widen the App ceiling
+      # that sits in every consumer's secrets/ci.yaml and buy no visibility.
+      # The minted token reaches only this repository and expires in an hour.
+      # Minting fails the job: a resolved App identity that cannot produce a
+      # token is a broken configuration, not a repo that never had one.
       - name: Mint a settings-read token
         id: broker-token
         if: steps.broker-app-id.outputs.used-fallback == 'false' && steps.broker-private-key.outputs.used-fallback == 'false'
@@ -281,7 +283,6 @@ jobs:
         with:
           app-id: ${{ env.BROKER_APP_ID }}
           private-key: ${{ env.BROKER_APP_PRIVATE_KEY }}
-          permission-administration: read
           permission-issues: read
 
       # Missing broker state deliberately falls back to the workflow token,

@@ -1835,9 +1835,12 @@ describe('canonical standards workflow broker settings token', () => {
       "if: steps.broker-app-id.outputs.used-fallback == 'false' && steps.broker-private-key.outputs.used-fallback == 'false'",
     );
     // Read-only, and no `repositories` input, so the token cannot reach beyond
-    // the repository the gate is comparing.
-    expect(mintStep).toContain('permission-administration: read');
+    // the repository the gate is comparing. Administration is deliberately not
+    // requested: a probe against a private repository showed a metadata-only
+    // installation token already reads every setting the gate compares, so
+    // asking for it would widen the App ceiling for nothing.
     expect(mintStep).toContain('permission-issues: read');
+    expect(mintStep).not.toContain('permission-administration:');
     expect(mintStep).not.toContain('repositories:');
     expect(mintStep).not.toMatch(WRITE_PERMISSION_INPUT);
   });
