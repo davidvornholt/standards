@@ -81,9 +81,9 @@ describe('runGithubCheck fail-closed visibility', () => {
     expect(calls.map(({ path }) => path)).toEqual(['/repos/owner/repo/labels']);
     const errors = output.errors.join('\n');
     expect(errors).toContain('declared labels not visible to this token');
-    expect(errors).toContain('ci.broker_app in secrets/ci.yaml');
-    expect(errors).toContain('read-only "Issues" access');
-    expect(errors).toContain('"Pull requests" read');
+    expect(errors).toContain("the github-settings job's workflow token");
+    expect(errors).toContain('issues: read');
+    expect(errors).toContain('pull-requests: read');
     expect(errors).not.toContain('GitHub API unreachable');
   });
 
@@ -140,14 +140,13 @@ describe('runGithubCheck fail-closed visibility', () => {
     expect(errors).toContain(
       'repository setting(s) not visible to this token, so the gate cannot verify: allow_auto_merge; allow_merge_commit; allow_rebase_merge; allow_squash_merge; delete_branch_on_merge',
     );
-    // The remedy names admin auth rather than a broader broker token: a probe
-    // found no read-only permission that reveals this to an installation
-    // token, so sending CI after one would cost a settings change and change
-    // nothing.
+    // The remedy names admin auth rather than a broader CI token: a probe found
+    // no permission that reveals this to any token CI can hold, so sending CI
+    // after one would cost a settings change and change nothing.
     expect(errors).toContain(
       'Use a user-scoped token with read access to repository administration',
     );
-    expect(errors).toContain('widening its read access is not the fix');
+    expect(errors).toContain('widening what CI reads with is not the fix');
   });
 
   it('fails when a declared ruleset field is invisible to the token', async () => {

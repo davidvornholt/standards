@@ -177,13 +177,19 @@ jobs:
       - name: Build Nix check
         run: nix build ".#checks.${{ matrix.system }}.standards-cli" -L
 
-  # The settings-read identity is a short-lived broker installation token, so no
-  # durable settings-capable credential exists to leak. The checkout carries the
-  # declarative settings inputs, the encrypted broker App identity, and the
-  # canonical SOPS resolver, and nothing else; the CLI that consumes the token is
-  # a published, checksum-pinned artifact installed under RUNNER_TEMP from
-  # direct, checksum-pinned release URLs, and the App identity is unset before it
-  # runs.
+  # The live settings comparison runs with the workflow token and no durable
+  # credential at all. A probe against a private repository compared every read
+  # this gate performs — list rulesets, get each ruleset, list labels, and the
+  # GraphQL merge-settings and bypass-actor query — across a broker App
+  # installation token and a token carrying exactly this job's grants, and the
+  # answers were identical, including the fields GitHub withholds from both.
+  # Minting a broker token here would therefore add no visibility while
+  # decrypting the one durable App key that every consumer keeps for the weekly
+  # sync, so this job never touches it. The checkout carries the declarative
+  # settings inputs and nothing else, and the CLI that consumes the token is a
+  # published, checksum-pinned artifact installed under RUNNER_TEMP from direct,
+  # checksum-pinned release URLs, so a pull request cannot substitute the code
+  # that performs the comparison.
   github-settings:
     runs-on: ubuntu-latest
     permissions:
@@ -195,10 +201,8 @@ jobs:
         with:
           persist-credentials: false
           sparse-checkout: |
-            .github/actions/sops-secret/action.yml
             .github/settings.json
             .github/settings.local.json
-            secrets/ci.yaml
           sparse-checkout-cone-mode: false
 
       - name: Install pinned settings checker
@@ -238,79 +242,27 @@ jobs:
           echo "$yaml_sha  $yaml_archive" | sha512sum --check --quiet
           tar -xzf "$yaml_archive" -C "$cli_root/node_modules/yaml" --strip-components=1
 
-      # Fallback mode rather than fail: a repo that has not provisioned the
-      # broker App yet still runs the gate on the workflow token. The sentinel
-      # only satisfies the resolver's non-empty contract; `used-fallback` is what
-      # the mint step reads, so an unresolved identity never reaches minting.
-      - name: Resolve broker App id
-        id: broker-app-id
-        uses: ./.github/actions/sops-secret
-        with:
-          age-key: ${{ secrets.SOPS_AGE_KEY }}
-          secret-file: secrets/ci.yaml
-          secret-key: broker_app.app_id
-          env-name: BROKER_APP_ID
-          failure-mode: fallback
-          fallback-value: unresolved
-
-      - name: Resolve broker App private key
-        id: broker-private-key
-        uses: ./.github/actions/sops-secret
-        with:
-          age-key: ${{ secrets.SOPS_AGE_KEY }}
-          secret-file: secrets/ci.yaml
-          secret-key: broker_app.private_key
-          env-name: BROKER_APP_PRIVATE_KEY
-          failure-mode: fallback
-          fallback-value: unresolved
-
-      # Issues read is what declared-label reads need; every other setting the
-      # gate compares rides on the implicit Metadata read. Administration read
-      # is deliberately absent: a probe against a private repository found a
-      # metadata-only installation token already lists rulesets and answers the
-      # GraphQL merge settings and bypass-actor counts, and adding
-      # Administration changed no response — REST withholds ruleset
-      # bypass_actors and repository merge settings from an installation token
-      # at every permission level. Asking for it would widen the App ceiling
-      # that sits in every consumer's secrets/ci.yaml and buy no visibility.
-      # The minted token reaches only this repository and expires in an hour.
-      # Minting fails the job: a resolved App identity that cannot produce a
-      # token is a broken configuration, not a repo that never had one.
-      - name: Mint a settings-read token
-        id: broker-token
-        if: steps.broker-app-id.outputs.used-fallback == 'false' && steps.broker-private-key.outputs.used-fallback == 'false'
-        uses: actions/create-github-app-token@v3
-        with:
-          app-id: ${{ env.BROKER_APP_ID }}
-          private-key: ${{ env.BROKER_APP_PRIVATE_KEY }}
-          permission-issues: read
-
-      # Missing broker state deliberately falls back to the workflow token,
-      # which holds only contents and issues read. That is often enough to pass,
-      # so the fallback is a degraded credential rather than a guaranteed
-      # failure; the gate stays fail-closed on any declared state that read
-      # cannot reach.
+      # Issues read is what declared-label reads need in a private repository;
+      # every other setting the gate compares rides on the implicit Metadata
+      # read every workflow token carries. Ruleset bypass actors and repository
+      # merge settings are withheld from this token — REST hides them from any
+      # GitHub App installation token at every permission level — so the CLI
+      # reads merge settings over GraphQL and verifies a declared-empty bypass
+      # list through the GraphQL bypass-actor count. A declared non-empty bypass
+      # list cannot be confirmed by any CI credential and fails closed until the
+      # check is re-run locally with admin auth; that is a property of GitHub's
+      # API, not of the token chosen here.
       - name: Check GitHub settings
         env:
-          BROKER_TOKEN: ${{ steps.broker-token.outputs.token }}
-          FALLBACK_TOKEN: ${{ github.token }}
+          SETTINGS_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          value="$BROKER_TOKEN"
-          if [ -z "$value" ]; then
-            value="$FALLBACK_TOKEN"
-            echo "::warning::No broker installation token was minted; using the workflow token"
-            echo "ci.broker_app is not resolvable from secrets/ci.yaml, so this run verifies with the workflow token's contents and issues read instead of the intended broker token. A green result therefore proves less; declared state that read cannot reach fails the gate rather than passing unverified. Provision the broker App to restore the intended settings visibility."
-          fi
-
-          if [ -z "$value" ] || [[ "$value" == *$'\n'* ]] || [[ "$value" == *$'\r'* ]]; then
+          if [ -z "$SETTINGS_TOKEN" ] || [[ "$SETTINGS_TOKEN" == *$'\n'* ]] || [[ "$SETTINGS_TOKEN" == *$'\r'* ]]; then
             echo "::error::Resolved GitHub settings token must be non-empty and single-line"
             exit 1
           fi
-          echo "::add-mask::$value"
-          unset BROKER_APP_ID BROKER_APP_PRIVATE_KEY BROKER_TOKEN FALLBACK_TOKEN
           cd "$RUNNER_TEMP/standards-cli"
-          GH_TOKEN="$value" "$RUNNER_TEMP/standards-bin/bun" \
+          GH_TOKEN="$SETTINGS_TOKEN" "$RUNNER_TEMP/standards-bin/bun" \
             package/src/cli.ts github --check --dir "$GITHUB_WORKSPACE"
 
   # Keep the stable required-check name while making all independent gates

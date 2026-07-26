@@ -1761,19 +1761,24 @@ describe('canonical standards workflow settings security', () => {
       STANDARDS_WORKFLOW,
       'Checkout settings inputs',
     );
-    // The job resolves SOPS secrets, so the only repository-controlled file it
-    // may execute is the canonical resolver itself. Pinning the whole list keeps
-    // a second, unreviewed executable path out of the sparse checkout.
+    // The job holds no durable credential, so it needs no executable file from
+    // the repository at all: declarative settings inputs and nothing else.
+    // Pinning the whole list keeps an unreviewed executable path out of the
+    // sparse checkout.
     expect(sparseCheckoutPaths(checkoutStep)).toEqual([
-      '.github/actions/sops-secret/action.yml',
       '.github/settings.json',
       '.github/settings.local.json',
-      'secrets/ci.yaml',
     ]);
     expect(workflow).not.toContain('GITHUB_ENV');
     expect(workflow).not.toContain('GH_TOKEN:');
     expect(settingsStep).not.toContain('GITHUB_OUTPUT');
-    expect(settingsStep).toContain('GH_TOKEN="$value"');
+    expect(settingsStep).toContain('GH_TOKEN="$SETTINGS_TOKEN"');
+    // An empty or multi-line token must stop the job rather than reach the CLI,
+    // where an empty GH_TOKEN would silently downgrade to anonymous reads.
+    expect(settingsStep).toContain('exit 1');
+    expect(settingsStep).toContain(
+      '[ -z "$SETTINGS_TOKEN" ] || [[ "$SETTINGS_TOKEN" == *$\'\\n\'* ]] || [[ "$SETTINGS_TOKEN" == *$\'\\r\'* ]]',
+    );
     expect(workflow).toContain('STANDARDS_SKIP_GITHUB_CHECK: "true"');
     expect(checkoutStep).toContain('sparse-checkout-cone-mode: false');
     expect(checkoutStep).toContain('persist-credentials: false');
@@ -1787,11 +1792,6 @@ describe('canonical standards workflow settings security', () => {
     expect(installStep.match(/sha=[a-f0-9]{128}/gu)).toHaveLength(2);
     expect(installStep).toContain('sha512sum --check --quiet');
     expect(installStep).not.toContain('bun add');
-    // The App identity is durable and reaches the whole permission ceiling, so
-    // it must be gone from the environment before the CLI is executed.
-    expect(settingsStep).toContain(
-      'unset BROKER_APP_ID BROKER_APP_PRIVATE_KEY BROKER_TOKEN FALLBACK_TOKEN',
-    );
     expect(settingsStep).not.toContain('SOPS_AGE_KEY');
   });
 
@@ -1812,37 +1812,28 @@ describe('canonical standards workflow settings security', () => {
   });
 });
 
-describe('canonical standards workflow broker settings token', () => {
-  it('reads settings through a repository-scoped read-only broker token', () => {
-    const appIdStep = yamlStep(STANDARDS_WORKFLOW, 'Resolve broker App id');
-    const privateKeyStep = yamlStep(
-      STANDARDS_WORKFLOW,
-      'Resolve broker App private key',
-    );
-    const mintStep = yamlStep(STANDARDS_WORKFLOW, 'Mint a settings-read token');
+describe('canonical standards workflow settings credential', () => {
+  it('reads settings with the workflow token and no durable credential', () => {
+    const workflow = readFileSync(STANDARDS_WORKFLOW, 'utf8');
+    const settingsStep = yamlStep(STANDARDS_WORKFLOW, 'Check GitHub settings');
 
-    for (const step of [appIdStep, privateKeyStep]) {
-      expect(step).toContain('uses: ./.github/actions/sops-secret');
-      expect(step).toContain('secret-file: secrets/ci.yaml');
-      expect(step).toContain('failure-mode: fallback');
-    }
-    expect(appIdStep).toContain('secret-key: broker_app.app_id');
-    expect(privateKeyStep).toContain('secret-key: broker_app.private_key');
-
-    // Neither the App id nor the key alone can mint, so an unresolved half must
-    // skip minting rather than hand `create-github-app-token` the sentinel.
-    expect(mintStep).toContain(
-      "if: steps.broker-app-id.outputs.used-fallback == 'false' && steps.broker-private-key.outputs.used-fallback == 'false'",
+    // A probe against a private repository compared a broker App installation
+    // token against a token holding exactly this job's grants across every read
+    // the gate performs, and the answers were identical. Minting therefore adds
+    // no visibility, so the gate must not decrypt the durable App key: doing so
+    // would put the one credential every consumer keeps for the weekly sync
+    // into a job that gains nothing from it.
+    expect(settingsStep).toContain(
+      `SETTINGS_TOKEN: ${githubExpression('github.token')}`,
     );
-    // Read-only, and no `repositories` input, so the token cannot reach beyond
-    // the repository the gate is comparing. Administration is deliberately not
-    // requested: a probe against a private repository showed a metadata-only
-    // installation token already reads every setting the gate compares, so
-    // asking for it would widen the App ceiling for nothing.
-    expect(mintStep).toContain('permission-issues: read');
-    expect(mintStep).not.toContain('permission-administration:');
-    expect(mintStep).not.toContain('repositories:');
-    expect(mintStep).not.toMatch(WRITE_PERMISSION_INPUT);
+    expect(workflow).not.toContain('sops-secret');
+    expect(workflow).not.toContain('secrets/ci.yaml');
+    expect(workflow).not.toContain('SOPS_AGE_KEY');
+    expect(workflow).not.toContain('create-github-app-token');
+    // No silent degradation path: there is one credential, so a green result
+    // never means "verified with something weaker than intended".
+    expect(settingsStep).not.toContain('::warning::');
+    expect(workflow).not.toMatch(WRITE_PERMISSION_INPUT);
   });
 
   it('grants label reads only to the isolated settings job', () => {
@@ -2143,10 +2134,11 @@ describe('canonical SOPS secret action wiring', () => {
     const sopsInstallers = productionFiles
       .filter(({ content }) => content.match(SOPS_RELEASE_URL) !== null)
       .map(({ path }) => path);
+    // The settings gate is deliberately absent: it resolves no SOPS secret, so
+    // it must not check out or execute the resolver either.
     const localActionWorkflows = [
       readFileSync(SYNC_WORKFLOW, 'utf8'),
       readFileSync(NOTIFY_WORKFLOW, 'utf8'),
-      readFileSync(STANDARDS_WORKFLOW, 'utf8'),
     ];
     expect(action.match(SOPS_VERSION_ASSIGNMENT)).toHaveLength(1);
     expect(action.match(SOPS_CHECKSUM_ASSIGNMENT)).toHaveLength(2);
