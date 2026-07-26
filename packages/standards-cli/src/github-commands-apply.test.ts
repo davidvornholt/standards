@@ -52,10 +52,11 @@ describe('runGithubApply', () => {
 
     expect(await runGithubApply(consumer())).toBe(true);
     expect(calls).toEqual([
-      { method: 'GET', path: '/repos/owner/repo', body: null },
+      { method: 'GET', path: '/repos/owner/repo', search: '', body: null },
       {
         method: 'PATCH',
         path: '/repos/owner/repo',
+        search: '',
         body: declaredPatchBody(false),
       },
     ]);
@@ -82,7 +83,7 @@ describe('runGithubApply', () => {
 
     expect(await runGithubApply(consumer())).toBe(false);
     expect(calls).toEqual([
-      { method: 'GET', path: '/repos/owner/repo', body: null },
+      { method: 'GET', path: '/repos/owner/repo', search: '', body: null },
     ]);
     expect(output.logs).toEqual([OPT_OUT_NOTICE]);
     expect(output.errors).toEqual([

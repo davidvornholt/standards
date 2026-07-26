@@ -23,6 +23,10 @@ const TEMPLATE_EXAMPLE_PATH = join(
   'template/secrets/ci.example.yaml',
 );
 const OBSOLETE_SYNC_KEY = ['standards', 'sync', 'token'].join('_');
+// The retired settings PAT. Nothing reads it any more, so a seeded example that
+// still carries it would send every adopter to mint a credential for nothing —
+// and `template/secrets/ci.example.yaml` is what new consumers start from.
+const OBSOLETE_SETTINGS_KEY = ['github', 'settings', 'read', 'token'].join('_');
 const BROKER_DESTINATION = 'ci:ci.broker_app';
 
 const workflowSource = readFileSync(WORKFLOW_PATH, 'utf8');
@@ -131,6 +135,8 @@ describe('Standards sync broker credential contract', () => {
     expect(source).toBe(template);
     expect(workflowSource).not.toContain(OBSOLETE_SYNC_KEY);
     expect(source).not.toContain(OBSOLETE_SYNC_KEY);
+    expect(source).not.toContain(OBSOLETE_SETTINGS_KEY);
+    expect(template).not.toContain(OBSOLETE_SETTINGS_KEY);
     expect(Object.keys(brokerApp).sort()).toEqual(['app_id', 'private_key']);
     expect(
       Object.values(brokerApp).every((value) => typeof value === 'string'),
@@ -166,11 +172,17 @@ describe('Standards sync broker documentation contract', () => {
       expect(document).toContain(BROKER_DESTINATION);
       expect(document).not.toContain(OBSOLETE_SYNC_KEY);
     }
+    // Current guidance must not instruct anyone to provision the retired PAT.
+    // The root README is excluded deliberately: it names the key in dated
+    // migration notes, which stay accurate as history.
+    for (const document of documents) {
+      expect(document).not.toContain(OBSOLETE_SETTINGS_KEY);
+    }
     expect(rootReadme).toContain('`@davidvornholt/standards` 0.14.0 or newer');
     expect(rootReadme).toContain('`bun.lock`');
     expect(rootReadme).not.toContain('current 0.12 workflow');
     expect(rootReadme).toContain(
-      'current broker-credential cutover raises the minimum again to 0.14.0',
+      'current credential-free settings-verification cutover raises the minimum again to 0.18.0',
     );
   });
 });

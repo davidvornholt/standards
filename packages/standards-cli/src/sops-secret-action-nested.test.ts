@@ -12,7 +12,6 @@ describe('nested SOPS secret action values', () => {
     const privateKey =
       '-----BEGIN RSA PRIVATE KEY-----\nkey\n-----END RSA PRIVATE KEY-----\n';
     const actionRun = runSopsAction({
-      failureMode: 'fail',
       secretKey: 'broker_app.private_key',
       sopsOutput: `{"ci":{"broker_app":{"app_id":"12345","private_key":${JSON.stringify(privateKey)}}}}`,
     });
@@ -29,8 +28,8 @@ describe('nested SOPS secret action values', () => {
         '',
       ].join('\n'),
     );
-    expect(actionRun.output).toBe('used-fallback=false\n');
-    expect(actionRun.output).not.toContain(privateKey);
+    expect(actionRun.output).toBe('');
+    expect(actionRun.environment).not.toBe('');
   });
 
   it.each([
@@ -51,7 +50,6 @@ describe('nested SOPS secret action values', () => {
     ],
   ] as const)('fails closed for %s', (_label, sopsOutput, reason) => {
     const actionRun = runSopsAction({
-      failureMode: 'fail',
       secretKey: 'broker_app.private_key',
       sopsOutput,
     });

@@ -4,13 +4,14 @@
 
 import {
   apiError,
-  fetchLiveRulesets,
   HTTP_CREATED,
   HTTP_NO_CONTENT,
   HTTP_OK,
   request,
 } from './github-api';
-import { diffRepositorySettings, diffRuleset } from './github-diff';
+import { diffRepositorySettings } from './github-diff';
+import { fetchLiveRulesets } from './github-ruleset-api';
+import { diffRuleset } from './github-ruleset-diff';
 import { type GithubSettings, isRecord } from './github-settings-parse';
 
 // GitHub answers a PATCH containing a plan-unavailable setting with HTTP 200

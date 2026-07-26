@@ -4,8 +4,6 @@
 
 import {
   apiError,
-  fetchLiveRulesets,
-  fetchMergeSettingsViaGraphql,
   HTTP_FORBIDDEN,
   HTTP_OK,
   HTTP_UNAUTHORIZED,
@@ -13,18 +11,31 @@ import {
   resolveGithubRepo,
   resolveToken,
 } from './github-api';
+import { resolveHiddenBypassActors } from './github-bypass-actors';
 import {
   enforceableRepositorySettings,
+  MERGE_SETTINGS_VISIBILITY_ADVICE,
   optOutEligibilityProblem,
   unverifiableProblem,
 } from './github-command-shared';
-import { diffRepositorySettings, diffRulesets } from './github-diff';
+import { diffRepositorySettings } from './github-diff';
+import {
+  fetchBypassActorCountsViaGraphql,
+  fetchMergeSettingsViaGraphql,
+} from './github-graphql';
 import { diffLabels, fetchLiveLabels } from './github-labels';
 import { GithubListResponseError } from './github-paginate';
+import { fetchLiveRulesets } from './github-ruleset-api';
+import { diffRulesets } from './github-ruleset-diff';
+import {
+  GRAPHQL_NOT_CONSULTED,
+  isHiddenBypassActors,
+  rulesetVisibilityProblems,
+} from './github-ruleset-visibility';
 import { type GithubSettings, isRecord } from './github-settings-parse';
 
 const LABEL_VISIBILITY_PROBLEM =
-  'declared labels not visible to this token, so the gate cannot verify them. In CI, use a valid ci.github_settings_read_token from secrets/ci.yaml with read-only "Issues" access (or "Pull requests" read); locally use a token with one of those permissions';
+  'declared labels not visible to this token, so the gate cannot verify them. Label reads need issues: read (or pull-requests: read); the canonical github-settings job already grants issues: read, so in CI this points at a stale synced workflow or an organization policy restricting the workflow token rather than anything to change in the declaration. Locally, use a token with one of those permissions';
 const PERMISSION_DENIAL_MESSAGES: ReadonlySet<string> = new Set([
   'Resource not accessible by integration',
   'Resource not accessible by personal access token',
@@ -73,9 +84,28 @@ const repositoryDrift = async (
   });
   return [
     ...rediff.drifted,
-    ...unverifiableProblem('repository setting(s)', rediff.unverifiable),
+    ...unverifiableProblem(
+      'repository setting(s)',
+      rediff.unverifiable,
+      MERGE_SETTINGS_VISIBILITY_ADVICE,
+    ),
   ];
 };
+
+// The live rulesets GraphQL answered a bypass-actor count for, named as the
+// REST response names them so the advice can say whether a hidden list was
+// counted-and-matched or never answered for at all.
+const countedRulesetNames = (
+  live: ReadonlyArray<Readonly<Record<string, unknown>>>,
+  counts: ReadonlyMap<number, number>,
+): ReadonlySet<string> =>
+  new Set(
+    live
+      .filter(
+        (ruleset) => typeof ruleset.id === 'number' && counts.has(ruleset.id),
+      )
+      .map((ruleset) => String(ruleset.name)),
+  );
 
 const rulesetDrift = async (
   token: string | null,
@@ -90,9 +120,30 @@ const rulesetDrift = async (
     return [live.problem ?? 'unable to read rulesets'];
   }
   const diff = diffRulesets(declared.rulesets, live.rulesets);
+  if (!diff.unverifiable.some(isHiddenBypassActors)) {
+    return [
+      ...diff.drifted,
+      ...rulesetVisibilityProblems(diff.unverifiable, GRAPHQL_NOT_CONSULTED),
+    ];
+  }
+  // REST hides bypass actors from every non-admin token and from installation
+  // tokens outright; retry the hidden lists as GraphQL counts before failing
+  // the gate.
+  const answered = await fetchBypassActorCountsViaGraphql(token, repo);
+  const rediff = diffRulesets(
+    declared.rulesets,
+    resolveHiddenBypassActors(
+      declared.rulesets,
+      live.rulesets,
+      answered.counts,
+    ),
+  );
   return [
-    ...diff.drifted,
-    ...unverifiableProblem('ruleset field(s)', diff.unverifiable),
+    ...rediff.drifted,
+    ...rulesetVisibilityProblems(rediff.unverifiable, {
+      countedNames: countedRulesetNames(live.rulesets, answered.counts),
+      failure: answered.failure,
+    }),
   ];
 };
 
