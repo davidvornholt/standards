@@ -1,3 +1,4 @@
+import type { CodexRunResult } from './poller-codex';
 import type { FixPublication } from './poller-fix-publication';
 import { createComment } from './poller-github-write';
 import {
@@ -6,7 +7,15 @@ import {
   type JobLabels,
   releaseLabels,
 } from './poller-job-shared';
+import { readFixOutcome } from './poller-outcome';
 import type { FixOutcome } from './poller-protocol';
+
+export const readFixRunOutcome = (
+  run: CodexRunResult,
+  workDir: string,
+  issueNumber: number,
+): Promise<FixOutcome | null> =>
+  run.succeeded ? readFixOutcome(workDir, issueNumber) : Promise.resolve(null);
 
 export const handleNonFixedOutcome = async (
   job: FixPublication,

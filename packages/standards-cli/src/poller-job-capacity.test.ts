@@ -112,7 +112,7 @@ describe('poller entrypoints without Codex capacity', () => {
       issueNumber: ISSUE_NUMBER,
       approvalId: binding.id,
       title: 'fix(poller): recover output',
-      body: 'Recovered.',
+      body: `Recovered.\n\nFixes #${ISSUE_NUMBER}`,
       baseSha: fixture.baseSha,
       commits: 1,
     });
