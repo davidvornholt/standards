@@ -18,26 +18,29 @@ type SopsStoredValueInput = {
 };
 
 // Extracting a scalar leaf prints the stored value itself, with no quoting and
-// no framing of any kind — probed against sops 3.13.0. Every byte of stdout is
-// therefore value, which makes exact equality the only sound comparison: a
-// trailing newline is a difference in the stored secret, not output framing.
+// no framing of any kind — probed against sops 3.13.0 and 3.13.3. Every byte of
+// stdout is therefore value, which makes exact equality the only sound
+// comparison: a trailing newline is a difference in the stored secret, not
+// output framing.
 //
-// Output that parses as JSON but is not a string cannot be a scalar leaf, so
-// the extraction resolved to a branch or the read returned something other than
-// the value. That is unverifiable rather than a mismatch. A stored value the
-// comparison above already rejected can reach this too — a differing number, say
-// — and unverifiable is the safe reading of it, because the alternative deletes
-// a credential on a guess.
-const readScalarLeaf = (stdout: string): string | null => {
+// Once equality has been ruled out, output that parses as JSON is output we
+// cannot read as this leaf's own value. It is a branch or list rather than a
+// scalar; or a typed leaf, which a stored string could equally have produced;
+// or a quoted rendering of exactly the value expected, which is either stray
+// quoting in storage or framing from some sops we have not probed. None of
+// those can be told apart from what was printed, and the wrong answer deletes a
+// credential, so all of them stay unverifiable.
+const isUnreadableOutput = (stdout: string, expectedValue: string): boolean => {
   if (stdout === '') {
-    return null;
+    return true;
   }
   try {
-    return typeof JSON.parse(stdout) === 'string' ? stdout : null;
+    const parsed: unknown = JSON.parse(stdout);
+    return typeof parsed !== 'string' || parsed === expectedValue;
   } catch {
     // Not JSON at all, which is the normal case: an opaque token value, or a
     // hex access key ID that reads as a malformed number.
-    return stdout;
+    return false;
   }
 };
 
@@ -61,10 +64,13 @@ export const verifySopsStoredValueWith = (
   if (result.status !== 0) {
     return { ok: false, problem };
   }
+  // Equality is decided before anything is classified, so a secret whose own
+  // text happens to be valid JSON — an all-digit token — is proven by the bytes
+  // rather than second-guessed by their shape.
   if (result.stdout === expectedValue) {
     return { ok: true, matches: true };
   }
-  return readScalarLeaf(result.stdout) === null
+  return isUnreadableOutput(result.stdout, expectedValue)
     ? { ok: false, problem }
     : { ok: true, matches: false };
 };

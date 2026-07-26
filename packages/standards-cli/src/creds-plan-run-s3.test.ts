@@ -116,7 +116,7 @@ describe('creds apply S3 pair renewal', () => {
   it('does not mutate when the stored access key belongs to another token', async () => {
     const { consumer, events } = initialize(S3_SECRETS);
     installSops(
-      'if [ "$1" = "decrypt" ]; then printf \'"foreign-token"\'; exit 0; fi\nprintf "write\\n" >> "$PLAN_EVENT_FILE"',
+      'if [ "$1" = "decrypt" ]; then printf \'foreign-token\'; exit 0; fi\nprintf "write\\n" >> "$PLAN_EVENT_FILE"',
     );
     stubCloudflare();
     const error = spyOn(console, 'error').mockImplementation(() => undefined);
