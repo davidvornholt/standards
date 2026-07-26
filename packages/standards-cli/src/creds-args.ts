@@ -20,8 +20,10 @@ export type CredsFlags = {
   zone: string | undefined;
   jurisdiction: R2Jurisdiction;
   s3: boolean;
+  force: boolean;
   org: string | undefined;
   name: string | undefined;
+  tokenId: string | undefined;
   readonly words: Array<string>;
 };
 
@@ -55,8 +57,10 @@ export const parseCredsArgs = (argv: ReadonlyArray<string>): CredsFlags => {
     zone: undefined,
     jurisdiction: DEFAULT_R2_JURISDICTION,
     s3: false,
+    force: false,
     org: undefined,
     name: undefined,
+    tokenId: undefined,
     words: [],
   };
   const setters: Readonly<Record<string, (value: string) => void>> = {
@@ -93,12 +97,17 @@ export const parseCredsArgs = (argv: ReadonlyArray<string>): CredsFlags => {
     '--name': (value) => {
       flags.name = value;
     },
+    '--token-id': (value) => {
+      flags.tokenId = value;
+    },
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index] ?? '';
     const setter = setters[arg];
     if (arg === '--s3') {
       flags.s3 = true;
+    } else if (arg === '--force') {
+      flags.force = true;
     } else if (setter !== undefined) {
       setter(flagValue(argv, index));
       index += 1;

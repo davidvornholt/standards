@@ -2,6 +2,7 @@ import { listSecretsTargets } from './creds-dest';
 import { identifyCloudflareBootstrapAuthority } from './creds-login-cloudflare';
 import { computeCredsPlan } from './creds-plan';
 import { renewPlannedToken } from './creds-plan-renew';
+import { reportCredsPlan } from './creds-plan-report';
 import { revokePlannedToken } from './creds-plan-revoke';
 import type { AccountToken, PlannedAction } from './creds-plan-types';
 import { readEncryptedKeys } from './creds-sops';
@@ -109,17 +110,7 @@ export const runCredsPlan = async (
     tokens: state.tokens,
     now: new Date(),
   });
-  for (const action of plan.actions) {
-    console.log(
-      `  ${apply ? '' : 'would '}${action.kind} ${action.name} (${action.reason})`,
-    );
-  }
-  for (const finding of plan.findings) {
-    console.error(`standards creds: ${finding}`);
-  }
-  console.log(
-    `standards creds: ${plan.actions.length} action(s), ${plan.findings.length} finding(s), ${plan.healthy} brokered token(s) healthy`,
-  );
+  reportCredsPlan(plan, apply);
   if (plan.findings.length > 0) {
     return fail('reconciliation aborted until every finding is resolved');
   }

@@ -7,6 +7,21 @@ export type AccountToken = {
   readonly token: CloudflareToken;
 };
 
+export type UnmanagedToken = {
+  readonly accountId: string;
+  readonly tokenId: string;
+  readonly name: string;
+  readonly status: string;
+};
+
+// A token the broker minted under another repository's name. That repository
+// normally reconciles it, so it is not unmanaged — the distinction matters
+// because it stops being true when that repository is renamed, transferred, or
+// deleted, and this account is then the only place the token is still visible.
+export type BrokeredElsewhereToken = UnmanagedToken & {
+  readonly repo: string;
+};
+
 export type PlannedAction =
   | {
       readonly kind: 'revoke';
@@ -33,4 +48,8 @@ export type CredsPlan = {
   readonly actions: ReadonlyArray<PlannedAction>;
   readonly findings: ReadonlyArray<string>;
   readonly healthy: number;
+  // Tokens in the account the broker did not mint. Reported, never mutated.
+  readonly unmanaged: ReadonlyArray<UnmanagedToken>;
+  // Tokens the broker minted for another repository. Reported, never mutated.
+  readonly brokeredElsewhere: ReadonlyArray<BrokeredElsewhereToken>;
 };

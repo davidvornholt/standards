@@ -3,23 +3,28 @@
 // naming scheme). A brokered token whose secret key vanished from SOPS is
 // revoked; one nearing expiry is replaced while copying its live policy and
 // lifetime. Secret keys without a brokered token are simply unmanaged — most
-// secrets are — and are never touched. Execution lives in creds-plan-run.ts.
+// secrets are — and are never touched. Tokens the broker did not mint, and
+// tokens it minted for another repository, are reported
+// (creds-plan-unmanaged.ts) but never mutated. Execution lives in
+// creds-plan-run.ts.
 
 import { cloudflareExpiresOn } from './creds-cloudflare-expiry';
-import { parseTokenName } from './creds-naming';
 import { groupByIntersectingFootprint } from './creds-plan-groups';
 import type {
   AccountToken,
   CredsPlan,
   PlannedAction,
 } from './creds-plan-types';
+import {
+  type ManagedTokenRef,
+  partitionAccountTokens,
+} from './creds-plan-unmanaged';
 import { destinationFormatOf, inferredDestinationFootprint } from './creds-r2';
 
 const DEFAULT_RENEW_WITHIN_DAYS = 30;
 const DAY_MS = 86_400_000;
 
-type ManagedToken = AccountToken & {
-  readonly ref: { readonly target: string; readonly key: string };
+type ManagedToken = ManagedTokenRef & {
   readonly footprint: ReadonlyArray<string>;
 };
 
@@ -145,23 +150,16 @@ export const computeCredsPlan = (input: {
   const renewWithin =
     (input.renewWithinDays ?? DEFAULT_RENEW_WITHIN_DAYS) * DAY_MS;
   const actions: Array<PlannedAction> = [];
-  const findings: Array<string> = [];
+  const partition = partitionAccountTokens(input.tokens, input.repo);
+  const findings: Array<string> = [...partition.findings];
   let healthy = 0;
-  const managed = input.tokens.flatMap((entry) => {
-    const ref = parseTokenName(entry.token.name, input.repo);
-    return ref === null
-      ? []
-      : [
-          {
-            ...entry,
-            ref,
-            footprint: inferredDestinationFootprint(
-              input.keysByTarget.get(ref.target),
-              ref.key,
-            ),
-          },
-        ];
-  });
+  const managed = partition.managed.map((entry) => ({
+    ...entry,
+    footprint: inferredDestinationFootprint(
+      input.keysByTarget.get(entry.ref.target),
+      entry.ref.key,
+    ),
+  }));
   const dispositions = groupByIntersectingFootprint(managed).map((group) =>
     dispositionForGroup(group, input, renewWithin),
   );
@@ -174,5 +172,11 @@ export const computeCredsPlan = (input: {
       healthy += 1;
     }
   }
-  return { actions, findings, healthy };
+  return {
+    actions,
+    findings,
+    healthy,
+    unmanaged: partition.unmanaged,
+    brokeredElsewhere: partition.brokeredElsewhere,
+  };
 };

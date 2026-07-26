@@ -70,6 +70,13 @@ export const initializeConsumer = (
   return consumer;
 };
 
+// Ownership guards resolve the repository from the origin remote, so a suite
+// covering a remote that resolves to a different name — or to none at all —
+// needs to rewrite it after the consumer exists.
+export const setConsumerOrigin = (consumer: string, url: string): void => {
+  execFileSync('git', ['-C', consumer, 'remote', 'set-url', 'origin', url]);
+};
+
 export const installSops = (body: string): void => {
   const bin = join(root, 'bin');
   mkdirSync(bin);

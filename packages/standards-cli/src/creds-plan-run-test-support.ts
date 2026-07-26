@@ -105,9 +105,15 @@ const pageInfo = (count: number): unknown => ({
   total_count: count,
 });
 
+const defaultListing = (target: string): ReadonlyArray<unknown> => [
+  { id: 'bootstrap', name: 'standards-broker', status: 'active' },
+  expiringToken(target),
+];
+
 export const stubCloudflare = (
   target = 'ci',
   verifiedId: string | null = 'bootstrap',
+  listing: ReadonlyArray<unknown> = defaultListing(target),
 ): void => {
   globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
@@ -133,15 +139,7 @@ export const stubCloudflare = (
       );
       return Promise.resolve(envelope({ id: 'deleted' }));
     }
-    return Promise.resolve(
-      envelope(
-        [
-          { id: 'bootstrap', name: 'standards-broker', status: 'active' },
-          expiringToken(target),
-        ],
-        pageInfo(2),
-      ),
-    );
+    return Promise.resolve(envelope(listing, pageInfo(listing.length)));
   }) as typeof fetch;
 };
 

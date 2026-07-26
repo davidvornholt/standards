@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   BROKER_IDENTITY_NAME,
   isInMintedNamespace,
+  parseAnyTokenName,
   parseTokenName,
   repoTokenPrefix,
   tokenNameOf,
@@ -42,6 +43,22 @@ describe('creds token naming', () => {
     ).toBe(true);
     expect(isInMintedNamespace('standards-broker-2')).toBe(false);
     expect(isInMintedNamespace('standards/anything')).toBe(true);
+  });
+
+  // `creds revoke` holds no repository, so this is the only thing standing
+  // between "another repository reconciles this token" and deleting it. A name
+  // it resolves is refused without --force; a name it does not is deleted, so
+  // both answers are load-bearing in opposite directions.
+  it('resolves the owning repository of a minted name, and nothing else', () => {
+    expect(parseAnyTokenName('standards/other/repo/ci/ci.dns_token')).toEqual({
+      repo: 'other/repo',
+      target: 'ci',
+      key: 'ci.dns_token',
+    });
+    expect(parseAnyTokenName('standards/other/repo/ci')).toBeNull();
+    expect(parseAnyTokenName('standards/only-owner')).toBeNull();
+    expect(parseAnyTokenName(BROKER_IDENTITY_NAME)).toBeNull();
+    expect(parseAnyTokenName('dns-token-from-2023')).toBeNull();
   });
 
   it('rejects unsafe segments instead of minting ambiguous names', () => {
