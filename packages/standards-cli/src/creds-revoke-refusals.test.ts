@@ -17,6 +17,7 @@ import {
   deletes,
   FOREIGN_ID,
   OTHER_MACHINE_BROKER_ID,
+  OTHER_OWNER_ID,
   OTHER_REPO_ID,
   RENAMED_BOOTSTRAP_ID,
   refusals,
@@ -37,11 +38,12 @@ describe('creds revoke provider identity', () => {
       false,
     );
     expect(deletes(requests)).toEqual([]);
+    const [message = ''] = refusals(error);
     // The broker store is machine-global, so the account that failed is the one
-    // fact the operator cannot reconstruct from the provider's own complaint.
-    expect(error).toHaveBeenCalledWith(
-      expect.stringContaining(`account ${ACCOUNT_A}`),
-    );
+    // fact the operator cannot reconstruct from the provider's own complaint —
+    // and the provider's complaint is the only clue to why it failed.
+    expect(message).toContain(`account ${ACCOUNT_A}`);
+    expect(message).toContain('token verification returned no valid token ID');
   });
 });
 
@@ -119,11 +121,41 @@ describe('creds revoke brokered refusals', () => {
     ).toBe(false);
     expect(deletes(requests)).toEqual([]);
     const [message = ''] = refusals(error);
-    expect(message).toContain('otherowner/otherrepo');
-    expect(message).toContain('davidvornholt/example');
+    // Both repositories appear in this message, so each name is asserted bound
+    // to its role: naming them without their roles reads the same forwards and
+    // backwards, and the reversed message tells the operator that the token
+    // they are standing next to is theirs.
+    expect(message).toContain('belongs to otherowner/otherrepo');
+    expect(message).toContain('this checkout is davidvornholt/example');
     // Without the remedy the operator is left with --force and no correct
     // alternative in sight, which is the one outcome this message prevents.
+    // It has to run in the owning repository: pointed at this one, it would
+    // have the operator delete their own live SOPS key.
+    expect(message).toContain("from otherowner/otherrepo's SOPS target");
     expect(message).toContain('ci:ci.dns_token');
     expect(message).toContain('standards creds apply');
+  });
+
+  // GitHub repository names are case-insensitive, so ownership cannot be
+  // decided by exact string match — but they are owner-scoped, so it cannot be
+  // decided by repository name alone either. This token shares this
+  // repository's name and nothing else.
+  it('refuses a token brokered under this repository name to another owner', async () => {
+    const consumer = initializeConsumer([ACCOUNT_A]);
+    const requests = stubAccount();
+    const error = spyOn(console, 'error').mockImplementation(() => undefined);
+    expect(
+      await runCredsCommand([
+        'revoke',
+        '--token-id',
+        OTHER_OWNER_ID,
+        '--dir',
+        consumer,
+      ]),
+    ).toBe(false);
+    expect(deletes(requests)).toEqual([]);
+    const [message = ''] = refusals(error);
+    expect(message).toContain('belongs to otherowner/example');
+    expect(message).toContain('this checkout is davidvornholt/example');
   });
 });

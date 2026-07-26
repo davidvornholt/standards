@@ -27,7 +27,9 @@ const fail = (message: string): false => {
 // GitHub owner and repository names are case-insensitive, so a checkout cloned
 // as `DavidVornholt/Example` owns the token minted as `davidvornholt/example`.
 // An exact comparison would call that token foreign and let --force delete a
-// live credential this very checkout reconciles.
+// live credential this very checkout reconciles. Owner and name are compared
+// together: `otherowner/example` shares this repository's name and nothing
+// else.
 const sameRepo = (left: string, right: string): boolean =>
   left.toLowerCase() === right.toLowerCase();
 
@@ -53,10 +55,17 @@ const brokeredRefusal = ({
   // this checkout is not the owner — is the thing that could not be checked,
   // so the override is refused rather than granted on an unevaluated guard.
   if (currentRepo === null) {
-    return `token ${tokenId} is brokered as ${name}, which belongs to ${brokered.repo}, and this checkout cannot resolve the GitHub repository from its origin remote, so whether this checkout owns the token could not be determined; --force does not override a check that never ran. Re-run from a checkout whose origin remote names a GitHub repository, or point --dir at one. If ${brokered.repo} still exists, the remedy runs there: delete ${brokered.target}:${brokered.key} from its SOPS target and run \`standards creds apply\` in that checkout`;
+    return `token ${tokenId} is brokered as ${name}, which belongs to ${brokered.repo}, and this checkout cannot resolve the GitHub repository from its origin remote, so whether this checkout owns the token could not be determined; --force widens only that ownership check, so here it has nothing to widen. Re-run from a checkout whose origin remote names a GitHub repository, or point --dir at one. If ${brokered.repo} still exists, the remedy runs there: delete ${brokered.target}:${brokered.key} from its SOPS target and run \`standards creds apply\` in that checkout`;
   }
-  if (sameRepo(brokered.repo, currentRepo)) {
+  if (brokered.repo === currentRepo) {
     return `token ${tokenId} is brokered as ${name} for this repository (${brokered.repo}); delete ${brokered.target}:${brokered.key} from this repository's SOPS target and run \`standards creds apply\`, which revokes it and keeps the secret in step`;
+  }
+  // Revoke compares repository names case-insensitively, but reconciliation
+  // matches the token name exactly, so a checkout whose origin differs only in
+  // capitalisation renews nothing and revokes nothing. Sending the operator to
+  // the reconciled remedy would prescribe a no-op.
+  if (sameRepo(brokered.repo, currentRepo)) {
+    return `token ${tokenId} is brokered as ${name}, and this checkout's origin names ${currentRepo}, which differs from ${brokered.repo} only in capitalisation; reconciliation matches the token name exactly, so from here it will neither renew nor revoke this token. Re-point the origin remote at ${brokered.repo} to bring the token back under reconciliation, or retire it in the Cloudflare dashboard`;
   }
   if (force) {
     return null;

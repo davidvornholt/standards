@@ -1,7 +1,8 @@
 // Shared account stub for the `creds revoke` suites. One account holds every
 // class the command has to tell apart: this machine's bootstrap credential,
 // another machine's under the same reserved name, a hand-made token, a token
-// brokered to the consumer repository, one brokered to a foreign one, and a
+// brokered to the consumer repository, one brokered to a foreign one, one
+// brokered under the consumer's repository name but a different owner, and a
 // bootstrap credential renamed out of the reserved name.
 
 import { pageInfo, response } from './creds-add-test-support';
@@ -12,6 +13,10 @@ export const FOREIGN_ID = `a${'1'.repeat(ID_LENGTH - 1)}`;
 export const BROKERED_ID = `b${'2'.repeat(ID_LENGTH - 1)}`;
 export const MISSING_ID = `c${'3'.repeat(ID_LENGTH - 1)}`;
 export const OTHER_REPO_ID = `d${'4'.repeat(ID_LENGTH - 1)}`;
+// Same repository name as the consumer, different owner. GitHub names are
+// case-insensitive but owner-scoped, so an ownership check that compares only
+// the repository name would hand this foreign token the owner's remedy.
+export const OTHER_OWNER_ID = `1${'8'.repeat(ID_LENGTH - 1)}`;
 export const OTHER_MACHINE_BROKER_ID = `e${'5'.repeat(ID_LENGTH - 1)}`;
 export const MALFORMED_ID = `0${'6'.repeat(ID_LENGTH - 1)}`;
 // A bootstrap credential someone renamed in the dashboard. Passed as
@@ -33,6 +38,11 @@ const ACCOUNT_TOKENS = [
   {
     id: OTHER_REPO_ID,
     name: 'standards/otherowner/otherrepo/ci/ci.dns_token',
+    status: 'active',
+  },
+  {
+    id: OTHER_OWNER_ID,
+    name: 'standards/otherowner/example/ci/ci.dns_token',
     status: 'active',
   },
   // In the repository's own namespace but not a name the broker mints. `plan`
