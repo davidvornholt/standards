@@ -37,6 +37,7 @@ Options:
   --jurisdiction <name> R2 jurisdiction: default or eu (default: default)
   --s3                  Store the derived R2 S3 credential pair (<key>.access_key_id, <key>.secret_access_key) instead of the raw token
   --token-id <id>       Cloudflare token to revoke (32-character hexadecimal ID)
+  --force               Let revoke delete a token brokered to another repository, for the one case nothing reconciles: that repository was renamed, transferred, or deleted, so no checkout resolves to its name and no \`standards creds apply\` will ever revoke the token. It never permits revoking a broker bootstrap credential or a token brokered to this repository
   --org <org>           Create the GitHub App under an organization
   --name <name>         GitHub App name (default: ${BROKER_IDENTITY_NAME})
 
@@ -110,7 +111,12 @@ export const runCredsCommand = (
     plan: () => runCredsPlan(flags.dir, false),
     apply: () => runCredsPlan(flags.dir, true),
     revoke: () =>
-      runCredsRevoke({ account: flags.account, tokenId: flags.tokenId }),
+      runCredsRevoke({
+        account: flags.account,
+        tokenId: flags.tokenId,
+        dir: flags.dir,
+        force: flags.force,
+      }),
     permissions: () => runCredsPermissions(flags.account),
     status: () => runCredsStatus(),
   };

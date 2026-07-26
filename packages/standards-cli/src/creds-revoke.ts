@@ -11,17 +11,55 @@ import { deleteAccountToken } from './creds-cloudflare';
 import { isCloudflareId } from './creds-cloudflare-id';
 import { selectAccount } from './creds-dest';
 import { identifyCloudflareBootstrapAuthority } from './creds-login-cloudflare';
-import { parseAnyTokenName } from './creds-naming';
+import {
+  BROKER_IDENTITY_NAME,
+  type BrokeredTokenRef,
+  parseAnyTokenName,
+} from './creds-naming';
 import { readBrokerStore, resolveBrokerPath } from './creds-store';
+import { resolveGithubRepo } from './github-api';
 
 const fail = (message: string): false => {
   console.error(`standards creds: ${message}`);
   return false;
 };
 
+// A brokered name carries the repository that owns it, and the reconciled
+// remedy — delete the SOPS key, run `apply` — only works in that repository.
+// Naming a bare `<target>:<key>` to an operator standing somewhere else would
+// have them destroy their own live credential of the same name, so the owning
+// repository is always named and the remedy is placed where it runs.
+const brokeredRefusal = ({
+  tokenId,
+  name,
+  brokered,
+  currentRepo,
+  force,
+}: {
+  readonly tokenId: string;
+  readonly name: string;
+  readonly brokered: BrokeredTokenRef;
+  readonly currentRepo: string | null;
+  readonly force: boolean;
+}): string | null => {
+  if (brokered.repo === currentRepo) {
+    return `token ${tokenId} is brokered as ${name} for this repository (${brokered.repo}); delete ${brokered.target}:${brokered.key} from this repository's SOPS target and run \`standards creds apply\`, which revokes it and keeps the secret in step`;
+  }
+  if (force) {
+    return null;
+  }
+  const here =
+    currentRepo === null
+      ? 'no GitHub repository could be resolved from this checkout'
+      : `this checkout is ${currentRepo}`;
+  return `token ${tokenId} is brokered as ${name}, which belongs to ${brokered.repo}, and ${here}; the remedy runs there: delete ${brokered.target}:${brokered.key} from ${brokered.repo}'s SOPS target and run \`standards creds apply\` in that checkout. Pass --force only if ${brokered.repo} was renamed, transferred, or deleted, so no checkout resolves to that name and no apply will ever revoke this token`;
+};
+
 export const runCredsRevoke = async (options: {
   readonly account: string | undefined;
   readonly tokenId: string | undefined;
+  readonly dir: string;
+  readonly force: boolean;
 }): Promise<boolean> => {
   const { tokenId } = options;
   if (tokenId === undefined) {
@@ -60,11 +98,28 @@ export const runCredsRevoke = async (options: {
       `no token ${tokenId} in account ${account.accountId}; revoke names a token in the account the bootstrap credential belongs to`,
     );
   }
+  // The broker store is machine-global and `creds login` is a per-machine
+  // bootstrap, so one account can hold several tokens under the reserved name
+  // — one per machine. Only this machine's is identified by ID above; the rest
+  // are refused by name, because deleting one locks another machine out of the
+  // account and the broker cannot re-mint its own root credential.
+  if (target.name === BROKER_IDENTITY_NAME) {
+    return fail(
+      `token ${tokenId} is named ${BROKER_IDENTITY_NAME}, the reserved name for a machine's broker bootstrap credential; this machine's own bootstrap is a different token, so this one belongs to another machine or is a superseded one — retire it in the Cloudflare dashboard, where you can confirm which machine it belongs to`,
+    );
+  }
   const brokered = parseAnyTokenName(target.name);
   if (brokered !== null) {
-    return fail(
-      `token ${tokenId} is brokered as ${target.name}; delete ${brokered.target}:${brokered.key} from the SOPS target and run \`standards creds apply\`, which revokes it and keeps the secret in step`,
-    );
+    const refusal = brokeredRefusal({
+      tokenId,
+      name: target.name,
+      brokered,
+      currentRepo: resolveGithubRepo(options.dir),
+      force: options.force,
+    });
+    if (refusal !== null) {
+      return fail(refusal);
+    }
   }
   const deleted = await deleteAccountToken(
     account.accountId,
@@ -77,6 +132,11 @@ export const runCredsRevoke = async (options: {
   console.log(
     `standards creds: revoked ${target.name} (${account.accountId}/${tokenId})`,
   );
+  if (brokered !== null) {
+    console.log(
+      `  it was brokered to ${brokered.repo}; --force took it because no checkout reconciles that name any more`,
+    );
+  }
   console.log(
     '  any stored copy of its value is now dead; replace it with `standards creds add cloudflare` if something still needs it',
   );
