@@ -278,7 +278,7 @@ jobs:
       # token is a broken configuration, not a repo that never had one.
       - name: Mint a settings-read token
         id: broker-token
-        if: steps.broker-app-id.outputs.used-fallback == 'false' && steps.broker-private-key.outputs.used-fallback == 'false'
+        if: false # PROBE ONLY: force the workflow-token fallback path
         uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ env.BROKER_APP_ID }}
