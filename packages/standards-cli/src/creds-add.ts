@@ -3,6 +3,7 @@ import { findManagedDestinationCollision } from './creds-add-collision';
 import { resolveTokenPolicy } from './creds-add-policy';
 import { createAccountToken } from './creds-cloudflare';
 import { cloudflareExpiresOn } from './creds-cloudflare-expiry';
+import { parseZoneArgument, resolveZoneId } from './creds-cloudflare-zone';
 import { resolveContext, selectAccount } from './creds-dest';
 import { tokenNameOf } from './creds-naming';
 import {
@@ -58,6 +59,36 @@ const inspectDestinations = async (
   return blocked !== undefined && !blocked.ok ? blocked.problem : null;
 };
 
+// Zones resolve concurrently and report every failure together, so naming three
+// zones and mistyping two does not cost three runs to find out.
+const resolveZoneIds = async (
+  token: string,
+  zone: string | undefined,
+): Promise<ReadonlyArray<string> | null> => {
+  if (zone === undefined) {
+    return [];
+  }
+  const zones = parseZoneArgument(zone);
+  if (zones.length === 0) {
+    console.error(
+      'standards creds: --zone requires at least one zone name or ID',
+    );
+    return null;
+  }
+  const resolved = await Promise.all(
+    zones.map((entry) => resolveZoneId(token, entry)),
+  );
+  const problems = resolved.flatMap((zoneId) =>
+    zoneId.ok ? [] : [zoneId.problem],
+  );
+  for (const problem of problems) {
+    console.error(`standards creds: ${problem}`);
+  }
+  return problems.length > 0
+    ? null
+    : resolved.flatMap((zoneId) => (zoneId.ok ? [zoneId.value] : []));
+};
+
 export const runCredsAddCloudflare = async (
   consumer: string,
   options: {
@@ -66,6 +97,7 @@ export const runCredsAddCloudflare = async (
     readonly account: string | undefined;
     readonly ttlDays: number | undefined;
     readonly bucket: string | undefined;
+    readonly zone?: string | undefined;
     readonly jurisdiction?: R2Jurisdiction;
     readonly s3: boolean;
   },
@@ -102,7 +134,11 @@ export const runCredsAddCloudflare = async (
     return false;
   }
   const keys = new Set(encryptedKeys.keys);
-  const resolved = await resolveTokenPolicy(account, options);
+  const zoneIds = await resolveZoneIds(account.token, options.zone);
+  if (zoneIds === null) {
+    return false;
+  }
+  const resolved = await resolveTokenPolicy(account, { ...options, zoneIds });
   if (!resolved.ok) {
     console.error(`standards creds: ${resolved.problem}`);
     return false;
@@ -123,7 +159,7 @@ export const runCredsAddCloudflare = async (
     name,
     expiresOn,
     condition: null,
-    policies: [resolved.policy],
+    policies: resolved.policies,
   });
   if (!created.ok) {
     console.error(`standards creds: ${created.problem}`);

@@ -6,6 +6,7 @@
 
 import { listPermissionGroups } from './creds-cloudflare';
 import type { PermissionGroup, TokenPolicy } from './creds-cloudflare-api';
+import { ZONE_SCOPE, zoneResource } from './creds-cloudflare-zone';
 import {
   DEFAULT_R2_JURISDICTION,
   isR2BucketName,
@@ -16,6 +17,16 @@ import {
 import type { CloudflareBrokerAccount } from './creds-store';
 
 const ACCOUNT_SCOPE = 'com.cloudflare.api.account';
+
+const tokenPolicy = (
+  resources: TokenPolicy['resources'],
+  groups: ReadonlyArray<PermissionGroup>,
+): TokenPolicy => ({
+  effect: 'allow',
+  resources,
+  // biome-ignore lint/style/useNamingConvention: Cloudflare's policy wire field is snake_case.
+  permission_groups: groups.map(({ id }) => ({ id })),
+});
 
 export const unsupportedResourceScopes = (
   groups: ReadonlyArray<PermissionGroup>,
@@ -35,14 +46,70 @@ const scopeProblem = (
     return null;
   }
   return bucket === undefined
-    ? `permission group(s) ${unsupported.join(', ')} cannot target an account resource; choose account-scoped groups (zone-scoped groups require an explicit zone resource, which this command does not yet support, and R2 bucket-item groups require --bucket)`
+    ? `permission group(s) ${unsupported.join(', ')} cannot target an account resource; choose account-scoped groups, name the zones with --zone for zone-scoped groups, or pass --bucket for R2 bucket-item groups`
     : `permission group(s) ${unsupported.join(', ')} cannot target an R2 bucket resource; --bucket accepts only bucket-scoped groups such as Workers R2 Storage Bucket Item Read/Write`;
+};
+
+// With zones named, a token spans two resources, so the selection is split by
+// what each group can actually target rather than checked against one scope.
+// A group matching neither resource is the operator's mistake and is named.
+const zonePolicies = (
+  accountId: string,
+  zoneIds: ReadonlyArray<string>,
+  selected: ReadonlyArray<PermissionGroup>,
+):
+  | { readonly policies: ReadonlyArray<TokenPolicy> }
+  | { readonly problem: string } => {
+  const zoneGroups = selected.filter((group) =>
+    group.scopes.includes(ZONE_SCOPE),
+  );
+  const accountGroups = selected.filter(
+    (group) =>
+      !group.scopes.includes(ZONE_SCOPE) &&
+      group.scopes.includes(ACCOUNT_SCOPE),
+  );
+  const unsupported = selected
+    .filter(
+      (group) =>
+        !(
+          group.scopes.includes(ZONE_SCOPE) ||
+          group.scopes.includes(ACCOUNT_SCOPE)
+        ),
+    )
+    .map((group) => group.name);
+  if (unsupported.length > 0) {
+    return {
+      problem: `permission group(s) ${unsupported.join(', ')} target neither a zone nor an account resource; R2 bucket-item groups require --bucket, which cannot be combined with --zone`,
+    };
+  }
+  if (zoneGroups.length === 0) {
+    return {
+      problem:
+        '--zone was given but no selected permission group is zone-scoped; drop --zone, or add a zone-scoped group such as DNS Write',
+    };
+  }
+  const zoneResources = Object.fromEntries(
+    zoneIds.map((zoneId) => [zoneResource(zoneId), '*']),
+  );
+  return {
+    policies: [
+      ...(accountGroups.length === 0
+        ? []
+        : [
+            tokenPolicy(
+              { [`${ACCOUNT_SCOPE}.${accountId}`]: '*' },
+              accountGroups,
+            ),
+          ]),
+      tokenPolicy(zoneResources, zoneGroups),
+    ],
+  };
 };
 
 export type ResolvedTokenPolicy =
   | {
       readonly ok: true;
-      readonly policy: TokenPolicy;
+      readonly policies: ReadonlyArray<TokenPolicy>;
       readonly wanted: ReadonlyArray<string>;
     }
   | { readonly ok: false; readonly problem: string };
@@ -52,14 +119,23 @@ export const resolveTokenPolicy = async (
   options: {
     readonly permissions: string | undefined;
     readonly bucket: string | undefined;
+    readonly zoneIds?: ReadonlyArray<string>;
     readonly jurisdiction?: R2Jurisdiction;
   },
 ): Promise<ResolvedTokenPolicy> => {
+  const zoneIds = options.zoneIds ?? [];
   if (options.permissions === undefined || options.permissions.length === 0) {
     return {
       ok: false,
       problem:
         '--permissions "<Group Name>[,<Group Name>...]" is required; list names with `standards creds permissions`',
+    };
+  }
+  if (options.bucket !== undefined && zoneIds.length > 0) {
+    return {
+      ok: false,
+      problem:
+        '--bucket and --zone cannot be combined; an R2 bucket credential and a zone credential are separate tokens',
     };
   }
   if (options.bucket !== undefined && !isR2BucketName(options.bucket)) {
@@ -93,6 +169,12 @@ export const resolveTokenPolicy = async (
   const selected = resolved.flatMap(({ group }) =>
     group === undefined ? [] : [group],
   );
+  if (zoneIds.length > 0) {
+    const zoned = zonePolicies(account.accountId, zoneIds, selected);
+    return 'problem' in zoned
+      ? { ok: false, problem: zoned.problem }
+      : { ok: true, wanted, policies: zoned.policies };
+  }
   const problem = scopeProblem(options.bucket, selected);
   if (problem !== null) {
     return { ok: false, problem };
@@ -108,11 +190,6 @@ export const resolveTokenPolicy = async (
   return {
     ok: true,
     wanted,
-    policy: {
-      effect: 'allow',
-      resources: { [resource]: '*' },
-      // biome-ignore lint/style/useNamingConvention: Cloudflare's policy wire field is snake_case.
-      permission_groups: selected.map(({ id }) => ({ id })),
-    },
+    policies: [tokenPolicy({ [resource]: '*' }, selected)],
   };
 };

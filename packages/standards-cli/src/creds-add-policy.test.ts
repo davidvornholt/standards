@@ -3,22 +3,14 @@ import {
   resolveTokenPolicy,
   unsupportedResourceScopes,
 } from './creds-add-policy';
+import {
+  ACCOUNT,
+  BROKER_ACCOUNT,
+  restoreFetch,
+  stubGroups,
+} from './creds-add-policy-test-support';
 
-const ACCOUNT_ID_LENGTH = 32;
-const ACCOUNT = 'a'.repeat(ACCOUNT_ID_LENGTH);
-const BROKER_ACCOUNT = { accountId: ACCOUNT, token: 'bootstrap' };
-const originalFetch = globalThis.fetch;
-
-const stubGroups = (groups: ReadonlyArray<unknown>): void => {
-  globalThis.fetch = ((_input: string | URL | Request) =>
-    Promise.resolve(
-      Response.json({ success: true, errors: [], result: groups }),
-    )) as typeof fetch;
-};
-
-afterEach(() => {
-  globalThis.fetch = originalFetch;
-});
+afterEach(restoreFetch);
 
 describe('unsupportedResourceScopes', () => {
   it('names groups that cannot target the requested resource scope', () => {
@@ -59,12 +51,14 @@ describe('resolveTokenPolicy', () => {
     ).toEqual({
       ok: true,
       wanted: ['Workers Scripts Write'],
-      policy: {
-        effect: 'allow',
-        resources: { [`com.cloudflare.api.account.${ACCOUNT}`]: '*' },
-        // biome-ignore lint/style/useNamingConvention: Cloudflare's policy wire field is snake_case.
-        permission_groups: [{ id: 'pg' }],
-      },
+      policies: [
+        {
+          effect: 'allow',
+          resources: { [`com.cloudflare.api.account.${ACCOUNT}`]: '*' },
+          // biome-ignore lint/style/useNamingConvention: Cloudflare's policy wire field is snake_case.
+          permission_groups: [{ id: 'pg' }],
+        },
+      ],
     });
   });
 
@@ -84,14 +78,16 @@ describe('resolveTokenPolicy', () => {
     ).toEqual({
       ok: true,
       wanted: ['Workers R2 Storage Bucket Item Write'],
-      policy: {
-        effect: 'allow',
-        resources: {
-          [`com.cloudflare.edge.r2.bucket.${ACCOUNT}_default_assets`]: '*',
+      policies: [
+        {
+          effect: 'allow',
+          resources: {
+            [`com.cloudflare.edge.r2.bucket.${ACCOUNT}_default_assets`]: '*',
+          },
+          // biome-ignore lint/style/useNamingConvention: Cloudflare's policy wire field is snake_case.
+          permission_groups: [{ id: 'r2' }],
         },
-        // biome-ignore lint/style/useNamingConvention: Cloudflare's policy wire field is snake_case.
-        permission_groups: [{ id: 'r2' }],
-      },
+      ],
     });
   });
 
@@ -112,14 +108,16 @@ describe('resolveTokenPolicy', () => {
     ).toEqual({
       ok: true,
       wanted: ['Workers R2 Storage Bucket Item Read'],
-      policy: {
-        effect: 'allow',
-        resources: {
-          [`com.cloudflare.edge.r2.bucket.${ACCOUNT}_eu_assets`]: '*',
+      policies: [
+        {
+          effect: 'allow',
+          resources: {
+            [`com.cloudflare.edge.r2.bucket.${ACCOUNT}_eu_assets`]: '*',
+          },
+          // biome-ignore lint/style/useNamingConvention: Cloudflare's policy wire field is snake_case.
+          permission_groups: [{ id: 'r2' }],
         },
-        // biome-ignore lint/style/useNamingConvention: Cloudflare's policy wire field is snake_case.
-        permission_groups: [{ id: 'r2' }],
-      },
+      ],
     });
   });
 
@@ -138,7 +136,7 @@ describe('resolveTokenPolicy', () => {
     expect(resolved).toEqual({
       ok: false,
       problem: expect.stringContaining(
-        'R2 bucket-item groups require --bucket',
+        'or pass --bucket for R2 bucket-item groups',
       ),
     });
   });

@@ -31,6 +31,7 @@ Options:
   --account <id>        Cloudflare account when more than one is configured
   --ttl-days <n>        Token lifetime in days (default: 90)
   --bucket <name>       Scope a Cloudflare token to one R2 bucket
+  --zone <name-or-id>   Scope a Cloudflare token to zones (comma-separated)
   --jurisdiction <name> R2 jurisdiction: default or eu (default: default)
   --s3                  Store the derived R2 S3 credential pair (<key>.access_key_id, <key>.secret_access_key) instead of the raw token
   --org <org>           Create the GitHub App under an organization
