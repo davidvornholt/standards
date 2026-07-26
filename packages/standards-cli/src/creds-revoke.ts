@@ -73,7 +73,7 @@ export const runCredsRevoke = async (options: {
   const { tokenId } = options;
   if (tokenId === undefined) {
     return fail(
-      'revoke requires --token-id <id>; `standards creds plan` lists the ID of every token in the account the broker did not mint',
+      'revoke requires --token-id <id>; `standards creds plan` prints the ID inside every revoke command it offers, and the Cloudflare dashboard has the ID of anything that listing leaves out',
     );
   }
   if (!isCloudflareId(tokenId)) {

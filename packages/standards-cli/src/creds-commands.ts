@@ -20,9 +20,9 @@ Commands:
   login cloudflare  Store a Cloudflare account's bootstrap token (one guided paste per account)
   add cloudflare    Mint a scoped, expiring account token and write it into a SOPS target
   add github        Write the broker App's credentials into a SOPS target for runtime token minting
-  plan              Show revocations and rotations reconciling SOPS keys against brokered tokens
-  apply             Execute the plan: revoke orphaned tokens, roll expiring ones into SOPS
-  revoke            Delete one Cloudflare token the broker did not mint, named by --token-id
+  plan              Reconcile SOPS keys against brokered tokens: show revocations, rotations, and the live account tokens nothing reconciles here
+  apply             Execute the plan: revoke brokered tokens whose SOPS key is gone, roll expiring ones into SOPS
+  revoke            Delete one Cloudflare token named by --token-id; bootstrap credentials and brokered tokens are refused
   permissions       List Cloudflare permission group names for --permissions
   status            Show the broker store location and configured providers
 
@@ -37,7 +37,7 @@ Options:
   --jurisdiction <name> R2 jurisdiction: default or eu (default: default)
   --s3                  Store the derived R2 S3 credential pair (<key>.access_key_id, <key>.secret_access_key) instead of the raw token
   --token-id <id>       Cloudflare token to revoke (32-character hexadecimal ID)
-  --force               Let revoke delete a token brokered to another repository, for the one case nothing reconciles: that repository was renamed, transferred, or deleted, so no checkout resolves to its name and no \`standards creds apply\` will ever revoke the token. It never permits revoking a broker bootstrap credential or a token brokered to this repository
+  --force               Let revoke delete a token brokered to another repository, for the one case nothing reconciles: that repository was renamed, transferred, or deleted, so no checkout resolves to its name and no \`standards creds apply\` will ever revoke the token. It never permits revoking a broker bootstrap credential, a token brokered to this repository, or any brokered token when this checkout's origin remote resolves to no GitHub repository, because ownership is then the very thing that could not be checked
   --org <org>           Create the GitHub App under an organization
   --name <name>         GitHub App name (default: ${BROKER_IDENTITY_NAME})
 
