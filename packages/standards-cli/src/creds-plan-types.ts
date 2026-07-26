@@ -7,6 +7,13 @@ export type AccountToken = {
   readonly token: CloudflareToken;
 };
 
+export type UnmanagedToken = {
+  readonly accountId: string;
+  readonly tokenId: string;
+  readonly name: string;
+  readonly status: string;
+};
+
 export type PlannedAction =
   | {
       readonly kind: 'revoke';
@@ -33,4 +40,6 @@ export type CredsPlan = {
   readonly actions: ReadonlyArray<PlannedAction>;
   readonly findings: ReadonlyArray<string>;
   readonly healthy: number;
+  // Tokens in the account the broker did not mint. Reported, never mutated.
+  readonly unmanaged: ReadonlyArray<UnmanagedToken>;
 };

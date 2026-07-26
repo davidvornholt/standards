@@ -80,3 +80,16 @@ export const parseTokenName = (
   }
   return ref;
 };
+
+// The repository a minted name belongs to is carried by the name itself, so a
+// command holding no repository — `creds revoke` is account-scoped — can still
+// tell a token reconciliation owns from one nothing manages.
+export const parseAnyTokenName = (name: string): BrokeredTokenRef | null => {
+  if (!isInMintedNamespace(name)) {
+    return null;
+  }
+  const [owner, repo] = name.slice(`${NAME_PREFIX}/`.length).split('/');
+  return owner === undefined || repo === undefined
+    ? null
+    : parseTokenName(name, `${owner}/${repo}`);
+};

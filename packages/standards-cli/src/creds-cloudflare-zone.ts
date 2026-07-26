@@ -4,9 +4,9 @@
 // would fail — or, worse, come back empty and read as a missing zone. A zone ID
 // is not a secret and is shown on the zone's dashboard overview.
 
-export const ZONE_SCOPE = 'com.cloudflare.api.account.zone';
+import { isCloudflareId } from './creds-cloudflare-id';
 
-const ZONE_ID_PATTERN = /^[0-9a-f]{32}$/u;
+export const ZONE_SCOPE = 'com.cloudflare.api.account.zone';
 
 export const zoneResource = (zoneId: string): string =>
   `${ZONE_SCOPE}.${zoneId}`;
@@ -30,7 +30,7 @@ export const parseZoneArgument = (value: string): ParsedZoneArgument => {
     };
   }
   const entries = [first, ...rest] as const;
-  const invalid = entries.filter((zone) => !ZONE_ID_PATTERN.test(zone));
+  const invalid = entries.filter((zone) => !isCloudflareId(zone));
   return invalid.length === 0
     ? { ok: true, zoneIds: entries }
     : {

@@ -22,6 +22,7 @@ export type CredsFlags = {
   s3: boolean;
   org: string | undefined;
   name: string | undefined;
+  tokenId: string | undefined;
   readonly words: Array<string>;
 };
 
@@ -57,6 +58,7 @@ export const parseCredsArgs = (argv: ReadonlyArray<string>): CredsFlags => {
     s3: false,
     org: undefined,
     name: undefined,
+    tokenId: undefined,
     words: [],
   };
   const setters: Readonly<Record<string, (value: string) => void>> = {
@@ -92,6 +94,9 @@ export const parseCredsArgs = (argv: ReadonlyArray<string>): CredsFlags => {
     },
     '--name': (value) => {
       flags.name = value;
+    },
+    '--token-id': (value) => {
+      flags.tokenId = value;
     },
   };
   for (let index = 0; index < argv.length; index += 1) {

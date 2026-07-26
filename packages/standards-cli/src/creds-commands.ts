@@ -6,6 +6,7 @@ import { runCredsLoginCloudflare } from './creds-login-cloudflare';
 import { runCredsLoginGithub } from './creds-login-github';
 import { BROKER_IDENTITY_NAME } from './creds-naming';
 import { runCredsPlan } from './creds-plan-run';
+import { runCredsRevoke } from './creds-revoke';
 import {
   inspectBrokerFileMode,
   readBrokerStore,
@@ -21,6 +22,7 @@ Commands:
   add github        Write the broker App's credentials into a SOPS target for runtime token minting
   plan              Show revocations and rotations reconciling SOPS keys against brokered tokens
   apply             Execute the plan: revoke orphaned tokens, roll expiring ones into SOPS
+  revoke            Delete one Cloudflare token the broker did not mint, named by --token-id
   permissions       List Cloudflare permission group names for --permissions
   status            Show the broker store location and configured providers
 
@@ -34,6 +36,7 @@ Options:
   --zone <zone-id>      Add a zone resource for zone-scoped groups (comma-separated IDs)
   --jurisdiction <name> R2 jurisdiction: default or eu (default: default)
   --s3                  Store the derived R2 S3 credential pair (<key>.access_key_id, <key>.secret_access_key) instead of the raw token
+  --token-id <id>       Cloudflare token to revoke (32-character hexadecimal ID)
   --org <org>           Create the GitHub App under an organization
   --name <name>         GitHub App name (default: ${BROKER_IDENTITY_NAME})
 
@@ -106,6 +109,8 @@ export const runCredsCommand = (
     'add github': () => runCredsAddGithub(flags.dir, flags),
     plan: () => runCredsPlan(flags.dir, false),
     apply: () => runCredsPlan(flags.dir, true),
+    revoke: () =>
+      runCredsRevoke({ account: flags.account, tokenId: flags.tokenId }),
     permissions: () => runCredsPermissions(flags.account),
     status: () => runCredsStatus(),
   };

@@ -114,12 +114,24 @@ export const runCredsPlan = async (
       `  ${apply ? '' : 'would '}${action.kind} ${action.name} (${action.reason})`,
     );
   }
+  for (const token of plan.unmanaged) {
+    console.log(
+      `  unmanaged ${token.name} (${token.accountId}/${token.tokenId}, ${token.status})`,
+    );
+  }
   for (const finding of plan.findings) {
     console.error(`standards creds: ${finding}`);
   }
   console.log(
-    `standards creds: ${plan.actions.length} action(s), ${plan.findings.length} finding(s), ${plan.healthy} brokered token(s) healthy`,
+    `standards creds: ${plan.actions.length} action(s), ${plan.findings.length} finding(s), ${plan.healthy} brokered token(s) healthy, ${plan.unmanaged.length} unmanaged`,
   );
+  if (plan.unmanaged.length > 0) {
+    // Listing is the whole point: an unmanaged token is one nothing renews or
+    // revokes, so a forgotten one stays valid forever unless it is named.
+    console.log(
+      'standards creds: unmanaged tokens are never mutated by plan or apply; retire one with `standards creds revoke --token-id <id>`',
+    );
+  }
   if (plan.findings.length > 0) {
     return fail('reconciliation aborted until every finding is resolved');
   }
