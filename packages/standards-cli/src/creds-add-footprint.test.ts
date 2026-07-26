@@ -78,6 +78,7 @@ const collisionOutcome = async ({
     account: ACCOUNT_A,
     ttlDays: 90,
     bucket: 'assets',
+    zone: undefined,
     s3,
   });
   return {

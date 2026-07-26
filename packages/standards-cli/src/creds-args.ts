@@ -17,6 +17,7 @@ export type CredsFlags = {
   account: string | undefined;
   ttlDays: number | undefined;
   bucket: string | undefined;
+  zone: string | undefined;
   jurisdiction: R2Jurisdiction;
   s3: boolean;
   org: string | undefined;
@@ -51,6 +52,7 @@ export const parseCredsArgs = (argv: ReadonlyArray<string>): CredsFlags => {
     account: undefined,
     ttlDays: undefined,
     bucket: undefined,
+    zone: undefined,
     jurisdiction: DEFAULT_R2_JURISDICTION,
     s3: false,
     org: undefined,
@@ -75,6 +77,9 @@ export const parseCredsArgs = (argv: ReadonlyArray<string>): CredsFlags => {
     },
     '--bucket': (value) => {
       flags.bucket = value;
+    },
+    '--zone': (value) => {
+      flags.zone = value;
     },
     '--jurisdiction': (value) => {
       if (!isR2Jurisdiction(value)) {

@@ -1,7 +1,12 @@
 import { commitCreatedCloudflareToken } from './creds-add-cloudflare-commit';
 import { findManagedDestinationCollision } from './creds-add-collision';
 import { resolveTokenPolicy } from './creds-add-policy';
+import {
+  inspectDestinations,
+  resolveResourceFlags,
+} from './creds-add-preflight';
 import { createAccountToken } from './creds-cloudflare';
+import type { TokenPolicy } from './creds-cloudflare-api';
 import { cloudflareExpiresOn } from './creds-cloudflare-expiry';
 import { resolveContext, selectAccount } from './creds-dest';
 import { tokenNameOf } from './creds-naming';
@@ -13,11 +18,7 @@ import {
   s3Endpoint,
   s3PairPaths,
 } from './creds-r2';
-import {
-  inspectSopsScalarDestination,
-  readEncryptedKeys,
-  setSopsValues,
-} from './creds-sops';
+import { readEncryptedKeys, setSopsValues } from './creds-sops';
 
 const DEFAULT_TTL_DAYS = 90;
 const DAY_MS = 86_400_000;
@@ -30,9 +31,16 @@ const printSuccess = (input: {
   readonly format: DestinationFormat;
   readonly accountId: string;
   readonly jurisdiction: R2Jurisdiction;
+  readonly policies: ReadonlyArray<TokenPolicy>;
 }): void => {
   console.log(`standards creds: minted Cloudflare token ${input.name}`);
   console.log(`  permissions: ${input.permissions.join(', ')}`);
+  // Read off the minted policies rather than the flags that asked for them:
+  // a selection can add an account policy the flags do not mention, and the
+  // reach of a token is the one thing worth stating from ground truth.
+  console.log(
+    `  resources: ${input.policies.flatMap((policy) => Object.keys(policy.resources)).join(', ')}`,
+  );
   console.log(
     `  expires: ${input.expiresOn} (rotate via \`standards creds apply\`)`,
   );
@@ -46,18 +54,6 @@ const printSuccess = (input: {
   }
 };
 
-const inspectDestinations = async (
-  consumer: string,
-  rel: string,
-  paths: ReadonlyArray<string>,
-): Promise<string | null> => {
-  const inspected = await Promise.all(
-    paths.map((path) => inspectSopsScalarDestination(consumer, rel, path)),
-  );
-  const blocked = inspected.find((result) => !result.ok);
-  return blocked !== undefined && !blocked.ok ? blocked.problem : null;
-};
-
 export const runCredsAddCloudflare = async (
   consumer: string,
   options: {
@@ -66,6 +62,7 @@ export const runCredsAddCloudflare = async (
     readonly account: string | undefined;
     readonly ttlDays: number | undefined;
     readonly bucket: string | undefined;
+    readonly zone: string | undefined;
     readonly jurisdiction?: R2Jurisdiction;
     readonly s3: boolean;
   },
@@ -74,6 +71,11 @@ export const runCredsAddCloudflare = async (
     console.error(
       'standards creds: --s3 requires --bucket so the credential is backed by a bucket-scoped R2 policy',
     );
+    return false;
+  }
+  const flags = resolveResourceFlags(options);
+  if (!flags.ok) {
+    console.error(`standards creds: ${flags.problem}`);
     return false;
   }
   const context = await resolveContext(consumer, options.dest);
@@ -102,7 +104,10 @@ export const runCredsAddCloudflare = async (
     return false;
   }
   const keys = new Set(encryptedKeys.keys);
-  const resolved = await resolveTokenPolicy(account, options);
+  const resolved = await resolveTokenPolicy(account, {
+    permissions: options.permissions,
+    resource: flags.resource,
+  });
   if (!resolved.ok) {
     console.error(`standards creds: ${resolved.problem}`);
     return false;
@@ -123,7 +128,7 @@ export const runCredsAddCloudflare = async (
     name,
     expiresOn,
     condition: null,
-    policies: [resolved.policy],
+    policies: resolved.policies,
   });
   if (!created.ok) {
     console.error(`standards creds: ${created.problem}`);
@@ -157,7 +162,11 @@ export const runCredsAddCloudflare = async (
     destination: `${context.rel} at ${context.dest.key}`,
     format,
     accountId: account.accountId,
-    jurisdiction: options.jurisdiction ?? DEFAULT_R2_JURISDICTION,
+    jurisdiction:
+      flags.resource.kind === 'bucket'
+        ? flags.resource.jurisdiction
+        : DEFAULT_R2_JURISDICTION,
+    policies: resolved.policies,
   });
   return true;
 };

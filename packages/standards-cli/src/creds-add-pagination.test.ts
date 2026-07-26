@@ -120,6 +120,7 @@ describe('creds add pagination safety', () => {
         account: ACCOUNT,
         ttlDays: 90,
         bucket: undefined,
+        zone: undefined,
         s3: false,
       }),
     ).toBe(false);
