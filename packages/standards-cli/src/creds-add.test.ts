@@ -53,6 +53,7 @@ describe('creds add cloudflare', () => {
       account: ACCOUNT_A,
       ttlDays: 90,
       bucket: undefined,
+      zone: undefined,
       s3: false,
     });
     expect(ok).toBe(false);
@@ -104,6 +105,7 @@ describe('creds add cloudflare compensation', () => {
       account: ACCOUNT_A,
       ttlDays: 90,
       bucket: undefined,
+      zone: undefined,
       s3: false,
     });
     expect(ok).toBe(false);

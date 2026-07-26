@@ -114,18 +114,35 @@ describe('resolveTokenPolicy with zones', () => {
     });
   });
 
-  it('refuses to combine a bucket resource with zones', async () => {
-    stubGroups([DNS_WRITE]);
-    expect(
-      await resolveTokenPolicy(BROKER_ACCOUNT, {
-        permissions: 'DNS Write',
-        bucket: 'my-bucket',
-        zoneIds: [ZONE_A],
-      }),
-    ).toEqual({
-      ok: false,
-      problem:
-        '--bucket and --zone cannot be combined; an R2 bucket credential and a zone credential are separate tokens',
+  // A group Cloudflare reports as zone- and account-scoped takes the narrower
+  // resource, so `--zone` never widens a selection to the whole account.
+  it('gives a dual-scoped group the zone policy rather than the account', async () => {
+    stubGroups([
+      {
+        id: 'dual',
+        name: 'Zone Settings Write',
+        scopes: [
+          'com.cloudflare.api.account.zone',
+          'com.cloudflare.api.account',
+        ],
+      },
+    ]);
+    const resolved = await resolveTokenPolicy(BROKER_ACCOUNT, {
+      permissions: 'Zone Settings Write',
+      bucket: undefined,
+      zoneIds: [ZONE_A],
+    });
+    expect(resolved).toEqual({
+      ok: true,
+      wanted: ['Zone Settings Write'],
+      policies: [
+        {
+          effect: 'allow',
+          resources: { [`com.cloudflare.api.account.zone.${ZONE_A}`]: '*' },
+          // biome-ignore lint/style/useNamingConvention: Cloudflare's policy wire field is snake_case.
+          permission_groups: [{ id: 'dual' }],
+        },
+      ],
     });
   });
 });

@@ -1,86 +1,50 @@
-import { afterEach, describe, expect, it } from 'bun:test';
-import { parseZoneArgument, resolveZoneId } from './creds-cloudflare-zone';
+import { describe, expect, it } from 'bun:test';
+import { parseZoneArgument, zoneResource } from './creds-cloudflare-zone';
 
 const ZONE_ID_LENGTH = 32;
-const ZONE_ID = `1${'b'.repeat(ZONE_ID_LENGTH - 1)}`;
-const originalFetch = globalThis.fetch;
-const requested: Array<string> = [];
-const HTTP_OK = 200;
-const HTTP_FORBIDDEN = 403;
+const ZONE_A = `1${'b'.repeat(ZONE_ID_LENGTH - 1)}`;
+const ZONE_B = `2${'c'.repeat(ZONE_ID_LENGTH - 1)}`;
 
-const stubZones = (payload: unknown, ok = true): void => {
-  globalThis.fetch = ((input: string | URL | Request) => {
-    requested.push(String(input));
-    return Promise.resolve(
-      Response.json(
-        {
-          success: ok,
-          errors: ok ? [] : [{ message: 'Authentication error' }],
-          result: payload,
-        },
-        { status: ok ? HTTP_OK : HTTP_FORBIDDEN },
-      ),
+describe('zoneResource', () => {
+  it('addresses one zone under the account zone scope', () => {
+    expect(zoneResource(ZONE_A)).toBe(
+      `com.cloudflare.api.account.zone.${ZONE_A}`,
     );
-  }) as typeof fetch;
-};
-
-afterEach(() => {
-  globalThis.fetch = originalFetch;
-  requested.length = 0;
+  });
 });
 
 describe('parseZoneArgument', () => {
-  it('splits a comma-separated list and drops blanks', () => {
-    expect(parseZoneArgument(' a.example , ,b.example ')).toEqual([
-      'a.example',
-      'b.example',
-    ]);
-  });
-
-  it('yields nothing for an argument holding no zone', () => {
-    expect(parseZoneArgument(' , ')).toEqual([]);
-  });
-});
-
-describe('resolveZoneId', () => {
-  it('uses a zone ID as given without spending a lookup', async () => {
-    stubZones([]);
-    expect(await resolveZoneId('bootstrap', ZONE_ID)).toEqual({
+  it('splits a comma-separated list and drops surrounding blanks', () => {
+    expect(parseZoneArgument(` ${ZONE_A} , ,${ZONE_B} `)).toEqual({
       ok: true,
-      value: ZONE_ID,
+      zoneIds: [ZONE_A, ZONE_B],
     });
-    expect(requested).toEqual([]);
   });
 
-  it('resolves a zone name to its ID', async () => {
-    stubZones([{ id: ZONE_ID, name: 'example.test' }]);
-    expect(await resolveZoneId('bootstrap', 'example.test')).toEqual({
-      ok: true,
-      value: ZONE_ID,
+  it('rejects an argument holding no zone', () => {
+    expect(parseZoneArgument(' , ')).toEqual({
+      ok: false,
+      problem: '--zone requires at least one zone ID',
     });
-    expect(requested).toEqual([
-      'https://api.cloudflare.com/client/v4/zones?name=example.test',
-    ]);
   });
 
-  // A name filter is server-side, but a stale or over-broad response must not be
-  // taken as a match for a zone the operator did not name.
-  it('rejects a response holding no exactly matching name', async () => {
-    stubZones([{ id: ZONE_ID, name: 'other.test' }]);
-    const result = await resolveZoneId('bootstrap', 'example.test');
-    expect(result).toEqual({
+  // Naming zones by domain is the expected mistake, so the rejection says what
+  // a zone ID is and where to find it rather than only that the value is wrong.
+  it('names every value that is not a zone ID', () => {
+    const parsed = parseZoneArgument(`example.test,${ZONE_A},other.test`);
+    expect(parsed).toEqual({
       ok: false,
       problem:
-        'no zone named example.test is visible to the broker token; pass its 32-character zone ID instead, which is used as given and needs no lookup',
+        "not a zone ID: example.test, other.test; --zone takes the 32-character hexadecimal zone ID shown on the zone's dashboard overview, not its domain name",
     });
   });
 
-  it('blames the missing lookup permission rather than the zone', async () => {
-    stubZones(null, false);
-    const result = await resolveZoneId('bootstrap', 'example.test');
-    expect(result.ok).toBe(false);
-    expect(result.ok ? '' : result.problem).toContain(
-      'the lookup needs Zone Read on the broker token',
-    );
+  it.each([
+    ['too short', ZONE_A.slice(1)],
+    ['too long', `${ZONE_A}0`],
+    ['upper-case hex', ZONE_A.toUpperCase()],
+    ['non-hex characters', `${'z'.repeat(ZONE_ID_LENGTH)}`],
+  ])('rejects a zone ID that is %s', (_label, value) => {
+    expect(parseZoneArgument(value).ok).toBe(false);
   });
 });

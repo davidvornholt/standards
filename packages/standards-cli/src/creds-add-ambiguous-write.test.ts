@@ -99,6 +99,7 @@ const run = (consumer: string): Promise<boolean> =>
     account: ACCOUNT,
     ttlDays: 90,
     bucket: undefined,
+    zone: undefined,
     s3: false,
   });
 

@@ -53,6 +53,9 @@ const scopeProblem = (
 // With zones named, a token spans two resources, so the selection is split by
 // what each group can actually target rather than checked against one scope.
 // A group matching neither resource is the operator's mistake and is named.
+// A group Cloudflare reports as both zone- and account-scoped goes to the zone
+// policy: `--zone` asks for zone reach, and the narrower reading is the safe
+// one to guess wrong.
 const zonePolicies = (
   accountId: string,
   zoneIds: ReadonlyArray<string>,
@@ -119,23 +122,16 @@ export const resolveTokenPolicy = async (
   options: {
     readonly permissions: string | undefined;
     readonly bucket: string | undefined;
-    readonly zoneIds?: ReadonlyArray<string>;
+    readonly zoneIds: ReadonlyArray<string>;
     readonly jurisdiction?: R2Jurisdiction;
   },
 ): Promise<ResolvedTokenPolicy> => {
-  const zoneIds = options.zoneIds ?? [];
+  const { zoneIds } = options;
   if (options.permissions === undefined || options.permissions.length === 0) {
     return {
       ok: false,
       problem:
         '--permissions "<Group Name>[,<Group Name>...]" is required; list names with `standards creds permissions`',
-    };
-  }
-  if (options.bucket !== undefined && zoneIds.length > 0) {
-    return {
-      ok: false,
-      problem:
-        '--bucket and --zone cannot be combined; an R2 bucket credential and a zone credential are separate tokens',
     };
   }
   if (options.bucket !== undefined && !isR2BucketName(options.bucket)) {

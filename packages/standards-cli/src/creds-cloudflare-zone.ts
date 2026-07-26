@@ -1,10 +1,8 @@
-// Zone resources for `standards creds add cloudflare`. A zone ID is used as
-// given, so the common path needs no extra reach: resolving a zone *name* costs
-// a lookup the bootstrap token may not be permitted to make, and the failure
-// says so rather than reporting the zone as missing.
-
-import { type CfResult, cfRequest } from './creds-cloudflare-api';
-import { isRecord } from './github-settings-parse';
+// Zone resources for `standards creds add cloudflare`. Zones are named by ID,
+// never by domain name: resolving a name would need Zone Read on the bootstrap
+// token, which holds Account API Tokens / Edit and nothing else, so the lookup
+// would fail — or, worse, come back empty and read as a missing zone. A zone ID
+// is not a secret and is shown on the zone's dashboard overview.
 
 export const ZONE_SCOPE = 'com.cloudflare.api.account.zone';
 
@@ -13,54 +11,26 @@ const ZONE_ID_PATTERN = /^[0-9a-f]{32}$/u;
 export const zoneResource = (zoneId: string): string =>
   `${ZONE_SCOPE}.${zoneId}`;
 
-export const parseZoneArgument = (value: string): ReadonlyArray<string> =>
-  value
+export type ParsedZoneArgument =
+  | { readonly ok: true; readonly zoneIds: ReadonlyArray<string> }
+  | { readonly ok: false; readonly problem: string };
+
+export const parseZoneArgument = (value: string): ParsedZoneArgument => {
+  const entries = value
     .split(',')
     .map((zone) => zone.trim())
     .filter((zone) => zone.length > 0);
-
-const matchingZoneId = (result: unknown, zone: string): string | null => {
-  if (!Array.isArray(result)) {
-    return null;
-  }
-  for (const entry of result) {
-    if (
-      isRecord(entry) &&
-      entry.name === zone &&
-      typeof entry.id === 'string' &&
-      entry.id.length > 0
-    ) {
-      return entry.id;
-    }
-  }
-  return null;
-};
-
-export const resolveZoneId = async (
-  token: string,
-  zone: string,
-): Promise<CfResult<string>> => {
-  if (ZONE_ID_PATTERN.test(zone)) {
-    return { ok: true, value: zone };
-  }
-  const response = await cfRequest(
-    token,
-    'GET',
-    `/zones?name=${encodeURIComponent(zone)}`,
-  );
-  const byIdInstead =
-    'pass its 32-character zone ID instead, which is used as given and needs no lookup';
-  if (!response.ok) {
+  if (entries.length === 0) {
     return {
       ok: false,
-      problem: `could not look up zone ${zone}: ${response.problem}; the lookup needs Zone Read on the broker token, so ${byIdInstead}`,
+      problem: '--zone requires at least one zone ID',
     };
   }
-  const zoneId = matchingZoneId(response.value.result, zone);
-  return zoneId === null
-    ? {
+  const invalid = entries.filter((zone) => !ZONE_ID_PATTERN.test(zone));
+  return invalid.length === 0
+    ? { ok: true, zoneIds: entries }
+    : {
         ok: false,
-        problem: `no zone named ${zone} is visible to the broker token; ${byIdInstead}`,
-      }
-    : { ok: true, value: zoneId };
+        problem: `not a zone ID: ${invalid.join(', ')}; --zone takes the 32-character hexadecimal zone ID shown on the zone's dashboard overview, not its domain name`,
+      };
 };

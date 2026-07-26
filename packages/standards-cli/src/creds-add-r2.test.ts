@@ -56,6 +56,7 @@ describe('creds add cloudflare R2 S3 destinations', () => {
       account: ACCOUNT_A,
       ttlDays: 30,
       bucket: 'my-bucket',
+      zone: undefined,
       s3: true,
     });
     expect(ok).toBe(true);
@@ -110,6 +111,7 @@ describe('creds add cloudflare R2 S3 destinations', () => {
       account: ACCOUNT_A,
       ttlDays: 30,
       bucket: 'my-bucket',
+      zone: undefined,
       s3: true,
     });
     expect(ok).toBe(false);

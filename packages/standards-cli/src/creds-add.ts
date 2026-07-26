@@ -1,9 +1,9 @@
 import { commitCreatedCloudflareToken } from './creds-add-cloudflare-commit';
 import { findManagedDestinationCollision } from './creds-add-collision';
 import { resolveTokenPolicy } from './creds-add-policy';
+import { inspectDestinations, parseZoneFlags } from './creds-add-preflight';
 import { createAccountToken } from './creds-cloudflare';
 import { cloudflareExpiresOn } from './creds-cloudflare-expiry';
-import { parseZoneArgument, resolveZoneId } from './creds-cloudflare-zone';
 import { resolveContext, selectAccount } from './creds-dest';
 import { tokenNameOf } from './creds-naming';
 import {
@@ -14,11 +14,7 @@ import {
   s3Endpoint,
   s3PairPaths,
 } from './creds-r2';
-import {
-  inspectSopsScalarDestination,
-  readEncryptedKeys,
-  setSopsValues,
-} from './creds-sops';
+import { readEncryptedKeys, setSopsValues } from './creds-sops';
 
 const DEFAULT_TTL_DAYS = 90;
 const DAY_MS = 86_400_000;
@@ -31,9 +27,16 @@ const printSuccess = (input: {
   readonly format: DestinationFormat;
   readonly accountId: string;
   readonly jurisdiction: R2Jurisdiction;
+  readonly zoneIds: ReadonlyArray<string>;
 }): void => {
   console.log(`standards creds: minted Cloudflare token ${input.name}`);
   console.log(`  permissions: ${input.permissions.join(', ')}`);
+  // A token minted with --zone still carries an account policy for any
+  // account-scoped group named alongside it, so the reach is worth showing
+  // rather than leaving the flag to imply it.
+  console.log(
+    `  resources: account ${input.accountId}${input.zoneIds.length === 0 ? '' : `, zone(s) ${input.zoneIds.join(', ')}`}`,
+  );
   console.log(
     `  expires: ${input.expiresOn} (rotate via \`standards creds apply\`)`,
   );
@@ -47,48 +50,6 @@ const printSuccess = (input: {
   }
 };
 
-const inspectDestinations = async (
-  consumer: string,
-  rel: string,
-  paths: ReadonlyArray<string>,
-): Promise<string | null> => {
-  const inspected = await Promise.all(
-    paths.map((path) => inspectSopsScalarDestination(consumer, rel, path)),
-  );
-  const blocked = inspected.find((result) => !result.ok);
-  return blocked !== undefined && !blocked.ok ? blocked.problem : null;
-};
-
-// Zones resolve concurrently and report every failure together, so naming three
-// zones and mistyping two does not cost three runs to find out.
-const resolveZoneIds = async (
-  token: string,
-  zone: string | undefined,
-): Promise<ReadonlyArray<string> | null> => {
-  if (zone === undefined) {
-    return [];
-  }
-  const zones = parseZoneArgument(zone);
-  if (zones.length === 0) {
-    console.error(
-      'standards creds: --zone requires at least one zone name or ID',
-    );
-    return null;
-  }
-  const resolved = await Promise.all(
-    zones.map((entry) => resolveZoneId(token, entry)),
-  );
-  const problems = resolved.flatMap((zoneId) =>
-    zoneId.ok ? [] : [zoneId.problem],
-  );
-  for (const problem of problems) {
-    console.error(`standards creds: ${problem}`);
-  }
-  return problems.length > 0
-    ? null
-    : resolved.flatMap((zoneId) => (zoneId.ok ? [zoneId.value] : []));
-};
-
 export const runCredsAddCloudflare = async (
   consumer: string,
   options: {
@@ -97,7 +58,7 @@ export const runCredsAddCloudflare = async (
     readonly account: string | undefined;
     readonly ttlDays: number | undefined;
     readonly bucket: string | undefined;
-    readonly zone?: string | undefined;
+    readonly zone: string | undefined;
     readonly jurisdiction?: R2Jurisdiction;
     readonly s3: boolean;
   },
@@ -106,6 +67,11 @@ export const runCredsAddCloudflare = async (
     console.error(
       'standards creds: --s3 requires --bucket so the credential is backed by a bucket-scoped R2 policy',
     );
+    return false;
+  }
+  const zones = parseZoneFlags(options);
+  if (!zones.ok) {
+    console.error(`standards creds: ${zones.problem}`);
     return false;
   }
   const context = await resolveContext(consumer, options.dest);
@@ -134,11 +100,10 @@ export const runCredsAddCloudflare = async (
     return false;
   }
   const keys = new Set(encryptedKeys.keys);
-  const zoneIds = await resolveZoneIds(account.token, options.zone);
-  if (zoneIds === null) {
-    return false;
-  }
-  const resolved = await resolveTokenPolicy(account, { ...options, zoneIds });
+  const resolved = await resolveTokenPolicy(account, {
+    ...options,
+    zoneIds: zones.zoneIds,
+  });
   if (!resolved.ok) {
     console.error(`standards creds: ${resolved.problem}`);
     return false;
@@ -194,6 +159,7 @@ export const runCredsAddCloudflare = async (
     format,
     accountId: account.accountId,
     jurisdiction: options.jurisdiction ?? DEFAULT_R2_JURISDICTION,
+    zoneIds: zones.zoneIds,
   });
   return true;
 };

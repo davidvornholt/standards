@@ -47,6 +47,7 @@ describe('resolveTokenPolicy', () => {
       await resolveTokenPolicy(BROKER_ACCOUNT, {
         permissions: 'Workers Scripts Write',
         bucket: undefined,
+        zoneIds: [],
       }),
     ).toEqual({
       ok: true,
@@ -74,6 +75,7 @@ describe('resolveTokenPolicy', () => {
       await resolveTokenPolicy(BROKER_ACCOUNT, {
         permissions: 'Workers R2 Storage Bucket Item Write',
         bucket: 'assets',
+        zoneIds: [],
       }),
     ).toEqual({
       ok: true,
@@ -103,6 +105,7 @@ describe('resolveTokenPolicy', () => {
       await resolveTokenPolicy(BROKER_ACCOUNT, {
         permissions: 'Workers R2 Storage Bucket Item Read',
         bucket: 'assets',
+        zoneIds: [],
         jurisdiction: 'eu',
       }),
     ).toEqual({
@@ -132,6 +135,7 @@ describe('resolveTokenPolicy', () => {
     const resolved = await resolveTokenPolicy(BROKER_ACCOUNT, {
       permissions: 'Workers R2 Storage Bucket Item Read',
       bucket: undefined,
+      zoneIds: [],
     });
     expect(resolved).toEqual({
       ok: false,
@@ -148,6 +152,7 @@ describe('resolveTokenPolicy', () => {
     const resolved = await resolveTokenPolicy(BROKER_ACCOUNT, {
       permissions: 'Workers R2 Storage Bucket Item Read',
       bucket: 'Bad_Bucket',
+      zoneIds: [],
     });
     expect(resolved).toEqual({
       ok: false,
