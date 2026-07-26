@@ -1,6 +1,6 @@
 {
   "name": "@davidvornholt/standards",
-  "version": "0.18.0",
+  "version": "0.19.0",
   "description": "Bootstrap, synchronize, and validate davidvornholt/standards consumers",
   "license": "MIT",
   "repository": {
@@ -85,6 +85,7 @@
     "src/github-settings-parse.ts",
     "src/github-settings.ts",
     "src/managed-files.ts",
+    "src/managed-path-ownership.ts",
     "src/poller-approval.ts",
     "src/poller-acknowledgements.ts",
     "src/poller-claim.ts",
