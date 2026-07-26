@@ -24,7 +24,7 @@ describe('creds add cloudflare R2 S3 destinations', () => {
   it('mints a bucket-scoped token and writes the derived S3 pair', async () => {
     const consumer = initializeConsumer([ACCOUNT_A]);
     installSops(
-      `if [ "$1" = "decrypt" ]; then\n  case "$3" in\n    *access_key_id*) printf '"replacement"' ;;\n    *) printf '"${sensitiveSha}"' ;;\n  esac\n  exit 0\nfi\neval "$SOPS_EDITOR \\"$2\\""`,
+      `if [ "$1" = "decrypt" ]; then\n  case "$3" in\n    *access_key_id*) printf 'replacement' ;;\n    *) printf '${sensitiveSha}' ;;\n  esac\n  exit 0\nfi\neval "$SOPS_EDITOR \\"$2\\""`,
     );
     const bodies: Array<unknown> = [];
     globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {

@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { hasClosingReferenceToIssue } from './poller-closing-reference';
 import type { SealedFixOutput } from './poller-fix-output';
 import type { JobDeps } from './poller-job-shared';
 import {
@@ -7,10 +8,7 @@ import {
   createValidationWorktree,
   isAncestor,
 } from './poller-output-integrity';
-import {
-  changedWorkspaceQualityManifests,
-  lockedPathsOf,
-} from './poller-protected-paths';
+import { lockedPathsOf } from './poller-protected-paths';
 import { forbiddenDiffPaths } from './poller-protocol';
 
 export const validateSealedFixOutput = async (
@@ -27,6 +25,7 @@ export const validateSealedFixOutput = async (
     output.repo !== job.deps.repo ||
     output.issueNumber !== job.issueNumber ||
     output.approvalId !== job.approvalId ||
+    !hasClosingReferenceToIssue(output.body, job.issueNumber) ||
     !isAncestor(job.cloneDir, output.baseSha, job.defaultBranch) ||
     !isAncestor(job.cloneDir, output.baseSha, output.generatedHead) ||
     commitCountBetween(job.cloneDir, output.baseSha, output.generatedHead) !==
@@ -49,10 +48,10 @@ export const validateSealedFixOutput = async (
     ),
   );
   try {
-    const forbidden = [
-      ...forbiddenDiffPaths(paths, await lockedPathsOf(workspace.dir)),
-      ...changedWorkspaceQualityManifests(workspace.dir, output.baseSha, paths),
-    ];
+    const forbidden = forbiddenDiffPaths(
+      paths,
+      await lockedPathsOf(workspace.dir),
+    );
     if (forbidden.length > 0) {
       throw new Error(
         `sealed fix output modified protected paths:\n${forbidden.join('\n')}`,

@@ -51,7 +51,7 @@ const initialize = (): string => {
   const sops = join(bin, 'sops');
   writeFileSync(
     sops,
-    '#!/bin/sh\nif [ "$1" = "edit" ]; then eval "$SOPS_EDITOR \\"$2\\""; exit $?; fi\nprintf \'"new-value"\'\n',
+    '#!/bin/sh\nif [ "$1" = "edit" ]; then eval "$SOPS_EDITOR \\"$2\\""; exit $?; fi\nprintf \'new-value\'\n',
   );
   chmodSync(sops, EXECUTABLE_MODE);
   process.env.PATH = `${bin}:${originalPath ?? ''}`;

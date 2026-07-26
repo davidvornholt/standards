@@ -15,7 +15,6 @@ import {
 import {
   inspectSopsStructure,
   isContainedSopsPath,
-  parseSopsKeyPath,
   type SopsShapeFailure,
 } from './creds-sops-structure';
 import { runSops } from './sops-exec';
@@ -36,15 +35,6 @@ export type SopsScalarDestinationResult = SopsScalarStructureResult | ReadError;
 export type SopsWriteResult =
   | { readonly ok: true }
   | { readonly ok: false; readonly problem: string };
-export type SopsStoredValueVerification =
-  | { readonly ok: true; readonly matches: boolean }
-  | { readonly ok: false; readonly problem: string };
-type SopsStoredValueInput = {
-  readonly consumer: string;
-  readonly rel: string;
-  readonly dottedPath: string;
-  readonly expectedValue: string;
-};
 
 export const listEncryptedKeys = (text: string): EncryptedKeysReadResult => {
   const result = inspectSopsStructure(text, true);
@@ -122,49 +112,6 @@ const editorCommand = (): string => {
   );
   return `"${process.execPath}" "${editor}"`;
 };
-
-export const verifySopsStoredValueWith = (
-  runner: typeof runSops,
-  input: SopsStoredValueInput,
-): SopsStoredValueVerification => {
-  const { consumer, rel, dottedPath, expectedValue } = input;
-  const path = parseSopsKeyPath(dottedPath);
-  const problem = `could not verify stored SOPS value at ${dottedPath} in ${rel}`;
-  if (path === null || !isContainedSopsPath(consumer, rel, 'file')) {
-    return { ok: false, problem };
-  }
-  const extract = path
-    .map((segment) => `[${JSON.stringify(segment)}]`)
-    .join('');
-  const result = runner(
-    ['decrypt', '--extract', extract, '--output-type', 'json', rel],
-    consumer,
-  );
-  if (result.status !== 0) {
-    return { ok: false, problem };
-  }
-  try {
-    const stored: unknown = JSON.parse(result.stdout);
-    return typeof stored === 'string'
-      ? { ok: true, matches: stored === expectedValue }
-      : { ok: false, problem };
-  } catch {
-    return { ok: false, problem };
-  }
-};
-
-export const verifySopsStoredValue = (
-  consumer: string,
-  rel: string,
-  dottedPath: string,
-  expectedValue: string,
-): SopsStoredValueVerification =>
-  verifySopsStoredValueWith(runSops, {
-    consumer,
-    rel,
-    dottedPath,
-    expectedValue,
-  });
 
 export const setSopsValues = (
   consumer: string,

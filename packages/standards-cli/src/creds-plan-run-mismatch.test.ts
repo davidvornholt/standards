@@ -15,7 +15,7 @@ describe('creds apply verification mismatch', () => {
   it('names the known-bad stored value when verification mismatches after a claimed-successful write', async () => {
     const { consumer, events } = initialize(ENCRYPTED_SECRETS);
     installSops(
-      'if [ "$1" = "decrypt" ]; then printf \'"tampered-value"\'; exit 0; fi\neval "$SOPS_EDITOR \\"$2\\"" && printf "write\\n" >> "$PLAN_EVENT_FILE"',
+      'if [ "$1" = "decrypt" ]; then printf \'tampered-value\'; exit 0; fi\neval "$SOPS_EDITOR \\"$2\\"" && printf "write\\n" >> "$PLAN_EVENT_FILE"',
     );
     stubCloudflare();
     const error = spyOn(console, 'error').mockImplementation(() => undefined);

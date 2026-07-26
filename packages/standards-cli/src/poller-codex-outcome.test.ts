@@ -6,6 +6,7 @@ import { readFixOutcome, readReviewOutcome } from './poller-outcome';
 import { OUTCOME_DIR, OUTCOME_FILE } from './poller-protocol';
 
 const dirs: Array<string> = [];
+const ISSUE_NUMBER = 7;
 
 const workDirWithOutcome = (outcome: unknown): string => {
   const dir = mkdtempSync(join(tmpdir(), 'poller-outcome-'));
@@ -33,8 +34,61 @@ describe('readFixOutcome', () => {
         prTitle: 'fix(auth): reject expired session tokens',
         prBody: 'Handles expiry.\n\nFixes #7',
       }),
+      ISSUE_NUMBER,
     );
     expect(outcome?.status).toBe('fixed');
+  });
+
+  it('accepts any supported closing keyword for the exact issue', async () => {
+    const outcome = await readFixOutcome(
+      workDirWithOutcome({
+        status: 'fixed',
+        summary: 'Corrected the boundary check.',
+        prTitle: 'fix(auth): reject expired session tokens',
+        prBody: 'Handles expiry.\n\nRESOLVES: #7',
+      }),
+      ISSUE_NUMBER,
+    );
+    expect(outcome?.status).toBe('fixed');
+  });
+
+  it('accepts a footer after a same-line triple-backtick code span', async () => {
+    const outcome = await readFixOutcome(
+      workDirWithOutcome({
+        status: 'fixed',
+        summary: 'Corrected the boundary check.',
+        prTitle: 'fix(auth): reject expired session tokens',
+        prBody: '``` must be paired with ```\n\nFixes #7',
+      }),
+      ISSUE_NUMBER,
+    );
+    expect(outcome?.status).toBe('fixed');
+  });
+
+  it.each([
+    ['missing reference', 'Handles expiry.'],
+    ['wrong issue', 'Handles expiry.\n\nFixes #8'],
+    ['an issue-number prefix', 'Handles expiry.\n\nFixes #70'],
+    ['non-closing reference', 'Handles expiry; see #7.'],
+    ['inline-code reference', 'Use a footer like `Fixes #7`.'],
+    ['fenced-code reference', 'Example:\n\n```markdown\nFixes #7\n```'],
+    ['HTML-comment reference', '<!-- Fixes #7 -->'],
+    ['multi-line HTML-comment reference', '<!--\nFixes #7\n-->'],
+    ['one-backtick multi-line code span', '`\nFixes #7\n`'],
+    ['two-backtick multi-line code span', '``\nFixes #7\n``'],
+    ['unclosed HTML-comment footer', '<!--\nFixes #7'],
+    ['unclosed fenced-code footer', '```markdown\nFixes #7'],
+  ])('rejects a fixed outcome with %s', async (_name, prBody) => {
+    const outcome = await readFixOutcome(
+      workDirWithOutcome({
+        status: 'fixed',
+        summary: 'Corrected the boundary check.',
+        prTitle: 'fix(auth): reject expired session tokens',
+        prBody,
+      }),
+      ISSUE_NUMBER,
+    );
+    expect(outcome).toBeNull();
   });
 
   it('rejects a fixed outcome with a malformed PR title', async () => {
@@ -45,6 +99,7 @@ describe('readFixOutcome', () => {
         prTitle: 'Fixed the thing',
         prBody: 'Fixes #7',
       }),
+      ISSUE_NUMBER,
     );
     expect(outcome).toBeNull();
   });
@@ -52,6 +107,7 @@ describe('readFixOutcome', () => {
   it('rejects a question outcome without a question', async () => {
     const outcome = await readFixOutcome(
       workDirWithOutcome({ status: 'question', summary: 'blocked' }),
+      ISSUE_NUMBER,
     );
     expect(outcome).toBeNull();
   });
@@ -60,12 +116,15 @@ describe('readFixOutcome', () => {
     expect(
       await readFixOutcome(
         workDirWithOutcome({ status: 'done', summary: 'x' }),
+        ISSUE_NUMBER,
       ),
     ).toBeNull();
-    expect(await readFixOutcome(workDirWithOutcome('not json'))).toBeNull();
+    expect(
+      await readFixOutcome(workDirWithOutcome('not json'), ISSUE_NUMBER),
+    ).toBeNull();
     const empty = mkdtempSync(join(tmpdir(), 'poller-outcome-'));
     dirs.push(empty);
-    expect(await readFixOutcome(empty)).toBeNull();
+    expect(await readFixOutcome(empty, ISSUE_NUMBER)).toBeNull();
   });
 });
 

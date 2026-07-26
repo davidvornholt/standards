@@ -1,9 +1,6 @@
 import { deleteAccountToken } from './creds-cloudflare';
-import {
-  type SopsValueChange,
-  type SopsWriteResult,
-  verifySopsStoredValue,
-} from './creds-sops';
+import type { SopsValueChange, SopsWriteResult } from './creds-sops';
+import { verifySopsStoredValue } from './creds-sops-value';
 
 export const commitCreatedCloudflareToken = async (input: {
   readonly consumer: string;

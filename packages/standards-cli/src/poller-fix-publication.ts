@@ -16,10 +16,7 @@ import {
   type JobLabels,
   releaseLabels,
 } from './poller-job-shared';
-import {
-  changedWorkspaceQualityManifests,
-  lockedPathsOf,
-} from './poller-protected-paths';
+import { lockedPathsOf } from './poller-protected-paths';
 import {
   APPROVED_FOR_REVIEW,
   type FixOutcome,
@@ -150,14 +147,10 @@ export const finishFixedJob = async (
     return `#${issue.number}: failed (fixed without commits)`;
   }
   const paths = changedPaths(workspace.dir, workspace.baseSha);
-  const forbidden = [
-    ...forbiddenDiffPaths(paths, await lockedPathsOf(workspace.dir)),
-    ...changedWorkspaceQualityManifests(
-      workspace.dir,
-      workspace.baseSha,
-      paths,
-    ),
-  ];
+  const forbidden = forbiddenDiffPaths(
+    paths,
+    await lockedPathsOf(workspace.dir),
+  );
   if (forbidden.length > 0) {
     await failJob(
       deps,
