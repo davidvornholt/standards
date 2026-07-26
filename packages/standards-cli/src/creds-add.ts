@@ -162,7 +162,10 @@ export const runCredsAddCloudflare = async (
     destination: `${context.rel} at ${context.dest.key}`,
     format,
     accountId: account.accountId,
-    jurisdiction: options.jurisdiction ?? DEFAULT_R2_JURISDICTION,
+    jurisdiction:
+      flags.resource.kind === 'bucket'
+        ? flags.resource.jurisdiction
+        : DEFAULT_R2_JURISDICTION,
     policies: resolved.policies,
   });
   return true;

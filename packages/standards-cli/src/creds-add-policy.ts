@@ -117,7 +117,12 @@ export type PolicyResource =
       readonly bucket: string;
       readonly jurisdiction: R2Jurisdiction;
     }
-  | { readonly kind: 'zones'; readonly zoneIds: ReadonlyArray<string> };
+  | {
+      readonly kind: 'zones';
+      // Non-empty by type: a zone policy with no resource would be accepted by
+      // the wire shape and reach nothing.
+      readonly zoneIds: readonly [string, ...ReadonlyArray<string>];
+    };
 
 export type ResolvedTokenPolicy =
   | {

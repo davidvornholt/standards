@@ -129,6 +129,32 @@ describe('public creds zone rejections', () => {
     );
   });
 
+  it('rejects an invalid bucket name before provider or SOPS mutation', async () => {
+    const consumer = initializeConsumer([ACCOUNT_A]);
+    const methods = refuseProviderCalls();
+    installSops('touch "$PWD/sops-called"\nexit 1');
+    const error = spyOn(console, 'error').mockImplementation(() => undefined);
+    expect(
+      await runCredsCommand([
+        'add',
+        'cloudflare',
+        '--dir',
+        consumer,
+        '--dest',
+        'ci:ci.r2',
+        '--bucket',
+        'Bad_Bucket',
+        '--permissions',
+        'Workers R2 Storage Bucket Item Read',
+      ]),
+    ).toBe(false);
+    expect(methods).toEqual([]);
+    expect(existsSync(join(consumer, 'sops-called'))).toBe(false);
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining('invalid R2 bucket name: Bad_Bucket'),
+    );
+  });
+
   it('rejects a zone named by domain before provider or SOPS mutation', async () => {
     const consumer = initializeConsumer([ACCOUNT_A]);
     const methods = refuseProviderCalls();

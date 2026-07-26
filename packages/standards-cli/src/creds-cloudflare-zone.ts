@@ -12,20 +12,24 @@ export const zoneResource = (zoneId: string): string =>
   `${ZONE_SCOPE}.${zoneId}`;
 
 export type ParsedZoneArgument =
-  | { readonly ok: true; readonly zoneIds: ReadonlyArray<string> }
+  | {
+      readonly ok: true;
+      readonly zoneIds: readonly [string, ...ReadonlyArray<string>];
+    }
   | { readonly ok: false; readonly problem: string };
 
 export const parseZoneArgument = (value: string): ParsedZoneArgument => {
-  const entries = value
+  const [first, ...rest] = value
     .split(',')
     .map((zone) => zone.trim())
     .filter((zone) => zone.length > 0);
-  if (entries.length === 0) {
+  if (first === undefined) {
     return {
       ok: false,
       problem: '--zone requires at least one zone ID',
     };
   }
+  const entries = [first, ...rest] as const;
   const invalid = entries.filter((zone) => !ZONE_ID_PATTERN.test(zone));
   return invalid.length === 0
     ? { ok: true, zoneIds: entries }
