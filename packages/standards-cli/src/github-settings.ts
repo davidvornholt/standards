@@ -1,7 +1,8 @@
 // Load and merge canonical GitHub settings with the repo-owned extension.
 // Parsing lives in github-settings-parse.ts, merge policy in
-// github-settings-merge.ts, drift in github-diff.ts, and API work in
-// github-api.ts; this stays dependency-free.
+// github-settings-merge.ts, drift in github-diff.ts and
+// github-ruleset-diff.ts, and API work in github-api.ts; this stays
+// dependency-free.
 
 import { mergeSettings } from './github-settings-merge';
 import {

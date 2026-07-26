@@ -174,14 +174,14 @@ export const installPollerApi = (
     nextCommentId: CLAIM_COMMENT_START,
   };
   globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
-    const path = new URL(String(input)).pathname;
+    const { pathname: path, search } = new URL(String(input));
     const method = init?.method ?? 'GET';
     const body =
       typeof init?.body === 'string'
         ? (JSON.parse(init.body) as Record<string, unknown>)
         : null;
     const request = { body, method, path };
-    calls.push(request);
+    calls.push({ ...request, search });
     const [response] = HANDLERS.flatMap(
       (handler) => handler(request, state) ?? [],
     );

@@ -1,5 +1,6 @@
 // Drift comparison between declared GitHub settings (github-settings.ts) and
-// the live state returned by the GitHub API. Pure logic; no network.
+// the live state returned by the GitHub API. Pure logic; no network. Ruleset
+// comparison lives in github-ruleset-diff.ts.
 
 import { isRecord } from './github-settings-parse';
 
@@ -39,114 +40,6 @@ export const subsetMatches = (declared: unknown, live: unknown): boolean => {
     );
   }
   return declared === live;
-};
-
-const RULESET_COMPARED_KEYS = [
-  'target',
-  'enforcement',
-  'conditions',
-  'bypass_actors',
-] as const;
-
-const diffRules = (
-  name: string,
-  declared: Readonly<Record<string, unknown>>,
-  live: Readonly<Record<string, unknown>>,
-): ReadonlyArray<string> => {
-  const drifted: Array<string> = [];
-  const declaredRules = Array.isArray(declared.rules)
-    ? declared.rules.filter(isRecord)
-    : [];
-  const liveRules = Array.isArray(live.rules)
-    ? live.rules.filter(isRecord)
-    : [];
-  const liveByType = new Map(
-    liveRules.map((rule) => [String(rule.type), rule]),
-  );
-  const declaredTypes = new Set(declaredRules.map((rule) => String(rule.type)));
-  for (const rule of declaredRules) {
-    const type = String(rule.type);
-    const liveRule = liveByType.get(type);
-    const declaredWithoutType = Object.fromEntries(
-      Object.entries(rule).filter(([key]) => key !== 'type'),
-    );
-    if (liveRule === undefined) {
-      drifted.push(`ruleset "${name}": missing rule "${type}"`);
-    } else if (!subsetMatches(declaredWithoutType, liveRule)) {
-      drifted.push(
-        `ruleset "${name}": rule "${type}" differs from the declared configuration`,
-      );
-    }
-  }
-  for (const type of liveByType.keys()) {
-    if (!declaredTypes.has(type)) {
-      drifted.push(`ruleset "${name}": has undeclared extra rule "${type}"`);
-    }
-  }
-  return drifted;
-};
-
-// Some ruleset fields — bypass_actors in particular — are only included in
-// API responses for admin viewers. A declared key that is absent on the live
-// side is unverifiable for this token, not drift: the same policy as
-// repository merge settings, so callers can fail with a targeted
-// missing-visibility message instead of a bogus value mismatch.
-export const diffRuleset = (
-  declared: Readonly<Record<string, unknown>>,
-  live: Readonly<Record<string, unknown>>,
-): SettingsDiff => {
-  const name = String(declared.name);
-  const drifted: Array<string> = [];
-  const unverifiable: Array<string> = [];
-  for (const key of RULESET_COMPARED_KEYS) {
-    if (declared[key] !== undefined) {
-      if (live[key] === undefined) {
-        unverifiable.push(`ruleset "${name}": ${key}`);
-      } else if (!subsetMatches(declared[key], live[key])) {
-        drifted.push(
-          `ruleset "${name}": ${key} differs from the declared configuration`,
-        );
-      }
-    }
-  }
-  drifted.push(...diffRules(name, declared, live));
-  return { drifted, unverifiable };
-};
-
-// Live rulesets must be exactly the declared set: additions, removals, and
-// in-place edits are all drift.
-export const diffRulesets = (
-  declared: ReadonlyArray<Readonly<Record<string, unknown>>>,
-  live: ReadonlyArray<Readonly<Record<string, unknown>>>,
-): SettingsDiff => {
-  const drifted: Array<string> = [];
-  const unverifiable: Array<string> = [];
-  const liveByName = new Map(
-    live.map((ruleset) => [String(ruleset.name), ruleset]),
-  );
-  const declaredNames = new Set(
-    declared.map((ruleset) => String(ruleset.name)),
-  );
-  for (const ruleset of declared) {
-    const liveRuleset = liveByName.get(String(ruleset.name));
-    if (liveRuleset === undefined) {
-      drifted.push(
-        `ruleset "${ruleset.name}" is declared but missing on GitHub`,
-      );
-    } else {
-      const diff = diffRuleset(ruleset, liveRuleset);
-      drifted.push(...diff.drifted);
-      unverifiable.push(...diff.unverifiable);
-    }
-  }
-  for (const name of liveByName.keys()) {
-    if (!declaredNames.has(name)) {
-      drifted.push(
-        `ruleset "${name}" exists on GitHub but is not declared; declare it in .github/settings.local.json or delete it`,
-      );
-    }
-  }
-  return { drifted, unverifiable };
 };
 
 // Repo merge settings are only visible to admin tokens; report invisible keys
