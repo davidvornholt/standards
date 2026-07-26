@@ -21,11 +21,31 @@ const manifestPaths = (): ReadonlyArray<string> => {
   return manifest.paths;
 };
 
-// `packages/a11y-testing/src/**` and `packages/typescript-config/*.json` both
-// declare coverage of a manifest directory; reduce either to the directory it
-// is rooted in so one comparison handles literals and globs alike.
+// Three manifest directories are deliberately declared as a set of narrower
+// inputs, so installed dependencies and build output under them stay out of the
+// cache key. Each set is pinned exactly: an input root deeper than the manifest
+// path covers only part of it, so accepting one on its own would let any of
+// these be narrowed further — or an unrelated directory be reduced to a single
+// subdirectory — without failing anything.
+const NARROWED: Readonly<Record<string, ReadonlyArray<string>>> = {
+  '.github/actions/sops-secret': ['.github/actions/sops-secret/action.yml'],
+  'packages/typescript-config': [
+    'packages/typescript-config/README.md',
+    'packages/typescript-config/*.json',
+    'packages/typescript-config/*.ts',
+  ],
+  'packages/a11y-testing': [
+    'packages/a11y-testing/README.md',
+    'packages/a11y-testing/package.json',
+    'packages/a11y-testing/tsconfig.json',
+    'packages/a11y-testing/src/**',
+  ],
+};
+
+// Reduce a glob to the directory it is rooted in, so one comparison handles
+// literals and globs alike.
 const inputRoot = (input: string): string => {
-  const segments = input.slice(ROOT_TOKEN.length).split('/');
+  const segments = input.split('/');
   const globIndex = segments.findIndex((segment) => segment.includes('*'));
   return (globIndex === -1 ? segments : segments.slice(0, globIndex)).join('/');
 };
@@ -40,19 +60,29 @@ const rootedInputs = (): ReadonlyArray<string> => {
   }
   return task.inputs
     .filter((input) => input.startsWith(ROOT_TOKEN))
-    .map(inputRoot);
+    .map((input) => input.slice(ROOT_TOKEN.length));
 };
 
 const covers = (root: string, path: string): boolean =>
-  root === path || root.startsWith(`${path}/`) || path.startsWith(`${root}/`);
+  root === path || path.startsWith(`${root}/`);
 
 describe('canonical payload as a test input', () => {
   it('declares every managed path in the standards test task inputs', () => {
-    const inputs = rootedInputs();
+    const roots = rootedInputs().map(inputRoot);
     const uncovered = manifestPaths().filter(
-      (path) => !inputs.some((root) => covers(root, path)),
+      (path) => !(path in NARROWED || roots.some((root) => covers(root, path))),
     );
 
     expect(uncovered).toEqual([]);
+  });
+
+  it('pins the exact narrower inputs that stand in for a manifest directory', () => {
+    const inputs = rootedInputs();
+
+    for (const [path, expected] of Object.entries(NARROWED)) {
+      expect(inputs.filter((input) => covers(path, input))).toEqual([
+        ...expected,
+      ]);
+    }
   });
 });

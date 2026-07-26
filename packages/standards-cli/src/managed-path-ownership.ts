@@ -5,7 +5,7 @@
 
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { inspectManagedPath } from './managed-files';
+import { inspectManagedPath, type ManagedEntry } from './managed-files';
 
 const collectPaths = async (
   root: string,
@@ -41,21 +41,45 @@ export const unlockedPathsUnder = async (
   return found.filter((path) => !locked.has(path)).sort();
 };
 
-// The first ancestor of `rel` inside `root` that is a symlink, or null when the
-// whole parent chain is real directories. A path whose parent chain crosses a
-// link does not name what the caller thinks it names: reading or removing it
-// reaches into the link's target tree, which is somebody else's content.
-export const symlinkedAncestor = async (
+// An ancestor that is not a directory, so nothing can sit below it under the
+// name the lock recorded. The kind is part of the answer: below a symlink the
+// name still resolves, to somebody else's content, while below a file it
+// resolves to nothing at all.
+export type InterposedAncestor = {
+  readonly rel: string;
+  readonly kind: 'file' | 'symlink';
+};
+
+// The shallowest ancestor of `rel` inside `root` that is not a directory, or
+// null when the whole parent chain is directories.
+//
+// `planned` is the payload this run mirrors, and it wins over the disk: every
+// path in it has the kind upstream gives it once the mirror has finished, and
+// the caller runs after the mirror. A dry run, which writes nothing, therefore
+// reaches the same answer the matching real run does.
+//
+// A path whose parent chain crosses a link does not name what the caller thinks
+// it names: reading or removing it reaches into the link's target tree, which
+// is somebody else's content.
+export const interposedAncestor = async (
   root: string,
   rel: string,
-): Promise<string | null> => {
+  planned: ReadonlyMap<string, ManagedEntry>,
+): Promise<InterposedAncestor | null> => {
   const segments = rel.split('/').slice(0, -1);
   const prefixes = segments.map((_, depth) =>
     segments.slice(0, depth + 1).join('/'),
   );
   const entries = await Promise.all(
-    prefixes.map((prefix) => inspectManagedPath(join(root, prefix))),
+    prefixes.map(
+      (prefix) => planned.get(prefix) ?? inspectManagedPath(join(root, prefix)),
+    ),
   );
-  const index = entries.findIndex((entry) => entry?.kind === 'symlink');
-  return index === -1 ? null : (prefixes[index] ?? null);
+  for (const [index, prefix] of prefixes.entries()) {
+    const entry = entries[index] ?? null;
+    if (entry !== null && entry.kind !== 'directory') {
+      return { rel: prefix, kind: entry.kind };
+    }
+  }
+  return null;
 };

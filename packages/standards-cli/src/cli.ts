@@ -39,7 +39,7 @@ import {
   writeManagedEntry,
 } from './managed-files';
 import {
-  symlinkedAncestor,
+  interposedAncestor,
   unlockedPathsUnder,
 } from './managed-path-ownership';
 import { runPollerCommand } from './poller-commands';
@@ -296,6 +296,11 @@ type MirrorResult = {
   // Locked paths the prune pass deliberately left on disk, each with the reason
   // the operator needs in order to finish the job by hand.
   readonly retained: ReadonlyArray<string>;
+  // Locked paths that sit below a managed symlink once this run has finished.
+  // Nothing is left on disk for the operator to act on: the lock entry is
+  // dropped, and the name now resolves through the link into content this run
+  // must not delete. Reported so the drop is not silent, never as an instruction.
+  readonly stale: ReadonlyArray<string>;
 };
 
 type MirrorOptions = {
@@ -305,10 +310,14 @@ type MirrorOptions = {
   readonly dryRun: boolean;
 };
 
-// Everything init/sync must know before its first write: an escaping canonical
-// link target, and a destination the engine never managed that is a directory
-// full of consumer work. Both are decided from data already in hand, and both
-// are reported together so one run surfaces every offending path.
+// Two things init/sync must settle before their first write: an escaping
+// canonical link target, and a managed destination that is a directory holding
+// paths the lock does not record. The lock is the only record of what this
+// engine put in a consumer, so whether the destination itself is locked decides
+// nothing — a consumer can replace a locked link with a directory of its own
+// skills, and that directory is still consumer work. Both problems are decided
+// from data already in hand, and both are reported together so one run surfaces
+// every offending managed path.
 const mirrorPreconditionProblems = async (
   consumer: string,
   upstream: ReadonlyMap<string, ManagedEntry>,
@@ -317,9 +326,6 @@ const mirrorPreconditionProblems = async (
   const locked = new Set(Object.keys(previous));
   const collisions = await Promise.all(
     [...upstream.keys()].map(async (rel) => {
-      if (locked.has(rel)) {
-        return null;
-      }
       const current = await inspectManagedPath(join(consumer, rel));
       if (current?.kind !== 'directory') {
         return null;
@@ -352,23 +358,30 @@ const assertNoProblems = (
 type PruneOutcome =
   | { readonly kind: 'absent' }
   | { readonly kind: 'delete'; readonly rel: string }
-  | { readonly kind: 'retain'; readonly note: string };
+  | { readonly kind: 'retain'; readonly note: string }
+  | { readonly kind: 'stale'; readonly note: string };
 
 // Two things the prune pass must never do: resolve through a symlink it (or an
 // older CLI's lock) put in the parent chain, and recursively delete a
-// destination the consumer turned into a directory.
+// destination the consumer turned into a directory. Every answer is decided
+// against the shape the mirror leaves behind, not the shape on disk right now,
+// so `--dry-run` predicts what the matching real run does.
 const pruneOutcome = async (
   consumer: string,
   rel: string,
+  planned: ReadonlyMap<string, ManagedEntry>,
 ): Promise<PruneOutcome> => {
-  const ancestor = await symlinkedAncestor(consumer, rel);
-  if (ancestor !== null) {
+  const ancestor = await interposedAncestor(consumer, rel, planned);
+  if (ancestor?.kind === 'symlink') {
     return {
-      kind: 'retain',
-      note: `${rel}: stale lock entry below the symlink ${ancestor}; not deleting through it`,
+      kind: 'stale',
+      note: `${rel} (below the symlink ${ancestor.rel}; nothing was deleted through it)`,
     };
   }
-  const current = await inspectManagedPath(join(consumer, rel));
+  // Below a managed file the name resolves to nothing once the mirror has run,
+  // whether or not a directory still stands there while a dry run looks.
+  const current =
+    ancestor === null ? await inspectManagedPath(join(consumer, rel)) : null;
   if (current === null) {
     return { kind: 'absent' };
   }
@@ -382,17 +395,20 @@ const pruneOutcome = async (
 };
 
 // Remove the locked paths that vanished upstream. Retained paths are reported
-// and left alone; the lock drops them either way, so the next run is clean.
+// and left alone; the lock drops every removable key either way, so the next
+// run is clean.
 const prune = async (
   consumer: string,
   removable: ReadonlyArray<string>,
+  planned: ReadonlyMap<string, ManagedEntry>,
   dryRun: boolean,
 ): Promise<{
   readonly deleted: ReadonlyArray<string>;
   readonly retained: ReadonlyArray<string>;
+  readonly stale: ReadonlyArray<string>;
 }> => {
   const outcomes = await Promise.all(
-    removable.map((rel) => pruneOutcome(consumer, rel)),
+    removable.map((rel) => pruneOutcome(consumer, rel, planned)),
   );
   const deleted = outcomes.flatMap((outcome) =>
     outcome.kind === 'delete' ? [outcome.rel] : [],
@@ -400,12 +416,17 @@ const prune = async (
   const retained = outcomes.flatMap((outcome) =>
     outcome.kind === 'retain' ? [outcome.note] : [],
   );
+  const stale = outcomes.flatMap((outcome) =>
+    outcome.kind === 'stale' ? [outcome.note] : [],
+  );
   if (!dryRun) {
+    // `pruneOutcome` decides what may be deleted; a directory takes the retain
+    // branch there and never reaches this call.
     await Promise.all(
       deleted.map((rel) => rm(join(consumer, rel), { force: true })),
     );
   }
-  return { deleted, retained };
+  return { deleted, retained, stale };
 };
 
 // Mirror managed files into the consumer, deleting any previously-locked file
@@ -448,9 +469,9 @@ const mirror = async ({
       }
       if (!dryRun) {
         await mkdir(dirname(dest), { recursive: true });
-        // Engine-owned by the precondition above: only a path the lock already
-        // recorded can be a directory here, so replacing it restores the
-        // managed shape rather than destroying consumer work.
+        // The precondition above proved every path inside this directory is one
+        // the lock already records, so replacing it restores the managed shape
+        // rather than destroying consumer work.
         if (current?.kind === 'directory') {
           await rm(dest, { recursive: true, force: true });
         }
@@ -460,63 +481,76 @@ const mirror = async ({
     }),
   );
   // `existsSync` would miss a broken link, so the prune pass lstats instead.
-  const { deleted, retained } = await prune(
+  const { deleted, retained, stale } = await prune(
     consumer,
     Object.keys(previous).filter((rel) => !(rel in next)),
+    upstream,
     dryRun,
   );
-  return { files: next, created, updated, deleted, tampered, retained };
+  return { files: next, created, updated, deleted, tampered, retained, stale };
 };
 
-// Print what a mirror did (or, for a dry run, would do). Real syncs stay quiet
-// about unchanged files and only announce deletions and clobbered local edits.
+// What a mirror reports, in the tense the run calls for: a dry run also
+// announces the writes ahead of it, while a real sync stays quiet about them and
+// speaks only of removals, lock entries it drops, and clobbered local edits. One
+// list in both tenses so a dry run cannot describe an outcome differently from
+// the real run it predicts.
+const mirrorLines = (
+  result: MirrorResult,
+  dryRun: boolean,
+): ReadonlyArray<string> => {
+  const tense = (would: string, did: string): string => (dryRun ? would : did);
+  const writes = dryRun
+    ? [
+        ...result.created.map((rel) => `would create ${rel}`),
+        ...result.updated.map((rel) => `would update ${rel}`),
+      ]
+    : [];
+  const tampered =
+    result.tampered.length === 0
+      ? []
+      : [
+          `${tense('would overwrite', 'overwrote')} ${result.tampered.length} locally-modified canonical path(s): ${result.tampered.join(', ')}`,
+        ];
+  return [
+    ...writes,
+    ...result.deleted.map(
+      (rel) => `${tense('would delete', 'deleted')} ${rel} (removed upstream)`,
+    ),
+    ...result.retained.map(
+      (note) => `${tense('would leave in place', 'left in place')} ${note}`,
+    ),
+    ...result.stale.map(
+      (note) =>
+        `${tense('would drop', 'dropped')} the stale lock entry ${note}`,
+    ),
+    ...tampered,
+  ];
+};
+
 const reportMirror = (result: MirrorResult, dryRun: boolean): void => {
-  if (dryRun) {
-    for (const rel of result.created) {
-      console.log(`  would create ${rel}`);
-    }
-    for (const rel of result.updated) {
-      console.log(`  would update ${rel}`);
-    }
-    for (const rel of result.deleted) {
-      console.log(`  would delete ${rel} (removed upstream)`);
-    }
-    for (const note of result.retained) {
-      console.log(`  left in place ${note}`);
-    }
-    if (result.tampered.length > 0) {
-      console.log(
-        `  would overwrite ${result.tampered.length} locally-modified canonical file(s): ${result.tampered.join(', ')}`,
-      );
-    }
-    return;
-  }
-  for (const rel of result.deleted) {
-    console.log(`  deleted ${rel} (removed upstream)`);
-  }
-  for (const note of result.retained) {
-    console.log(`  left in place ${note}`);
-  }
-  if (result.tampered.length > 0) {
-    console.log(
-      `  overwrote ${result.tampered.length} locally-modified canonical file(s): ${result.tampered.join(', ')}`,
-    );
+  for (const line of mirrorLines(result, dryRun)) {
+    console.log(`  ${line}`);
   }
 };
 
+// A retained or stale key leaves the lock, so the run rewrites `sync-standards.lock`
+// even when it touches nothing on disk; neither may be summed into "no changes".
 const reportDryRunSummary = (
   result: MirrorResult,
   generated: boolean,
 ): void => {
+  const unlocked = result.retained.length + result.stale.length;
   const changes =
     result.created.length +
     result.updated.length +
     result.deleted.length +
+    unlocked +
     Number(generated);
   console.log(
     changes === 0
       ? 'dry run: already in sync; no changes'
-      : `dry run: ${result.created.length} to create, ${result.updated.length} to update, ${result.deleted.length} to delete, ${Number(generated)} to generate`,
+      : `dry run: ${result.created.length} to create, ${result.updated.length} to update, ${result.deleted.length} to delete, ${Number(generated)} to generate, ${unlocked} to drop from the lock without deleting`,
   );
 };
 
@@ -553,8 +587,10 @@ const runInit = async (
   await Promise.all(
     [...seeds].map(async ([rel, entry]) => {
       const dest = join(consumer, rel);
-      // `existsSync` reports a broken link as absent, and seeding over one would
-      // write the seed through it into whatever the link names.
+      // A seed destination is kept whenever anything at all occupies it.
+      // `existsSync` reports a broken link as absent, so it would call this
+      // destination free and let the seed replace a link the consumer put
+      // there; `lstat` sees the link and keeps it.
       if ((await inspectManagedPath(dest)) !== null) {
         console.log(`  kept ${rel} (already present)`);
         return;
@@ -578,7 +614,7 @@ const runInit = async (
     files: result.files,
   });
   console.log(
-    `init complete: ${Object.keys(result.files).length} managed file(s) at ${src.sha}`,
+    `init complete: ${Object.keys(result.files).length} managed path(s) at ${src.sha}`,
   );
 };
 
@@ -619,7 +655,7 @@ const runSync = async (
     files: result.files,
   });
   console.log(
-    `sync complete: ${Object.keys(result.files).length} managed file(s) at ${src.sha}`,
+    `sync complete: ${Object.keys(result.files).length} managed path(s) at ${src.sha}`,
   );
 };
 
@@ -657,7 +693,7 @@ const runCheck = async (consumer: string): Promise<boolean> => {
     await findManagedFilesContainingBiomeDirectiveToken(lockedFiles);
   if (problems.length > 0) {
     console.error(
-      `standards: ${problems.length} canonical file(s) drifted from the last synced state:`,
+      `standards: ${problems.length} canonical path(s) drifted from the last synced state:`,
     );
     console.error(problems.join('\n'));
     console.error(
@@ -675,7 +711,7 @@ const runCheck = async (consumer: string): Promise<boolean> => {
   }
   if (problems.length === 0) {
     console.log(
-      `standards: ${Object.keys(lock.files).length} canonical file(s) match the last synced state`,
+      `standards: ${Object.keys(lock.files).length} canonical path(s) match the last synced state`,
     );
   }
   return problems.length === 0 && directiveFiles.length === 0;

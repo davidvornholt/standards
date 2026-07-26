@@ -53,18 +53,22 @@ export const engineFor = (
   };
 };
 
+// How the payload carries `.claude/skills`. `directory` is what the published
+// CLI produced before the link existed — a materialized copy of the skills tree
+// under a second name — and is what a consumer migrates away from. `absent`
+// drops the path from the manifest entirely.
+type ClaudeSkills = 'absent' | 'directory' | 'symlink';
+
 type UpstreamOptions = {
   readonly target: string;
-  // `false` drops the link from the manifest, so a suite can build the pre-link
-  // payload an older CLI synced before this shape existed.
-  readonly linked: boolean;
+  readonly claudeSkills: ClaudeSkills;
   // Extra managed files, for suites that need a path upstream can later drop.
   readonly extra: ReadonlyArray<string>;
 };
 
 export const buildUpstream = ({
   target = TARGET,
-  linked = true,
+  claudeSkills = 'symlink',
   extra = [],
 }: Partial<UpstreamOptions> = {}): string => {
   const up = mkTmp('symlink-up-');
@@ -78,7 +82,7 @@ export const buildUpstream = ({
         'sync-standards.json',
         '.github/dependabot.base.yml',
         '.agents/skills',
-        ...(linked ? [LINK] : []),
+        ...(claudeSkills === 'absent' ? [] : [LINK]),
         ...extra,
       ],
     }),
@@ -89,9 +93,12 @@ export const buildUpstream = ({
   for (const rel of extra) {
     write(up, rel, `canonical ${rel}\n`);
   }
-  if (linked) {
+  if (claudeSkills === 'symlink') {
     mkdirSync(join(up, '.claude'), { recursive: true });
     symlinkSync(target, join(up, LINK));
+  }
+  if (claudeSkills === 'directory') {
+    write(up, `${LINK}/probe/SKILL.md`, '---\nname: probe\n---\n');
   }
   return up;
 };

@@ -73,11 +73,14 @@ describe('symlinks as managed paths', () => {
     expect(check.stderr).toContain(`modified: ${LINK}`);
   });
 
-  it('restores a link a consumer replaced with a real directory', () => {
+  it('restores a link a consumer replaced with an empty directory', () => {
+    // An empty directory holds no consumer work, so the adoption guard has
+    // nothing to protect and the link is simply restored. A directory with
+    // anything in it is refused instead — see `managed-files-refusal.test.ts`.
     const up = buildUpstream();
     const { consumer } = initConsumer(up);
     rmSync(join(consumer, LINK));
-    write(consumer, `${LINK}/stale.md`, 'local copy\n');
+    mkdirSync(join(consumer, LINK), { recursive: true });
 
     const result = run(consumer, ['sync', '--from', up, '--dir', consumer]);
 

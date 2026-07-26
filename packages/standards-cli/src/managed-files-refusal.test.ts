@@ -1,7 +1,8 @@
-// init and sync refuse two classes of payload before they write anything: a
-// canonical link whose target leaves the repository, and a managed destination
-// occupied by a directory the lock never recorded. Both refusals are
-// preconditions, so the consumer must be exactly as it was.
+// init and sync refuse a canonical link whose target leaves the repository
+// before they write anything. The refusal is a precondition, so the consumer
+// must be exactly as it was. The other precondition — a managed destination
+// occupied by a directory of consumer work — is pinned in
+// `managed-files-adoption.test.ts`.
 
 import { afterEach, describe, expect, it } from 'bun:test';
 import { existsSync, lstatSync, readdirSync, symlinkSync } from 'node:fs';
@@ -15,8 +16,6 @@ import {
 } from './managed-files-symlink-test-support';
 
 const { initConsumer, run } = engineFor({ ...process.env });
-
-const OWN_SKILL = `${LINK}/my-local-skill/SKILL.md`;
 
 const untouched = (consumer: string): boolean =>
   !(
@@ -108,55 +107,5 @@ describe('escaping canonical symlink targets', () => {
     expect(lstatSync(join(consumer, 'note-link.md')).isSymbolicLink()).toBe(
       true,
     );
-  });
-});
-
-describe('managed destinations the engine never managed', () => {
-  it('refuses to init over a consumer-owned directory instead of deleting it', () => {
-    const consumer = mkTmp('symlink-cons-');
-    write(consumer, OWN_SKILL, 'name: mine\n');
-
-    const result = run(consumer, [
-      'init',
-      '--from',
-      buildUpstream(),
-      '--dir',
-      consumer,
-    ]);
-
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain(
-      `${LINK} is a directory holding 1 path(s) this repository does not manage`,
-    );
-    expect(result.stderr).toContain(OWN_SKILL);
-    expect(existsSync(join(consumer, OWN_SKILL))).toBe(true);
-    expect(untouched(consumer)).toBe(true);
-  });
-
-  it('refuses a sync that would delete a directory a consumer built there', () => {
-    // The realistic upgrade: adopted before the link existed, own skills added,
-    // then upstream starts managing the path the skills sit at.
-    const { consumer } = initConsumer(buildUpstream({ linked: false }));
-    write(consumer, OWN_SKILL, 'name: mine\n');
-    write(consumer, `${LINK}/notes.md`, 'notes\n');
-    const linked = buildUpstream();
-
-    const dryRun = run(consumer, [
-      'sync',
-      '--from',
-      linked,
-      '--dir',
-      consumer,
-      '--dry-run',
-    ]);
-    const result = run(consumer, ['sync', '--from', linked, '--dir', consumer]);
-
-    expect(dryRun.status).not.toBe(0);
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain(
-      `${LINK} is a directory holding 2 path(s) this repository does not manage`,
-    );
-    expect(existsSync(join(consumer, OWN_SKILL))).toBe(true);
-    expect(existsSync(join(consumer, `${LINK}/notes.md`))).toBe(true);
   });
 });

@@ -52,12 +52,16 @@ describe('lock digest contract', () => {
     expect(check.stdout).toContain('match the last synced state');
   });
 
-  it('records the link as a digest, not as its target string', () => {
+  it('records the link as a marked digest a plain file can never match', () => {
     const { consumer } = initConsumer(buildUpstream());
 
     const entry = readLock(consumer)[LINK];
 
     expect(entry).toMatch(HEX_DIGEST);
-    expect(entry).not.toContain(TARGET);
+    expect(entry).toBe(digest(`${NUL}standards-symlink${NUL}${TARGET}`));
+    // The marker is what separates a link from a text file holding the target,
+    // which is exactly what a Windows checkout without `core.symlinks=true`
+    // leaves behind. Hashing the bare target would let that file validate.
+    expect(entry).not.toBe(digest(TARGET));
   });
 });
