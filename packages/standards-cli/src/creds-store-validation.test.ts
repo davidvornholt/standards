@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import {
   type CloudflareBrokerAccount,
   EMPTY_BROKER_STORE,
+  type GithubBrokerApp,
   readBrokerStore,
   updateBrokerStore,
 } from './creds-store';
@@ -31,6 +32,15 @@ const account = (
   accountId: string,
   token = 'cfat_secret',
 ): CloudflareBrokerAccount => ({ accountId, token });
+
+const GITHUB_APP: GithubBrokerApp = {
+  owner: 'davidvornholt',
+  appId: 42,
+  slug: 'standards-broker',
+  htmlUrl: 'https://github.com/apps/standards-broker',
+  clientId: 'Iv1.abc',
+  privateKey: 'private-key',
+};
 
 afterEach(() => {
   for (const dir of dirs.splice(0)) {
@@ -78,5 +88,37 @@ describe('broker store Cloudflare account validation', () => {
     expect(readFileSync(path)).toEqual(bytes);
     const { mode: currentMode } = statSync(path);
     expect(currentMode).toBe(mode);
+  });
+});
+
+describe('broker store GitHub App validation', () => {
+  it.each([
+    ['empty owner', { owner: '' }],
+    ['non-integer App id', { appId: 42.5 }],
+    ['empty slug', { slug: '' }],
+    ['empty URL', { htmlUrl: '' }],
+    ['empty client id', { clientId: '' }],
+    ['empty private key', { privateKey: '' }],
+  ])('rejects a %s without replacing the store', async (_, replacement) => {
+    const path = storePath();
+    await updateBrokerStore(path, () => ({
+      ...EMPTY_BROKER_STORE,
+      github: [GITHUB_APP],
+    }));
+    const bytes = readFileSync(path);
+
+    await expect(
+      updateBrokerStore(path, (store) => ({
+        ...store,
+        github: [
+          {
+            ...GITHUB_APP,
+            ...replacement,
+          } as GithubBrokerApp,
+        ],
+      })),
+    ).rejects.toThrow('invalid GitHub App');
+
+    expect(readFileSync(path)).toEqual(bytes);
   });
 });

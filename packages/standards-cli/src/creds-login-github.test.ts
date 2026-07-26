@@ -173,9 +173,11 @@ describe('GitHub App manifest conversion', () => {
         html_url: 'https://github.com/apps/standards-broker',
         client_id: 'Iv1.abc',
         pem: '-----BEGIN RSA PRIVATE KEY-----\n...',
+        owner: { login: 'davidvornholt' },
         webhook_secret: null,
       }),
     ).toEqual({
+      owner: 'davidvornholt',
       appId: 7,
       slug: 'standards-broker',
       htmlUrl: 'https://github.com/apps/standards-broker',

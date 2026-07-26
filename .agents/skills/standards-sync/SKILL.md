@@ -41,7 +41,7 @@ Because bucket-1 files are byte-identical everywhere, every legitimate per-repo 
 
 If a task seems to require editing a canonical file for one repo's needs, stop — the change either belongs upstream (it's a real standard) or in the seam (it's repo-specific).
 
-The weekly workflow's writer identity is not a per-repo policy seam. It requires `ci.broker_app.app_id` and `ci.broker_app.private_key` in the SOPS-encrypted `secrets/ci.yaml`, provisioned with `bun standards creds add github --dest ci:ci.broker_app` after installing the broker App only on the selected repository. The workflow resolves those nested values before sync, mints a short-lived current-repository token with Contents read and Pull requests write, and fails closed without a durable-token or workflow-token fallback. The isolated settings gate holds no credential at all, so `ci.broker_app` is the only durable GitHub credential a consumer stores.
+The weekly workflow's writer identity is not a per-repo policy seam. It requires `ci.broker_app.app_id` and `ci.broker_app.private_key` in the SOPS-encrypted `secrets/ci.yaml`, provisioned with `bun standards creds add github --dest ci:ci.broker_app` after installing that repository owner's private broker App only on the selected repository. The command selects by repository owner and verifies the installation before writing. The workflow resolves those nested values before sync, mints a short-lived current-repository token with Contents read and Pull requests write, and fails closed without a durable-token or workflow-token fallback. The isolated settings gate holds no credential at all, so `ci.broker_app` is the only durable GitHub credential a consumer stores.
 
 ## Commands
 
