@@ -1750,7 +1750,7 @@ describe('canonical standards workflow security boundaries', () => {
 });
 
 describe('canonical standards workflow settings security', () => {
-  it('isolates the settings-read token from repository-controlled executable code', () => {
+  it('isolates the settings comparison from repository-controlled executable code', () => {
     const workflow = readFileSync(STANDARDS_WORKFLOW, 'utf8');
     const installStep = yamlStep(
       STANDARDS_WORKFLOW,

@@ -53,7 +53,7 @@ describe('runGithubCheck fail-closed visibility', () => {
       message: 'Resource not accessible by integration',
       status: HTTP_FORBIDDEN,
     },
-  ])('names the label-read credential fix after $status $message', async ({
+  ])('names the label-read permission and where it lives after $status $message', async ({
     message,
     status,
   }) => {
@@ -81,9 +81,14 @@ describe('runGithubCheck fail-closed visibility', () => {
     expect(calls.map(({ path }) => path)).toEqual(['/repos/owner/repo/labels']);
     const errors = output.errors.join('\n');
     expect(errors).toContain('declared labels not visible to this token');
-    expect(errors).toContain("the github-settings job's workflow token");
     expect(errors).toContain('issues: read');
     expect(errors).toContain('pull-requests: read');
+    // The canonical workflow already grants it, so CI readers must be sent at
+    // the real causes rather than at a synced file they must not edit.
+    expect(errors).toContain(
+      'the canonical github-settings job already grants',
+    );
+    expect(errors).not.toContain('secrets/ci.yaml');
     expect(errors).not.toContain('GitHub API unreachable');
   });
 
@@ -140,13 +145,13 @@ describe('runGithubCheck fail-closed visibility', () => {
     expect(errors).toContain(
       'repository setting(s) not visible to this token, so the gate cannot verify: allow_auto_merge; allow_merge_commit; allow_rebase_merge; allow_squash_merge; delete_branch_on_merge',
     );
-    // The remedy names admin auth rather than a broader CI token: a probe found
-    // no permission that reveals this to any token CI can hold, so sending CI
-    // after one would cost a settings change and change nothing.
-    expect(errors).toContain(
-      'Use a user-scoped token with read access to repository administration',
-    );
-    expect(errors).toContain('widening what CI reads with is not the fix');
+    // GraphQL serves merge settings to read-only tokens by design, so reaching
+    // this message means the fallback request failed. The remedy must say
+    // "re-run" rather than sending the reader after a permission that would not
+    // have helped and that CI cannot hold anyway.
+    expect(errors).toContain('more likely a failed request than a permission');
+    expect(errors).toContain('re-run the check');
+    expect(errors).not.toContain('widening what CI reads with is not the fix');
   });
 
   it('fails when a declared ruleset field is invisible to the token', async () => {

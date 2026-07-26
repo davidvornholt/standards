@@ -244,14 +244,17 @@ jobs:
 
       # Issues read is what declared-label reads need in a private repository;
       # every other setting the gate compares rides on the implicit Metadata
-      # read every workflow token carries. Ruleset bypass actors and repository
-      # merge settings are withheld from this token — REST hides them from any
-      # GitHub App installation token at every permission level — so the CLI
-      # reads merge settings over GraphQL and verifies a declared-empty bypass
-      # list through the GraphQL bypass-actor count. A declared non-empty bypass
-      # list cannot be confirmed by any CI credential and fails closed until the
-      # check is re-run locally with admin auth; that is a property of GitHub's
-      # API, not of the token chosen here.
+      # read every workflow token carries. REST withholds two things from this
+      # token: repository merge settings, which it serves only to write-level
+      # viewers, and ruleset bypass actors, which it serves only to a
+      # user-scoped token holding repository Administration read — never to an
+      # installation token, at any permission level. The CLI reads merge
+      # settings over GraphQL and verifies a declared-empty bypass list through
+      # the GraphQL bypass-actor count. A declared non-empty bypass list fails
+      # closed until the check is re-run locally with admin auth. The retired
+      # PAT was user-scoped and did see those actor lists over REST, so that
+      # case is a deliberate, disclosed narrowing rather than a property of
+      # GitHub's API; no credential CI can safely hold recovers it.
       - name: Check GitHub settings
         env:
           SETTINGS_TOKEN: ${{ github.token }}
