@@ -1,14 +1,18 @@
 import { randomBytes } from 'node:crypto';
 import { openInBrowser } from './creds-browser';
-import { loadOwnedGithubStore, upsertGithubApp } from './creds-github-apps';
+import {
+  loadOwnedGithubStore,
+  sameGithubApp,
+  upsertGithubApp,
+} from './creds-github-apps';
 import {
   buildAppManifest,
   convertManifestCode,
   createManifestState,
   MANIFEST_STATE_BYTES,
   manifestFormHtml,
+  resolveGithubAppName,
 } from './creds-login-github-manifest';
-import { BROKER_IDENTITY_NAME } from './creds-naming';
 import {
   type GithubBrokerApp,
   resolveBrokerPath,
@@ -85,10 +89,31 @@ export const waitForCode = (
 };
 export const githubInstallMessage = (installUrl: string): string =>
   `Install it only on the selected repositories that need broker credentials: ${installUrl}`;
-export const runCredsLoginGithub = async (options: {
-  readonly name: string | undefined;
-  readonly org: string | undefined;
-}): Promise<boolean> => {
+
+type GithubLoginDependencies = {
+  readonly waitForCode: typeof waitForCode;
+  readonly convertManifestCode: typeof convertManifestCode;
+  readonly openInBrowser: typeof openInBrowser;
+};
+
+const DEFAULT_LOGIN_DEPENDENCIES: GithubLoginDependencies = {
+  waitForCode,
+  convertManifestCode,
+  openInBrowser,
+};
+
+export const runCredsLoginGithub = async (
+  options: {
+    readonly name: string | undefined;
+    readonly org: string | undefined;
+  },
+  dependencies: GithubLoginDependencies = DEFAULT_LOGIN_DEPENDENCIES,
+): Promise<boolean> => {
+  const resolvedName = resolveGithubAppName(options.name, options.org);
+  if (!resolvedName.ok) {
+    console.error(`standards creds: ${resolvedName.problem}`);
+    return false;
+  }
   const storePath = resolveBrokerPath();
   const loaded = await loadOwnedGithubStore(storePath);
   if (!loaded.ok) {
@@ -99,29 +124,42 @@ export const runCredsLoginGithub = async (options: {
     options.org === undefined
       ? 'https://github.com/settings/apps/new'
       : `https://github.com/organizations/${options.org}/settings/apps/new`;
-  const name =
-    options.name ??
-    (options.org === undefined
-      ? BROKER_IDENTITY_NAME
-      : `${BROKER_IDENTITY_NAME}-${options.org}`);
-  const code = await waitForCode((port, state) =>
+  const code = await dependencies.waitForCode((port, state) =>
     manifestFormHtml(
       action,
       JSON.stringify(
-        buildAppManifest(name, `http://127.0.0.1:${port}/callback`),
+        buildAppManifest(
+          resolvedName.value,
+          `http://127.0.0.1:${port}/callback`,
+        ),
       ),
       state,
     ),
   );
-  const conversion = await convertManifestCode(code);
+  const conversion = await dependencies.convertManifestCode(code);
   if (!conversion.ok) {
     console.error(`standards creds: ${conversion.problem}`);
     return false;
   }
   const { app } = conversion;
+  const observed = loaded.value.github.find(
+    (entry) => entry.owner?.toLowerCase() === app.owner?.toLowerCase(),
+  );
   let replaced: GithubBrokerApp | undefined;
   try {
     await updateBrokerStore(storePath, (current) => {
+      const currentEntry = current.github.find(
+        (entry) => entry.owner?.toLowerCase() === app.owner?.toLowerCase(),
+      );
+      const unchanged =
+        observed === undefined
+          ? currentEntry === undefined
+          : currentEntry !== undefined && sameGithubApp(currentEntry, observed);
+      if (!unchanged) {
+        throw new Error(
+          `the broker App for ${app.owner} changed while this App was being created`,
+        );
+      }
       const upserted = upsertGithubApp(current.github, app);
       replaced = upserted.replaced ?? undefined;
       return { ...current, github: upserted.apps };
@@ -144,6 +182,6 @@ export const runCredsLoginGithub = async (options: {
   }
   const installUrl = `${app.htmlUrl}/installations/new`;
   console.log(githubInstallMessage(installUrl));
-  openInBrowser(installUrl);
+  dependencies.openInBrowser(installUrl);
   return true;
 };

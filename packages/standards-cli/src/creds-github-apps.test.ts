@@ -83,6 +83,19 @@ describe('GitHub broker App store migration', () => {
     expect(readFileSync(path, 'utf8')).toBe(legacyYaml);
   });
 
+  it('leaves the singleton bytes untouched when owner lookup is invalid', async () => {
+    const path = storePath();
+    writeFileSync(path, legacyYaml);
+
+    await expect(
+      loadOwnedGithubStore(path, () =>
+        Promise.resolve({ ok: true, value: '' }),
+      ),
+    ).rejects.toThrow('invalid GitHub App');
+
+    expect(readFileSync(path, 'utf8')).toBe(legacyYaml);
+  });
+
   it('rejects duplicate owners case-insensitively', () => {
     const path = storePath();
     writeFileSync(

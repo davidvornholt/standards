@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import process from 'node:process';
 import { runCredsAddGithub } from './creds-add-github';
 import { runCredsCommand } from './creds-commands';
+import { updateBrokerStore } from './creds-store';
 
 const HTTP_NOT_FOUND = 404;
 const roots: Array<string> = [];
@@ -24,7 +25,11 @@ const PRIVATE_KEY = generateKeyPairSync('rsa', {
   .privateKey.export({ format: 'pem', type: 'pkcs1' })
   .toString();
 
-const setup = (): { readonly consumer: string; readonly secrets: string } => {
+const setup = (): {
+  readonly broker: string;
+  readonly consumer: string;
+  readonly secrets: string;
+} => {
   const root = mkdtempSync(join(tmpdir(), 'creds-github-command-'));
   roots.push(root);
   const consumer = join(root, 'consumer');
@@ -65,7 +70,7 @@ ${PRIVATE_KEY.split('\n')
 `,
   );
   process.env.STANDARDS_BROKER_FILE = broker;
-  return { consumer, secrets };
+  return { broker, consumer, secrets };
 };
 
 afterEach(() => {
@@ -111,6 +116,85 @@ describe('GitHub credential commands', () => {
     expect(readFileSync(secrets)).toEqual(before);
     expect(error).toHaveBeenCalledWith(
       expect.stringContaining('is not installed on example/repository'),
+    );
+  });
+
+  it('does not authenticate when a local SOPS destination is blocked', async () => {
+    const { consumer, secrets } = setup();
+    writeFileSync(
+      secrets,
+      'ci:\n  broker_app:\n    app_id:\n      blocked: true\nsops:\n  version: 3.9.4\n',
+    );
+    let fetchCalls = 0;
+    globalThis.fetch = ((
+      _input: string | URL | Request,
+      _init?: RequestInit,
+    ) => {
+      fetchCalls += 1;
+      return Promise.resolve(Response.json({}));
+    }) as typeof fetch;
+    const error = spyOn(console, 'error').mockImplementation(() => undefined);
+
+    expect(
+      await runCredsAddGithub(consumer, { dest: 'ci:ci.broker_app' }),
+    ).toBe(false);
+
+    expect(fetchCalls).toBe(0);
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining('SOPS key path names a mapping'),
+    );
+  });
+
+  it('does not write an App replaced while installation verification is paused', async () => {
+    const { broker, consumer, secrets } = setup();
+    const before = readFileSync(secrets);
+    let releaseVerification = (): void => undefined;
+    let markVerifying = (): void => undefined;
+    const verifying = new Promise<void>((resolve) => {
+      markVerifying = resolve;
+    });
+    globalThis.fetch = (() => {
+      markVerifying();
+      return new Promise<Response>((resolve) => {
+        releaseVerification = () => {
+          resolve(
+            Response.json({
+              // biome-ignore lint/style/useNamingConvention: GitHub's installation response uses snake_case.
+              app_id: 2,
+              account: { login: 'example' },
+            }),
+          );
+        };
+      });
+    }) as unknown as typeof fetch;
+    const error = spyOn(console, 'error').mockImplementation(() => undefined);
+
+    const adding = runCredsAddGithub(consumer, {
+      dest: 'ci:ci.broker_app',
+    });
+    await verifying;
+    await updateBrokerStore(broker, (store) => ({
+      ...store,
+      github: store.github.map((app) =>
+        app.owner === 'example'
+          ? {
+              ...app,
+              appId: 3,
+              slug: 'replacement-app',
+              htmlUrl: 'https://github.com/apps/replacement-app',
+              clientId: 'Iv1.replacement',
+            }
+          : app,
+      ),
+    }));
+    releaseVerification();
+
+    expect(await adding).toBe(false);
+    expect(readFileSync(secrets)).toEqual(before);
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'changed while its installation was being verified',
+      ),
     );
   });
 });

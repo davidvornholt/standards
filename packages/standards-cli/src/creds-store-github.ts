@@ -9,22 +9,24 @@ export type GithubBrokerApp = {
   readonly privateKey: string;
 };
 
+export const isGithubBrokerApp = (value: unknown): value is GithubBrokerApp =>
+  isRecord(value) &&
+  (value.owner === null || isNonEmptyString(value.owner)) &&
+  typeof value.appId === 'number' &&
+  Number.isInteger(value.appId) &&
+  isNonEmptyString(value.slug) &&
+  isNonEmptyString(value.htmlUrl) &&
+  isNonEmptyString(value.clientId) &&
+  isNonEmptyString(value.privateKey);
+
 const parseGithubApp = (
   raw: unknown,
   owner: string | null,
 ): GithubBrokerApp => {
-  if (
-    !isRecord(raw) ||
-    typeof raw.app_id !== 'number' ||
-    !Number.isInteger(raw.app_id) ||
-    !isNonEmptyString(raw.slug) ||
-    !isNonEmptyString(raw.html_url) ||
-    !isNonEmptyString(raw.client_id) ||
-    !isNonEmptyString(raw.private_key)
-  ) {
+  if (!isRecord(raw)) {
     throw new Error('invalid github: run `standards creds login github`');
   }
-  return {
+  const app = {
     owner,
     appId: raw.app_id,
     slug: raw.slug,
@@ -32,6 +34,10 @@ const parseGithubApp = (
     clientId: raw.client_id,
     privateKey: raw.private_key,
   };
+  if (!isGithubBrokerApp(app)) {
+    throw new Error('invalid github: run `standards creds login github`');
+  }
+  return app;
 };
 
 export const validateGithubApps = (
@@ -41,6 +47,11 @@ export const validateGithubApps = (
   const owners = new Set<string>();
   const appIds = new Set<number>();
   for (const app of apps) {
+    if (!isGithubBrokerApp(app)) {
+      throw new Error(
+        `${path}: invalid GitHub App; run \`standards creds login github\``,
+      );
+    }
     if (app.owner === null) {
       if (apps.length !== 1) {
         throw new Error(

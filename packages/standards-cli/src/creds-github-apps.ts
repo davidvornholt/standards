@@ -10,8 +10,14 @@ type GithubAppsResult<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly problem: string };
 
-const sameApp = (left: GithubBrokerApp, right: GithubBrokerApp): boolean =>
+export const sameGithubApp = (
+  left: GithubBrokerApp,
+  right: GithubBrokerApp,
+): boolean =>
+  left.owner?.toLowerCase() === right.owner?.toLowerCase() &&
   left.appId === right.appId &&
+  left.slug === right.slug &&
+  left.htmlUrl === right.htmlUrl &&
   left.clientId === right.clientId &&
   left.privateKey === right.privateKey;
 
@@ -36,7 +42,7 @@ export const loadOwnedGithubStore = async (
   await updateBrokerStore(path, (current) => ({
     ...current,
     github: current.github.map((app) =>
-      app.owner === null && sameApp(app, legacy)
+      app.owner === null && sameGithubApp(app, legacy)
         ? { ...app, owner: owner.value }
         : app,
     ),
