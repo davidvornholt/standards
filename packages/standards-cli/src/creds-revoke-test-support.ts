@@ -12,6 +12,7 @@ export const BROKERED_ID = `b${'2'.repeat(ID_LENGTH - 1)}`;
 export const MISSING_ID = `c${'3'.repeat(ID_LENGTH - 1)}`;
 export const OTHER_REPO_ID = `d${'4'.repeat(ID_LENGTH - 1)}`;
 export const OTHER_MACHINE_BROKER_ID = `e${'5'.repeat(ID_LENGTH - 1)}`;
+export const MALFORMED_ID = `0${'6'.repeat(ID_LENGTH - 1)}`;
 
 const ACCOUNT_TOKENS = [
   { id: BOOTSTRAP_ID, name: 'standards-broker', status: 'active' },
@@ -27,21 +28,55 @@ const ACCOUNT_TOKENS = [
     name: 'standards/otherowner/otherrepo/ci/ci.dns_token',
     status: 'active',
   },
+  // In the repository's own namespace but not a name the broker mints. `plan`
+  // tells the operator to retire exactly this with `revoke`, so it must stay
+  // revocable.
+  {
+    id: MALFORMED_ID,
+    name: 'standards/davidvornholt/example/ci',
+    status: 'active',
+  },
 ];
 
+const FORBIDDEN = 403;
+
 // Returns the request log so a suite can assert that a refusal issued no
-// DELETE at all, not merely that the command reported failure.
-export const stubAccount = (): Array<string> => {
+// DELETE at all, not merely that the command reported failure. `verifiedId`
+// null drops the ID from the verify response, which is how the provider looks
+// when bootstrap identity cannot be established.
+export const stubAccount = (
+  options: {
+    readonly denyDelete?: boolean;
+    readonly verifiedId?: string | null;
+  } = {},
+): Array<string> => {
+  const { denyDelete = false, verifiedId = BOOTSTRAP_ID } = options;
   const requests: Array<string> = [];
   globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? 'GET';
     requests.push(`${method} ${url}`);
     if (url.endsWith('/verify')) {
-      return Promise.resolve(response({ id: BOOTSTRAP_ID, status: 'active' }));
+      return Promise.resolve(
+        response({
+          ...(verifiedId === null ? {} : { id: verifiedId }),
+          status: 'active',
+        }),
+      );
     }
     if (method === 'DELETE') {
-      return Promise.resolve(response({ id: 'deleted' }));
+      return Promise.resolve(
+        denyDelete
+          ? Response.json(
+              {
+                success: false,
+                errors: [{ message: 'Insufficient permissions' }],
+                result: null,
+              },
+              { status: FORBIDDEN },
+            )
+          : response({ id: 'deleted' }),
+      );
     }
     return Promise.resolve(
       response(

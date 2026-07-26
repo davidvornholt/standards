@@ -13,12 +13,31 @@ import {
   BOOTSTRAP_ID,
   BROKERED_ID,
   deletes,
+  FOREIGN_ID,
   OTHER_MACHINE_BROKER_ID,
   OTHER_REPO_ID,
   stubAccount,
 } from './creds-revoke-test-support';
 
 afterEach(cleanupCredsAdd);
+
+// Establishing the bootstrap identity is what proves which token must never be
+// deleted and that the named one exists at all. If an unidentifiable account
+// were survivable, both guards would fall away together.
+describe('creds revoke provider identity', () => {
+  it('refuses when the bootstrap identity cannot be established', async () => {
+    initializeConsumer([ACCOUNT_A]);
+    const requests = stubAccount({ verifiedId: null });
+    const error = spyOn(console, 'error').mockImplementation(() => undefined);
+    expect(await runCredsCommand(['revoke', '--token-id', FOREIGN_ID])).toBe(
+      false,
+    );
+    expect(deletes(requests)).toEqual([]);
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining('valid token ID'),
+    );
+  });
+});
 
 describe('creds revoke refusals', () => {
   it('refuses every token named standards-broker, with its own message each', async () => {

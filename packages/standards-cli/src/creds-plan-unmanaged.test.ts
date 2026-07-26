@@ -109,4 +109,23 @@ describe('creds plan unmanaged reporting', () => {
       'hand-made-token',
     ]);
   });
+
+  // A partition finding must reach the plan, because that is what aborts
+  // `apply`: a name squatting the repository's namespace could otherwise be
+  // reconciled around silently, in both output channels and in the exit code.
+  it('carries a namespace-squatting finding into the plan', () => {
+    const plan = computeCredsPlan({
+      repo: REPO,
+      keysByTarget: keys({ ci: ['ci.dns_token'] }),
+      tokens: [entry(`standards/${REPO}/ci`)],
+      now: NOW,
+    });
+    expect(plan.findings).toEqual([
+      expect.stringContaining(
+        "claims this repository's brokered namespace but is not a name this broker mints",
+      ),
+    ]);
+    expect(plan.actions).toEqual([]);
+    expect(plan.unmanaged).toEqual([]);
+  });
 });
