@@ -33,7 +33,14 @@ export const optOutEligibilityProblem = (
     : null;
 
 export const ADMIN_VISIBILITY_ADVICE =
-  'Use a token with read access to repository administration (in CI: ci.github_settings_read_token in secrets/ci.yaml), or verify locally with admin auth';
+  'Use a user-scoped token with read access to repository administration, or verify locally with admin auth; a CI token cannot hold that access, so widening what CI reads with is not the fix';
+
+// Merge settings have a different remedy from everything else this advice used
+// to cover. GraphQL serves them to read-only tokens by design, so reaching this
+// message means the fallback request itself failed — pointing the reader at a
+// permission they cannot obtain would send them after the wrong cause.
+export const MERGE_SETTINGS_VISIBILITY_ADVICE =
+  'REST serves repository merge settings only to write-level viewers, and the GraphQL fallback that answers them for a read-only token did not respond, so this is more likely a failed request than a permission gap: re-run the check, and if it keeps failing verify locally with admin auth';
 
 // Declared state the token cannot see is a gate failure, not a pass with a
 // log line: a gate that cannot perform its comparison fails closed. The advice

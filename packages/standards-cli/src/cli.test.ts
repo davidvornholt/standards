@@ -49,6 +49,10 @@ const NIX_SYSTEM_MATRIX_FILTER = join(
 const SYNC_MANIFEST = join(ACTUAL_UPSTREAM, 'sync-standards.json');
 const SOPS_VERSION_ASSIGNMENT = /version=v\d+\.\d+\.\d+/gu;
 const SOPS_CHECKSUM_ASSIGNMENT = /sha=[a-f0-9]{64}/gu;
+// `sha=`/`version=` alone also match the Bun, CLI, and actionlint pins that
+// legitimately live in the canonical workflow, so ownership is asked of the one
+// string only a SOPS installer has.
+const SOPS_RELEASE_URL = /github\.com\/getsops\/sops\/releases\/download\//gu;
 const ACTIONLINT_ASSET_PATTERN =
   /actionlint_\$\{version\}_linux_\$\{arch\}\.tar\.gz/u;
 const PINNED_STANDARDS_VERSION_PATTERN =
@@ -56,6 +60,7 @@ const PINNED_STANDARDS_VERSION_PATTERN =
 const MINIMUM_STANDARDS_VERSION_PATTERN =
   /MINIMUM_STANDARDS_VERSION: "(?<version>\d+\.\d+\.\d+)"/u;
 const MAJOR_ACTION_REF = /^[^@\s]+@v\d+$/u;
+const WRITE_PERMISSION_INPUT = /permission-\S+: write/u;
 const SOURCE_REPOSITORY_CONDITION =
   "github.repository == 'davidvornholt/standards'";
 const STD_PATHS: ReadonlyArray<string> = [
@@ -219,6 +224,28 @@ const yamlJobs = (path: string): Record<string, WorkflowJob> => {
   return jobs;
 };
 
+// The block-scalar entries of a checkout step's `sparse-checkout` input, so a
+// test can pin the whole list instead of spot-checking individual paths.
+const sparseCheckoutPaths = (step: string): ReadonlyArray<string> => {
+  const lines = step.split('\n');
+  const startIndex = lines.findIndex(
+    (line) => line.trim() === 'sparse-checkout: |',
+  );
+  if (startIndex === -1) {
+    throw new Error('Step has no block-scalar sparse-checkout input');
+  }
+  const indentOf = (line: string): number =>
+    line.length - line.trimStart().length;
+  const body = lines.slice(startIndex + 1);
+  const indent = indentOf(body[0] ?? '');
+  const endIndex = body.findIndex(
+    (line) => line.trim().length > 0 && indentOf(line) < indent,
+  );
+  return (endIndex === -1 ? body : body.slice(0, endIndex))
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+};
+
 const canonicalWorkflowPaths = (): ReadonlyArray<string> => {
   const syncManifest: unknown = JSON.parse(readFileSync(SYNC_MANIFEST, 'utf8'));
   if (
@@ -307,7 +334,7 @@ const runWorkflowVersionGuard = (version: string): RunResult => {
       '-c',
       workflowRunScript('Require compatible standards CLI'),
     ],
-    { MINIMUM_STANDARDS_VERSION: '0.14.0' },
+    { MINIMUM_STANDARDS_VERSION: '0.18.0' },
   );
 };
 
@@ -1723,43 +1750,49 @@ describe('canonical standards workflow security boundaries', () => {
 });
 
 describe('canonical standards workflow settings security', () => {
-  it('isolates the settings-read token from repository-controlled executable code', () => {
+  it('isolates the settings comparison from repository-controlled executable code', () => {
     const workflow = readFileSync(STANDARDS_WORKFLOW, 'utf8');
     const installStep = yamlStep(
       STANDARDS_WORKFLOW,
       'Install pinned settings checker',
     );
     const settingsStep = yamlStep(STANDARDS_WORKFLOW, 'Check GitHub settings');
-    expect(workflow).not.toContain('uses: ./.github/actions/sops-secret');
+    const checkoutStep = yamlStep(
+      STANDARDS_WORKFLOW,
+      'Checkout settings inputs',
+    );
+    // The job holds no durable credential, so it needs no executable file from
+    // the repository at all: declarative settings inputs and nothing else.
+    // Pinning the whole list keeps an unreviewed executable path out of the
+    // sparse checkout.
+    expect(sparseCheckoutPaths(checkoutStep)).toEqual([
+      '.github/settings.json',
+      '.github/settings.local.json',
+    ]);
     expect(workflow).not.toContain('GITHUB_ENV');
     expect(workflow).not.toContain('GH_TOKEN:');
     expect(settingsStep).not.toContain('GITHUB_OUTPUT');
-    expect(settingsStep).toContain('GH_TOKEN="$value"');
+    expect(settingsStep).toContain('GH_TOKEN="$SETTINGS_TOKEN"');
+    // An empty or multi-line token must stop the job rather than reach the CLI,
+    // where an empty GH_TOKEN would silently downgrade to anonymous reads.
+    expect(settingsStep).toContain('exit 1');
+    expect(settingsStep).toContain(
+      '[ -z "$SETTINGS_TOKEN" ] || [[ "$SETTINGS_TOKEN" == *$\'\\n\'* ]] || [[ "$SETTINGS_TOKEN" == *$\'\\r\'* ]]',
+    );
     expect(workflow).toContain('STANDARDS_SKIP_GITHUB_CHECK: "true"');
-    expect(workflow).toContain('.github/settings.json');
-    expect(workflow).toContain('.github/settings.local.json');
-    expect(workflow).toContain('secrets/ci.yaml');
-    expect(workflow).toContain('sparse-checkout-cone-mode: false');
-    expect(workflow).toContain('persist-credentials: false');
+    expect(checkoutStep).toContain('sparse-checkout-cone-mode: false');
+    expect(checkoutStep).toContain('persist-credentials: false');
     expect(installStep).toContain('bun_version=1.3.14');
     expect(installStep.match(/bun_sha=[a-f0-9]{64}/gu)).toHaveLength(2);
-    expect(installStep).toContain('standards_version=0.14.0');
+    expect(installStep).toContain('standards_version=0.18.0');
     expect(installStep).toContain(
-      'standards_sha=a9884f90ab4bc4c037f519e99cb844b9dac1d9aa0d53f3885eea0abbd9d3960e86404eed7df8b9865aaf8d040fccc73381fd5f666fde05d60f38a36fde8e792d',
+      'standards_sha=001e736ce8c87548c699877ee4322dbec773bf99f7d4f4f591ccfe80bd07420aceffc345bb840daaf7688d82174ee3da38a3c60c7f9d8a65cd7a58bfa5d02004',
     );
     expect(installStep).toContain('yaml_version=2.9.0');
     expect(installStep.match(/sha=[a-f0-9]{128}/gu)).toHaveLength(2);
     expect(installStep).toContain('sha512sum --check --quiet');
     expect(installStep).not.toContain('bun add');
-    expect(settingsStep).toContain(
-      `--extract '["ci"]["github_settings_read_token"]'`,
-    );
-    expect(settingsStep).not.toContain('--output-type json');
-    expect(settingsStep).not.toContain('jq ');
-    expect(settingsStep).toContain('[ -n "$extracted" ]');
-    expect(settingsStep).toContain(`[[ "$extracted" != *$'\\n'* ]]`);
-    expect(settingsStep).toContain(`[[ "$extracted" != *$'\\r'* ]]`);
-    expect(settingsStep).toContain('unset SOPS_AGE_KEY FALLBACK_TOKEN');
+    expect(settingsStep).not.toContain('SOPS_AGE_KEY');
   });
 
   it('pins the isolated settings checker to the sync workflow minimum', () => {
@@ -1776,6 +1809,31 @@ describe('canonical standards workflow settings security', () => {
     expect(pinnedVersion).toBeDefined();
     expect(minimumVersion).toBeDefined();
     expect(pinnedVersion).toBe(minimumVersion);
+  });
+});
+
+describe('canonical standards workflow settings credential', () => {
+  it('reads settings with the workflow token and no durable credential', () => {
+    const workflow = readFileSync(STANDARDS_WORKFLOW, 'utf8');
+    const settingsStep = yamlStep(STANDARDS_WORKFLOW, 'Check GitHub settings');
+
+    // A probe against a private repository compared a broker App installation
+    // token against a token holding exactly this job's grants across every read
+    // the gate performs, and the answers were identical. Minting therefore adds
+    // no visibility, so the gate must not decrypt the durable App key: doing so
+    // would put the one credential every consumer keeps for the weekly sync
+    // into a job that gains nothing from it.
+    expect(settingsStep).toContain(
+      `SETTINGS_TOKEN: ${githubExpression('github.token')}`,
+    );
+    expect(workflow).not.toContain('sops-secret');
+    expect(workflow).not.toContain('secrets/ci.yaml');
+    expect(workflow).not.toContain('SOPS_AGE_KEY');
+    expect(workflow).not.toContain('create-github-app-token');
+    // No silent degradation path: there is one credential, so a green result
+    // never means "verified with something weaker than intended".
+    expect(settingsStep).not.toContain('::warning::');
+    expect(workflow).not.toMatch(WRITE_PERMISSION_INPUT);
   });
 
   it('grants label reads only to the isolated settings job', () => {
@@ -2073,35 +2131,24 @@ describe('canonical SOPS secret action wiring', () => {
     const action = readFileSync(SOPS_ACTION, 'utf8');
     const canonicalActionPath = '.github/actions/sops-secret/action.yml';
     const productionFiles = readProductionGithubFiles();
-    const versionOwners = productionFiles
-      .filter(({ content }) => content.match(SOPS_VERSION_ASSIGNMENT) !== null)
+    const sopsInstallers = productionFiles
+      .filter(({ content }) => content.match(SOPS_RELEASE_URL) !== null)
       .map(({ path }) => path);
-    const checksumOwners = productionFiles
-      .filter(({ content }) => content.match(SOPS_CHECKSUM_ASSIGNMENT) !== null)
-      .map(({ path }) => path);
+    // The settings gate is deliberately absent: it resolves no SOPS secret, so
+    // it must not check out or execute the resolver either.
     const localActionWorkflows = [
       readFileSync(SYNC_WORKFLOW, 'utf8'),
       readFileSync(NOTIFY_WORKFLOW, 'utf8'),
     ];
-    const isolatedWorkflow = readFileSync(STANDARDS_WORKFLOW, 'utf8');
     expect(action.match(SOPS_VERSION_ASSIGNMENT)).toHaveLength(1);
     expect(action.match(SOPS_CHECKSUM_ASSIGNMENT)).toHaveLength(2);
-    expect(versionOwners).toEqual([
-      '.github/workflows/standards.yml',
-      canonicalActionPath,
-    ]);
-    expect(checksumOwners).toEqual([
-      '.github/workflows/standards.yml',
-      canonicalActionPath,
-    ]);
+    // The action is the only owner of the SOPS pin. A workflow that installs
+    // SOPS itself is a second copy of this file's release URL and checksums,
+    // which is exactly the drift the resolver exists to prevent.
+    expect(sopsInstallers).toEqual([canonicalActionPath]);
     for (const workflow of localActionWorkflows) {
       expect(workflow).toContain('uses: ./.github/actions/sops-secret');
     }
-    expect(isolatedWorkflow).not.toContain(
-      'uses: ./.github/actions/sops-secret',
-    );
-    expect(isolatedWorkflow).toContain('sops_version=v3.13.2');
-    expect(isolatedWorkflow.match(/sops_sha=[a-f0-9]{64}/gu)).toHaveLength(2);
     const syncManifest = JSON.parse(
       readFileSync(join(ACTUAL_UPSTREAM, 'sync-standards.json'), 'utf8'),
     ) as { readonly paths: ReadonlyArray<string> };
@@ -2265,23 +2312,28 @@ describe('standards sync workflow policy', () => {
     '0.12.1',
     '0.13.0',
     '0.13.1',
+    '0.14.0',
+    '0.14.1',
+    '0.15.1',
+    '0.16.0',
+    '0.17.3',
   ])('rejects installed CLI version %s without a policy file', (version) => {
     const result = runWorkflowVersionGuard(version);
     expect(result.status).toBe(1);
     expect(`${result.stdout}${result.stderr}`).toContain('::error::');
   });
 
-  it('makes the 0.14.0 guard unconditional', () => {
+  it('makes the 0.18.0 guard unconditional', () => {
     const workflow = readFileSync(SYNC_WORKFLOW, 'utf8');
-    expect(workflow).toContain('MINIMUM_STANDARDS_VERSION: "0.14.0"');
+    expect(workflow).toContain('MINIMUM_STANDARDS_VERSION: "0.18.0"');
     expect(workflow).not.toContain(
       "if: needs.policy.outputs.present == 'true'",
     );
   });
 
   it.each([
-    '0.14.0',
-    '0.14.1',
+    '0.18.0',
+    '0.18.1',
     '1.0.0',
   ])('accepts installed CLI version %s without a policy file', (version) => {
     expect(runWorkflowVersionGuard(version).status).toBe(0);

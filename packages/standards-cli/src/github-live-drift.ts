@@ -13,8 +13,8 @@ import {
 } from './github-api';
 import { resolveHiddenBypassActors } from './github-bypass-actors';
 import {
-  ADMIN_VISIBILITY_ADVICE,
   enforceableRepositorySettings,
+  MERGE_SETTINGS_VISIBILITY_ADVICE,
   optOutEligibilityProblem,
   unverifiableProblem,
 } from './github-command-shared';
@@ -35,7 +35,7 @@ import {
 import { type GithubSettings, isRecord } from './github-settings-parse';
 
 const LABEL_VISIBILITY_PROBLEM =
-  'declared labels not visible to this token, so the gate cannot verify them. In CI, use a valid ci.github_settings_read_token from secrets/ci.yaml with read-only "Issues" access (or "Pull requests" read); locally use a token with one of those permissions';
+  'declared labels not visible to this token, so the gate cannot verify them. Label reads need issues: read (or pull-requests: read); the canonical github-settings job already grants issues: read, so in CI this points at a stale synced workflow or an organization policy restricting the workflow token rather than anything to change in the declaration. Locally, use a token with one of those permissions';
 const PERMISSION_DENIAL_MESSAGES: ReadonlySet<string> = new Set([
   'Resource not accessible by integration',
   'Resource not accessible by personal access token',
@@ -87,7 +87,7 @@ const repositoryDrift = async (
     ...unverifiableProblem(
       'repository setting(s)',
       rediff.unverifiable,
-      ADMIN_VISIBILITY_ADVICE,
+      MERGE_SETTINGS_VISIBILITY_ADVICE,
     ),
   ];
 };

@@ -20,9 +20,6 @@ export type SopsActionOptions = {
   readonly createSecretFile?: boolean;
   readonly curlStatus?: number;
   readonly envName?: string;
-  // Deliberately unconstrained so suites can exercise invalid modes.
-  readonly failureMode?: string;
-  readonly fallbackValue?: string;
   readonly secretKey?: string;
   readonly sha256Status?: number;
   readonly sopsOutput?: string;
@@ -49,8 +46,6 @@ const DEFAULT_OPTIONS = {
   createSecretFile: true,
   curlStatus: 0,
   envName: 'GH_TOKEN',
-  failureMode: 'fallback',
-  fallbackValue: 'workflow-token',
   secretKey: 'example_token',
   sha256Status: 0,
   sopsOutput: JSON.stringify({
@@ -135,8 +130,6 @@ export const createSopsActionRunner =
         RUNNER_TEMP: runnerTemp,
         SOPS_AGE_KEY: resolved.ageKey,
         SOPS_ENV_NAME: resolved.envName,
-        SOPS_FAILURE_MODE: resolved.failureMode,
-        SOPS_FALLBACK_VALUE: resolved.fallbackValue,
         SOPS_MARKER: sopsMarker,
         SOPS_SECRET_FILE: 'secrets/ci.yaml',
         SOPS_SECRET_KEY: resolved.secretKey,

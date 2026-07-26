@@ -177,10 +177,19 @@ jobs:
       - name: Build Nix check
         run: nix build ".#checks.${{ matrix.system }}.standards-cli" -L
 
-  # The settings-read PAT is isolated from all repository-controlled executable
-  # code. The checkout contains only declarative settings inputs and the
-  # encrypted token source; the CLI is a published, checksum-pinned artifact
-  # installed under RUNNER_TEMP from direct, checksum-pinned release URLs.
+  # The live settings comparison runs with the workflow token and no durable
+  # credential at all. A probe against a private repository compared every read
+  # this gate performs — list rulesets, get each ruleset, list labels, and the
+  # GraphQL merge-settings and bypass-actor query — across a broker App
+  # installation token and a token carrying exactly this job's grants, and the
+  # answers were identical, including the fields GitHub withholds from both.
+  # Minting a broker token here would therefore add no visibility while
+  # decrypting the one durable App key that every consumer keeps for the weekly
+  # sync, so this job never touches it. The checkout carries the declarative
+  # settings inputs and nothing else, and the CLI that consumes the token is a
+  # published, checksum-pinned artifact installed under RUNNER_TEMP from direct,
+  # checksum-pinned release URLs, so a pull request cannot substitute the code
+  # that performs the comparison.
   github-settings:
     runs-on: ubuntu-latest
     permissions:
@@ -194,7 +203,6 @@ jobs:
           sparse-checkout: |
             .github/settings.json
             .github/settings.local.json
-            secrets/ci.yaml
           sparse-checkout-cone-mode: false
 
       - name: Install pinned settings checker
@@ -217,8 +225,8 @@ jobs:
           unzip -q "$bun_archive" -d "$bun_root"
           install -m 0755 "$bun_root/bun-linux-${bun_arch}/bun" "$bun_root/bun"
 
-          standards_version=0.14.0
-          standards_sha=a9884f90ab4bc4c037f519e99cb844b9dac1d9aa0d53f3885eea0abbd9d3960e86404eed7df8b9865aaf8d040fccc73381fd5f666fde05d60f38a36fde8e792d
+          standards_version=0.18.0
+          standards_sha=001e736ce8c87548c699877ee4322dbec773bf99f7d4f4f591ccfe80bd07420aceffc345bb840daaf7688d82174ee3da38a3c60c7f9d8a65cd7a58bfa5d02004
           standards_archive="$RUNNER_TEMP/standards.tgz"
           cli_root="$RUNNER_TEMP/standards-cli"
           mkdir -p "$cli_root/package"
@@ -234,58 +242,30 @@ jobs:
           echo "$yaml_sha  $yaml_archive" | sha512sum --check --quiet
           tar -xzf "$yaml_archive" -C "$cli_root/node_modules/yaml" --strip-components=1
 
-      # GitHub hides ruleset bypass actors from the workflow token, so this
-      # resolves a repository-scoped fine-grained PAT with read-only
-      # Administration and Issues access. Missing secret state deliberately
-      # falls back to the workflow token, which can read labels but still fails
-      # closed on settings hidden without Administration access.
+      # Issues read is what declared-label reads need in a private repository;
+      # every other setting the gate compares rides on the implicit Metadata
+      # read every workflow token carries. REST withholds two things from this
+      # token: repository merge settings, which it serves only to write-level
+      # viewers, and ruleset bypass actors, which it serves only to a
+      # user-scoped token holding repository Administration read — never to an
+      # installation token, at any permission level. The CLI reads merge
+      # settings over GraphQL and verifies a declared-empty bypass list through
+      # the GraphQL bypass-actor count. A declared non-empty bypass list fails
+      # closed until the check is re-run locally with admin auth. The retired
+      # PAT was user-scoped and did see those actor lists over REST, so that
+      # case is a deliberate, disclosed narrowing rather than a property of
+      # GitHub's API; no credential CI can safely hold recovers it.
       - name: Check GitHub settings
         env:
-          FALLBACK_TOKEN: ${{ github.token }}
-          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+          SETTINGS_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          value="$FALLBACK_TOKEN"
-          used_fallback=true
-
-          if [ -n "$SOPS_AGE_KEY" ] && [ -f secrets/ci.yaml ]; then
-            sops_version=v3.13.2
-            case "$(uname -m)" in
-              x86_64) arch=amd64; sops_sha=154dfe4cd70554bdd82b98e4cd4acf191d43d01ead6f00a73477aa44c4ac42ef ;;
-              aarch64) arch=arm64; sops_sha=78abf2e15c86250a1553ae6f53aba96be6b2a8126f160b1534959add3467ad76 ;;
-              *)
-                echo "::error::No pinned SOPS binary for runner architecture $(uname -m)"
-                exit 1
-                ;;
-            esac
-            sops="$RUNNER_TEMP/sops"
-            curl -sfLo "$sops" "https://github.com/getsops/sops/releases/download/${sops_version}/sops-${sops_version}.linux.${arch}"
-            echo "$sops_sha  $sops" | sha256sum --check --quiet
-            chmod +x "$sops"
-            if extracted=$("$sops" decrypt --extract '["ci"]["github_settings_read_token"]' secrets/ci.yaml) \
-              && [ -n "$extracted" ] \
-              && [[ "$extracted" != *$'\n'* ]] \
-              && [[ "$extracted" != *$'\r'* ]]; then
-              value="$extracted"
-              used_fallback=false
-            else
-              echo "::warning::ci.github_settings_read_token is not a readable non-empty single-line string in secrets/ci.yaml; using the workflow token"
-            fi
-          else
-            echo "::warning::SOPS_AGE_KEY or secrets/ci.yaml is unavailable; using the workflow token"
-          fi
-
-          if [ -z "$value" ] || [[ "$value" == *$'\n'* ]] || [[ "$value" == *$'\r'* ]]; then
+          if [ -z "$SETTINGS_TOKEN" ] || [[ "$SETTINGS_TOKEN" == *$'\n'* ]] || [[ "$SETTINGS_TOKEN" == *$'\r'* ]]; then
             echo "::error::Resolved GitHub settings token must be non-empty and single-line"
             exit 1
           fi
-          echo "::add-mask::$value"
-          if [ "$used_fallback" = true ]; then
-            echo "ci.github_settings_read_token is not readable from secrets/ci.yaml; the GitHub settings gate will fail on settings the workflow token cannot see."
-          fi
-          unset SOPS_AGE_KEY FALLBACK_TOKEN
           cd "$RUNNER_TEMP/standards-cli"
-          GH_TOKEN="$value" "$RUNNER_TEMP/standards-bin/bun" \
+          GH_TOKEN="$SETTINGS_TOKEN" "$RUNNER_TEMP/standards-bin/bun" \
             package/src/cli.ts github --check --dir "$GITHUB_WORKSPACE"
 
   # Keep the stable required-check name while making all independent gates

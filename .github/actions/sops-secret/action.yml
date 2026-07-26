@@ -14,18 +14,6 @@ inputs:
   env-name:
     description: Environment variable to export for later workflow steps
     required: true
-  fallback-value:
-    description: Value to export when fallback mode handles an unresolvable secret
-    required: false
-  failure-mode:
-    description: Whether an unresolvable secret (missing key or file, SOPS setup failure, decrypt or validation failure) fails or uses fallback-value
-    required: false
-    default: fail
-
-outputs:
-  used-fallback:
-    description: Whether fallback-value was exported
-    value: ${{ steps.resolve.outputs.used-fallback }}
 
 runs:
   using: composite
@@ -38,17 +26,11 @@ runs:
         SOPS_SECRET_FILE: ${{ inputs.secret-file }}
         SOPS_SECRET_KEY: ${{ inputs.secret-key }}
         SOPS_ENV_NAME: ${{ inputs.env-name }}
-        SOPS_FALLBACK_VALUE: ${{ inputs.fallback-value }}
-        SOPS_FAILURE_MODE: ${{ inputs.failure-mode }}
       run: |
         set -euo pipefail
 
         if [[ ! "$SOPS_ENV_NAME" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
           echo "::error::env-name must be a valid environment variable name"
-          exit 1
-        fi
-        if [[ "$SOPS_FAILURE_MODE" != fail && "$SOPS_FAILURE_MODE" != fallback ]]; then
-          echo "::error::failure-mode must be either fail or fallback"
           exit 1
         fi
 
@@ -144,16 +126,16 @@ runs:
           fi
         fi
 
-        use_fallback=false
+        # An unresolvable secret always fails the step. There is deliberately no
+        # mode that substitutes a default: a caller that degrades quietly turns
+        # a broken credential into a green run.
         if [ -n "$reason" ]; then
-          use_fallback=true
-          if [ "$SOPS_FAILURE_MODE" = fail ]; then
-            echo "::error::$reason"
-            exit 1
-          fi
-          printf '%s' "$SOPS_FALLBACK_VALUE" > "$value_file"
-          echo "::warning::$reason; using the configured fallback"
+          echo "::error::$reason"
+          exit 1
         fi
+        # Unreachable through the resolve statuses above, which reject an empty
+        # value with a precise message. Kept as a last guard on the GITHUB_ENV
+        # boundary so a future filter change cannot export an empty credential.
         if [ ! -s "$value_file" ]; then
           echo "::error::Resolved secret value must be non-empty"
           exit 1
@@ -186,4 +168,3 @@ runs:
           cat "$value_file" >> "$GITHUB_ENV"
           printf '\n%s\n' "$delimiter" >> "$GITHUB_ENV"
         fi
-        printf 'used-fallback=%s\n' "$use_fallback" >> "$GITHUB_OUTPUT"
