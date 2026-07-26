@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { openInBrowser } from './creds-browser';
+import { loadOwnedGithubStore, upsertGithubApp } from './creds-github-apps';
 import {
   buildAppManifest,
   convertManifestCode,
@@ -9,7 +10,7 @@ import {
 } from './creds-login-github-manifest';
 import { BROKER_IDENTITY_NAME } from './creds-naming';
 import {
-  readBrokerStore,
+  type GithubBrokerApp,
   resolveBrokerPath,
   updateBrokerStore,
 } from './creds-store';
@@ -89,18 +90,20 @@ export const runCredsLoginGithub = async (options: {
   readonly org: string | undefined;
 }): Promise<boolean> => {
   const storePath = resolveBrokerPath();
-  const store = await readBrokerStore(storePath);
-  if (store.github !== null) {
-    console.error(
-      `standards creds: a broker GitHub App is already configured (${store.github.htmlUrl}); remove the "github" section from ${storePath} to re-run login`,
-    );
+  const loaded = await loadOwnedGithubStore(storePath);
+  if (!loaded.ok) {
+    console.error(`standards creds: ${loaded.problem}`);
     return false;
   }
   const action =
     options.org === undefined
       ? 'https://github.com/settings/apps/new'
       : `https://github.com/organizations/${options.org}/settings/apps/new`;
-  const name = options.name ?? BROKER_IDENTITY_NAME;
+  const name =
+    options.name ??
+    (options.org === undefined
+      ? BROKER_IDENTITY_NAME
+      : `${BROKER_IDENTITY_NAME}-${options.org}`);
   const code = await waitForCode((port, state) =>
     manifestFormHtml(
       action,
@@ -116,16 +119,29 @@ export const runCredsLoginGithub = async (options: {
     return false;
   }
   const { app } = conversion;
-  await updateBrokerStore(storePath, (current) => {
-    if (current.github !== null) {
-      throw new Error(
-        `a broker GitHub App was configured while login was in progress (${current.github.htmlUrl}); the newly created App ${app.htmlUrl} was not stored and should be deleted`,
-      );
-    }
-    return { ...current, github: app };
-  });
-  console.log(`standards creds: created App ${app.slug} (${app.htmlUrl})`);
+  let replaced: GithubBrokerApp | undefined;
+  try {
+    await updateBrokerStore(storePath, (current) => {
+      const upserted = upsertGithubApp(current.github, app);
+      replaced = upserted.replaced ?? undefined;
+      return { ...current, github: upserted.apps };
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(
+      `standards creds: the newly created App ${app.htmlUrl} was not stored (${message}); retry login, and delete the new App if it is still absent from \`creds status\``,
+    );
+    return false;
+  }
+  console.log(
+    `standards creds: created App ${app.slug} for ${app.owner} (${app.htmlUrl})`,
+  );
   console.log(`  credentials stored in ${storePath}`);
+  if (replaced !== undefined) {
+    console.log(
+      `  replaced App ${replaced.slug} for ${app.owner}; update its SOPS destinations, verify token minting, then delete the old App`,
+    );
+  }
   const installUrl = `${app.htmlUrl}/installations/new`;
   console.log(githubInstallMessage(installUrl));
   openInBrowser(installUrl);

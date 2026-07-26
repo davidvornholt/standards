@@ -8,6 +8,7 @@
 // substring.
 
 import { afterEach, describe, expect, it } from 'bun:test';
+import { generateKeyPairSync } from 'node:crypto';
 import {
   createAccountToken,
   deleteAccountToken,
@@ -16,6 +17,10 @@ import {
   verifyAccountToken,
 } from './creds-cloudflare';
 import { cloudflareExpiresOn } from './creds-cloudflare-expiry';
+import {
+  resolveGithubAppOwner,
+  verifyGithubAppInstallation,
+} from './creds-github-app-api';
 import { convertManifestCode } from './creds-login-github-manifest';
 
 const ACCOUNT_ID_LENGTH = 32;
@@ -24,6 +29,19 @@ const CF = `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT}`;
 const HTTP_OK = 200;
 const HTTP_CREATED = 201;
 const HTTP_NOT_FOUND = 404;
+const GITHUB_APP_KEY = generateKeyPairSync('rsa', {
+  modulusLength: 2048,
+})
+  .privateKey.export({ format: 'pem', type: 'pkcs1' })
+  .toString();
+const GITHUB_APP = {
+  owner: 'example',
+  appId: 1,
+  slug: 's',
+  htmlUrl: 'https://github.com/apps/s',
+  clientId: 'Iv1.x',
+  privateKey: GITHUB_APP_KEY,
+};
 
 const originalFetch = globalThis.fetch;
 const requests: Array<string> = [];
@@ -59,6 +77,7 @@ describe('provider wire contract', () => {
       // biome-ignore lint/style/useNamingConvention: GitHub's response field is snake_case.
       client_id: 'Iv1.x',
       pem: '-----BEGIN RSA PRIVATE KEY-----',
+      owner: { login: 'davidvornholt' },
     });
     expect((await convertManifestCode('code123')).ok).toBe(true);
     expect(requests).toEqual([
@@ -82,6 +101,31 @@ describe('provider wire contract', () => {
       ok: false,
       problem: 'unexpected manifest conversion response shape',
     });
+  });
+
+  // https://docs.github.com/en/rest/apps/apps#get-the-authenticated-app
+  it('GitHub legacy owner migration: GET /app', async () => {
+    stubFetch(HTTP_OK, { id: 1, owner: { login: 'example' } });
+    expect(await resolveGithubAppOwner(GITHUB_APP)).toEqual({
+      ok: true,
+      value: 'example',
+    });
+    expect(requests).toEqual(['GET https://api.github.com/app']);
+  });
+
+  // https://docs.github.com/en/rest/apps/apps#get-a-repository-installation-for-the-authenticated-app
+  it('GitHub repository installation: GET /repos/{owner}/{repo}/installation', async () => {
+    stubFetch(HTTP_OK, {
+      // biome-ignore lint/style/useNamingConvention: GitHub's response field is snake_case.
+      app_id: 1,
+      account: { login: 'example' },
+    });
+    expect(
+      await verifyGithubAppInstallation(GITHUB_APP, 'example/repository'),
+    ).toEqual({ ok: true, value: true });
+    expect(requests).toEqual([
+      'GET https://api.github.com/repos/example/repository/installation',
+    ]);
   });
 
   // https://developers.cloudflare.com/api/resources/accounts/subresources/tokens/methods/verify/

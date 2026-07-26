@@ -6,7 +6,7 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import type { GithubBrokerApp } from './creds-store';
 import { apiError, HTTP_CREATED, request } from './github-api';
-import { isRecord } from './github-settings-parse';
+import { isNonEmptyString, isRecord } from './github-settings-parse';
 
 export const MANIFEST_STATE_BYTES = 32;
 
@@ -76,8 +76,11 @@ export const parseConversion = (body: unknown): GithubBrokerApp | null =>
   typeof body.slug === 'string' &&
   typeof body.html_url === 'string' &&
   typeof body.client_id === 'string' &&
-  typeof body.pem === 'string'
+  typeof body.pem === 'string' &&
+  isRecord(body.owner) &&
+  isNonEmptyString(body.owner.login)
     ? {
+        owner: body.owner.login,
         appId: body.id,
         slug: body.slug,
         htmlUrl: body.html_url,

@@ -2,6 +2,7 @@ import { runCredsAddCloudflare } from './creds-add';
 import { runCredsAddGithub } from './creds-add-github';
 import { parseCredsArgs } from './creds-args';
 import { listPermissionGroups } from './creds-cloudflare';
+import { loadOwnedGithubStore } from './creds-github-apps';
 import { runCredsLoginCloudflare } from './creds-login-cloudflare';
 import { runCredsLoginGithub } from './creds-login-github';
 import { BROKER_IDENTITY_NAME } from './creds-naming';
@@ -15,10 +16,10 @@ import {
 const CREDS_USAGE = `Usage: standards creds <command> [options]
 
 Commands:
-  login github      Create the broker GitHub App via the manifest flow (one click) and store its credentials
+  login github      Create or replace one account's broker GitHub App via the manifest flow
   login cloudflare  Store a Cloudflare account's bootstrap token (one guided paste per account)
   add cloudflare    Mint a scoped, expiring account token and write it into a SOPS target
-  add github        Write the broker App's credentials into a SOPS target for runtime token minting
+  add github        Select the repository owner's App, verify its installation, and write it into SOPS
   plan              Show revocations and rotations reconciling SOPS keys against brokered tokens
   apply             Execute the plan: revoke orphaned tokens, roll expiring ones into SOPS
   permissions       List Cloudflare permission group names for --permissions
@@ -35,12 +36,17 @@ Options:
   --jurisdiction <name> R2 jurisdiction: default or eu (default: default)
   --s3                  Store the derived R2 S3 credential pair (<key>.access_key_id, <key>.secret_access_key) instead of the raw token
   --org <org>           Create the GitHub App under an organization
-  --name <name>         GitHub App name (default: ${BROKER_IDENTITY_NAME})
+  --name <name>         GitHub App name (default: ${BROKER_IDENTITY_NAME}, suffixed by --org)
 
 Secret values are written directly into SOPS-encrypted targets and never printed.`;
 const runCredsStatus = async (): Promise<boolean> => {
   const path = resolveBrokerPath();
-  const store = await readBrokerStore(path);
+  const loaded = await loadOwnedGithubStore(path);
+  if (!loaded.ok) {
+    console.error(`standards creds: ${loaded.problem}`);
+    return false;
+  }
+  const { value: store } = loaded;
   console.log(`broker store: ${path}`);
   const mode = inspectBrokerFileMode(path);
   if (!mode.exists) {
@@ -48,11 +54,16 @@ const runCredsStatus = async (): Promise<boolean> => {
   } else if (mode.problem !== null) {
     console.log(`  WARNING: ${mode.problem}`);
   }
-  console.log(
-    store.github === null
-      ? 'github: not configured (`standards creds login github`)'
-      : `github: App ${store.github.slug} (id ${store.github.appId}) — ${store.github.htmlUrl}`,
-  );
+  if (store.github.length === 0) {
+    console.log('github: not configured (`standards creds login github`)');
+  } else {
+    console.log('github:');
+    for (const app of store.github) {
+      console.log(
+        `  ${app.owner}: App ${app.slug} (id ${app.appId}) — ${app.htmlUrl}`,
+      );
+    }
+  }
   console.log(
     store.cloudflare.length === 0
       ? 'cloudflare: not configured (`standards creds login cloudflare`)'

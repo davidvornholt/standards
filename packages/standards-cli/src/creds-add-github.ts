@@ -5,11 +5,17 @@
 // runtime, scoped per repository and permission.
 
 import { resolveContext } from './creds-dest';
+import { verifyGithubAppInstallation } from './creds-github-app-api';
+import {
+  loadOwnedGithubStore,
+  selectGithubAppForRepo,
+} from './creds-github-apps';
 import {
   inspectSopsScalarDestination,
   setSopsValues,
   verifySopsScalarLeaf,
 } from './creds-sops';
+import { resolveBrokerPath } from './creds-store';
 
 export const runCredsAddGithub = async (
   consumer: string,
@@ -19,13 +25,25 @@ export const runCredsAddGithub = async (
   if (context === null) {
     return false;
   }
-  if (context.store.github === null) {
-    console.error(
-      'standards creds: no broker GitHub App configured; run `standards creds login github`',
-    );
+  const loaded = await loadOwnedGithubStore(resolveBrokerPath());
+  if (!loaded.ok) {
+    console.error(`standards creds: ${loaded.problem}`);
     return false;
   }
-  const { appId, privateKey, slug } = context.store.github;
+  const selected = selectGithubAppForRepo(loaded.value.github, context.repo);
+  if (!selected.ok) {
+    console.error(`standards creds: ${selected.problem}`);
+    return false;
+  }
+  const installation = await verifyGithubAppInstallation(
+    selected.value,
+    context.repo,
+  );
+  if (!installation.ok) {
+    console.error(`standards creds: ${installation.problem}`);
+    return false;
+  }
+  const { appId, privateKey, slug } = selected.value;
   const appIdPath = `${context.dest.key}.app_id`;
   const privateKeyPath = `${context.dest.key}.private_key`;
   const preflight = await Promise.all(
