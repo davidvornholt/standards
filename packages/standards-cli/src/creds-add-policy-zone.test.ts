@@ -29,8 +29,7 @@ describe('resolveTokenPolicy with zones', () => {
     expect(
       await resolveTokenPolicy(BROKER_ACCOUNT, {
         permissions: 'DNS Write',
-        bucket: undefined,
-        zoneIds: [ZONE_A, ZONE_B],
+        resource: { kind: 'zones', zoneIds: [ZONE_A, ZONE_B] },
       }),
     ).toEqual({
       ok: true,
@@ -55,8 +54,7 @@ describe('resolveTokenPolicy with zones', () => {
     stubGroups([DNS_WRITE, R2_WRITE]);
     const resolved = await resolveTokenPolicy(BROKER_ACCOUNT, {
       permissions: 'Workers R2 Storage Write,DNS Write',
-      bucket: undefined,
-      zoneIds: [ZONE_A],
+      resource: { kind: 'zones', zoneIds: [ZONE_A] },
     });
     expect(resolved).toEqual({
       ok: true,
@@ -83,8 +81,7 @@ describe('resolveTokenPolicy with zones', () => {
     expect(
       await resolveTokenPolicy(BROKER_ACCOUNT, {
         permissions: 'Workers R2 Storage Write',
-        bucket: undefined,
-        zoneIds: [ZONE_A],
+        resource: { kind: 'zones', zoneIds: [ZONE_A] },
       }),
     ).toEqual({
       ok: false,
@@ -104,8 +101,7 @@ describe('resolveTokenPolicy with zones', () => {
     ]);
     const resolved = await resolveTokenPolicy(BROKER_ACCOUNT, {
       permissions: 'DNS Write,Workers R2 Storage Bucket Item Write',
-      bucket: undefined,
-      zoneIds: [ZONE_A],
+      resource: { kind: 'zones', zoneIds: [ZONE_A] },
     });
     expect(resolved).toEqual({
       ok: false,
@@ -129,8 +125,7 @@ describe('resolveTokenPolicy with zones', () => {
     ]);
     const resolved = await resolveTokenPolicy(BROKER_ACCOUNT, {
       permissions: 'Zone Settings Write',
-      bucket: undefined,
-      zoneIds: [ZONE_A],
+      resource: { kind: 'zones', zoneIds: [ZONE_A] },
     });
     expect(resolved).toEqual({
       ok: true,

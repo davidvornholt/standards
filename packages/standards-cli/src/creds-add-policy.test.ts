@@ -46,8 +46,7 @@ describe('resolveTokenPolicy', () => {
     expect(
       await resolveTokenPolicy(BROKER_ACCOUNT, {
         permissions: 'Workers Scripts Write',
-        bucket: undefined,
-        zoneIds: [],
+        resource: { kind: 'account' },
       }),
     ).toEqual({
       ok: true,
@@ -74,8 +73,7 @@ describe('resolveTokenPolicy', () => {
     expect(
       await resolveTokenPolicy(BROKER_ACCOUNT, {
         permissions: 'Workers R2 Storage Bucket Item Write',
-        bucket: 'assets',
-        zoneIds: [],
+        resource: { kind: 'bucket', bucket: 'assets', jurisdiction: 'default' },
       }),
     ).toEqual({
       ok: true,
@@ -104,9 +102,7 @@ describe('resolveTokenPolicy', () => {
     expect(
       await resolveTokenPolicy(BROKER_ACCOUNT, {
         permissions: 'Workers R2 Storage Bucket Item Read',
-        bucket: 'assets',
-        zoneIds: [],
-        jurisdiction: 'eu',
+        resource: { kind: 'bucket', bucket: 'assets', jurisdiction: 'eu' },
       }),
     ).toEqual({
       ok: true,
@@ -134,29 +130,13 @@ describe('resolveTokenPolicy', () => {
     ]);
     const resolved = await resolveTokenPolicy(BROKER_ACCOUNT, {
       permissions: 'Workers R2 Storage Bucket Item Read',
-      bucket: undefined,
-      zoneIds: [],
+      resource: { kind: 'account' },
     });
     expect(resolved).toEqual({
       ok: false,
       problem: expect.stringContaining(
         'or pass --bucket for R2 bucket-item groups',
       ),
-    });
-  });
-
-  it('rejects an invalid bucket name before any provider call', async () => {
-    globalThis.fetch = ((_input: string | URL | Request): Promise<Response> => {
-      throw new Error('no provider call expected');
-    }) as typeof fetch;
-    const resolved = await resolveTokenPolicy(BROKER_ACCOUNT, {
-      permissions: 'Workers R2 Storage Bucket Item Read',
-      bucket: 'Bad_Bucket',
-      zoneIds: [],
-    });
-    expect(resolved).toEqual({
-      ok: false,
-      problem: expect.stringContaining('invalid R2 bucket name'),
     });
   });
 });

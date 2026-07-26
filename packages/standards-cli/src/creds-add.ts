@@ -1,8 +1,12 @@
 import { commitCreatedCloudflareToken } from './creds-add-cloudflare-commit';
 import { findManagedDestinationCollision } from './creds-add-collision';
 import { resolveTokenPolicy } from './creds-add-policy';
-import { inspectDestinations, parseZoneFlags } from './creds-add-preflight';
+import {
+  inspectDestinations,
+  resolveResourceFlags,
+} from './creds-add-preflight';
 import { createAccountToken } from './creds-cloudflare';
+import type { TokenPolicy } from './creds-cloudflare-api';
 import { cloudflareExpiresOn } from './creds-cloudflare-expiry';
 import { resolveContext, selectAccount } from './creds-dest';
 import { tokenNameOf } from './creds-naming';
@@ -27,15 +31,15 @@ const printSuccess = (input: {
   readonly format: DestinationFormat;
   readonly accountId: string;
   readonly jurisdiction: R2Jurisdiction;
-  readonly zoneIds: ReadonlyArray<string>;
+  readonly policies: ReadonlyArray<TokenPolicy>;
 }): void => {
   console.log(`standards creds: minted Cloudflare token ${input.name}`);
   console.log(`  permissions: ${input.permissions.join(', ')}`);
-  // A token minted with --zone still carries an account policy for any
-  // account-scoped group named alongside it, so the reach is worth showing
-  // rather than leaving the flag to imply it.
+  // Read off the minted policies rather than the flags that asked for them:
+  // a selection can add an account policy the flags do not mention, and the
+  // reach of a token is the one thing worth stating from ground truth.
   console.log(
-    `  resources: account ${input.accountId}${input.zoneIds.length === 0 ? '' : `, zone(s) ${input.zoneIds.join(', ')}`}`,
+    `  resources: ${input.policies.flatMap((policy) => Object.keys(policy.resources)).join(', ')}`,
   );
   console.log(
     `  expires: ${input.expiresOn} (rotate via \`standards creds apply\`)`,
@@ -69,9 +73,9 @@ export const runCredsAddCloudflare = async (
     );
     return false;
   }
-  const zones = parseZoneFlags(options);
-  if (!zones.ok) {
-    console.error(`standards creds: ${zones.problem}`);
+  const flags = resolveResourceFlags(options);
+  if (!flags.ok) {
+    console.error(`standards creds: ${flags.problem}`);
     return false;
   }
   const context = await resolveContext(consumer, options.dest);
@@ -101,8 +105,8 @@ export const runCredsAddCloudflare = async (
   }
   const keys = new Set(encryptedKeys.keys);
   const resolved = await resolveTokenPolicy(account, {
-    ...options,
-    zoneIds: zones.zoneIds,
+    permissions: options.permissions,
+    resource: flags.resource,
   });
   if (!resolved.ok) {
     console.error(`standards creds: ${resolved.problem}`);
@@ -159,7 +163,7 @@ export const runCredsAddCloudflare = async (
     format,
     accountId: account.accountId,
     jurisdiction: options.jurisdiction ?? DEFAULT_R2_JURISDICTION,
-    zoneIds: zones.zoneIds,
+    policies: resolved.policies,
   });
   return true;
 };

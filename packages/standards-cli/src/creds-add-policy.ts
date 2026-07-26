@@ -8,8 +8,6 @@ import { listPermissionGroups } from './creds-cloudflare';
 import type { PermissionGroup, TokenPolicy } from './creds-cloudflare-api';
 import { ZONE_SCOPE, zoneResource } from './creds-cloudflare-zone';
 import {
-  DEFAULT_R2_JURISDICTION,
-  isR2BucketName,
   R2_BUCKET_SCOPE,
   type R2Jurisdiction,
   r2BucketResource,
@@ -37,15 +35,15 @@ export const unsupportedResourceScopes = (
     .map((group) => group.name);
 
 const scopeProblem = (
-  bucket: string | undefined,
+  resource: { readonly kind: 'account' | 'bucket' },
   selected: ReadonlyArray<PermissionGroup>,
 ): string | null => {
-  const scope = bucket === undefined ? ACCOUNT_SCOPE : R2_BUCKET_SCOPE;
+  const scope = resource.kind === 'account' ? ACCOUNT_SCOPE : R2_BUCKET_SCOPE;
   const unsupported = unsupportedResourceScopes(selected, scope);
   if (unsupported.length === 0) {
     return null;
   }
-  return bucket === undefined
+  return resource.kind === 'account'
     ? `permission group(s) ${unsupported.join(', ')} cannot target an account resource; choose account-scoped groups, name the zones with --zone for zone-scoped groups, or pass --bucket for R2 bucket-item groups`
     : `permission group(s) ${unsupported.join(', ')} cannot target an R2 bucket resource; --bucket accepts only bucket-scoped groups such as Workers R2 Storage Bucket Item Read/Write`;
 };
@@ -109,6 +107,18 @@ const zonePolicies = (
   };
 };
 
+// One token reaches exactly one kind of resource, so the caller states which
+// rather than passing flags whose illegal combinations would have to be
+// re-rejected here.
+export type PolicyResource =
+  | { readonly kind: 'account' }
+  | {
+      readonly kind: 'bucket';
+      readonly bucket: string;
+      readonly jurisdiction: R2Jurisdiction;
+    }
+  | { readonly kind: 'zones'; readonly zoneIds: ReadonlyArray<string> };
+
 export type ResolvedTokenPolicy =
   | {
       readonly ok: true;
@@ -121,23 +131,15 @@ export const resolveTokenPolicy = async (
   account: CloudflareBrokerAccount,
   options: {
     readonly permissions: string | undefined;
-    readonly bucket: string | undefined;
-    readonly zoneIds: ReadonlyArray<string>;
-    readonly jurisdiction?: R2Jurisdiction;
+    readonly resource: PolicyResource;
   },
 ): Promise<ResolvedTokenPolicy> => {
-  const { zoneIds } = options;
+  const { resource } = options;
   if (options.permissions === undefined || options.permissions.length === 0) {
     return {
       ok: false,
       problem:
         '--permissions "<Group Name>[,<Group Name>...]" is required; list names with `standards creds permissions`',
-    };
-  }
-  if (options.bucket !== undefined && !isR2BucketName(options.bucket)) {
-    return {
-      ok: false,
-      problem: `invalid R2 bucket name: ${options.bucket} (3-63 lowercase letters, digits, and hyphens)`,
     };
   }
   const groups = await listPermissionGroups(account.accountId, account.token);
@@ -165,27 +167,27 @@ export const resolveTokenPolicy = async (
   const selected = resolved.flatMap(({ group }) =>
     group === undefined ? [] : [group],
   );
-  if (zoneIds.length > 0) {
-    const zoned = zonePolicies(account.accountId, zoneIds, selected);
+  if (resource.kind === 'zones') {
+    const zoned = zonePolicies(account.accountId, resource.zoneIds, selected);
     return 'problem' in zoned
       ? { ok: false, problem: zoned.problem }
       : { ok: true, wanted, policies: zoned.policies };
   }
-  const problem = scopeProblem(options.bucket, selected);
+  const problem = scopeProblem(resource, selected);
   if (problem !== null) {
     return { ok: false, problem };
   }
-  const resource =
-    options.bucket === undefined
+  const target =
+    resource.kind === 'account'
       ? `${ACCOUNT_SCOPE}.${account.accountId}`
       : r2BucketResource(
           account.accountId,
-          options.bucket,
-          options.jurisdiction ?? DEFAULT_R2_JURISDICTION,
+          resource.bucket,
+          resource.jurisdiction,
         );
   return {
     ok: true,
     wanted,
-    policies: [tokenPolicy({ [resource]: '*' }, selected)],
+    policies: [tokenPolicy({ [target]: '*' }, selected)],
   };
 };

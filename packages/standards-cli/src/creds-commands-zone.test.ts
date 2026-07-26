@@ -92,10 +92,10 @@ describe('public creds zone routing', () => {
         },
       ],
     });
-    // The account policy is the wider half of that token, so the operator sees
-    // it in the summary rather than inferring it from the flag.
+    // The account policy is the wider half of that token, so the summary reads
+    // it off the minted policies rather than echoing the flags.
     expect(log.mock.calls.join(' ')).toContain(
-      `resources: account ${ACCOUNT_A}, zone(s) ${ZONE_A}, ${ZONE_B}`,
+      `resources: com.cloudflare.api.account.${ACCOUNT_A}, com.cloudflare.api.account.zone.${ZONE_A}, com.cloudflare.api.account.zone.${ZONE_B}`,
     );
   });
 });
