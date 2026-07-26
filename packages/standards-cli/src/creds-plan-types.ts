@@ -14,6 +14,14 @@ export type UnmanagedToken = {
   readonly status: string;
 };
 
+// A token the broker minted under another repository's name. That repository
+// normally reconciles it, so it is not unmanaged — the distinction matters
+// because it stops being true when that repository is renamed, transferred, or
+// deleted, and this account is then the only place the token is still visible.
+export type BrokeredElsewhereToken = UnmanagedToken & {
+  readonly repo: string;
+};
+
 export type PlannedAction =
   | {
       readonly kind: 'revoke';
@@ -42,4 +50,6 @@ export type CredsPlan = {
   readonly healthy: number;
   // Tokens in the account the broker did not mint. Reported, never mutated.
   readonly unmanaged: ReadonlyArray<UnmanagedToken>;
+  // Tokens the broker minted for another repository. Reported, never mutated.
+  readonly brokeredElsewhere: ReadonlyArray<BrokeredElsewhereToken>;
 };

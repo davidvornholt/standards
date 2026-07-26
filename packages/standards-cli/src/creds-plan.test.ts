@@ -3,7 +3,7 @@ import { computeCredsPlan } from './creds-plan';
 import { keys, NOW, POLICIES, REPO, token } from './creds-plan-test-support';
 
 describe('creds plan computation', () => {
-  it('leaves healthy brokered tokens and all foreign tokens alone', () => {
+  it('plans nothing against a healthy brokered token, and reports an unmanaged one apart from one brokered elsewhere', () => {
     const plan = computeCredsPlan({
       repo: REPO,
       keysByTarget: keys({ ci: ['ci.dns_token'] }),
@@ -29,6 +29,12 @@ describe('creds plan computation', () => {
     expect(plan.actions).toEqual([]);
     expect(plan.findings).toEqual([]);
     expect(plan.healthy).toBe(1);
+    expect(plan.unmanaged.map((found) => found.name)).toEqual([
+      'hand-made-token',
+    ]);
+    expect(
+      plan.brokeredElsewhere.map((found) => `${found.repo}: ${found.name}`),
+    ).toEqual(['other/repo: standards/other/repo/ci/ci.dns_token']);
   });
 
   it('revokes a brokered token whose secret key vanished from SOPS', () => {

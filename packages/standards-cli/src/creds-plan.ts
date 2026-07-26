@@ -3,8 +3,9 @@
 // naming scheme). A brokered token whose secret key vanished from SOPS is
 // revoked; one nearing expiry is replaced while copying its live policy and
 // lifetime. Secret keys without a brokered token are simply unmanaged — most
-// secrets are — and are never touched. Tokens the broker did not mint are
-// reported (creds-plan-unmanaged.ts) but never mutated. Execution lives in
+// secrets are — and are never touched. Tokens the broker did not mint, and
+// tokens it minted for another repository, are reported
+// (creds-plan-unmanaged.ts) but never mutated. Execution lives in
 // creds-plan-run.ts.
 
 import { cloudflareExpiresOn } from './creds-cloudflare-expiry';
@@ -171,5 +172,11 @@ export const computeCredsPlan = (input: {
       healthy += 1;
     }
   }
-  return { actions, findings, healthy, unmanaged: partition.unmanaged };
+  return {
+    actions,
+    findings,
+    healthy,
+    unmanaged: partition.unmanaged,
+    brokeredElsewhere: partition.brokeredElsewhere,
+  };
 };

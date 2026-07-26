@@ -43,12 +43,23 @@ describe('account token partitioning', () => {
     });
   });
 
-  it('stays quiet about another repository brokered token', () => {
+  it('reports another repository brokered token separately from unmanaged', () => {
     const partition = partitionAccountTokens(
       [entry('standards/other/repo/ci/ci.dns_token')],
       REPO,
     );
-    expect(partition).toEqual({ managed: [], unmanaged: [], findings: [] });
+    expect(partition.managed).toEqual([]);
+    expect(partition.unmanaged).toEqual([]);
+    expect(partition.findings).toEqual([]);
+    expect(partition.brokeredElsewhere).toEqual([
+      {
+        accountId: 'a',
+        tokenId: 'id-standards/other/repo/ci/ci.dns_token',
+        name: 'standards/other/repo/ci/ci.dns_token',
+        status: 'active',
+        repo: 'other/repo',
+      },
+    ]);
   });
 
   it('omits an expired foreign token so live ones stay visible', () => {
