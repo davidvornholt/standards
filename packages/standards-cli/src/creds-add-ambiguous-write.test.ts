@@ -119,7 +119,7 @@ afterEach(() => {
 describe('creds add ambiguous SOPS outcomes', () => {
   it('retains a replacement committed before a late editor failure', async () => {
     const consumer = initialize(
-      'if [ "$1" = "edit" ]; then eval "$SOPS_EDITOR \\"$2\\""; exit 1; fi\nprintf \'"new-value"\'',
+      'if [ "$1" = "edit" ]; then eval "$SOPS_EDITOR \\"$2\\""; exit 1; fi\nprintf \'new-value\'',
     );
     expect(await run(consumer)).toBe(true);
     expect(methods).not.toContain('DELETE');

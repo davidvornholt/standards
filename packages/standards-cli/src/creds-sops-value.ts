@@ -1,7 +1,8 @@
 // Proving that a stored secret matches the value that was just minted, without
 // that value reaching a return type, a log line, or an error message. Callers
-// treat a proven mismatch as reason to destroy the new credential, so the two
-// negative answers — mismatch and unverifiable — must stay distinct.
+// destroy the new credential on a proven mismatch and keep it on an
+// unverifiable read, so the two negative answers must stay distinct: anything
+// that is not a leaf we can read as a scalar string is unverifiable.
 
 import { isContainedSopsPath, parseSopsKeyPath } from './creds-sops-structure';
 import { runSops } from './sops-exec';
@@ -16,23 +17,27 @@ type SopsStoredValueInput = {
   readonly expectedValue: string;
 };
 
-// Extracting a scalar leaf prints the value itself, not a JSON document, so a
-// raw comparison is the normal path and JSON parsing only covers a sops that
-// quotes it. The optional trailing newline is sops's own framing.
-const matchesRawScalar = (stdout: string, expectedValue: string): boolean =>
-  stdout === expectedValue || stdout === `${expectedValue}\n`;
-
-const matchesQuotedScalar = (
-  stdout: string,
-  expectedValue: string,
-): boolean => {
+// Extracting a scalar leaf prints the stored value itself, with no quoting and
+// no framing of any kind — probed against sops 3.13.0. Every byte of stdout is
+// therefore value, which makes exact equality the only sound comparison: a
+// trailing newline is a difference in the stored secret, not output framing.
+//
+// Output that parses as JSON but is not a string cannot be a scalar leaf, so
+// the extraction resolved to a branch or the read returned something other than
+// the value. That is unverifiable rather than a mismatch. A stored value the
+// comparison above already rejected can reach this too — a differing number, say
+// — and unverifiable is the safe reading of it, because the alternative deletes
+// a credential on a guess.
+const readScalarLeaf = (stdout: string): string | null => {
+  if (stdout === '') {
+    return null;
+  }
   try {
-    const stored: unknown = JSON.parse(stdout);
-    return stored === expectedValue;
+    return typeof JSON.parse(stdout) === 'string' ? stdout : null;
   } catch {
-    // A raw scalar that is not valid JSON, such as a hex access key ID that
-    // reads as a malformed number. The raw comparison already decided it.
-    return false;
+    // Not JSON at all, which is the normal case: an opaque token value, or a
+    // hex access key ID that reads as a malformed number.
+    return stdout;
   }
 };
 
@@ -53,17 +58,15 @@ export const verifySopsStoredValueWith = (
     ['decrypt', '--extract', extract, '--output-type', 'json', rel],
     consumer,
   );
-  // A read that answered nothing is unverifiable rather than a mismatch: the
-  // mismatch branch destroys a credential, so an empty read must not reach it.
-  if (result.status !== 0 || result.stdout === '') {
+  if (result.status !== 0) {
     return { ok: false, problem };
   }
-  return {
-    ok: true,
-    matches:
-      matchesRawScalar(result.stdout, expectedValue) ||
-      matchesQuotedScalar(result.stdout, expectedValue),
-  };
+  if (result.stdout === expectedValue) {
+    return { ok: true, matches: true };
+  }
+  return readScalarLeaf(result.stdout) === null
+    ? { ok: false, problem }
+    : { ok: true, matches: false };
 };
 
 export const verifySopsStoredValue = (

@@ -105,72 +105,95 @@ describe('stored SOPS value verification', () => {
     ).toEqual({ ok: true, matches: true });
   });
 
-  it('treats the trailing newline as framing rather than value', () => {
+  it('proves a match for a value carrying its own newline', () => {
     const consumer = fixture();
-    runResult = { ...runResult, stdout: 'secret-value\n' };
+    runResult = { ...runResult, stdout: 'line-one\nline-two' };
     expect(
       verifySopsStoredValue(
         consumer,
         'secrets/ci.yaml',
-        'ci.token',
-        'secret-value',
-      ),
-    ).toEqual({ ok: true, matches: true });
-  });
-
-  it('still proves a match when sops quotes the scalar as JSON', () => {
-    const consumer = fixture();
-    runResult = { ...runResult, stdout: JSON.stringify('secret-value') };
-    expect(
-      verifySopsStoredValue(
-        consumer,
-        'secrets/ci.yaml',
-        'ci.token',
-        'secret-value',
+        'ci.deploy_app.private_key',
+        'line-one\nline-two',
       ),
     ).toEqual({ ok: true, matches: true });
   });
 });
 
 describe('stored SOPS value rejection', () => {
-  it('proves a mismatch without exposing either value', () => {
+  const mismatch = (stdout: string, expectedValue: string) => {
     const consumer = fixture();
-    runResult = { ...runResult, stdout: 'different-value' };
-    expect(
-      verifySopsStoredValue(
-        consumer,
-        'secrets/ci.yaml',
-        'ci.token',
-        'expected-value',
-      ),
-    ).toEqual({ ok: true, matches: false });
+    runResult = { ...runResult, stdout };
+    return verifySopsStoredValue(
+      consumer,
+      'secrets/ci.yaml',
+      'ci.token',
+      expectedValue,
+    );
+  };
+
+  it('proves a mismatch without exposing either value', () => {
+    expect(mismatch('different-value', 'expected-value')).toEqual({
+      ok: true,
+      matches: false,
+    });
   });
 
-  // Callers delete the token they just created on a mismatch, so a read that
-  // answered nothing must stay unverifiable and leave that decision alone.
-  it('reports a failed decrypt and an empty read as unverifiable', () => {
+  // sops adds no framing, so a trailing newline belongs to the stored secret.
+  // Accepting it would certify a destination holding something other than the
+  // minted value — and at creds-plan-renew.ts that destination is then rewritten
+  // as if its ownership had been proven.
+  it('counts a trailing newline as a difference in the stored value', () => {
+    expect(mismatch('secret-value\n', 'secret-value')).toEqual({
+      ok: true,
+      matches: false,
+    });
+  });
+
+  // Stray quoting around a secret is the storage corruption this check exists
+  // to catch, so the quotes are part of the value rather than JSON syntax.
+  it('counts literal quotes around the value as a difference', () => {
+    expect(mismatch(JSON.stringify('secret-value'), 'secret-value')).toEqual({
+      ok: true,
+      matches: false,
+    });
+  });
+});
+
+// Callers delete the token they just created on a mismatch, so every read that
+// failed to produce a scalar leaf must stay unverifiable and leave the
+// credential alone.
+describe('stored SOPS value unverifiability', () => {
+  const problem =
+    'could not verify stored SOPS value at ci.token in secrets/ci.yaml';
+
+  const unverifiable = (stdout: string, status = 0) => {
     const consumer = fixture();
-    runResult = { ...runResult, status: 1 };
-    const failed = verifySopsStoredValue(
+    runResult = { ...runResult, status, stdout };
+    return verifySopsStoredValue(
       consumer,
       'secrets/ci.yaml',
       'ci.token',
       'expected-value',
     );
-    expect(failed).toEqual({
-      ok: false,
-      problem:
-        'could not verify stored SOPS value at ci.token in secrets/ci.yaml',
-    });
+  };
 
-    runResult = { ...runResult, status: 0, stdout: '' };
-    expect(
-      verifySopsStoredValue(
-        consumer,
-        'secrets/ci.yaml',
-        'ci.token',
-        'expected-value',
-      ),
-    ).toEqual(failed);
+  it('reports a failed decrypt as unverifiable', () => {
+    expect(unverifiable('secret-value', 1)).toEqual({ ok: false, problem });
+  });
+
+  it('reports a read that answered nothing as unverifiable', () => {
+    expect(unverifiable('')).toEqual({ ok: false, problem });
+  });
+
+  // An extraction that resolved to a branch, a list, or any other non-string
+  // never read the value at all, so it proves nothing either way.
+  it.each([
+    ['an object', '{"access_key_id":"a","secret_access_key":"b"}'],
+    ['a list', '["a","b"]'],
+    ['null', 'null'],
+    ['a number', '123'],
+    ['a boolean', 'true'],
+  ])('reports %s extraction as unverifiable', (_label, stdout) => {
+    expect(unverifiable(stdout)).toEqual({ ok: false, problem });
   });
 });
