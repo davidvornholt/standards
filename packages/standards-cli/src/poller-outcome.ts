@@ -7,6 +7,7 @@ import { existsSync, rmSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isNonEmptyString, isRecord } from './github-settings-parse';
+import { hasClosingReferenceToIssue } from './poller-closing-reference';
 import {
   type FixOutcome,
   OUTCOME_FILE,
@@ -59,6 +60,7 @@ const PR_TITLE_PATTERN = /^[a-z]+(?:\([^)]+\))?!?: .+/u;
 
 export const readFixOutcome = async (
   workDir: string,
+  issueNumber: number,
 ): Promise<FixOutcome | null> => {
   const raw = await readOutcomeRaw(workDir);
   if (
@@ -78,7 +80,8 @@ export const readFixOutcome = async (
     !(
       isNonEmptyString(raw.prTitle) &&
       PR_TITLE_PATTERN.test(raw.prTitle) &&
-      isNonEmptyString(raw.prBody)
+      isNonEmptyString(raw.prBody) &&
+      hasClosingReferenceToIssue(raw.prBody, issueNumber)
     )
   ) {
     return null;

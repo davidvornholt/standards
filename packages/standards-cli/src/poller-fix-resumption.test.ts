@@ -68,7 +68,7 @@ it('releases a failed sealed fix publication for the next tick', async () => {
     issueNumber: ISSUE_NUMBER,
     approvalId: binding.id,
     title: 'fix(poller): recover output',
-    body: 'Recovered.',
+    body: `Use \`<!--\` literally.\n\nFixes #${ISSUE_NUMBER}`,
     baseSha: fixture.baseSha,
     commits: 1,
   });
@@ -116,4 +116,62 @@ it('releases a failed sealed fix publication for the next tick', async () => {
     lines: [`#${ISSUE_NUMBER}: opened draft PR #44`],
     ranCodex: false,
   });
+});
+
+it('rejects non-operative closing text before publishing resumed output', async () => {
+  const fixture = createLocalPollerRepo();
+  roots.push(fixture.root);
+  const item: IssueItem = {
+    number: ISSUE_NUMBER,
+    title: 'Title',
+    body: 'Body',
+    isPullRequest: false,
+    labels: ['approved-for-fix'],
+    authorLogin: 'reporter',
+  };
+  const binding = createTestApproval('approved-for-fix', issueRevision(item));
+  checkout(fixture.source, fixture.baseSha);
+  commitFile(fixture.source, 'fixed.txt', 'fixed\n');
+  const sealed = sealFixOutput(fixture.source, {
+    repo: REPO,
+    issueNumber: ISSUE_NUMBER,
+    approvalId: binding.id,
+    title: 'fix(poller): recover output',
+    body: `<!--\nFixes #${ISSUE_NUMBER}\n-->`,
+    baseSha: fixture.baseSha,
+    commits: 1,
+  });
+  pushRef(
+    fixture.source,
+    branchNameForIssue(ISSUE_NUMBER, binding.id),
+    sealed.sealedHead,
+  );
+  const calls = installPollerApi({
+    baseSha: fixture.baseSha,
+    headSha: fixture.headSha,
+    isPullRequest: false,
+  });
+
+  await expect(
+    runFixJob(
+      deps(fixture.cacheDir),
+      item,
+      () => Promise.resolve('main'),
+      false,
+    ),
+  ).rejects.toThrow('sealed fix output does not match this job');
+  expect(
+    calls.some(
+      (call) =>
+        (call.method === 'POST' || call.method === 'PATCH') &&
+        call.path.includes('/pulls'),
+    ),
+  ).toBe(false);
+  expect(
+    calls.some(
+      (call) =>
+        call.method === 'DELETE' &&
+        call.path.endsWith('/labels/fix-in-progress'),
+    ),
+  ).toBe(true);
 });

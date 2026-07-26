@@ -95,6 +95,7 @@
     "src/poller-comment-metadata.ts",
     "src/poller-comment-reconciliation.ts",
     "src/poller-claim-reconciliation.ts",
+    "src/poller-closing-reference.ts",
     "src/poller-config.ts",
     "src/poller-fix-outcome.ts",
     "src/poller-fix-output.ts",

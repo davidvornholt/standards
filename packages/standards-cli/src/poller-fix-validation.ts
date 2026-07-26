@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { hasClosingReferenceToIssue } from './poller-closing-reference';
 import type { SealedFixOutput } from './poller-fix-output';
 import type { JobDeps } from './poller-job-shared';
 import {
@@ -24,6 +25,7 @@ export const validateSealedFixOutput = async (
     output.repo !== job.deps.repo ||
     output.issueNumber !== job.issueNumber ||
     output.approvalId !== job.approvalId ||
+    !hasClosingReferenceToIssue(output.body, job.issueNumber) ||
     !isAncestor(job.cloneDir, output.baseSha, job.defaultBranch) ||
     !isAncestor(job.cloneDir, output.baseSha, output.generatedHead) ||
     commitCountBetween(job.cloneDir, output.baseSha, output.generatedHead) !==
