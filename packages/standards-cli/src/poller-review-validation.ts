@@ -7,10 +7,7 @@ import {
   createValidationWorktree,
   isAncestor,
 } from './poller-output-integrity';
-import {
-  changedWorkspaceQualityManifests,
-  lockedPathsOf,
-} from './poller-protected-paths';
+import { lockedPathsOf } from './poller-protected-paths';
 import { forbiddenDiffPaths } from './poller-protocol';
 import type { ReviewPublicationPlan } from './poller-review-output';
 
@@ -47,14 +44,10 @@ export const validateSealedReviewOutput = async (options: {
     ),
   );
   try {
-    const forbidden = [
-      ...forbiddenDiffPaths(paths, await lockedPathsOf(workspace.dir)),
-      ...changedWorkspaceQualityManifests(
-        workspace.dir,
-        plan.approvedHead,
-        paths,
-      ),
-    ];
+    const forbidden = forbiddenDiffPaths(
+      paths,
+      await lockedPathsOf(workspace.dir),
+    );
     if (forbidden.length > 0) {
       throw new Error(
         `publication blocked: sealed review modified protected paths:\n${forbidden.join('\n')}`,

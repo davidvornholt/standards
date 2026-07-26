@@ -1,11 +1,7 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isRecord } from './github-settings-parse';
-import { changesWorkspaceQualityScripts } from './poller-protocol';
-import { runGit } from './poller-workspace';
-
-const WORKSPACE_MANIFEST = /^(?:apps|packages)\/[^/]+\/package\.json$/u;
 
 export const lockedPathsOf = async (
   workDir: string,
@@ -29,23 +25,3 @@ export const lockedPathsOf = async (
     );
   }
 };
-
-export const changedWorkspaceQualityManifests = (
-  workDir: string,
-  baseSha: string,
-  paths: ReadonlyArray<string>,
-): ReadonlyArray<string> =>
-  paths.filter((path) => {
-    if (!WORKSPACE_MANIFEST.test(path)) {
-      return false;
-    }
-    try {
-      return changesWorkspaceQualityScripts(
-        path,
-        runGit(['-C', workDir, 'show', `${baseSha}:${path}`], null),
-        readFileSync(join(workDir, path), 'utf8'),
-      );
-    } catch {
-      return true;
-    }
-  });

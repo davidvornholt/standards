@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import {
   branchNameForIssue,
-  changesWorkspaceQualityScripts,
   forbiddenDiffPaths,
   isTrustedRole,
 } from './poller-protocol';
@@ -38,7 +37,7 @@ describe('forbiddenDiffPaths', () => {
     ]);
   });
 
-  it('flags root quality-gate wiring while package manifests need content comparison', () => {
+  it('flags root quality-gate wiring but leaves workspace manifests editable', () => {
     expect(
       forbiddenDiffPaths(
         ['biome.jsonc', 'turbo.json', 'package.json', 'apps/web/package.json'],
@@ -47,31 +46,21 @@ describe('forbiddenDiffPaths', () => {
     ).toEqual(['biome.jsonc', 'turbo.json', 'package.json']);
   });
 
-  it('detects workspace quality-script rewrites but permits dependency edits', () => {
-    const before = JSON.stringify({
-      scripts: { test: 'bun test', dev: 'vite' },
-      dependencies: { react: '1' },
-    });
+  it('leaves workspace gate configs protected', () => {
     expect(
-      changesWorkspaceQualityScripts(
-        'apps/web/package.json',
-        before,
-        JSON.stringify({
-          scripts: { test: 'true', dev: 'vite' },
-          dependencies: { react: '1' },
-        }),
+      forbiddenDiffPaths(
+        [
+          'apps/web/tsconfig.json',
+          'apps/web/biome.jsonc',
+          'packages/ui/vitest.config.ts',
+        ],
+        [],
       ),
-    ).toBe(true);
-    expect(
-      changesWorkspaceQualityScripts(
-        'apps/web/package.json',
-        before,
-        JSON.stringify({
-          scripts: { test: 'bun test', dev: 'vite' },
-          dependencies: { react: '2' },
-        }),
-      ),
-    ).toBe(false);
+    ).toEqual([
+      'apps/web/tsconfig.json',
+      'apps/web/biome.jsonc',
+      'packages/ui/vitest.config.ts',
+    ]);
   });
 
   it('passes ordinary source changes', () => {

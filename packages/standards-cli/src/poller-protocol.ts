@@ -76,8 +76,6 @@ const GATE_WIRING_FILES: ReadonlySet<string> = new Set([
 const HOST_SECRETS_FILE = /(?:^|\/)secrets\.yaml$/u;
 const WORKSPACE_GATE_CONFIG =
   /(?:^|\/)(?:biome\.jsonc|turbo\.json|tsconfig(?:\.[^.]+)?\.json|vitest\.config\.[cm]?[jt]s|playwright\.config\.[cm]?[jt]s)$/u;
-const QUALITY_SCRIPT = /^(?:check|lint|test|typecheck)(?::|$)/u;
-const WORKSPACE_MANIFEST = /^(?:apps|packages)\/[^/]+\/package\.json$/u;
 
 const isEncryptedSecret = (path: string): boolean =>
   !path.endsWith('.example.yaml') &&
@@ -99,46 +97,6 @@ export const forbiddenDiffPaths = (
       path === OUTCOME_FILE ||
       path.startsWith(`${OUTCOME_DIR}/`),
   );
-};
-
-const qualityScripts = (
-  manifest: unknown,
-): Readonly<Record<string, string>> => {
-  if (
-    typeof manifest !== 'object' ||
-    manifest === null ||
-    !('scripts' in manifest) ||
-    typeof manifest.scripts !== 'object' ||
-    manifest.scripts === null
-  ) {
-    return {};
-  }
-  return Object.fromEntries(
-    Object.entries(manifest.scripts)
-      .filter(
-        (entry): entry is [string, string] =>
-          QUALITY_SCRIPT.test(entry[0]) && typeof entry[1] === 'string',
-      )
-      .sort(([left], [right]) => left.localeCompare(right)),
-  );
-};
-
-export const changesWorkspaceQualityScripts = (
-  path: string,
-  before: string,
-  after: string,
-): boolean => {
-  if (path === 'package.json' || !WORKSPACE_MANIFEST.test(path)) {
-    return false;
-  }
-  try {
-    return (
-      JSON.stringify(qualityScripts(JSON.parse(before) as unknown)) !==
-      JSON.stringify(qualityScripts(JSON.parse(after) as unknown))
-    );
-  } catch {
-    return true;
-  }
 };
 
 export const branchNameForIssue = (

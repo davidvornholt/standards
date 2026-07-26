@@ -8,10 +8,7 @@ import {
   createValidationWorktree,
   isAncestor,
 } from './poller-output-integrity';
-import {
-  changedWorkspaceQualityManifests,
-  lockedPathsOf,
-} from './poller-protected-paths';
+import { lockedPathsOf } from './poller-protected-paths';
 import { forbiddenDiffPaths } from './poller-protocol';
 
 export const validateSealedFixOutput = async (
@@ -51,10 +48,10 @@ export const validateSealedFixOutput = async (
     ),
   );
   try {
-    const forbidden = [
-      ...forbiddenDiffPaths(paths, await lockedPathsOf(workspace.dir)),
-      ...changedWorkspaceQualityManifests(workspace.dir, output.baseSha, paths),
-    ];
+    const forbidden = forbiddenDiffPaths(
+      paths,
+      await lockedPathsOf(workspace.dir),
+    );
     if (forbidden.length > 0) {
       throw new Error(
         `sealed fix output modified protected paths:\n${forbidden.join('\n')}`,

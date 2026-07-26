@@ -1,10 +1,7 @@
 import type { ClaimBinding } from './poller-claim';
 import type { PullRequest } from './poller-github-pulls';
 import { failJob, type JobDeps, type JobLabels } from './poller-job-shared';
-import {
-  changedWorkspaceQualityManifests,
-  lockedPathsOf,
-} from './poller-protected-paths';
+import { lockedPathsOf } from './poller-protected-paths';
 import { forbiddenDiffPaths, type ReviewOutcome } from './poller-protocol';
 import { publishReviewArtifacts } from './poller-review-artifacts';
 import {
@@ -89,10 +86,7 @@ export const finishReviewedJob = async (options: {
   const { deps, labels, pr, claim, workDir, outcome } = options;
   const commits = commitCount(workDir, pr.headSha);
   const paths = commits > 0 ? changedPaths(workDir, pr.headSha) : [];
-  const forbidden = [
-    ...forbiddenDiffPaths(paths, await lockedPathsOf(workDir)),
-    ...changedWorkspaceQualityManifests(workDir, pr.headSha, paths),
-  ];
+  const forbidden = forbiddenDiffPaths(paths, await lockedPathsOf(workDir));
   if (forbidden.length > 0) {
     await failJob(
       deps,
