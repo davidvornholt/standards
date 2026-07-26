@@ -4,12 +4,18 @@
 // identity itself; workflows mint short-lived installation tokens from it at
 // runtime, scoped per repository and permission.
 
+import { inspectDestinations } from './creds-add-preflight';
 import { resolveContext } from './creds-dest';
+import { verifyGithubAppInstallation } from './creds-github-app-api';
 import {
-  inspectSopsScalarDestination,
-  setSopsValues,
-  verifySopsScalarLeaf,
-} from './creds-sops';
+  loadOwnedGithubStore,
+  sameGithubApp,
+  selectGithubAppForRepo,
+} from './creds-github-apps';
+import { setSopsValues } from './creds-sops';
+import { verifySopsStoredValue } from './creds-sops-value';
+import { readBrokerStore, resolveBrokerPath } from './creds-store';
+import { withBrokerLock } from './creds-store-lock';
 
 export const runCredsAddGithub = async (
   consumer: string,
@@ -19,41 +25,87 @@ export const runCredsAddGithub = async (
   if (context === null) {
     return false;
   }
-  if (context.store.github === null) {
-    console.error(
-      'standards creds: no broker GitHub App configured; run `standards creds login github`',
-    );
-    return false;
-  }
-  const { appId, privateKey, slug } = context.store.github;
   const appIdPath = `${context.dest.key}.app_id`;
   const privateKeyPath = `${context.dest.key}.private_key`;
-  const preflight = await Promise.all(
-    [appIdPath, privateKeyPath].map((path) =>
-      inspectSopsScalarDestination(consumer, context.rel, path),
-    ),
-  );
-  const blocked = preflight.find((result) => !result.ok);
-  if (blocked !== undefined && !blocked.ok) {
-    console.error(`standards creds: ${blocked.problem}`);
+  const blocked = await inspectDestinations(consumer, context.rel, [
+    appIdPath,
+    privateKeyPath,
+  ]);
+  if (blocked !== null) {
+    console.error(`standards creds: ${blocked}`);
     return false;
   }
-  const written = setSopsValues(consumer, context.rel, [
+  const storePath = resolveBrokerPath();
+  const loaded = await loadOwnedGithubStore(storePath);
+  if (!loaded.ok) {
+    console.error(`standards creds: ${loaded.problem}`);
+    return false;
+  }
+  const selected = selectGithubAppForRepo(loaded.value.github, context.repo);
+  if (!selected.ok) {
+    console.error(`standards creds: ${selected.problem}`);
+    return false;
+  }
+  const installation = await verifyGithubAppInstallation(
+    selected.value,
+    context.repo,
+  );
+  if (!installation.ok) {
+    console.error(`standards creds: ${installation.problem}`);
+    return false;
+  }
+  const { appId, privateKey, slug } = selected.value;
+  let writeResult:
+    | { readonly ok: true }
+    | { readonly ok: false; readonly problem: string };
+  try {
+    writeResult = await withBrokerLock(storePath, async () => {
+      const current = selectGithubAppForRepo(
+        (await readBrokerStore(storePath)).github,
+        context.repo,
+      );
+      if (!current.ok) {
+        return current;
+      }
+      if (!sameGithubApp(current.value, selected.value)) {
+        return {
+          ok: false,
+          problem: `the broker GitHub App for ${selected.value.owner} changed while its installation was being verified; retry so the replacement can be verified`,
+        };
+      }
+      return setSopsValues(consumer, context.rel, [
+        { path: appIdPath, value: String(appId) },
+        { path: privateKeyPath, value: privateKey },
+      ]);
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`standards creds: ${message}`);
+    return false;
+  }
+  if (!writeResult.ok) {
+    console.error(`standards creds: ${writeResult.problem}`);
+    return false;
+  }
+  const verified = [
     { path: appIdPath, value: String(appId) },
     { path: privateKeyPath, value: privateKey },
-  ]);
-  if (!written.ok) {
-    console.error(`standards creds: ${written.problem}`);
+  ].map(({ path, value }) => ({
+    path,
+    result: verifySopsStoredValue(consumer, context.rel, path, value),
+  }));
+  const unverifiable = verified.find(({ result }) => !result.ok);
+  if (unverifiable !== undefined && !unverifiable.result.ok) {
+    console.error(`standards creds: ${unverifiable.result.problem}`);
     return false;
   }
-  const verified = await Promise.all(
-    [appIdPath, privateKeyPath].map((path) =>
-      verifySopsScalarLeaf(consumer, context.rel, path),
-    ),
-  );
-  const failedVerification = verified.find((result) => !result.ok);
-  if (failedVerification !== undefined && !failedVerification.ok) {
-    console.error(`standards creds: ${failedVerification.problem}`);
+  const mismatched = verified
+    .filter(({ result }) => result.ok && !result.matches)
+    .map(({ path }) => path);
+  if (mismatched.length > 0) {
+    console.error(
+      `standards creds: the stored SOPS value at ${mismatched.join(', ')} does not match the selected GitHub App`,
+    );
     return false;
   }
   console.log(

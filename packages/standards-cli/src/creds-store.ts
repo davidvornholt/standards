@@ -6,23 +6,24 @@ import { basename, dirname, join } from 'node:path';
 import process from 'node:process';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { isCloudflareAccountId } from './creds-cloudflare-account';
+import {
+  type GithubBrokerApp,
+  githubStoreDocument,
+  parseGithubApps,
+  validateGithubApps,
+} from './creds-store-github';
 import { withBrokerLock } from './creds-store-lock';
 import { isNonEmptyString, isRecord } from './github-settings-parse';
-export type GithubBrokerApp = {
-  readonly appId: number;
-  readonly slug: string;
-  readonly htmlUrl: string;
-  readonly clientId: string;
-  readonly privateKey: string;
-};
+
+export type { GithubBrokerApp } from './creds-store-github';
 export type CloudflareBrokerAccount = Readonly<
   Record<'accountId' | 'token', string>
 >;
 export type BrokerStore = {
-  readonly github: GithubBrokerApp | null;
+  readonly github: ReadonlyArray<GithubBrokerApp>;
   readonly cloudflare: ReadonlyArray<CloudflareBrokerAccount>;
 };
-export const EMPTY_BROKER_STORE: BrokerStore = { github: null, cloudflare: [] };
+export const EMPTY_BROKER_STORE: BrokerStore = { github: [], cloudflare: [] };
 const OWNER_ONLY_FILE_MODE = 0o600;
 const OWNER_ONLY_DIR_MODE = 0o700;
 const FILE_MODE_MODULUS = 0o1000;
@@ -48,29 +49,6 @@ export const resolveBrokerPath = (): string =>
     process.env.XDG_CONFIG_HOME ?? join(homedir(), '.config'),
     'standards/broker.yaml',
   );
-const parseGithub = (raw: unknown): GithubBrokerApp | null => {
-  if (raw === undefined || raw === null) {
-    return null;
-  }
-  if (
-    !isRecord(raw) ||
-    typeof raw.app_id !== 'number' ||
-    !Number.isInteger(raw.app_id) ||
-    !isNonEmptyString(raw.slug) ||
-    !isNonEmptyString(raw.html_url) ||
-    !isNonEmptyString(raw.client_id) ||
-    !isNonEmptyString(raw.private_key)
-  ) {
-    throw new Error('invalid github: run `standards creds login github`');
-  }
-  return {
-    appId: raw.app_id,
-    slug: raw.slug,
-    htmlUrl: raw.html_url,
-    clientId: raw.client_id,
-    privateKey: raw.private_key,
-  };
-};
 const validateCloudflareAccounts = (
   accounts: ReadonlyArray<CloudflareBrokerAccount>,
   path: string,
@@ -131,7 +109,7 @@ export const readBrokerStore = async (path: string): Promise<BrokerStore> => {
     throw new Error(`${path} must contain a YAML mapping`);
   }
   return {
-    github: parseGithub(raw.github),
+    github: parseGithubApps(raw.github, path),
     cloudflare: parseCloudflare(raw.cloudflare, path),
   };
 };
@@ -142,21 +120,14 @@ export const updateBrokerStore = async (
 ): Promise<void> =>
   withBrokerLock(path, async () => {
     const store = await update(await readBrokerStore(path));
+    validateGithubApps(store.github, path);
     validateCloudflareAccounts(store.cloudflare, path);
     await writeBrokerStoreUnlocked(path, store, sync);
   });
 const storeDocument = (store: BrokerStore): unknown => ({
-  ...(store.github === null
+  ...(store.github.length === 0
     ? {}
-    : {
-        github: {
-          app_id: store.github.appId,
-          slug: store.github.slug,
-          html_url: store.github.htmlUrl,
-          client_id: store.github.clientId,
-          private_key: store.github.privateKey,
-        },
-      }),
+    : { github: githubStoreDocument(store.github) }),
   ...(store.cloudflare.length === 0
     ? {}
     : {

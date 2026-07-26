@@ -1,6 +1,6 @@
 {
   "name": "@davidvornholt/standards",
-  "version": "0.19.0",
+  "version": "0.20.0",
   "description": "Bootstrap, synchronize, and validate davidvornholt/standards consumers",
   "license": "MIT",
   "repository": {
@@ -38,6 +38,8 @@
     "src/creds-commands.ts",
     "src/creds-args.ts",
     "src/creds-dest.ts",
+    "src/creds-github-app-api.ts",
+    "src/creds-github-apps.ts",
     "src/creds-login-cloudflare.ts",
     "src/creds-login-github.ts",
     "src/creds-login-github-manifest.ts",
@@ -58,7 +60,11 @@
     "src/creds-sops-structure.ts",
     "src/creds-sops-value.ts",
     "src/creds-store.ts",
+    "src/creds-store-github.ts",
     "src/creds-store-lock.ts",
+    "src/creds-store-lock-holder.ts",
+    "src/creds-store-lock-inspection.ts",
+    "src/creds-store-lock-lease.ts",
     "src/dependabot-compose-input.ts",
     "src/dependabot-compose.ts",
     "src/dependabot-directory-character-class.ts",

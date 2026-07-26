@@ -2,6 +2,7 @@ import { runCredsAddCloudflare } from './creds-add';
 import { runCredsAddGithub } from './creds-add-github';
 import { parseCredsArgs } from './creds-args';
 import { listPermissionGroups } from './creds-cloudflare';
+import { loadOwnedGithubStore } from './creds-github-apps';
 import { runCredsLoginCloudflare } from './creds-login-cloudflare';
 import { runCredsLoginGithub } from './creds-login-github';
 import { BROKER_IDENTITY_NAME } from './creds-naming';
@@ -16,10 +17,10 @@ import {
 const CREDS_USAGE = `Usage: standards creds <command> [options]
 
 Commands:
-  login github      Create the broker GitHub App via the manifest flow (one click) and store its credentials
+  login github      Create or replace one account's broker GitHub App via the manifest flow
   login cloudflare  Store a Cloudflare account's bootstrap token (one guided paste per account)
   add cloudflare    Mint a scoped, expiring account token and write it into a SOPS target
-  add github        Write the broker App's credentials into a SOPS target for runtime token minting
+  add github        Select the repository owner's App, verify its installation, and write it into SOPS
   plan              Reconcile SOPS keys against brokered tokens: show revocations, rotations, and the live account tokens nothing reconciles here
   apply             Execute the plan: revoke brokered tokens whose SOPS key is gone, roll expiring ones into SOPS
   revoke            Delete one Cloudflare token named by --token-id; bootstrap credentials and brokered tokens are refused
@@ -39,12 +40,17 @@ Options:
   --token-id <id>       Cloudflare token to revoke (32-character hexadecimal ID)
   --force               Let revoke delete a token brokered to a repository that is not this checkout's. It verifies nothing about that repository, so use it only when nothing reconciles the token any more: that repository was renamed, transferred, or deleted, so no checkout resolves to its name and no \`standards creds apply\` will ever revoke the token. It never permits revoking a broker bootstrap credential, a token brokered to this repository, a token whose brokered repository differs from this checkout's only in capitalisation, or any brokered token when this checkout's origin remote resolves to no GitHub repository, because ownership is then the very thing that could not be checked
   --org <org>           Create the GitHub App under an organization
-  --name <name>         GitHub App name (default: ${BROKER_IDENTITY_NAME})
+  --name <name>         GitHub App name (default: ${BROKER_IDENTITY_NAME}, suffixed by --org)
 
 Secret values are written directly into SOPS-encrypted targets and never printed.`;
 const runCredsStatus = async (): Promise<boolean> => {
   const path = resolveBrokerPath();
-  const store = await readBrokerStore(path);
+  const loaded = await loadOwnedGithubStore(path);
+  if (!loaded.ok) {
+    console.error(`standards creds: ${loaded.problem}`);
+    return false;
+  }
+  const { value: store } = loaded;
   console.log(`broker store: ${path}`);
   const mode = inspectBrokerFileMode(path);
   if (!mode.exists) {
@@ -52,11 +58,16 @@ const runCredsStatus = async (): Promise<boolean> => {
   } else if (mode.problem !== null) {
     console.log(`  WARNING: ${mode.problem}`);
   }
-  console.log(
-    store.github === null
-      ? 'github: not configured (`standards creds login github`)'
-      : `github: App ${store.github.slug} (id ${store.github.appId}) — ${store.github.htmlUrl}`,
-  );
+  if (store.github.length === 0) {
+    console.log('github: not configured (`standards creds login github`)');
+  } else {
+    console.log('github:');
+    for (const app of store.github) {
+      console.log(
+        `  ${app.owner}: App ${app.slug} (id ${app.appId}) — ${app.htmlUrl}`,
+      );
+    }
+  }
   console.log(
     store.cloudflare.length === 0
       ? 'cloudflare: not configured (`standards creds login cloudflare`)'

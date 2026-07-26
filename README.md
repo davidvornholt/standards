@@ -80,7 +80,7 @@ bun standards github --apply  # converge the live repo (needs admin gh auth)
 bun standards help            # list commands and options
 ```
 
-The `Standards sync` workflow also runs `sync` weekly and opens a PR when upstream has moved, so you never have to remember to pull. It resolves `ci.broker_app.app_id` and `ci.broker_app.private_key` through the trusted pre-sync copy of the canonical SOPS action, mints a short-lived installation token for only the current repository with Contents read and Pull requests write, and never exposes that token to the sync command. External actions use their maintained major-version tags by policy. The PR is validated by the required `Standards` gate like any other change. Install the broker GitHub App only on the selected repository and provision its nested credentials with `bun standards creds add github --dest ci:ci.broker_app`; missing credentials or failed token minting stop the workflow without a fallback.
+The `Standards sync` workflow also runs `sync` weekly and opens a PR when upstream has moved, so you never have to remember to pull. It resolves `ci.broker_app.app_id` and `ci.broker_app.private_key` through the trusted pre-sync copy of the canonical SOPS action, mints a short-lived installation token for only the current repository with Contents read and Pull requests write, and never exposes that token to the sync command. External actions use their maintained major-version tags by policy. The PR is validated by the required `Standards` gate like any other change. Create one private broker GitHub App per owning user or organization, install it only on selected repositories, and provision each repository with `bun standards creds add github --dest ci:ci.broker_app`; the command selects the App by origin owner and verifies its installation before writing, while missing credentials or failed token minting stop the workflow without a fallback.
 
 ### Automate deferred fixes with the poller
 
@@ -96,7 +96,7 @@ Pin a released tag and, when the consumer already owns nixpkgs, make the standar
 
 ```nix
 inputs.standards = {
-  url = "github:davidvornholt/standards/v0.19.0";
+  url = "github:davidvornholt/standards/v0.20.0";
   inputs.nixpkgs.follows = "nixpkgs";
 };
 

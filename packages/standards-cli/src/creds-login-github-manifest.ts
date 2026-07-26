@@ -4,11 +4,35 @@
 // creds-login-github.ts.
 
 import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { BROKER_IDENTITY_NAME } from './creds-naming';
 import type { GithubBrokerApp } from './creds-store';
+import { isGithubBrokerApp } from './creds-store-github';
 import { apiError, HTTP_CREATED, request } from './github-api';
 import { isRecord } from './github-settings-parse';
 
 export const MANIFEST_STATE_BYTES = 32;
+const GITHUB_APP_NAME_MAX_LENGTH = 34;
+
+type GithubAppNameResult =
+  | { readonly ok: true; readonly value: string }
+  | { readonly ok: false; readonly problem: string };
+
+export const resolveGithubAppName = (
+  requested: string | undefined,
+  org: string | undefined,
+): GithubAppNameResult => {
+  const name =
+    requested ??
+    (org === undefined
+      ? BROKER_IDENTITY_NAME
+      : `${BROKER_IDENTITY_NAME}-${org}`);
+  return name.length <= GITHUB_APP_NAME_MAX_LENGTH
+    ? { ok: true, value: name }
+    : {
+        ok: false,
+        problem: `GitHub App names may contain at most ${GITHUB_APP_NAME_MAX_LENGTH} characters; pass --name with a shorter globally unique name`,
+      };
+};
 
 // Root-credential ceiling: everything the broker may ever delegate. The
 // `permission-*` inputs a workflow passes when minting are a request, not a
@@ -70,21 +94,20 @@ export const manifestFormHtml = (
 ): string =>
   `<!doctype html><html><body><form id="m" action="${escapeAttribute(`${action}?state=${encodeURIComponent(state)}`)}" method="post"><input type="hidden" name="manifest" value="${escapeAttribute(manifest)}"><noscript><button type="submit">Create GitHub App</button></noscript></form><script>document.getElementById("m").submit()</script></body></html>`;
 
-export const parseConversion = (body: unknown): GithubBrokerApp | null =>
-  isRecord(body) &&
-  typeof body.id === 'number' &&
-  typeof body.slug === 'string' &&
-  typeof body.html_url === 'string' &&
-  typeof body.client_id === 'string' &&
-  typeof body.pem === 'string'
-    ? {
-        appId: body.id,
-        slug: body.slug,
-        htmlUrl: body.html_url,
-        clientId: body.client_id,
-        privateKey: body.pem,
-      }
-    : null;
+export const parseConversion = (body: unknown): GithubBrokerApp | null => {
+  if (!(isRecord(body) && isRecord(body.owner))) {
+    return null;
+  }
+  const app = {
+    owner: body.owner.login,
+    appId: body.id,
+    slug: body.slug,
+    htmlUrl: body.html_url,
+    clientId: body.client_id,
+    privateKey: body.pem,
+  };
+  return isGithubBrokerApp(app) && app.owner !== null ? app : null;
+};
 
 export type ManifestConversion =
   | { readonly ok: true; readonly app: GithubBrokerApp }
