@@ -6,6 +6,7 @@
 // this shape" apart from "another repository owns this".
 
 import { afterEach, describe, expect, it, spyOn } from 'bun:test';
+import { BROKER_IDENTITY_NAME } from './creds-naming';
 import { runCredsPlan } from './creds-plan-run';
 import {
   ACCOUNT,
@@ -20,6 +21,7 @@ const FOREIGN_ID = `a${'1'.repeat(ID_LENGTH - 1)}`;
 const EXPIRED_ID = `b${'2'.repeat(ID_LENGTH - 1)}`;
 const ELSEWHERE_ID = `c${'3'.repeat(ID_LENGTH - 1)}`;
 const ELSEWHERE_NAME = 'standards/otherowner/otherrepo/ci/ci.dns_token';
+const OTHER_MACHINE_ID = `d${'4'.repeat(ID_LENGTH - 1)}`;
 
 const LISTING = [
   { id: 'bootstrap', name: 'standards-broker', status: 'active' },
@@ -52,6 +54,26 @@ describe('creds plan reporting', () => {
     expect(elsewhere).toContain(
       `standards creds revoke --account ${ACCOUNT} --token-id ${ELSEWHERE_ID} --force`,
     );
+  });
+
+  // A second machine's bootstrap credential shares the reserved name, so it
+  // lands in this listing while `revoke` refuses that name outright. Printing a
+  // revoke command here would hand the operator one that always fails.
+  it('sends a second broker bootstrap credential to the dashboard, not to revoke', async () => {
+    const { consumer } = initialize(ENCRYPTED_SECRETS);
+    stubCloudflare('ci', 'bootstrap', [
+      ...LISTING,
+      { id: OTHER_MACHINE_ID, name: BROKER_IDENTITY_NAME, status: 'active' },
+    ]);
+    const log = spyOn(console, 'log').mockImplementation(() => undefined);
+
+    expect(await runCredsPlan(consumer, false)).toBe(true);
+
+    const printed = log.mock.calls.map((call) => String(call[0]));
+    const row = lineWith(printed, BROKER_IDENTITY_NAME);
+    expect(row).toContain('Cloudflare dashboard');
+    expect(row).not.toContain('standards creds revoke');
+    expect(row).not.toContain(OTHER_MACHINE_ID);
   });
 
   it('counts a foreign token apart from one brokered elsewhere, and hides neither the bootstrap nor an expired token', async () => {

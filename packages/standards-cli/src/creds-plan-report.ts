@@ -4,6 +4,7 @@
 // repository reconciles at all. The summary counts them apart for the same
 // reason.
 
+import { BROKER_IDENTITY_NAME } from './creds-naming';
 import type {
   BrokeredElsewhereToken,
   CredsPlan,
@@ -16,6 +17,17 @@ import type {
 // `revoke` demands it whenever the broker holds more than one.
 const revokeCommand = (token: UnmanagedToken, extra: string): string =>
   `\`standards creds revoke --account ${token.accountId} --token-id ${token.tokenId}${extra}\``;
+
+// One unmanaged shape has no revoke command to offer: the reserved bootstrap
+// name. This machine's own bootstrap is excluded from the listing by verified
+// ID, so a row under that name is another machine's or a superseded one, and
+// `revoke` refuses it by name — printing a command that always fails would
+// send the operator down a dead end. The remedy is the dashboard, which is
+// also the only place the machine it belongs to can be confirmed.
+const unmanagedRemedy = (token: UnmanagedToken): string =>
+  token.name === BROKER_IDENTITY_NAME
+    ? "the reserved name for a machine's broker bootstrap credential, which `revoke` refuses; retire it in the Cloudflare dashboard, where you can confirm which machine it belongs to"
+    : `retire it with ${revokeCommand(token, '')}`;
 
 const reportActions = (
   actions: ReadonlyArray<PlannedAction>,
@@ -37,11 +49,11 @@ const reportUnmanaged = (tokens: ReadonlyArray<UnmanagedToken>): void => {
     return;
   }
   console.log(
-    'standards creds: unmanaged tokens — the broker mints nothing of this shape, and plan and apply never mutate them',
+    'standards creds: unmanaged tokens — reconciliation mints nothing of this shape, and plan and apply never mutate them',
   );
   for (const token of tokens) {
     console.log(
-      `  ${token.name} (${token.status}) — retire it with ${revokeCommand(token, '')}`,
+      `  ${token.name} (${token.status}) — ${unmanagedRemedy(token)}`,
     );
   }
 };
@@ -53,11 +65,11 @@ const reportBrokeredElsewhere = (
     return;
   }
   console.log(
-    'standards creds: tokens brokered to another repository — reconciled in that repository, never mutated here',
+    'standards creds: tokens brokered to another repository — never mutated here, and reconciled there only if a checkout still mints that exact name',
   );
   for (const token of tokens) {
     console.log(
-      `  ${token.name} (${token.status}) — brokered to ${token.repo}; if ${token.repo} was renamed, transferred, or deleted then nothing reconciles this token any more, and only then: ${revokeCommand(token, ' --force')}`,
+      `  ${token.name} (${token.status}) — brokered to ${token.repo}; if no checkout mints this name any more — ${token.repo} renamed, transferred, or deleted — then nothing reconciles the token, and only then: ${revokeCommand(token, ' --force')}`,
     );
   }
 };

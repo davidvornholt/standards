@@ -24,6 +24,13 @@ const fail = (message: string): false => {
   return false;
 };
 
+// GitHub owner and repository names are case-insensitive, so a checkout cloned
+// as `DavidVornholt/Example` owns the token minted as `davidvornholt/example`.
+// An exact comparison would call that token foreign and let --force delete a
+// live credential this very checkout reconciles.
+const sameRepo = (left: string, right: string): boolean =>
+  left.toLowerCase() === right.toLowerCase();
+
 // A brokered name carries the repository that owns it, and the reconciled
 // remedy — delete the SOPS key, run `apply` — only works in that repository.
 // Naming a bare `<target>:<key>` to an operator standing somewhere else would
@@ -42,17 +49,19 @@ const brokeredRefusal = ({
   readonly currentRepo: string | null;
   readonly force: boolean;
 }): string | null => {
-  if (brokered.repo === currentRepo) {
+  // Without a repository here, the one thing --force claims to override — that
+  // this checkout is not the owner — is the thing that could not be checked,
+  // so the override is refused rather than granted on an unevaluated guard.
+  if (currentRepo === null) {
+    return `token ${tokenId} is brokered as ${name}, which belongs to ${brokered.repo}, and this checkout cannot resolve the GitHub repository from its origin remote, so whether this checkout owns the token could not be determined; --force does not override a check that never ran. Re-run from a checkout whose origin remote names a GitHub repository, or point --dir at one. If ${brokered.repo} still exists, the remedy runs there: delete ${brokered.target}:${brokered.key} from its SOPS target and run \`standards creds apply\` in that checkout`;
+  }
+  if (sameRepo(brokered.repo, currentRepo)) {
     return `token ${tokenId} is brokered as ${name} for this repository (${brokered.repo}); delete ${brokered.target}:${brokered.key} from this repository's SOPS target and run \`standards creds apply\`, which revokes it and keeps the secret in step`;
   }
   if (force) {
     return null;
   }
-  const here =
-    currentRepo === null
-      ? 'no GitHub repository could be resolved from this checkout'
-      : `this checkout is ${currentRepo}`;
-  return `token ${tokenId} is brokered as ${name}, which belongs to ${brokered.repo}, and ${here}; the remedy runs there: delete ${brokered.target}:${brokered.key} from ${brokered.repo}'s SOPS target and run \`standards creds apply\` in that checkout. Pass --force only if ${brokered.repo} was renamed, transferred, or deleted, so no checkout resolves to that name and no apply will ever revoke this token`;
+  return `token ${tokenId} is brokered as ${name}, which belongs to ${brokered.repo}, and this checkout is ${currentRepo}; the remedy runs there: delete ${brokered.target}:${brokered.key} from ${brokered.repo}'s SOPS target and run \`standards creds apply\` in that checkout. Pass --force only if ${brokered.repo} was renamed, transferred, or deleted, so no checkout resolves to that name and no apply will ever revoke this token`;
 };
 
 export const runCredsRevoke = async (options: {
@@ -134,7 +143,7 @@ export const runCredsRevoke = async (options: {
   );
   if (brokered !== null) {
     console.log(
-      `  it was brokered to ${brokered.repo}; --force took it because no checkout reconciles that name any more`,
+      `  it was brokered to ${brokered.repo}; --force took it because this checkout is not that repository`,
     );
   }
   console.log(

@@ -1,6 +1,7 @@
-// Every class of token `creds revoke` must refuse, and the fact that --force
-// widens exactly one of them. A refusal is only correct if it issued no DELETE
-// and named the repository or machine the operator has to act in.
+// Every class of token `creds revoke` must refuse. A refusal is only correct if
+// it issued no DELETE and named the repository or machine the operator has to
+// act in. What --force does and does not widen lives in
+// `creds-revoke-force.test.ts`.
 
 import { afterEach, describe, expect, it, spyOn } from 'bun:test';
 import {
@@ -57,24 +58,6 @@ describe('creds revoke refusals', () => {
     expect(foreign).not.toEqual(local);
   });
 
-  it("refuses another machine's bootstrap credential even under --force", async () => {
-    initializeConsumer([ACCOUNT_A]);
-    const requests = stubAccount();
-    const error = spyOn(console, 'error').mockImplementation(() => undefined);
-    expect(
-      await runCredsCommand([
-        'revoke',
-        '--token-id',
-        OTHER_MACHINE_BROKER_ID,
-        '--force',
-      ]),
-    ).toBe(false);
-    expect(deletes(requests)).toEqual([]);
-    expect(error).toHaveBeenCalledWith(
-      expect.stringContaining('retire it in the Cloudflare dashboard'),
-    );
-  });
-
   it('refuses a token brokered to this repository and points at the reconciled path', async () => {
     const consumer = initializeConsumer([ACCOUNT_A]);
     const requests = stubAccount();
@@ -93,26 +76,6 @@ describe('creds revoke refusals', () => {
       expect.stringContaining(
         "for this repository (davidvornholt/example); delete ci:ci.dns_token from this repository's SOPS target",
       ),
-    );
-  });
-
-  it('refuses a token brokered to this repository even under --force', async () => {
-    const consumer = initializeConsumer([ACCOUNT_A]);
-    const requests = stubAccount();
-    const error = spyOn(console, 'error').mockImplementation(() => undefined);
-    expect(
-      await runCredsCommand([
-        'revoke',
-        '--token-id',
-        BROKERED_ID,
-        '--dir',
-        consumer,
-        '--force',
-      ]),
-    ).toBe(false);
-    expect(deletes(requests)).toEqual([]);
-    expect(error).toHaveBeenCalledWith(
-      expect.stringContaining('for this repository (davidvornholt/example)'),
     );
   });
 
