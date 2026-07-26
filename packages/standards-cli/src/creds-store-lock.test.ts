@@ -1,20 +1,36 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import process from 'node:process';
 import { withBrokerLock } from './creds-store-lock';
 
 const MS_PER_SECOND = 1000;
 const STALE_AGE_MS = 120_000;
 const HOLD_MS = 25;
 const FAST = { timeoutMs: 500, retryMs: 5 };
+const DEAD_PID = 2_147_483_647;
 
 const dirs: Array<string> = [];
 const mkStorePath = (): string => {
   const dir = mkdtempSync(join(tmpdir(), 'creds-lock-'));
   dirs.push(dir);
   return join(dir, 'broker.yaml');
+};
+
+const installHolder = (path: string, name: string, pid: number): string => {
+  const lock = `${path}.lock`;
+  mkdirSync(lock);
+  const holder = join(lock, `holder-${name}.json`);
+  writeFileSync(holder, JSON.stringify({ pid }));
+  return holder;
 };
 
 afterEach(() => {
@@ -27,9 +43,9 @@ describe('broker store lock', () => {
   it('breaks a stale lock left by a dead process and proceeds', async () => {
     const path = mkStorePath();
     const lock = `${path}.lock`;
-    mkdirSync(lock);
+    const holder = installHolder(path, 'dead', DEAD_PID);
     const past = (Date.now() - STALE_AGE_MS) / MS_PER_SECOND;
-    await utimes(lock, past, past);
+    await utimes(holder, past, past);
     const result = await withBrokerLock(
       path,
       () => Promise.resolve('ran'),
@@ -41,7 +57,9 @@ describe('broker store lock', () => {
 
   it('times out on a live lock with a remediation hint', async () => {
     const path = mkStorePath();
-    mkdirSync(`${path}.lock`);
+    const holder = installHolder(path, 'live', process.pid);
+    const past = (Date.now() - STALE_AGE_MS) / MS_PER_SECOND;
+    await utimes(holder, past, past);
     await expect(
       withBrokerLock(path, () => Promise.resolve('ran'), {
         ...FAST,

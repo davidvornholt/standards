@@ -12,7 +12,8 @@ import {
   sameGithubApp,
   selectGithubAppForRepo,
 } from './creds-github-apps';
-import { setSopsValues, verifySopsScalarLeaf } from './creds-sops';
+import { setSopsValues } from './creds-sops';
+import { verifySopsStoredValue } from './creds-sops-value';
 import { readBrokerStore, resolveBrokerPath } from './creds-store';
 import { withBrokerLock } from './creds-store-lock';
 
@@ -86,14 +87,25 @@ export const runCredsAddGithub = async (
     console.error(`standards creds: ${writeResult.problem}`);
     return false;
   }
-  const verified = await Promise.all(
-    [appIdPath, privateKeyPath].map((path) =>
-      verifySopsScalarLeaf(consumer, context.rel, path),
-    ),
-  );
-  const failedVerification = verified.find((result) => !result.ok);
-  if (failedVerification !== undefined && !failedVerification.ok) {
-    console.error(`standards creds: ${failedVerification.problem}`);
+  const verified = [
+    { path: appIdPath, value: String(appId) },
+    { path: privateKeyPath, value: privateKey },
+  ].map(({ path, value }) => ({
+    path,
+    result: verifySopsStoredValue(consumer, context.rel, path, value),
+  }));
+  const unverifiable = verified.find(({ result }) => !result.ok);
+  if (unverifiable !== undefined && !unverifiable.result.ok) {
+    console.error(`standards creds: ${unverifiable.result.problem}`);
+    return false;
+  }
+  const mismatched = verified
+    .filter(({ result }) => result.ok && !result.matches)
+    .map(({ path }) => path);
+  if (mismatched.length > 0) {
+    console.error(
+      `standards creds: the stored SOPS value at ${mismatched.join(', ')} does not match the selected GitHub App`,
+    );
     return false;
   }
   console.log(

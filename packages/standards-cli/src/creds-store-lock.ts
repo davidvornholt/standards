@@ -1,12 +1,18 @@
-// Broker store lock: a mkdir-based mutex serializing read-modify-write
-// cycles on broker.yaml. Store writes are sub-second, so a lock directory
-// older than the staleness window can only belong to a dead process and is
-// broken automatically; the timeout error names the directory and the manual
-// remediation for the pathological rest.
+// Broker store lock: a mkdir-based mutex serializing read-modify-write cycles
+// on broker.yaml. Each holder records a unique token and its live process.
+// Contenders reclaim an expired lock only after that process is dead, and
+// cleanup unlinks the exact token before removing the directory. Long
+// synchronous SOPS/Nix work therefore cannot look abandoned merely because
+// the JavaScript event loop cannot renew a timer.
 
-import { mkdir, rmdir, stat } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { isRecord } from './github-settings-parse';
+import {
+  type HeldBrokerLock,
+  reclaimExpiredBrokerLock,
+  releaseBrokerLock,
+  tryAcquireBrokerLock,
+} from './creds-store-lock-holder';
 
 const OWNER_ONLY_DIR_MODE = 0o700;
 
@@ -23,36 +29,14 @@ const DEFAULT_STALE_MS = 30_000;
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
-const tryAcquire = async (lockPath: string): Promise<boolean> => {
-  try {
-    await mkdir(lockPath, { mode: OWNER_ONLY_DIR_MODE });
-    return true;
-  } catch (error) {
-    if (isRecord(error) && error.code === 'EEXIST') {
-      return false;
-    }
-    throw error;
-  }
-};
-
-// True when the contender may immediately retry: the lock vanished, or it
-// was stale and this process removed it (losing the removal race to another
-// contender also lands here — the retry's mkdir arbitrates).
+// True when the contender may retry immediately. Removing the exact
+// generation-specific holder file is the ownership check: if another
+// contender already reclaimed it and installed a new token, unlink sees
+// ENOENT and can never remove that new holder.
 const breakIfStale = async (
   lockPath: string,
   staleMs: number,
-): Promise<boolean> => {
-  try {
-    const info = await stat(lockPath);
-    if (Date.now() - info.mtimeMs < staleMs) {
-      return false;
-    }
-    await rmdir(lockPath);
-    return true;
-  } catch {
-    return true;
-  }
-};
+): Promise<boolean> => reclaimExpiredBrokerLock(lockPath, staleMs);
 
 // One acquisition attempt: acquired, or cleared a stale/vanished lock (retry
 // immediately), or waited one retry slot; a live lock past the deadline
@@ -62,12 +46,13 @@ const attemptAcquire = async (
   staleMs: number,
   retryMs: number,
   deadline: number,
-): Promise<boolean> => {
-  if (await tryAcquire(lockPath)) {
-    return true;
+): Promise<HeldBrokerLock | null> => {
+  const held = await tryAcquireBrokerLock(lockPath);
+  if (held !== null) {
+    return held;
   }
   if (await breakIfStale(lockPath, staleMs)) {
-    return false;
+    return null;
   }
   if (Date.now() >= deadline) {
     throw new Error(
@@ -75,7 +60,7 @@ const attemptAcquire = async (
     );
   }
   await sleep(retryMs);
-  return false;
+  return null;
 };
 
 export const withBrokerLock = async <T>(
@@ -89,14 +74,14 @@ export const withBrokerLock = async <T>(
   const lockPath = `${path}.lock`;
   await mkdir(dirname(path), { recursive: true, mode: OWNER_ONLY_DIR_MODE });
   const deadline = Date.now() + timeoutMs;
-  let acquired = false;
-  while (!acquired) {
+  let held: HeldBrokerLock | null = null;
+  while (held === null) {
     // biome-ignore lint/performance/noAwaitInLoops: lock acquisition retries are inherently sequential.
-    acquired = await attemptAcquire(lockPath, staleMs, retryMs, deadline);
+    held = await attemptAcquire(lockPath, staleMs, retryMs, deadline);
   }
   try {
     return await operation();
   } finally {
-    await rmdir(lockPath);
+    await releaseBrokerLock(held);
   }
 };
