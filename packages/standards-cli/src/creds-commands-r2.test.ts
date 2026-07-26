@@ -72,7 +72,7 @@ describe('public creds R2 routing', () => {
       return Promise.resolve(response([], pageInfo(0, 0)));
     }) as typeof fetch;
     installSops(
-      'if [ "$1" = "decrypt" ]; then case "$3" in *access_key_id*) printf \'"replacement"\' ;; *) printf \'"5776f573ef7db2824f9f28c4c9d033f1e56890a339a7a2057d3f273243fcd9c5"\' ;; esac; exit 0; fi\neval "$SOPS_EDITOR \\"$2\\""',
+      'if [ "$1" = "decrypt" ]; then case "$3" in *access_key_id*) printf \'replacement\' ;; *) printf \'5776f573ef7db2824f9f28c4c9d033f1e56890a339a7a2057d3f273243fcd9c5\' ;; esac; exit 0; fi\neval "$SOPS_EDITOR \\"$2\\""',
     );
     const log = spyOn(console, 'log').mockImplementation(() => undefined);
     expect(

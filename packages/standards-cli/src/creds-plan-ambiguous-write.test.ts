@@ -134,7 +134,7 @@ afterEach(() => {
 describe('creds renewal ambiguous SOPS outcomes', () => {
   it('revokes only the old token after proving a late write committed', async () => {
     const consumer = initialize(
-      'if [ "$1" = "edit" ]; then eval "$SOPS_EDITOR \\"$2\\""; exit 1; fi\nprintf \'"new-value"\'',
+      'if [ "$1" = "edit" ]; then eval "$SOPS_EDITOR \\"$2\\""; exit 1; fi\nprintf \'new-value\'',
     );
     expect(await runCredsPlan(consumer, true)).toBe(true);
     expect(deletes).toEqual(['old']);

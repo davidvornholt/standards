@@ -142,7 +142,7 @@ describe('creds plan/apply mutation safety', () => {
   it('cleans a replacement and preserves the old token on write failure', async () => {
     const { consumer, events } = initialize(ENCRYPTED_SECRETS);
     installSops(
-      'if [ "$1" = "decrypt" ]; then printf \'"old-value"\'; exit 0; fi\nexit 1',
+      'if [ "$1" = "decrypt" ]; then printf \'old-value\'; exit 0; fi\nexit 1',
     );
     stubCloudflare();
     expect(await runCredsPlan(consumer, true)).toBe(false);
@@ -154,7 +154,7 @@ describe('creds plan/apply mutation safety', () => {
   it('writes and verifies the replacement before revoking the old token', async () => {
     const { consumer, events } = initialize(ENCRYPTED_SECRETS);
     installSops(
-      'if [ "$1" = "decrypt" ]; then printf \'"new-value"\'; exit 0; fi\neval "$SOPS_EDITOR \\"$2\\"" && printf "write\\n" >> "$PLAN_EVENT_FILE"',
+      'if [ "$1" = "decrypt" ]; then printf \'new-value\'; exit 0; fi\neval "$SOPS_EDITOR \\"$2\\"" && printf "write\\n" >> "$PLAN_EVENT_FILE"',
     );
     stubCloudflare();
     expect(await runCredsPlan(consumer, true)).toBe(true);

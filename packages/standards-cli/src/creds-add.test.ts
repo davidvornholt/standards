@@ -69,7 +69,7 @@ describe('creds add cloudflare compensation', () => {
   it('deletes a just-created token when the SOPS write fails', async () => {
     const consumer = initializeConsumer([ACCOUNT_A]);
     installSops(
-      'if [ "$1" = "decrypt" ]; then printf \'"old-value"\'; exit 0; fi\nexit 1',
+      'if [ "$1" = "decrypt" ]; then printf \'old-value\'; exit 0; fi\nexit 1',
     );
     const methods: Array<string> = [];
     globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
