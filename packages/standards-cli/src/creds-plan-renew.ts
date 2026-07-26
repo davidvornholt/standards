@@ -7,11 +7,8 @@ import { createAccountToken, deleteAccountToken } from './creds-cloudflare';
 import { resolveTargetRel } from './creds-dest';
 import type { PlannedAction } from './creds-plan-types';
 import { destinationWrites, s3AccessKeyPath, s3PairPaths } from './creds-r2';
-import {
-  inspectSopsScalarDestination,
-  setSopsValues,
-  verifySopsStoredValue,
-} from './creds-sops';
+import { inspectSopsScalarDestination, setSopsValues } from './creds-sops';
+import { verifySopsStoredValue } from './creds-sops-value';
 import type { CloudflareBrokerAccount } from './creds-store';
 
 type RenewAction = Extract<PlannedAction, { readonly kind: 'renew' }>;

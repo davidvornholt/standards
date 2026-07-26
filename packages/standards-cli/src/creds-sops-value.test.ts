@@ -2,16 +2,18 @@ import { afterEach, describe, expect, it, spyOn } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { verifySopsStoredValueWith } from './creds-sops';
+import { verifySopsStoredValueWith } from './creds-sops-value';
 import type { SopsRunResult } from './sops-exec';
 
 const calls: Array<{
   readonly args: ReadonlyArray<string>;
   readonly cwd: string;
 }> = [];
+// sops prints an extracted scalar leaf raw, so that — not a JSON document — is
+// what the runner returns by default here.
 let runResult: SopsRunResult = {
   status: 0,
-  stdout: JSON.stringify('secret-value'),
+  stdout: 'secret-value',
   stderr: '',
   errorMessage: null,
 };
@@ -44,7 +46,7 @@ afterEach(() => {
   calls.length = 0;
   runResult = {
     status: 0,
-    stdout: JSON.stringify('secret-value'),
+    stdout: 'secret-value',
     stderr: '',
     errorMessage: null,
   };
@@ -85,9 +87,55 @@ describe('stored SOPS value verification', () => {
     ]);
   });
 
+  // The R2 access key ID that surfaced this: 32 hex characters starting with a
+  // digit, which JSON.parse rejects as a malformed number. Reading that as
+  // unverifiable told operators to re-mint a credential that was stored
+  // correctly.
+  it('proves a match for a raw scalar that is not valid JSON', () => {
+    const consumer = fixture();
+    const accessKeyId = '9f3a1c7d0b52e84a6d1f0c93be27a5d4';
+    runResult = { ...runResult, stdout: accessKeyId };
+    expect(
+      verifySopsStoredValue(
+        consumer,
+        'secrets/ci.yaml',
+        'ci.tofu_state.access_key_id',
+        accessKeyId,
+      ),
+    ).toEqual({ ok: true, matches: true });
+  });
+
+  it('treats the trailing newline as framing rather than value', () => {
+    const consumer = fixture();
+    runResult = { ...runResult, stdout: 'secret-value\n' };
+    expect(
+      verifySopsStoredValue(
+        consumer,
+        'secrets/ci.yaml',
+        'ci.token',
+        'secret-value',
+      ),
+    ).toEqual({ ok: true, matches: true });
+  });
+
+  it('still proves a match when sops quotes the scalar as JSON', () => {
+    const consumer = fixture();
+    runResult = { ...runResult, stdout: JSON.stringify('secret-value') };
+    expect(
+      verifySopsStoredValue(
+        consumer,
+        'secrets/ci.yaml',
+        'ci.token',
+        'secret-value',
+      ),
+    ).toEqual({ ok: true, matches: true });
+  });
+});
+
+describe('stored SOPS value rejection', () => {
   it('proves a mismatch without exposing either value', () => {
     const consumer = fixture();
-    runResult = { ...runResult, stdout: JSON.stringify('different-value') };
+    runResult = { ...runResult, stdout: 'different-value' };
     expect(
       verifySopsStoredValue(
         consumer,
@@ -98,7 +146,9 @@ describe('stored SOPS value verification', () => {
     ).toEqual({ ok: true, matches: false });
   });
 
-  it('reports decrypt and parse failures as unverifiable', () => {
+  // Callers delete the token they just created on a mismatch, so a read that
+  // answered nothing must stay unverifiable and leave that decision alone.
+  it('reports a failed decrypt and an empty read as unverifiable', () => {
     const consumer = fixture();
     runResult = { ...runResult, status: 1 };
     const failed = verifySopsStoredValue(
@@ -113,7 +163,7 @@ describe('stored SOPS value verification', () => {
         'could not verify stored SOPS value at ci.token in secrets/ci.yaml',
     });
 
-    runResult = { ...runResult, status: 0, stdout: 'not-json' };
+    runResult = { ...runResult, status: 0, stdout: '' };
     expect(
       verifySopsStoredValue(
         consumer,
