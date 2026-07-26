@@ -1,7 +1,8 @@
 // Shared account stub for the `creds revoke` suites. One account holds every
 // class the command has to tell apart: this machine's bootstrap credential,
 // another machine's under the same reserved name, a hand-made token, a token
-// brokered to the consumer repository, and one brokered to a foreign one.
+// brokered to the consumer repository, one brokered to a foreign one, and a
+// bootstrap credential renamed out of the reserved name.
 
 import { pageInfo, response } from './creds-add-test-support';
 
@@ -13,6 +14,12 @@ export const MISSING_ID = `c${'3'.repeat(ID_LENGTH - 1)}`;
 export const OTHER_REPO_ID = `d${'4'.repeat(ID_LENGTH - 1)}`;
 export const OTHER_MACHINE_BROKER_ID = `e${'5'.repeat(ID_LENGTH - 1)}`;
 export const MALFORMED_ID = `0${'6'.repeat(ID_LENGTH - 1)}`;
+// A bootstrap credential someone renamed in the dashboard. Passed as
+// `verifiedId`, it is this machine's own bootstrap under a name the reserved-name
+// guard does not catch, which is the only way to exercise the ID-based guard on
+// its own. It sits last in the listing so a positional match cannot stand in
+// for the identity match.
+export const RENAMED_BOOTSTRAP_ID = `9${'7'.repeat(ID_LENGTH - 1)}`;
 
 const ACCOUNT_TOKENS = [
   { id: BOOTSTRAP_ID, name: 'standards-broker', status: 'active' },
@@ -34,6 +41,11 @@ const ACCOUNT_TOKENS = [
   {
     id: MALFORMED_ID,
     name: 'standards/davidvornholt/example/ci',
+    status: 'active',
+  },
+  {
+    id: RENAMED_BOOTSTRAP_ID,
+    name: 'cloudflare-token-2022',
     status: 'active',
   },
 ];
@@ -92,3 +104,10 @@ export const deletes = (
   requests: ReadonlyArray<string>,
 ): ReadonlyArray<string> =>
   requests.filter((request) => request.startsWith('DELETE'));
+
+// A refusal is asserted fact by fact — the repository it names, the SOPS key to
+// delete, the command to run — rather than as one long span of prose, so a
+// reworded sentence stays green while a dropped remedy goes red.
+export const refusals = (spy: {
+  readonly mock: { readonly calls: ReadonlyArray<ReadonlyArray<unknown>> };
+}): ReadonlyArray<string> => spy.mock.calls.map((call) => String(call[0]));
