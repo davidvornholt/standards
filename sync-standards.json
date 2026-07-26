@@ -13,6 +13,7 @@
     ".agents/skills/review-fix",
     ".agents/skills/standards-sync",
     ".agents/skills/ux-ui",
+    ".claude/skills",
     ".claude/agents/reviewer.md",
     ".claude/workflows/review-pass.js",
     ".codex/agents/reviewer.toml",

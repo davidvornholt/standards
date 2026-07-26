@@ -605,7 +605,7 @@ describe('check', () => {
     const check = run(consumer, ['check', '--dir', consumer]);
     expect(check.status).toBe(0);
     expect(check.stdout).toContain(
-      'canonical file(s) match the last synced state',
+      'canonical path(s) match the last synced state',
     );
   });
 
@@ -622,7 +622,7 @@ describe('check', () => {
 
     expect(check.status).toBe(1);
     expect(check.stdout).toContain(
-      'canonical file(s) match the last synced state',
+      'canonical path(s) match the last synced state',
     );
     expect(check.stderr).toContain(
       'canonical file(s) contain the forbidden inline Biome directive token',
@@ -636,7 +636,7 @@ describe('check', () => {
     const check = run(consumer, ['check', '--dir', consumer]);
     expect(check.status).toBe(1);
     expect(check.stderr).toContain(
-      'canonical file(s) drifted from the last synced state',
+      'canonical path(s) drifted from the last synced state',
     );
     expect(check.stderr).toContain('modified: managed/a.txt');
   });
@@ -1534,7 +1534,7 @@ describe('packed artifact token contract', () => {
 
     expect(check.status).toBe(1);
     expect(check.stdout).toContain(
-      'canonical file(s) match the last synced state',
+      'canonical path(s) match the last synced state',
     );
     expect(check.stderr).toContain(
       'canonical file(s) contain the forbidden inline Biome directive token',

@@ -85,6 +85,7 @@
     "src/github-settings-parse.ts",
     "src/github-settings.ts",
     "src/managed-files.ts",
+    "src/managed-path-ownership.ts",
     "src/poller-approval.ts",
     "src/poller-acknowledgements.ts",
     "src/poller-claim.ts",
