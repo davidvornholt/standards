@@ -1,6 +1,7 @@
-// Behavioral matrix for the canonical SOPS secret action: every failure in
-// the "secret is unavailable" class honors failure-mode, while caller
-// configuration errors and invalid final values stay fail-closed in both.
+// Behavioral matrix for the canonical SOPS secret action: every failure in the
+// "secret is unavailable" class fails the step, as do caller configuration
+// errors. The action has no mode that substitutes a value for a secret it could
+// not resolve, and a guard below keeps one from being reintroduced.
 
 import { afterEach, describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
@@ -19,16 +20,14 @@ afterEach(cleanupTmpDirs);
 const ciValue = (value: unknown): string =>
   JSON.stringify({ ci: { example_token: value } });
 
-const FINAL_VALUE_ERROR = '::error::Resolved secret value must be non-empty';
-
-type FallbackScenario = {
+type UnavailableScenario = {
   readonly label: string;
   readonly options: SopsActionOptions;
   readonly reason: string;
   readonly failsAt: 'setup' | 'install' | 'resolve';
 };
 
-const FALLBACK_SCENARIOS: ReadonlyArray<FallbackScenario> = [
+const UNAVAILABLE_SCENARIOS: ReadonlyArray<UnavailableScenario> = [
   {
     label: 'the age key is not configured',
     options: { ageKey: '' },
@@ -85,27 +84,11 @@ const FALLBACK_SCENARIOS: ReadonlyArray<FallbackScenario> = [
   },
 ];
 
-const rows = FALLBACK_SCENARIOS.map((s) => [s.label, s] as const);
+const rows = UNAVAILABLE_SCENARIOS.map((s) => [s.label, s] as const);
 
-describe('fallback-eligible failures', () => {
-  it.each(rows)('uses the fallback when %s', (_label, scenario) => {
+describe('unresolvable secrets', () => {
+  it.each(rows)('fails closed when %s', (_label, scenario) => {
     const actionRun = runSopsAction(scenario.options);
-
-    expect(actionRun.result.status).toBe(0);
-    expect(actionRun.environment).toBe('GH_TOKEN=workflow-token\n');
-    expect(actionRun.output).toBe('used-fallback=true\n');
-    expect(actionRun.result.stdout).toContain(
-      `::warning::${scenario.reason}; using the configured fallback`,
-    );
-    expect(actionRun.curlCalled).toBe(scenario.failsAt !== 'setup');
-    expect(actionRun.sopsExecuted).toBe(scenario.failsAt === 'resolve');
-  });
-
-  it.each(rows)('fails closed in fail mode when %s', (_label, scenario) => {
-    const actionRun = runSopsAction({
-      ...scenario.options,
-      failureMode: 'fail',
-    });
 
     expect(actionRun.result.status).toBe(1);
     expect(actionRun.environment).toBe('');
@@ -113,15 +96,13 @@ describe('fallback-eligible failures', () => {
     expect(`${actionRun.result.stdout}${actionRun.result.stderr}`).toContain(
       `::error::${scenario.reason}`,
     );
+    expect(actionRun.result.stdout).not.toContain('::warning::');
     expect(actionRun.curlCalled).toBe(scenario.failsAt !== 'setup');
     expect(actionRun.sopsExecuted).toBe(scenario.failsAt === 'resolve');
   });
 
-  it.each([
-    'fail',
-    'fallback',
-  ] as const)('never keeps or executes an unverified binary in %s mode', (failureMode) => {
-    const actionRun = runSopsAction({ failureMode, sha256Status: 1 });
+  it('never keeps or executes an unverified binary', () => {
+    const actionRun = runSopsAction({ sha256Status: 1 });
 
     expect(actionRun.sopsExecuted).toBe(false);
     expect(actionRun.sopsBinaryPresent).toBe(false);
@@ -134,47 +115,46 @@ describe('canonical SOPS secret action script behavior', () => {
 
     expect(actionRun.result.status).toBe(0);
     expect(actionRun.environment).toBe('GH_TOKEN=resolved-token\n');
-    expect(actionRun.output).toBe('used-fallback=false\n');
+    expect(actionRun.output).toBe('');
     expect(actionRun.result.stdout).toBe('::add-mask::resolved-token\n');
     expect(actionRun.result.stderr).toBe('');
     expect(actionRun.curlCalled).toBe(true);
     expect(actionRun.sopsExecuted).toBe(true);
   });
 
-  it('defaults failure-mode to fail', () => {
+  // The action used to offer a mode that exported a caller-supplied default
+  // instead of failing. Its last caller degraded a broken credential into a
+  // green gate, so the mode is gone; this pins the contract that resolving is
+  // the only outcome an interface can ask for.
+  it('offers no interface for substituting an unresolvable secret', () => {
     const action = parseYaml(readFileSync(SOPS_ACTION, 'utf8')) as {
-      readonly inputs: Record<string, { readonly default?: string }>;
+      readonly inputs: Record<string, unknown>;
+      readonly outputs?: Record<string, unknown>;
     };
 
-    expect(action.inputs['failure-mode'].default).toBe('fail');
+    expect(Object.keys(action.inputs).sort()).toEqual([
+      'age-key',
+      'env-name',
+      'secret-file',
+      'secret-key',
+    ]);
+    expect(action.outputs).toBeUndefined();
   });
 });
 
 describe('caller configuration errors', () => {
-  it.each([
-    ['env-name is not a valid variable name', { envName: 'GH TOKEN' }],
-    ['failure-mode is not a supported mode', { failureMode: 'warn' }],
-  ] as ReadonlyArray<
-    readonly [string, SopsActionOptions]
-  >)('fails closed even with a usable fallback when %s', (_label, options) => {
-    const actionRun = runSopsAction({ ageKey: '', ...options });
+  it('rejects an env-name that is not a valid variable name', () => {
+    const options: SopsActionOptions = { envName: 'GH TOKEN' };
+    const actionRun = runSopsAction(options);
 
     expect(actionRun.result.status).toBe(1);
     expect(actionRun.environment).toBe('');
     expect(actionRun.output).toBe('');
     expect(`${actionRun.result.stdout}${actionRun.result.stderr}`).toContain(
-      '::error::',
+      '::error::env-name must be a valid environment variable name',
     );
-  });
-
-  it('rejects an empty fallback value before the environment boundary', () => {
-    const actionRun = runSopsAction({ ageKey: '', fallbackValue: '' });
-
-    expect(actionRun.result.status).toBe(1);
-    expect(actionRun.environment).toBe('');
-    expect(actionRun.output).toBe('');
-    expect(`${actionRun.result.stdout}${actionRun.result.stderr}`).toContain(
-      FINAL_VALUE_ERROR,
-    );
+    // Rejected before any network or decrypt work happens.
+    expect(actionRun.curlCalled).toBe(false);
+    expect(actionRun.sopsExecuted).toBe(false);
   });
 });
