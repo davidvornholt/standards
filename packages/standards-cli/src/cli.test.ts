@@ -1770,14 +1770,17 @@ describe('canonical standards workflow security boundaries', () => {
     });
   });
 
-  it('uses major-version tags for every external action in every production workflow', () => {
-    const workflowPaths = productionWorkflowPaths();
-    // Pin the enumerated set, not just its size. This ratchet shares one
+  it('enumerates exactly the known production workflow files', () => {
+    // Pin the enumerated set, not just its size. This enumeration shares one
     // workflow-file predicate with the canonical runner-boundary ratchet, so a
     // narrowing made for that one must fail here instead of silently dropping a
-    // workflow — publish-standards-cli.yml above all — out of the pin check.
+    // workflow — publish-standards-cli.yml above all — out of every check that
+    // walks production workflows.
     expect(
-      workflowPaths.map((path) => relative(ACTUAL_UPSTREAM, path)).toSorted(),
+      productionWorkflowPaths()
+        .map((path) => relative(ACTUAL_UPSTREAM, path))
+        .toSorted(),
+      'The production workflow inventory no longer matches this list. If you added a workflow, add its path to the expected list below. If a path went missing, the shared workflow-file predicate stopped matching it and the workflow has fallen out of these security checks — restore the predicate instead of editing the list.',
     ).toEqual([
       '.github/workflows/notify-pause.yml',
       '.github/workflows/pr-title.yml',
@@ -1785,8 +1788,10 @@ describe('canonical standards workflow security boundaries', () => {
       '.github/workflows/standards-sync.yml',
       '.github/workflows/standards.yml',
     ]);
+  });
 
-    const uses = workflowPaths.flatMap(externalActionUses);
+  it('uses major-version tags for every external action in every production workflow', () => {
+    const uses = productionWorkflowPaths().flatMap(externalActionUses);
 
     expect(uses.length).toBeGreaterThan(0);
     for (const use of uses) {
