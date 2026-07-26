@@ -59,6 +59,8 @@
     "src/creds-store-github.ts",
     "src/creds-store-lock.ts",
     "src/creds-store-lock-holder.ts",
+    "src/creds-store-lock-inspection.ts",
+    "src/creds-store-lock-lease.ts",
     "src/dependabot-compose-input.ts",
     "src/dependabot-compose.ts",
     "src/dependabot-directory-character-class.ts",

@@ -1,18 +1,17 @@
-// Broker store lock: a mkdir-based mutex serializing read-modify-write cycles
-// on broker.yaml. Each holder records a unique token and its live process.
-// Contenders reclaim an expired lock only after that process is dead, and
-// cleanup unlinks the exact token before removing the directory. Long
-// synchronous SOPS/Nix work therefore cannot look abandoned merely because
-// the JavaScript event loop cannot renew a timer.
+// Broker store lock: a fully initialized generation is atomically renamed into
+// place before its operation starts. A worker-thread lease remains live while
+// synchronous SOPS/Nix blocks the main event loop. Cleanup unlinks the exact
+// generation token before removing the directory, so an old owner cannot
+// remove a replacement.
 
 import { mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import {
   type HeldBrokerLock,
-  reclaimExpiredBrokerLock,
   releaseBrokerLock,
   tryAcquireBrokerLock,
 } from './creds-store-lock-holder';
+import { inspectBrokerLock } from './creds-store-lock-inspection';
 
 const OWNER_ONLY_DIR_MODE = 0o700;
 
@@ -29,32 +28,24 @@ const DEFAULT_STALE_MS = 30_000;
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
-// True when the contender may retry immediately. Removing the exact
-// generation-specific holder file is the ownership check: if another
-// contender already reclaimed it and installed a new token, unlink sees
-// ENOENT and can never remove that new holder.
-const breakIfStale = async (
-  lockPath: string,
-  staleMs: number,
-): Promise<boolean> => reclaimExpiredBrokerLock(lockPath, staleMs);
-
 // One acquisition attempt: acquired, or cleared a stale/vanished lock (retry
-// immediately), or waited one retry slot; a live lock past the deadline
-// throws with the remediation hint.
+// immediately), or waited one retry slot. Proven-live generations do not
+// consume the recovery deadline; incomplete or ambiguous generations do.
 const attemptAcquire = async (
   lockPath: string,
   staleMs: number,
   retryMs: number,
   deadline: number,
 ): Promise<HeldBrokerLock | null> => {
-  const held = await tryAcquireBrokerLock(lockPath);
+  const held = await tryAcquireBrokerLock(lockPath, staleMs);
   if (held !== null) {
     return held;
   }
-  if (await breakIfStale(lockPath, staleMs)) {
+  const availability = await inspectBrokerLock(lockPath, staleMs);
+  if (availability === 'retry') {
     return null;
   }
-  if (Date.now() >= deadline) {
+  if (availability === 'blocked' && Date.now() >= deadline) {
     throw new Error(
       `lock timeout: another creds process holds ${lockPath}; if none is running, remove that directory and retry`,
     );

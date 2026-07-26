@@ -11,10 +11,10 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import process from 'node:process';
 import { withBrokerLock } from './creds-store-lock';
 
 const SCALED_STALE_MS = 10;
+const LIVE_WAIT_MULTIPLIER = 4;
 const SCALED = {
   timeoutMs: 500,
   retryMs: 2,
@@ -34,7 +34,7 @@ afterEach(() => {
   }
 });
 
-describe('broker store live-lock ownership', () => {
+describe('broker store live-lock serialization', () => {
   it('keeps delayed SOPS, same-owner replacement, and another contender exclusive past staleness', async () => {
     const path = mkStorePath();
     const events: Array<string> = [];
@@ -93,6 +93,59 @@ describe('broker store live-lock ownership', () => {
     );
     expect(existsSync(`${path}.lock`)).toBe(false);
   });
+});
+
+describe('broker store lock generation lifecycle', () => {
+  it('waits past the recovery timeout while a generation lease remains live', async () => {
+    const path = mkStorePath();
+    let releaseHolder = (): void => undefined;
+    let markStarted = (): void => undefined;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseHolder = resolve;
+    });
+    const holder = withBrokerLock(
+      path,
+      async () => {
+        markStarted();
+        await release;
+      },
+      SCALED,
+    );
+    await started;
+    let contenderRan = false;
+    const contender = withBrokerLock(
+      path,
+      () => {
+        contenderRan = true;
+        return Promise.resolve();
+      },
+      { ...SCALED, timeoutMs: SCALED_STALE_MS },
+    );
+    await new Promise((resolve) =>
+      setTimeout(resolve, SCALED_STALE_MS * LIVE_WAIT_MULTIPLIER),
+    );
+
+    expect(contenderRan).toBe(false);
+    releaseHolder();
+    await Promise.all([holder, contender]);
+    expect(contenderRan).toBe(true);
+  });
+
+  it('ignores an incomplete private candidate left before publication', async () => {
+    const path = mkStorePath();
+    const candidate = `${path}.lock.pending-crashed`;
+    mkdirSync(candidate);
+    writeFileSync(join(candidate, 'holder-crashed.json'), '{"generation":');
+
+    expect(
+      await withBrokerLock(path, () => Promise.resolve('ran'), SCALED),
+    ).toBe('ran');
+    expect(existsSync(`${path}.lock`)).toBe(false);
+    expect(existsSync(candidate)).toBe(true);
+  });
 
   it('does not remove a replacement lock generation during release', async () => {
     const path = mkStorePath();
@@ -108,7 +161,10 @@ describe('broker store live-lock ownership', () => {
         unlinkSync(join(lock, ownHolder));
         rmdirSync(lock);
         mkdirSync(lock);
-        writeFileSync(replacement, JSON.stringify({ pid: process.pid }));
+        writeFileSync(
+          replacement,
+          JSON.stringify({ generation: 'replacement' }),
+        );
         return Promise.resolve();
       },
       SCALED,
