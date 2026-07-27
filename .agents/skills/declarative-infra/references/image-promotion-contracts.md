@@ -53,7 +53,12 @@ requiredProvenance:
 rollback:
   identity: rollback:<current-identity>-><target-identity>
   required: [protectedApproval, nonEmptyReason, operator, exactAncestorDigestProof]
-lifecycle: [announced, branch, open, merged, deploy-failed, completed]
+superseding:
+  trigger: promotion-opened-or-reused
+  candidates: same-app-open-promotions
+  compareOutcome: descendant
+  result: superseded
+lifecycle: [announced, branch, open, merged, deploy-failed, completed, superseded]
 ```
 
 <!-- contract:metadata-transition -->

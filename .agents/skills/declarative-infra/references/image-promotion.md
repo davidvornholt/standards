@@ -101,6 +101,8 @@ After proof, compare `promotedSourceSha` to the candidate through GitHub's compa
 
 Canonical promotion identity is source repository + source SHA + digest. Valid run ids are evidence attached to one operation before branch creation, while its PR is open, after merge, after failed deploy, and after successful deploy; they never create a competing PR. The operation is complete only after the exact merge SHA deploy succeeds.
 
+Opening or reusing a promotion PR retires every other trusted open promotion for the same app when the new candidate is provably a descendant of the other candidate. The writer uses the same source-repository compare proof as the provenance gate and fails closed: an ancestor, equal, diverged, or unprovable candidate closes nothing. A retired operation enters the terminal `superseded` phase and cannot merge or deploy; later announcements of its canonical identity attach as evidence instead of opening another PR.
+
 An approved rollback has a distinct operation identity, protected-environment approval, non-empty reason, operator, and exact ancestor/digest proof. It always opens a new audited PR and deploys again, including when its target was promoted previously.
 
 The trusted provenance check revalidates App-bot author, canonical same-repository branch, marker and payload, exact run proof, exact resulting object, current-main ancestry, merge-group execution, and an `images.json`-only diff. It runs on the merge candidate and every condition fails closed.

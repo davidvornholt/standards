@@ -13,6 +13,18 @@ const evidencePasses = (
   required: ReadonlyArray<string>,
 ): boolean => required.every((name) => evidence[name] === true);
 
+const allowedTransitions: Readonly<
+  Record<Operation['phase'], ReadonlyArray<Operation['phase']>>
+> = {
+  announced: ['branch'],
+  branch: ['open'],
+  completed: [],
+  'deploy-failed': ['completed'],
+  merged: ['deploy-failed', 'completed'],
+  open: ['merged'],
+  superseded: [],
+};
+
 export const advance = (
   state: PromotionState,
   identity: string,
@@ -23,12 +35,7 @@ export const advance = (
   if (operation === undefined) {
     return { kind: 'rejected', state };
   }
-  const currentIndex = writerContract.lifecycle.indexOf(operation.phase);
-  const nextIndex = writerContract.lifecycle.indexOf(phase);
-  const valid =
-    nextIndex === currentIndex + 1 ||
-    (operation.phase === 'merged' && phase === 'completed') ||
-    (operation.phase === 'deploy-failed' && phase === 'completed');
+  const valid = allowedTransitions[operation.phase].includes(phase);
   if (
     !valid ||
     (phase === 'merged' && mergeSha === null) ||
@@ -58,6 +65,51 @@ export const advance = (
         phase === 'open' ? state.nextPrNumber + 1 : state.nextPrNumber,
       operations: { ...state.operations, [identity]: updated },
     },
+  };
+};
+
+export const openPromotion = (
+  state: PromotionState,
+  identity: string,
+  comparisons: Readonly<Record<string, Compare>>,
+): ModelResult => {
+  const existing = state.operations[identity];
+  const opened =
+    existing?.phase === 'open'
+      ? ({ kind: 'advanced', state } as const)
+      : advance(state, identity, 'open');
+  const operation = opened.state.operations[identity];
+  if (
+    opened.kind !== 'advanced' ||
+    operation?.kind !== 'promotion' ||
+    writerContract.superseding.trigger !== 'promotion-opened-or-reused'
+  ) {
+    return opened;
+  }
+  const operations = Object.fromEntries(
+    Object.entries(opened.state.operations).map(
+      ([otherIdentity, otherOperation]) => {
+        const superseded =
+          otherIdentity !== identity &&
+          otherOperation.kind === 'promotion' &&
+          otherOperation.phase === 'open' &&
+          comparisons[otherIdentity] ===
+            writerContract.superseding.compareOutcome;
+        return [
+          otherIdentity,
+          superseded
+            ? {
+                ...otherOperation,
+                phase: writerContract.superseding.result,
+              }
+            : otherOperation,
+        ];
+      },
+    ),
+  );
+  return {
+    kind: 'advanced',
+    state: { ...opened.state, operations },
   };
 };
 
