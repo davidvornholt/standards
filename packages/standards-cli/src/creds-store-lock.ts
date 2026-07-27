@@ -2,7 +2,7 @@
 // place before its operation starts. A worker-thread lease remains live while
 // synchronous SOPS/Nix blocks the main event loop. Cleanup unlinks the exact
 // generation token before removing the directory, so an old owner cannot
-// remove a replacement -- and finding one there instead of an empty directory
+// remove a replacement — and finding one there instead of an empty directory
 // is a no-op, never a failure of the operation being unwound.
 
 import { mkdir } from 'node:fs/promises';

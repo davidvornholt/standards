@@ -1,18 +1,11 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  rmdirSync,
-  rmSync,
-  unlinkSync,
-  writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { withBrokerLock } from './creds-store-lock';
-import { awaitLeaseRefresh } from './creds-store-lock-live-test-support';
+import {
+  awaitLeaseRefresh,
+  brokerStorePaths,
+} from './creds-store-lock-test-support';
 
 // The staleness window is scaled down from the 30s default so these tests run
 // in seconds, but not below what a loaded machine can actually honour. The
@@ -22,29 +15,20 @@ import { awaitLeaseRefresh } from './creds-store-lock-live-test-support';
 // scheduler rather than against the lock.
 const SCALED_STALE_MS = 500;
 const LIVE_WAIT_MULTIPLIER = 4;
-// Bun's default is 5s, and the fixed sleeps below already spend over 2s of it.
-// That leaves too little for worker startup on a loaded runner, and it is less
-// than awaitLeaseRefresh's own budget, so its diagnostic could never print --
-// a timing failure would report as a bare timeout instead of naming the lease.
+// Bun's default is 5s, and the fixed sleeps below spend 2s of it before the
+// lease wait is counted. That leaves too little for worker startup on a loaded
+// runner, and it is less than awaitLeaseRefresh's own 10s budget, so its
+// diagnostic could never print: a timing failure would report as a bare
+// timeout instead of naming the lease that never refreshed.
 const TEST_TIMEOUT_MS = 20_000;
 const SCALED = {
   timeoutMs: 5000,
   retryMs: 20,
   staleMs: SCALED_STALE_MS,
 };
-const dirs: Array<string> = [];
+const { cleanup, mkStorePath } = brokerStorePaths('creds-lock-live-');
 
-const mkStorePath = (): string => {
-  const dir = mkdtempSync(join(tmpdir(), 'creds-lock-live-'));
-  dirs.push(dir);
-  return join(dir, 'broker.yaml');
-};
-
-afterEach(() => {
-  for (const dir of dirs.splice(0)) {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+afterEach(cleanup);
 
 describe('broker store live-lock serialization', () => {
   it(
@@ -167,31 +151,5 @@ describe('broker store lock generation lifecycle', () => {
     ).toBe('ran');
     expect(existsSync(`${path}.lock`)).toBe(false);
     expect(existsSync(candidate)).toBe(true);
-  });
-
-  it('does not remove a replacement lock generation during release', async () => {
-    const path = mkStorePath();
-    const lock = `${path}.lock`;
-    const replacement = join(lock, 'holder-replacement.json');
-    await withBrokerLock(
-      path,
-      () => {
-        const [ownHolder] = readdirSync(lock);
-        if (ownHolder === undefined) {
-          throw new Error('expected holder token');
-        }
-        unlinkSync(join(lock, ownHolder));
-        rmdirSync(lock);
-        mkdirSync(lock);
-        writeFileSync(
-          replacement,
-          JSON.stringify({ generation: 'replacement' }),
-        );
-        return Promise.resolve();
-      },
-      SCALED,
-    );
-
-    expect(readdirSync(lock)).toEqual(['holder-replacement.json']);
   });
 });

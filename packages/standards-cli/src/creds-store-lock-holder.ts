@@ -10,6 +10,13 @@ const OWNER_ONLY_FILE_MODE = 0o600;
 const HOLDER_PREFIX = 'holder-';
 const HOLDER_SUFFIX = '.json';
 const LEASE_DIVISOR = 3;
+// Both codes mean the lock is no longer this owner's to clean up. ENOENT: it is
+// already gone. ENOTEMPTY: a contender published its own generation into the
+// directory during the moment the unlink left it empty — renaming onto an empty
+// directory succeeds, which is exactly how a waiter takes the lock. Releasing
+// runs from a finally, so throwing here would replace the result of an
+// operation that already succeeded.
+const RELEASABLE_RMDIR_CODES = ['ENOENT', 'ENOTEMPTY'] as const;
 
 export type HeldBrokerLock = {
   readonly holderPath: string;
@@ -88,17 +95,10 @@ export const releaseBrokerLock = async ({
     }
     throw error;
   }
-  // Both codes mean the lock is no longer this owner's to clean up. ENOENT:
-  // it is already gone. ENOTEMPTY: a contender published its own generation
-  // into the directory during the moment the unlink above left it empty --
-  // renaming onto an empty directory succeeds, which is exactly how a waiter
-  // takes the lock. Releasing runs from a finally, so throwing here would
-  // replace the result of an operation that already succeeded.
-  const releasable = ['ENOENT', 'ENOTEMPTY'];
   try {
     await rmdir(lockPath);
   } catch (error) {
-    if (!releasable.some((code) => isErrorCode(error, code))) {
+    if (!RELEASABLE_RMDIR_CODES.some((code) => isErrorCode(error, code))) {
       throw error;
     }
   }

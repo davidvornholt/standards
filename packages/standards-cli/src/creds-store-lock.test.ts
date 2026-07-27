@@ -1,27 +1,16 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { utimes } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { withBrokerLock } from './creds-store-lock';
 import { inspectBrokerLock } from './creds-store-lock-inspection';
+import { brokerStorePaths } from './creds-store-lock-test-support';
 
 const MS_PER_SECOND = 1000;
 const STALE_AGE_MS = 120_000;
 const HOLD_MS = 25;
 const FAST = { timeoutMs: 500, retryMs: 5 };
-const dirs: Array<string> = [];
-const mkStorePath = (): string => {
-  const dir = mkdtempSync(join(tmpdir(), 'creds-lock-'));
-  dirs.push(dir);
-  return join(dir, 'broker.yaml');
-};
+const { cleanup, mkStorePath } = brokerStorePaths('creds-lock-');
 
 const installHolder = (path: string, generation: string): string => {
   const lock = `${path}.lock`;
@@ -31,11 +20,7 @@ const installHolder = (path: string, generation: string): string => {
   return holder;
 };
 
-afterEach(() => {
-  for (const dir of dirs.splice(0)) {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+afterEach(cleanup);
 
 describe('broker store lock', () => {
   it('reclaims a stale completed generation and proceeds', async () => {

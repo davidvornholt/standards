@@ -1,5 +1,29 @@
-import { readdirSync, statSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+// Each caller keeps its own registry, so one file's afterEach can never remove
+// a temporary store another file's still-running test is holding.
+export const brokerStorePaths = (
+  prefix: string,
+): {
+  readonly cleanup: () => void;
+  readonly mkStorePath: () => string;
+} => {
+  const dirs: Array<string> = [];
+  return {
+    cleanup: (): void => {
+      for (const dir of dirs.splice(0)) {
+        rmSync(dir, { force: true, recursive: true });
+      }
+    },
+    mkStorePath: (): string => {
+      const dir = mkdtempSync(join(tmpdir(), prefix));
+      dirs.push(dir);
+      return join(dir, 'broker.yaml');
+    },
+  };
+};
 
 // The lease that keeps a held lock alive runs in a worker thread, and starting
 // that thread costs more wall clock on a loaded runner than a scaled staleness
@@ -27,10 +51,11 @@ export const awaitLeaseRefresh = async (path: string): Promise<void> => {
   const deadline = Date.now() + LEASE_REFRESH_TIMEOUT_MS;
   await new Promise<void>((resolve, reject) => {
     // Only the first poll runs inside this executor. Every later one arrives
-    // from a timer, where a throw would escape uncaught instead of rejecting:
-    // the awaiting test would hang, and the error would surface against
-    // whichever test ran next. Routing every failure through reject keeps a
-    // failure attributable to the test that caused it.
+    // from a timer, where a throw escapes uncaught instead of rejecting. The
+    // runner attributes that to whichever test is running, which is the right
+    // one only until the awaiting test times out first — after that the error
+    // lands on an innocent neighbour. Rejecting keeps the failure attached to
+    // the test that caused it whatever the runner is doing.
     const poll = (): void => {
       try {
         if (statSync(file).mtimeMs !== acquired) {
