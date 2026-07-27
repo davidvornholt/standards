@@ -12,12 +12,19 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { withBrokerLock } from './creds-store-lock';
+import { awaitLeaseRefresh } from './creds-store-lock-live-test-support';
 
-const SCALED_STALE_MS = 10;
+// The staleness window is scaled down from the 30s default so these tests run
+// in seconds, but not below what a loaded machine can actually honour. The
+// holder keeps its lock alive from a worker thread that refreshes every
+// staleMs/3, so a window narrow enough for one missed scheduling slot to span
+// it makes a live holder look abandoned and the test assert against the
+// scheduler rather than against the lock.
+const SCALED_STALE_MS = 500;
 const LIVE_WAIT_MULTIPLIER = 4;
 const SCALED = {
-  timeoutMs: 500,
-  retryMs: 2,
+  timeoutMs: 5000,
+  retryMs: 20,
   staleMs: SCALED_STALE_MS,
 };
 const dirs: Array<string> = [];
@@ -71,6 +78,7 @@ describe('broker store live-lock serialization', () => {
       );
     const sops = operation('sops', sopsRelease);
     await sopsStarted;
+    await awaitLeaseRefresh(path);
     await new Promise((resolve) => setTimeout(resolve, SCALED_STALE_MS * 2));
     const replacement = operation('same-owner-replacement');
     const contender = operation('other-contender');
@@ -115,6 +123,7 @@ describe('broker store lock generation lifecycle', () => {
       SCALED,
     );
     await started;
+    await awaitLeaseRefresh(path);
     let contenderRan = false;
     const contender = withBrokerLock(
       path,
