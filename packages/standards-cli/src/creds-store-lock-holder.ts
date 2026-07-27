@@ -88,10 +88,17 @@ export const releaseBrokerLock = async ({
     }
     throw error;
   }
+  // Both codes mean the lock is no longer this owner's to clean up. ENOENT:
+  // it is already gone. ENOTEMPTY: a contender published its own generation
+  // into the directory during the moment the unlink above left it empty --
+  // renaming onto an empty directory succeeds, which is exactly how a waiter
+  // takes the lock. Releasing runs from a finally, so throwing here would
+  // replace the result of an operation that already succeeded.
+  const releasable = ['ENOENT', 'ENOTEMPTY'];
   try {
     await rmdir(lockPath);
   } catch (error) {
-    if (!isErrorCode(error, 'ENOENT')) {
+    if (!releasable.some((code) => isErrorCode(error, code))) {
       throw error;
     }
   }

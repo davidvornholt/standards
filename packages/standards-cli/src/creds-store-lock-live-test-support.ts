@@ -21,21 +21,30 @@ const holderFile = (path: string): string => {
   return join(lockPath, holder);
 };
 
-export const awaitLeaseRefresh = (path: string): Promise<void> => {
+export const awaitLeaseRefresh = async (path: string): Promise<void> => {
   const file = holderFile(path);
   const acquired = statSync(file).mtimeMs;
   const deadline = Date.now() + LEASE_REFRESH_TIMEOUT_MS;
-  return new Promise((resolve, reject) => {
+  await new Promise<void>((resolve, reject) => {
+    // Only the first poll runs inside this executor. Every later one arrives
+    // from a timer, where a throw would escape uncaught instead of rejecting:
+    // the awaiting test would hang, and the error would surface against
+    // whichever test ran next. Routing every failure through reject keeps a
+    // failure attributable to the test that caused it.
     const poll = (): void => {
-      if (statSync(file).mtimeMs !== acquired) {
-        resolve();
-        return;
+      try {
+        if (statSync(file).mtimeMs !== acquired) {
+          resolve();
+          return;
+        }
+        if (Date.now() > deadline) {
+          reject(new Error(`the lease never refreshed ${file}`));
+          return;
+        }
+        setTimeout(poll, POLL_MS);
+      } catch (error) {
+        reject(error instanceof Error ? error : new Error(String(error)));
       }
-      if (Date.now() > deadline) {
-        reject(new Error(`the lease never refreshed ${file}`));
-        return;
-      }
-      setTimeout(poll, POLL_MS);
     };
     poll();
   });
