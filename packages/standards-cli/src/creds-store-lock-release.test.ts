@@ -1,23 +1,23 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import {
-  chmodSync,
+  existsSync,
   mkdirSync,
   readdirSync,
+  renameSync,
   rmdirSync,
+  symlinkSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { withBrokerLock } from './creds-store-lock';
 import { brokerStorePaths } from './creds-store-lock-test-support';
 
 // What release does when the lock directory is no longer its own to remove,
-// decided without the clock. The live-lock file next door reaches 200 lines on
-// staleness behaviour alone, and none of that wall time is needed here.
+// decided without the clock. Keeping it out of the live-lock file next door is
+// what holds both under the 200-line limit; none of that file's wall time buys
+// anything here.
 const SCALED = { retryMs: 20, staleMs: 500, timeoutMs: 5000 };
-const READ_ONLY_DIR_MODE = 0o500;
-const OWNER_ONLY_DIR_MODE = 0o700;
-const NOT_PERMITTED = /EACCES|EPERM/u;
 const { cleanup, mkStorePath } = brokerStorePaths('creds-lock-release-');
 
 afterEach(cleanup);
@@ -75,27 +75,29 @@ describe('broker store lock release', () => {
     expect(readdirSync(lock)).toEqual(['holder-replacement.json']);
   });
 
-  // Tolerating the two handover codes must not become tolerating everything: a
-  // read-only parent directory makes the release rmdir fail with EACCES, which
-  // says the lock is still there and still this owner's, and must surface.
+  // Tolerating the two handover codes must not become tolerating everything.
+  // Replacing the lock directory with a symlink to itself lets the unlink pass
+  // through while the rmdir fails with ENOTDIR, which says the lock is still
+  // there and still this owner's, so it must surface. Permissions would be the
+  // obvious way to force this, but root ignores them and CI can be root.
   it('propagates a removal failure that is not a handover', async () => {
     const path = mkStorePath();
-    const parent = dirname(path);
+    const lock = `${path}.lock`;
     const attempt = withBrokerLock(
       path,
       () => {
-        chmodSync(parent, READ_ONLY_DIR_MODE);
+        renameSync(lock, `${lock}.real`);
+        symlinkSync(`${lock}.real`, lock);
         return Promise.resolve();
       },
       SCALED,
     );
 
-    try {
-      await expect(attempt).rejects.toThrow(NOT_PERMITTED);
-    } finally {
-      // Restore before afterEach, which cannot delete through a read-only
-      // parent — a failed assertion would otherwise break cleanup as well.
-      chmodSync(parent, OWNER_ONLY_DIR_MODE);
-    }
+    const error = await attempt.then(
+      () => null,
+      (rejection: unknown) => rejection,
+    );
+    expect(error).toMatchObject({ code: 'ENOTDIR', syscall: 'rmdir' });
+    expect(existsSync(`${lock}.real`)).toBe(true);
   });
 });
