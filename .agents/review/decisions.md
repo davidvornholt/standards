@@ -50,6 +50,12 @@ REST serves ruleset `bypass_actors` only to a user-scoped token holding reposito
 
 Production workflows use maintained major-version tags for external actions instead of full commit SHAs. The owner accepts the minimal risk that an upstream tag could be retargeted; reviews must not request immutable action pins unless that risk assessment changes.
 
+## IMAGE-PROMOTION-001: Superseded promotions never reactivate
+
+When promotion B provably supersedes open promotion A, A enters the terminal `superseded` phase. Later announcements of A attach evidence but never reopen its PR, advance its phase, merge it, or deploy it. If B fails, recovery continues by repairing or retrying B or by announcing a newer source build. Restoring a previously deployed A digest is possible only through a distinct approved rollback operation with its own identity and audit trail; it never reactivates A.
+
+This policy deliberately gives up an older ready candidate as an immediate availability fallback and can lengthen recovery while B or a newer build becomes deployable. The tradeoff is accepted because source-build retry and explicit rollback remain available, while terminal identities prevent stale branches from re-entering the deployment path and keep one unambiguous history for each operation. Reopen this decision if source builds or retries cannot reliably produce a candidate during an incident, the recovery-time objective cannot tolerate the delay in practice, the terminal rule is observed to prolong an outage, or a proposed fallback can preserve provenance, monotonic desired state, and an unambiguous audit trail without reactivating the superseded operation.
+
 ## CREDS-CUSTODY-001: Machine-global plaintext broker custody
 
 The broker store is machine-global state outside every repository, so the repository rule requiring secret values in SOPS-encrypted YAML does not govern it. Plaintext `0600` custody shares the same local-account trust root as the plaintext personal age identity at `~/.config/sops/age/keys.txt`; encrypting the store to a recipient whose private key sits beside it was rejected as theater. Store writes must remain crash-atomic and concurrency-safe so interrupted or simultaneous logins cannot corrupt the file or lose one provider's credential. Reopen this decision if the threat model expands beyond the trusted local account, hardware-backed custody becomes part of the design, or the store moves into a repository, sync, or backup boundary.
