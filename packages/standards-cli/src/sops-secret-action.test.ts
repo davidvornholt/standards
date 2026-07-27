@@ -101,8 +101,13 @@ describe('unresolvable secrets', () => {
     expect(actionRun.sopsExecuted).toBe(scenario.failsAt === 'resolve');
   });
 
-  it('never keeps or executes an unverified binary', () => {
-    const actionRun = runSopsAction({ sha256Status: 1 });
+  it.each([
+    ['the download fails', { curlStatus: 22 }],
+    ['checksum verification fails', { sha256Status: 1 }],
+  ] as ReadonlyArray<
+    readonly [string, SopsActionOptions]
+  >)('never keeps or executes an unverified binary when %s', (_label, options) => {
+    const actionRun = runSopsAction(options);
 
     expect(actionRun.sopsExecuted).toBe(false);
     expect(actionRun.sopsBinaryPresent).toBe(false);
@@ -150,9 +155,10 @@ describe('caller configuration errors', () => {
     expect(actionRun.result.status).toBe(1);
     expect(actionRun.environment).toBe('');
     expect(actionRun.output).toBe('');
-    expect(`${actionRun.result.stdout}${actionRun.result.stderr}`).toContain(
-      '::error::env-name must be a valid environment variable name',
+    expect(actionRun.result.stdout).toBe(
+      '::error::env-name must be a valid environment variable name\n',
     );
+    expect(actionRun.result.stderr).toBe('');
     // Rejected before any network or decrypt work happens.
     expect(actionRun.curlCalled).toBe(false);
     expect(actionRun.sopsExecuted).toBe(false);
