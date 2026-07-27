@@ -83,6 +83,7 @@ export const createSopsActionRunner =
       'set -euo pipefail',
       'printf called > "$CURL_MARKER"',
       'if [ "$FAKE_CURL_STATUS" -ne 0 ]; then',
+      '  printf partial > "$2"',
       '  exit "$FAKE_CURL_STATUS"',
       'fi',
       'cp "$FAKE_SOPS" "$2"',
