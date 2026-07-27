@@ -9,6 +9,7 @@ import {
 import {
   advance,
   deploy,
+  openPromotion,
 } from './image-promotion-reference-lifecycle-test-support';
 import {
   announce,
@@ -66,7 +67,7 @@ const progress = (
   mergeSha: string,
 ): PromotionState => {
   let next = requireState(advance(state, identity, 'branch'), 'advanced');
-  next = requireState(advance(next, identity, 'open'), 'advanced');
+  next = requireState(openPromotion(next, identity, {}), 'advanced');
   next = requireState(advance(next, identity, 'merged', mergeSha), 'advanced');
   return requireState(deploy(next, identity, mergeSha, true), 'advanced');
 };
@@ -79,7 +80,14 @@ it('parses compare outcomes and makes every provenance condition fail closed', (
     'merged',
     'deploy-failed',
     'completed',
+    'superseded',
   ]);
+  expect(writerContract.superseding).toEqual({
+    candidates: 'same-app-open-promotions',
+    compareOutcome: 'descendant',
+    result: 'superseded',
+    trigger: 'promotion-opened-or-reused',
+  });
   const value = candidate(SHA_A, DIGEST_A, '41');
   for (const condition of writerContract.requiredProvenance) {
     const evidence = { ...validEvidence(), [condition]: false };

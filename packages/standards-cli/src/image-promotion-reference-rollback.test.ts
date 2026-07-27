@@ -9,6 +9,7 @@ import {
 import {
   advance,
   deploy,
+  openPromotion,
   rollback,
 } from './image-promotion-reference-lifecycle-test-support';
 import {
@@ -70,7 +71,7 @@ const progress = (
   mergeSha: string,
 ): PromotionState => {
   let next = requireState(advance(state, identity, 'branch'), 'advanced');
-  next = requireState(advance(next, identity, 'open'), 'advanced');
+  next = requireState(openPromotion(next, identity, {}), 'advanced');
   next = requireState(advance(next, identity, 'merged', mergeSha), 'advanced');
   return requireState(deploy(next, identity, mergeSha, true), 'advanced');
 };

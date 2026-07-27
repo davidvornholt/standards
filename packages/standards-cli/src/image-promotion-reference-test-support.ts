@@ -31,6 +31,12 @@ type WriterContract = {
   readonly lifecycle: ReadonlyArray<Operation['phase']>;
   readonly requiredProvenance: ReadonlyArray<string>;
   readonly rollback: { readonly required: ReadonlyArray<string> };
+  readonly superseding: {
+    readonly candidates: 'same-app-open-promotions';
+    readonly compareOutcome: 'descendant';
+    readonly result: 'superseded';
+    readonly trigger: 'promotion-opened-or-reused';
+  };
 };
 export type Operation = {
   readonly candidate: Promotion;
@@ -43,7 +49,8 @@ export type Operation = {
     | 'open'
     | 'merged'
     | 'deploy-failed'
-    | 'completed';
+    | 'completed'
+    | 'superseded';
   readonly prNumber: number | null;
   readonly runEvidence: ReadonlyArray<string>;
 };
