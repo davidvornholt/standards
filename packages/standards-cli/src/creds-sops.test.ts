@@ -76,10 +76,13 @@ describe('SOPS structure reading', () => {
       ENCRYPTED,
     );
     writeFileSync(join(consumer, 'secrets', 'ci.example.yaml'), 'ci: {}\n');
-    expect(listSecretsTargets(consumer)).toEqual([
-      { target: 'ci', rel: 'secrets/ci.yaml' },
-      { target: 'prod-1', rel: 'infra/hosts/prod-1/secrets.yaml' },
-    ]);
+    expect(listSecretsTargets(consumer)).toEqual({
+      targets: [
+        { target: 'ci', rel: 'secrets/ci.yaml' },
+        { target: 'prod-1', rel: 'infra/hosts/prod-1/secrets.yaml' },
+      ],
+      problems: [],
+    });
   });
 
   it('resolves target names the same way as the canonical justfile', () => {

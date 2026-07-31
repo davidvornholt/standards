@@ -76,6 +76,7 @@
     "src/dependabot-update.ts",
     "src/dev-env-brokered.ts",
     "src/dev-env-brokered-allowlist.ts",
+    "src/dev-env-brokered-preserve.ts",
     "src/dev-env-brokered-resolve.ts",
     "src/dev-env-brokered-refresh.ts",
     "src/dev-env-plain-layer.ts",

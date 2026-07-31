@@ -80,6 +80,7 @@ export const resolveBrokeredReferences = (
   consumer: string,
   targets: ReadonlyArray<ComposedDevEnvTarget>,
   allowedReferences: ReadonlySet<string>,
+  preservedReferences: ReadonlySet<string> = new Set(),
 ): ResolvedDevEnv => {
   const problems: Array<string> = [];
   const documents = new Map<string, SopsDocumentResult>();
@@ -111,6 +112,9 @@ export const resolveBrokeredReferences = (
         value: null,
         problem: `${label}: unauthorized brokered S3 pair; add "${allowlistEntry}" to the encrypted secrets/dev.yaml brokeredReferences allowlist`,
       };
+    }
+    if (preservedReferences.has(allowlistEntry)) {
+      return { value: '', problem: null };
     }
     const document = readDocument(reference.brokeredS3);
     if (!document.ok) {

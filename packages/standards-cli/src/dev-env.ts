@@ -1,5 +1,9 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import {
+  type DevEnvRunOptions,
+  renderDevEnvPreservingUnsafeReferences,
+} from './dev-env-brokered-preserve';
 import { resolveBrokeredReferences } from './dev-env-brokered-resolve';
 import { composeDevEnv } from './dev-env-compose';
 import {
@@ -9,7 +13,6 @@ import {
 } from './dev-env-destination';
 import { devEnvGitIgnoreProblem } from './dev-env-destination-gitignore';
 import { parseDevEnvDocument } from './dev-env-document';
-import { renderDotenv } from './dev-env-dotenv';
 import type { DevEnvPlainInput } from './dev-env-plain-layer';
 import { readPlainLayer } from './dev-env-plain-layer';
 import { planDevEnvRemovals } from './dev-env-reconciliation';
@@ -18,8 +21,6 @@ import { applyDevEnvChanges } from './dev-env-transaction';
 
 export const DEV_CONFIG_FILE = 'config/dev.yaml';
 export const DEV_LOCAL_FILE = 'config/dev.local.yaml';
-
-export type { DevEnvPlainInput } from './dev-env-plain-layer';
 
 export type DevEnvInputs = {
   readonly config: DevEnvPlainInput;
@@ -44,6 +45,7 @@ export type DevEnvPlan = {
 export const planDevEnvChanges = (
   consumer: string,
   inputs: DevEnvInputs,
+  options: DevEnvRunOptions = { preservedBrokeredReferences: new Set() },
 ): DevEnvPlan => {
   const layer = (source: string, input: DevEnvPlainInput) =>
     input === null
@@ -68,6 +70,7 @@ export const planDevEnvChanges = (
     consumer,
     composed.targets,
     composed.brokeredReferences,
+    options.preservedBrokeredReferences,
   );
   const problems: Array<string> = [...composed.problems, ...resolved.problems];
   const writes: Array<DevEnvWrite> = [];
@@ -77,14 +80,25 @@ export const planDevEnvChanges = (
     if (existsSync(join(consumer, workspaceDir, 'package.json'))) {
       const ignoreProblem = devEnvGitIgnoreProblem(consumer, rel);
       if (ignoreProblem === null) {
-        writes.push({
+        const composedTarget = composed.targets.find(
+          (candidate) =>
+            candidate.group === target.group &&
+            candidate.workspace === target.workspace,
+        );
+        const rendered = renderDevEnvPreservingUnsafeReferences({
+          consumer,
           rel,
-          content: renderDotenv(
-            `${target.group}.${target.workspace}`,
-            target.sources,
-            target.env,
-          ),
+          sourcePath: `${target.group}.${target.workspace}`,
+          sources: target.sources,
+          resolvedEnv: target.env,
+          composedEnv: composedTarget?.env ?? {},
+          preservedReferences: options.preservedBrokeredReferences,
         });
+        if (rendered.ok) {
+          writes.push({ rel, content: rendered.content });
+        } else {
+          problems.push(rendered.problem);
+        }
       } else {
         problems.push(ignoreProblem);
       }
@@ -102,7 +116,10 @@ export const planDevEnvChanges = (
   };
 };
 
-export const runDevEnv = async (consumer: string): Promise<boolean> => {
+export const runDevEnv = async (
+  consumer: string,
+  options: DevEnvRunOptions = { preservedBrokeredReferences: new Set() },
+): Promise<boolean> => {
   const config = readPlainLayer(consumer, DEV_CONFIG_FILE);
   const secrets = readDevSecrets(consumer);
   const local = readPlainLayer(consumer, DEV_LOCAL_FILE);
@@ -125,11 +142,15 @@ export const runDevEnv = async (consumer: string): Promise<boolean> => {
     console.error(inputProblems.map((problem) => `  - ${problem}`).join('\n'));
     return false;
   }
-  const plan = planDevEnvChanges(consumer, {
-    config: config.input,
-    secrets: secrets.value,
-    local: local.input,
-  });
+  const plan = planDevEnvChanges(
+    consumer,
+    {
+      config: config.input,
+      secrets: secrets.value,
+      local: local.input,
+    },
+    options,
+  );
   const problems = [
     ...plan.problems,
     ...(await devEnvDestinationProblems(consumer, [

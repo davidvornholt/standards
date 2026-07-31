@@ -18,9 +18,17 @@ import { refreshDevEnvForSopsWrites } from './dev-env-brokered-refresh';
 import { resolveGithubRepo } from './github-api';
 
 const gatherRepoState = async (consumer: string, store: BrokerStore) => {
+  const inventory = listSecretsTargets(consumer);
+  if (inventory.problems.length > 0) {
+    return {
+      keysByTarget: new Map<string, ReadonlySet<string>>(),
+      tokens: [] as Array<AccountToken>,
+      problems: inventory.problems,
+    };
+  }
   const keysByTarget = new Map<string, ReadonlySet<string>>();
   const targetKeys = await Promise.all(
-    listSecretsTargets(consumer).map(async ({ target, rel }) => ({
+    inventory.targets.map(async ({ target, rel }) => ({
       target,
       rel,
       keys: await readEncryptedKeys(consumer, rel),
@@ -72,7 +80,7 @@ const applyAction = (
   if (account === undefined) {
     return Promise.resolve({
       failure: `${action.name}: account ${action.accountId} is not in the broker store`,
-      writtenRel: null,
+      refreshEvidence: null,
     });
   }
   if (action.kind === 'renew') {
@@ -80,7 +88,7 @@ const applyAction = (
   }
   return revokePlannedToken(account, action).then((failure) => ({
     failure,
-    writtenRel: null,
+    refreshEvidence: null,
   }));
 };
 
@@ -135,9 +143,9 @@ export const runCredsPlan = async (
   for (const failure of failures) {
     console.error(`standards creds: ${failure}`);
   }
-  const writtenRels = results.flatMap(({ writtenRel }) =>
-    writtenRel === null ? [] : [writtenRel],
+  const refreshEvidence = results.flatMap(({ refreshEvidence: evidence }) =>
+    evidence === null ? [] : [evidence],
   );
-  const refreshed = await refreshDevEnvForSopsWrites(consumer, writtenRels);
+  const refreshed = await refreshDevEnvForSopsWrites(consumer, refreshEvidence);
   return failures.length === 0 && refreshed;
 };

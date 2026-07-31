@@ -7,34 +7,29 @@ import { createAccountToken, deleteAccountToken } from './creds-cloudflare';
 import type { PlannedAction } from './creds-plan-types';
 import { destinationWrites, s3AccessKeyPath, s3PairPaths } from './creds-r2';
 import { inspectSopsScalarDestination, setSopsValues } from './creds-sops';
-import {
-  type SopsStoredValueVerification,
-  verifySopsStoredValue,
-} from './creds-sops-value';
+import { verifySopsStoredValue } from './creds-sops-value';
 import type { CloudflareBrokerAccount } from './creds-store';
-import { resolveTargetRel } from './creds-target';
+import { resolveTargetRelResult } from './creds-target';
+import type { BrokeredRefreshEvidence } from './dev-env-brokered-refresh';
 
 type RenewAction = Extract<PlannedAction, { readonly kind: 'renew' }>;
 
 export type RenewPlannedTokenResult = {
   readonly failure: string | null;
-  readonly writtenRel: string | null;
+  readonly refreshEvidence: BrokeredRefreshEvidence | null;
 };
 
 const renewalResult = (
   failure: string | null,
-  writtenRel: string | null = null,
-): RenewPlannedTokenResult => ({ failure, writtenRel });
+  evidence: BrokeredRefreshEvidence | null = null,
+): RenewPlannedTokenResult => ({ failure, refreshEvidence: evidence });
 
-const committedRel = (
-  rel: string,
-  verified: ReadonlyArray<{
-    readonly result: SopsStoredValueVerification;
-  }>,
-): string | null =>
-  verified.length > 0 &&
-  verified.every(({ result }) => result.ok && result.matches)
-    ? rel
+const refreshEvidence = (
+  action: RenewAction,
+  safety: BrokeredRefreshEvidence['safety'],
+): BrokeredRefreshEvidence | null =>
+  action.format === 's3'
+    ? { target: action.target, key: action.key, safety }
     : null;
 
 const cleanupReplacement = async (
@@ -74,19 +69,18 @@ export const renewPlannedToken = async (
   action: RenewAction,
 ): Promise<RenewPlannedTokenResult> => {
   const { accountId, token: bootstrapToken } = account;
-  const rel = resolveTargetRel(consumer, action.target);
-  if (rel === null) {
-    return renewalResult(
-      `${action.name}: secrets target ${action.target} not found`,
-    );
+  const resolved = resolveTargetRelResult(consumer, action.target);
+  if (!resolved.ok) {
+    return renewalResult(`${action.name}: ${resolved.problem}`);
   }
+  const { rel } = resolved;
   const destinationProblem = await inspectRenewDestinations(
     consumer,
     rel,
     action,
   );
   if (destinationProblem !== null) {
-    return renewalResult(destinationProblem);
+    return renewalResult(destinationProblem, refreshEvidence(action, 'unsafe'));
   }
   if (action.format === 's3') {
     const accessKey = verifySopsStoredValue(
@@ -98,6 +92,7 @@ export const renewPlannedToken = async (
     if (!(accessKey.ok && accessKey.matches)) {
       return renewalResult(
         `${action.name}: could not prove the stored S3 access key belongs to the managed token; renewal stopped before mutation`,
+        refreshEvidence(action, 'unsafe'),
       );
     }
   }
@@ -122,7 +117,6 @@ export const renewPlannedToken = async (
     path: write.path,
     result: verifySopsStoredValue(consumer, rel, write.path, write.value),
   }));
-  const writtenRel = committedRel(rel, verified);
   const unverifiable = verified.flatMap(({ result }) =>
     result.ok ? [] : [result.problem],
   );
@@ -130,7 +124,7 @@ export const renewPlannedToken = async (
     const detail = unverifiable.join('; ');
     return renewalResult(
       `${action.name}: ${written.ok ? detail : `${written.problem}; ${detail}`}; account ${accountId} replacement ${replacementId} and old token ${action.tokenId} remain active because the stored value is unverifiable`,
-      writtenRel,
+      refreshEvidence(action, 'unsafe'),
     );
   }
   const mismatched = verified.flatMap(({ path, result }) =>
@@ -142,7 +136,7 @@ export const renewPlannedToken = async (
       : `${action.name}: ${written.problem}`;
     return renewalResult(
       await cleanupReplacement(account, replacementId, action.tokenId, problem),
-      writtenRel,
+      refreshEvidence(action, 'unsafe'),
     );
   }
   const deleted = await deleteAccountToken(
@@ -154,6 +148,6 @@ export const renewPlannedToken = async (
     deleted.ok
       ? null
       : `${action.name}: replacement ${replacementId} is stored, but old token ${action.tokenId} could not be revoked: ${deleted.problem}`,
-    rel,
+    refreshEvidence(action, 'verified'),
   );
 };

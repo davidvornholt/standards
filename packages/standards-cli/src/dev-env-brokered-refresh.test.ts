@@ -18,6 +18,11 @@ const EXECUTABLE_MODE = 0o755;
 const UNREADABLE_MODE = 0o000;
 const originalPath = process.env.PATH;
 const roots: Array<string> = [];
+const R2_WRITE = {
+  target: 'r2-dev',
+  key: 'r2.dev_rw',
+  safety: 'verified',
+} as const;
 
 const fixture = () => {
   const root = mkdtempSync(join(tmpdir(), 'dev-env-refresh-'));
@@ -80,9 +85,7 @@ const refreshWithExistingEnv = async (
 ) => {
   writeFileSync(setup.destination, 'S3_ACCESS_KEY_ID=REVOKED\n');
   const error = spyOn(console, 'error').mockImplementation(() => undefined);
-  const result = await refreshDevEnvForSopsWrites(setup.consumer, [
-    'secrets/r2-dev.yaml',
-  ]);
+  const result = await refreshDevEnvForSopsWrites(setup.consumer, [R2_WRITE]);
   const reported = error.mock.calls.flat().join('\n');
   return {
     result,
@@ -116,25 +119,22 @@ describe('dev env refresh after brokered SOPS writes', () => {
   it('regenerates env files when a referenced target was written', async () => {
     const setup = fixture();
     const log = spyOn(console, 'log').mockImplementation(() => undefined);
-    try {
-      expect(
-        await refreshDevEnvForSopsWrites(setup.consumer, [
-          'secrets/r2-dev.yaml',
-        ]),
-      ).toBe(true);
-      const generated = readFileSync(setup.destination, 'utf8');
-      expect(generated).toContain('AKID');
-      expect(generated).toContain('AUTH_SECRET');
-    } finally {
-      log.mockRestore();
-    }
+    expect(await refreshDevEnvForSopsWrites(setup.consumer, [R2_WRITE])).toBe(
+      true,
+    );
+    const generated = readFileSync(setup.destination, 'utf8');
+    expect(generated).toContain('AKID');
+    expect(generated).toContain('AUTH_SECRET');
+    log.mockRestore();
   });
 
-  it('leaves env files alone when the written target is not referenced', async () => {
+  it('leaves env files alone when the verified destination is not referenced', async () => {
     const setup = fixture();
     writeFileSync(setup.destination, 'UNCHANGED=true\n');
     expect(
-      await refreshDevEnvForSopsWrites(setup.consumer, ['secrets/ci.yaml']),
+      await refreshDevEnvForSopsWrites(setup.consumer, [
+        { target: 'ci', key: 'ci.token', safety: 'verified' },
+      ]),
     ).toBe(true);
     expect(readFileSync(setup.destination, 'utf8')).toBe('UNCHANGED=true\n');
     expect(existsSync(setup.sopsMarker)).toBe(false);

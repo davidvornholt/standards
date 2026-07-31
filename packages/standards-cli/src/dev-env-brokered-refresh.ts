@@ -11,7 +11,10 @@ import { readPlainLayer } from './dev-env-plain-layer';
 const DEV_PLAIN_LAYERS = ['config/dev.yaml', 'config/dev.local.yaml'] as const;
 
 type LayerReferenceDiscovery = {
-  readonly targetNames: ReadonlyArray<string>;
+  readonly references: ReadonlyArray<{
+    readonly target: string;
+    readonly key: string;
+  }>;
   readonly problems: ReadonlyArray<string>;
 };
 
@@ -21,7 +24,7 @@ const layerReferenceTargets = (
 ): LayerReferenceDiscovery => {
   const layer = readPlainLayer(consumer, layerRel);
   if (layer.input === null) {
-    return { targetNames: [], problems: layer.problems };
+    return { references: [], problems: layer.problems };
   }
   const document = parseDevEnvDocument(
     layer.input.raw,
@@ -29,9 +32,11 @@ const layerReferenceTargets = (
     'configuration',
   );
   return {
-    targetNames: document.targets.flatMap((target) =>
+    references: document.targets.flatMap((target) =>
       Object.values(target.env).flatMap((value) =>
-        typeof value === 'string' ? [] : [value.brokeredS3],
+        typeof value === 'string'
+          ? []
+          : [{ target: value.brokeredS3, key: value.key }],
       ),
     ),
     problems: [...layer.problems, ...document.problems],
@@ -39,39 +44,48 @@ const layerReferenceTargets = (
 };
 
 type BrokeredReferenceDiscovery = {
-  readonly rels: ReadonlySet<string>;
+  readonly references: ReadonlySet<string>;
   readonly problems: ReadonlyArray<string>;
 };
+
+export type BrokeredRefreshEvidence = {
+  readonly target: string;
+  readonly key: string;
+  readonly safety: 'verified' | 'unsafe';
+};
+
+const referenceIdentity = (target: string, key: string): string =>
+  `${target}:${key}`;
 
 const discoverBrokeredReferenceRels = (
   consumer: string,
 ): BrokeredReferenceDiscovery => {
-  const rels = new Set<string>();
+  const references = new Set<string>();
   const problems: Array<string> = [];
   for (const layerRel of DEV_PLAIN_LAYERS) {
     const layer = layerReferenceTargets(consumer, layerRel);
     problems.push(...layer.problems);
-    for (const targetName of layer.targetNames) {
-      const resolved = resolveTargetRelResult(consumer, targetName);
+    for (const reference of layer.references) {
+      const resolved = resolveTargetRelResult(consumer, reference.target);
       if (resolved.ok) {
-        rels.add(resolved.rel);
+        references.add(referenceIdentity(reference.target, reference.key));
       } else {
         problems.push(
           resolved.kind === 'ambiguous'
             ? `dev config references ${resolved.problem}`
-            : `dev config references secrets target "${targetName}", but it is missing or is not a contained regular SOPS file`,
+            : `dev config references secrets target "${reference.target}", but it is missing or is not a contained regular SOPS file`,
         );
       }
     }
   }
-  return { rels, problems };
+  return { references, problems };
 };
 
 export const refreshDevEnvForSopsWrites = async (
   consumer: string,
-  writtenRels: ReadonlyArray<string>,
+  evidence: ReadonlyArray<BrokeredRefreshEvidence>,
 ): Promise<boolean> => {
-  if (writtenRels.length === 0) {
+  if (evidence.length === 0) {
     return true;
   }
   const discovery = discoverBrokeredReferenceRels(consumer);
@@ -87,11 +101,29 @@ export const refreshDevEnvForSopsWrites = async (
     );
     return false;
   }
-  if (!writtenRels.some((rel) => discovery.rels.has(rel))) {
+  const unsafe = new Set(
+    evidence
+      .filter((entry) => entry.safety === 'unsafe')
+      .map((entry) => referenceIdentity(entry.target, entry.key)),
+  );
+  const verified = new Set(
+    evidence
+      .filter((entry) => entry.safety === 'verified')
+      .map((entry) => referenceIdentity(entry.target, entry.key)),
+  );
+  const changedReferences = [...verified].filter(
+    (reference) =>
+      discovery.references.has(reference) && !unsafe.has(reference),
+  );
+  if (changedReferences.length === 0) {
     return true;
   }
   console.log(
     'standards creds: regenerating dev env files (a brokered pair referenced by the dev config changed)',
   );
-  return await runDevEnv(consumer);
+  return await runDevEnv(consumer, {
+    preservedBrokeredReferences: new Set(
+      [...unsafe].filter((reference) => discovery.references.has(reference)),
+    ),
+  });
 };

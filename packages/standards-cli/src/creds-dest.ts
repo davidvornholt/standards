@@ -11,7 +11,10 @@ import {
   readBrokerStore,
   resolveBrokerPath,
 } from './creds-store';
-import { isSafeSecretsTargetName, resolveTargetRel } from './creds-target';
+import {
+  isSafeSecretsTargetName,
+  resolveTargetRelResult,
+} from './creds-target';
 import { resolveGithubRepo } from './github-api';
 import { isRecord } from './github-settings-parse';
 
@@ -20,6 +23,10 @@ export type CredsDestination = {
   readonly key: string;
 };
 export type SecretsTarget = { readonly target: string; readonly rel: string };
+export type SecretsTargetInventory = {
+  readonly targets: ReadonlyArray<SecretsTarget>;
+  readonly problems: ReadonlyArray<string>;
+};
 export type ResolvedContext = {
   readonly repo: string;
   readonly rel: string;
@@ -87,7 +94,7 @@ const isHostTargetCandidate = (consumer: string, name: string): boolean => {
 
 export const listSecretsTargets = (
   consumer: string,
-): ReadonlyArray<SecretsTarget> => {
+): SecretsTargetInventory => {
   const flat = listDir(consumer, 'secrets')
     .filter(isYamlSecrets)
     .map((name) => ({
@@ -104,7 +111,21 @@ export const listSecretsTargets = (
       target: name,
       rel: `infra/hosts/${name}/secrets.yaml`,
     }));
-  return [...flat, ...hosts];
+  const targets = [...flat, ...hosts];
+  const relsByTarget = new Map<string, Array<string>>();
+  for (const { target, rel } of targets) {
+    const rels = relsByTarget.get(target) ?? [];
+    rels.push(rel);
+    relsByTarget.set(target, rels);
+  }
+  const problems = [...relsByTarget.entries()].flatMap(([target, rels]) =>
+    rels.length > 1
+      ? [
+          `secrets target "${target}" is ambiguous because ${rels.join(' and ')} both claim that identity; rename one target so the name binds exactly one encrypted file`,
+        ]
+      : [],
+  );
+  return { targets, problems };
 };
 
 export const resolveContext = async (
@@ -129,14 +150,23 @@ export const resolveContext = async (
     );
     return null;
   }
-  const rel = resolveTargetRel(consumer, dest.target);
-  if (rel === null) {
+  const resolved = resolveTargetRelResult(consumer, dest.target);
+  if (!resolved.ok) {
     console.error(
-      `standards creds: secrets target "${dest.target}" not found; create it with \`just secrets edit ${dest.target}\` first`,
+      `standards creds: ${
+        resolved.kind === 'missing'
+          ? `${resolved.problem}; create it with \`just secrets edit ${dest.target}\` first`
+          : resolved.problem
+      }`,
     );
     return null;
   }
-  return { repo, rel, dest, store: await readBrokerStore(resolveBrokerPath()) };
+  return {
+    repo,
+    rel: resolved.rel,
+    dest,
+    store: await readBrokerStore(resolveBrokerPath()),
+  };
 };
 
 export const selectAccount = (
