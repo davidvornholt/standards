@@ -11,10 +11,9 @@ import {
   readBrokerStore,
   resolveBrokerPath,
 } from './creds-store';
+import { isSafeSecretsTargetName, resolveTargetRel } from './creds-target';
 import { resolveGithubRepo } from './github-api';
 import { isRecord } from './github-settings-parse';
-
-const SAFE_TARGET = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9_-])?$/u;
 
 export type CredsDestination = {
   readonly target: string;
@@ -34,7 +33,7 @@ export const parseDestination = (raw: string): CredsDestination | null => {
   const key = raw.slice(separator + 1);
   return separator > 0 &&
     separator < raw.length - 1 &&
-    SAFE_TARGET.test(target) &&
+    isSafeSecretsTargetName(target) &&
     parseSopsKeyPath(key) !== null
     ? { target, key }
     : null;
@@ -95,31 +94,17 @@ export const listSecretsTargets = (
       target: name.slice(0, -'.yaml'.length),
       rel: `secrets/${name}`,
     }))
-    .filter(({ target }) => SAFE_TARGET.test(target));
+    .filter(({ target }) => isSafeSecretsTargetName(target));
   const hosts = listDir(consumer, 'infra/hosts')
     .filter(
-      (name) => SAFE_TARGET.test(name) && isHostTargetCandidate(consumer, name),
+      (name) =>
+        isSafeSecretsTargetName(name) && isHostTargetCandidate(consumer, name),
     )
     .map((name) => ({
       target: name,
       rel: `infra/hosts/${name}/secrets.yaml`,
     }));
   return [...flat, ...hosts];
-};
-
-export const resolveTargetRel = (
-  consumer: string,
-  target: string,
-): string | null => {
-  if (!SAFE_TARGET.test(target)) {
-    return null;
-  }
-  const host = `infra/hosts/${target}/secrets.yaml`;
-  if (isContainedSopsPath(consumer, host, 'file')) {
-    return host;
-  }
-  const flat = `secrets/${target}.yaml`;
-  return isContainedSopsPath(consumer, flat, 'file') ? flat : null;
 };
 
 export const resolveContext = async (

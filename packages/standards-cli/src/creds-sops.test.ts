@@ -2,13 +2,14 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { listSecretsTargets, resolveTargetRel } from './creds-dest';
+import { listSecretsTargets } from './creds-dest';
 import {
   inspectSopsScalarDestination,
   listEncryptedKeys,
   verifySopsScalarLeaf,
 } from './creds-sops';
 import { applySopsEditorChanges } from './creds-sops-editor';
+import { resolveTargetRel } from './creds-target';
 
 const dirs: Array<string> = [];
 const mkConsumer = (): string => {

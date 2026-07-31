@@ -5,9 +5,8 @@ import {
   type DecodedTokenCondition,
   decodeTokenCondition,
 } from './creds-cloudflare-condition';
+import { requestCloudflare } from './creds-cloudflare-request';
 import { isRecord } from './github-settings-parse';
-
-const API_ROOT = 'https://api.cloudflare.com/client/v4';
 
 export type CfResult<T> =
   | { readonly ok: true; readonly value: T }
@@ -57,14 +56,11 @@ export const cfRequest = async (
   path: string,
   body?: unknown,
 ): Promise<CfResult<Envelope>> => {
-  const response = await fetch(`${API_ROOT}${path}`, {
-    method,
-    headers: {
-      authorization: `Bearer ${token}`,
-      ...(body === undefined ? {} : { 'content-type': 'application/json' }),
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  const requested = await requestCloudflare(token, method, path, body);
+  if (!requested.ok) {
+    return requested;
+  }
+  const response = requested.value;
   let parsed: unknown = null;
   try {
     parsed = (await response.json()) as unknown;

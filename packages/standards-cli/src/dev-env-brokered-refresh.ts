@@ -3,7 +3,7 @@
 // that target. Regenerating here closes the rotation loop: a renewed pair
 // reaches every generated .env.local without a manual copy step.
 
-import { resolveTargetRel } from './creds-dest';
+import { resolveTargetRelResult } from './creds-target';
 import { runDevEnv } from './dev-env';
 import { parseDevEnvDocument } from './dev-env-document';
 import { readPlainLayer } from './dev-env-plain-layer';
@@ -52,13 +52,15 @@ const discoverBrokeredReferenceRels = (
     const layer = layerReferenceTargets(consumer, layerRel);
     problems.push(...layer.problems);
     for (const targetName of layer.targetNames) {
-      const rel = resolveTargetRel(consumer, targetName);
-      if (rel === null) {
-        problems.push(
-          `dev config references secrets target "${targetName}", but it is missing or is not a contained regular SOPS file`,
-        );
+      const resolved = resolveTargetRelResult(consumer, targetName);
+      if (resolved.ok) {
+        rels.add(resolved.rel);
       } else {
-        rels.add(rel);
+        problems.push(
+          resolved.kind === 'ambiguous'
+            ? `dev config references ${resolved.problem}`
+            : `dev config references secrets target "${targetName}", but it is missing or is not a contained regular SOPS file`,
+        );
       }
     }
   }

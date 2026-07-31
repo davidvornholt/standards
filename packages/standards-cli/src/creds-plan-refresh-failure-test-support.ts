@@ -31,7 +31,10 @@ const encryptedPair =
 const secretOf = (target: string): string =>
   createHash('sha256').update(`value-${target}`).digest('hex');
 
-const sopsScript = (targets: ReadonlyArray<string>): string => {
+const sopsScript = (
+  targets: ReadonlyArray<string>,
+  mismatchedSecretTarget: string | null,
+): string => {
   const devSecrets = JSON.stringify({
     brokeredReferences: targets.map((target) => `${target}:r2.pair`),
   });
@@ -42,7 +45,10 @@ const sopsScript = (targets: ReadonlyArray<string>): string => {
       r2: {
         pair: {
           [ACCESS_KEY_FIELD]: `new${target}`,
-          [SECRET_KEY_FIELD]: secretOf(target),
+          [SECRET_KEY_FIELD]:
+            target === mismatchedSecretTarget
+              ? `concurrent-secret-${target}`
+              : secretOf(target),
         },
       },
     })}'`,
@@ -60,7 +66,11 @@ const sopsScript = (targets: ReadonlyArray<string>): string => {
   const extracts = targets.flatMap((target) => [
     `    "secrets/${target}.yaml")`,
     `      if grep -q "new${target}" "$6"; then`,
-    `        case "$3" in *access_key_id*) printf 'new${target}' ;; *) printf '${secretOf(target)}' ;; esac`,
+    `        case "$3" in *access_key_id*) printf 'new${target}' ;; *) printf '${
+      target === mismatchedSecretTarget
+        ? `concurrent-secret-${target}`
+        : secretOf(target)
+    }' ;; esac`,
     `      else printf 'old${target}'; fi ;;`,
   ]);
   return [
@@ -83,6 +93,7 @@ const sopsScript = (targets: ReadonlyArray<string>): string => {
 
 export const refreshFailureFixture = (
   targets: ReadonlyArray<string>,
+  options: { readonly mismatchedSecretTarget?: string } = {},
 ): { readonly consumer: string; readonly destination: string } => {
   root = mkdtempSync(join(tmpdir(), 'creds-plan-refresh-failure-'));
   const consumer = join(root, 'consumer');
@@ -127,7 +138,10 @@ export const refreshFailureFixture = (
   const bin = join(root, 'bin');
   mkdirSync(bin);
   const sops = join(bin, 'sops');
-  writeFileSync(sops, sopsScript(targets));
+  writeFileSync(
+    sops,
+    sopsScript(targets, options.mismatchedSecretTarget ?? null),
+  );
   chmodSync(sops, EXECUTABLE_MODE);
   // biome-ignore lint/style/noProcessEnv: the fake sops binary is isolated to this test fixture.
   process.env.PATH = `${bin}:${originalPath ?? ''}`;

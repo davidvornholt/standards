@@ -4,19 +4,15 @@
 // mismatch deletes the replacement and preserves the old token.
 
 import { createAccountToken, deleteAccountToken } from './creds-cloudflare';
-import { resolveTargetRel } from './creds-dest';
 import type { PlannedAction } from './creds-plan-types';
 import { destinationWrites, s3AccessKeyPath, s3PairPaths } from './creds-r2';
-import {
-  inspectSopsScalarDestination,
-  type SopsWriteResult,
-  setSopsValues,
-} from './creds-sops';
+import { inspectSopsScalarDestination, setSopsValues } from './creds-sops';
 import {
   type SopsStoredValueVerification,
   verifySopsStoredValue,
 } from './creds-sops-value';
 import type { CloudflareBrokerAccount } from './creds-store';
+import { resolveTargetRel } from './creds-target';
 
 type RenewAction = Extract<PlannedAction, { readonly kind: 'renew' }>;
 
@@ -32,12 +28,12 @@ const renewalResult = (
 
 const committedRel = (
   rel: string,
-  written: SopsWriteResult,
   verified: ReadonlyArray<{
     readonly result: SopsStoredValueVerification;
   }>,
 ): string | null =>
-  written.ok || verified.some(({ result }) => result.ok && result.matches)
+  verified.length > 0 &&
+  verified.every(({ result }) => result.ok && result.matches)
     ? rel
     : null;
 
@@ -126,7 +122,7 @@ export const renewPlannedToken = async (
     path: write.path,
     result: verifySopsStoredValue(consumer, rel, write.path, write.value),
   }));
-  const writtenRel = committedRel(rel, written, verified);
+  const writtenRel = committedRel(rel, verified);
   const unverifiable = verified.flatMap(({ result }) =>
     result.ok ? [] : [result.problem],
   );

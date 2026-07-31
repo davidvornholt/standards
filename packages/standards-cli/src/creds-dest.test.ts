@@ -14,9 +14,9 @@ import {
   listSecretsTargets,
   parseDestination,
   resolveContext,
-  resolveTargetRel,
 } from './creds-dest';
 import { setSopsValues } from './creds-sops';
+import { resolveTargetRel } from './creds-target';
 
 const dirs: Array<string> = [];
 afterEach(() => {

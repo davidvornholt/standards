@@ -3,7 +3,7 @@
 // after layer composition so a later layer's literal can override an earlier
 // layer's reference, and a reference that lost the merge is never decrypted.
 
-import { resolveTargetRel } from './creds-dest';
+import { resolveTargetRelResult } from './creds-target';
 import type { BrokeredS3Reference } from './dev-env-brokered';
 import type { ComposedDevEnvTarget } from './dev-env-compose';
 import { encodeBunDotenvValue } from './dev-env-dotenv-value';
@@ -88,14 +88,16 @@ export const resolveBrokeredReferences = (
     if (cached !== undefined) {
       return cached;
     }
-    const rel = resolveTargetRel(consumer, targetName);
-    const result =
-      rel === null
-        ? {
-            ok: false as const,
-            problem: `secrets target "${targetName}" does not exist; create it and mint the pair with \`bun standards creds add cloudflare --s3\``,
-          }
-        : decryptSopsJson(consumer, rel);
+    const resolved = resolveTargetRelResult(consumer, targetName);
+    const result = resolved.ok
+      ? decryptSopsJson(consumer, resolved.rel)
+      : {
+          ok: false as const,
+          problem:
+            resolved.kind === 'ambiguous'
+              ? resolved.problem
+              : `secrets target "${targetName}" does not exist; create it and mint the pair with \`bun standards creds add cloudflare --s3\``,
+        };
     documents.set(targetName, result);
     return result;
   };
