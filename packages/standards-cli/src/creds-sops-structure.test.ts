@@ -30,12 +30,16 @@ describe('SOPS YAML key structure', () => {
     });
   });
 
-  it('still rejects arrays after AST validation', () => {
+  it('skips arrays after AST validation without hiding scalar siblings', () => {
     expect(
-      listEncryptedKeys(encryptedDocument('  tokens: [one, two]\n')),
-    ).toMatchObject({
-      ok: false,
-      kind: 'unsupported-shape',
+      listEncryptedKeys(
+        encryptedDocument(
+          '  tokens: [one, two]\n  scalar_sibling: encrypted\n',
+        ),
+      ),
+    ).toEqual({
+      ok: true,
+      keys: ['ci.scalar_sibling'],
     });
   });
 });
