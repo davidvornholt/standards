@@ -41,7 +41,7 @@ const matrix: ReadonlyArray<
     'config',
     [
       'config/dev.yaml must contain valid YAML',
-      'secrets/dev.yaml top-level key "invalid" must be "apps" or "packages"',
+      'secrets/dev.yaml top-level key "invalid" must be "apps" or "packages" or "brokeredReferences"',
       'secrets/dev.yaml "apps.web" must map env keys to string values',
       'config/dev.local.yaml top-level key "invalid" must be "apps" or "packages"',
       'config/dev.local.yaml "packages" must map workspace names to env objects',
@@ -64,7 +64,7 @@ const matrix: ReadonlyArray<
     [
       'config/dev.yaml top-level key "invalid" must be "apps" or "packages"',
       'config/dev.yaml "apps.web" must map env keys to string values',
-      'secrets/dev.yaml top-level key "invalid" must be "apps" or "packages"',
+      'secrets/dev.yaml top-level key "invalid" must be "apps" or "packages" or "brokeredReferences"',
       'secrets/dev.yaml "apps.web" must map env keys to string values',
       'config/dev.local.yaml must contain valid YAML',
       localIgnoreProblem,

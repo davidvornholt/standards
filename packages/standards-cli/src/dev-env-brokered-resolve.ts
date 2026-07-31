@@ -63,10 +63,14 @@ const lookupReference = (
     }
     node = node[segment];
   }
-  if (!isRecord(node) || typeof node[reference.part] !== 'string') {
+  if (
+    !isRecord(node) ||
+    typeof node.access_key_id !== 'string' ||
+    typeof node.secret_access_key !== 'string'
+  ) {
     return {
       value: null,
-      problem: `key "${reference.key}" does not hold a brokered S3 pair with "${reference.part}"`,
+      problem: `key "${reference.key}" does not hold a complete brokered S3 pair; both "access_key_id" and "secret_access_key" must be strings`,
     };
   }
   return { value: node[reference.part] as string, problem: null };
@@ -75,6 +79,7 @@ const lookupReference = (
 export const resolveBrokeredReferences = (
   consumer: string,
   targets: ReadonlyArray<ComposedDevEnvTarget>,
+  allowedReferences: ReadonlySet<string>,
 ): ResolvedDevEnv => {
   const problems: Array<string> = [];
   const documents = new Map<string, SopsDocumentResult>();
@@ -98,6 +103,13 @@ export const resolveBrokeredReferences = (
     label: string,
     reference: BrokeredS3Reference,
   ): { readonly value: string | null; readonly problem: string | null } => {
+    const allowlistEntry = `${reference.brokeredS3}:${reference.key}`;
+    if (!allowedReferences.has(allowlistEntry)) {
+      return {
+        value: null,
+        problem: `${label}: unauthorized brokered S3 pair; add "${allowlistEntry}" to the encrypted secrets/dev.yaml brokeredReferences allowlist`,
+      };
+    }
     const document = readDocument(reference.brokeredS3);
     if (!document.ok) {
       return { value: null, problem: `${label}: ${document.problem}` };

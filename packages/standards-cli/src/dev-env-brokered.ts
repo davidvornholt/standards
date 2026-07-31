@@ -5,6 +5,7 @@
 // A reference is configuration, never a secret, so the SOPS-encrypted
 // secrets layer must not declare one.
 
+import { parseDestination } from './creds-dest';
 import { parseSopsKeyPath } from './creds-sops-structure';
 import { isRecord } from './github-settings-parse';
 
@@ -34,8 +35,9 @@ export type BrokeredS3ParseResult =
 const isBrokeredS3Part = (value: unknown): value is BrokeredS3Part =>
   BROKERED_S3_PARTS.includes(value as BrokeredS3Part);
 
-// Target-name validity and existence are owned by `resolveTargetRel` at
-// resolution time; parsing only checks the reference's own shape.
+// Target existence and contained-path resolution are owned by
+// `resolveTargetRel` at resolution time; parsing rejects a target name that
+// could never name a broker destination.
 export const parseBrokeredS3Reference = (
   label: string,
   raw: Record<string, unknown>,
@@ -49,9 +51,12 @@ export const parseBrokeredS3Reference = (
     }
   }
   const { brokeredS3: target, key, part } = raw;
-  if (typeof target !== 'string' || target.length === 0) {
+  if (
+    typeof target !== 'string' ||
+    parseDestination(`${target}:reference_validation`) === null
+  ) {
     problems.push(
-      `${label} brokered S3 pair reference needs a non-empty "brokeredS3" secrets target name`,
+      `${label} brokered S3 pair reference needs a valid "brokeredS3" secrets target name`,
     );
   }
   if (typeof key !== 'string' || parseSopsKeyPath(key) === null) {

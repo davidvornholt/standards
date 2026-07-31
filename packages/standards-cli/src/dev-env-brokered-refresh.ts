@@ -18,7 +18,11 @@ const layerReferenceTargets = (
   if (layer.input === null) {
     return [];
   }
-  const document = parseDevEnvDocument(layer.input.raw, layerRel, 'allowed');
+  const document = parseDevEnvDocument(
+    layer.input.raw,
+    layerRel,
+    'configuration',
+  );
   return document.targets.flatMap((target) =>
     Object.values(target.env).flatMap((value) =>
       typeof value === 'string' ? [] : [value.brokeredS3],

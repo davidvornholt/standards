@@ -2,15 +2,20 @@
 // `packages.<name>` map env keys to values — the shape mirrored in
 // secrets/dev.example.yaml. Plain configuration layers may also declare a
 // brokered S3 pair reference instead of a literal; the secrets layer may
-// not, because a reference is configuration. Parsing gathers every problem
-// instead of failing on the first one so a malformed document is repaired
-// in one pass.
+// not, because a reference is configuration. The secrets layer instead owns
+// the encrypted allowlist that authorizes exact target/key pairs. Parsing
+// gathers every problem instead of failing on the first one so a malformed
+// document is repaired in one pass.
 
 import {
   type BrokeredS3Reference,
   isBrokeredS3ReferenceShape,
   parseBrokeredS3Reference,
 } from './dev-env-brokered';
+import {
+  BROKERED_REFERENCES_KEY,
+  parseBrokeredAllowlist,
+} from './dev-env-brokered-allowlist';
 import { encodeBunDotenvValue } from './dev-env-dotenv-value';
 import { isRecord } from './github-settings-parse';
 
@@ -18,7 +23,7 @@ export type DevEnvValue = string | BrokeredS3Reference;
 
 export type EnvValues = Readonly<Record<string, DevEnvValue>>;
 
-export type DevEnvReferencesMode = 'allowed' | 'forbidden';
+export type DevEnvLayerKind = 'configuration' | 'secrets';
 
 export type DevEnvTarget = {
   readonly group: string;
@@ -29,6 +34,7 @@ export type DevEnvTarget = {
 
 export type DevEnvDocument = {
   readonly targets: ReadonlyArray<DevEnvTarget>;
+  readonly brokeredReferences: ReadonlySet<string>;
   readonly problems: ReadonlyArray<string>;
 };
 
@@ -45,7 +51,7 @@ const parseWorkspaceValue = (
   label: string,
   key: string,
   value: unknown,
-  references: DevEnvReferencesMode,
+  layerKind: DevEnvLayerKind,
 ): {
   readonly value: DevEnvValue | null;
   readonly problems: ReadonlyArray<string>;
@@ -61,7 +67,7 @@ const parseWorkspaceValue = (
       : { value, problems: [] };
   }
   if (isBrokeredS3ReferenceShape(value)) {
-    if (references === 'forbidden') {
+    if (layerKind === 'secrets') {
       return {
         value: null,
         problems: [
@@ -77,7 +83,7 @@ const parseWorkspaceValue = (
   return {
     value: null,
     problems: [
-      references === 'allowed'
+      layerKind === 'configuration'
         ? `${label}.${key} must be a string value or a brokered S3 pair reference`
         : `${label}.${key} must be a string value`,
     ],
@@ -87,7 +93,7 @@ const parseWorkspaceValue = (
 const parseWorkspaceEnv = (
   label: string,
   raw: Record<string, unknown>,
-  references: DevEnvReferencesMode,
+  layerKind: DevEnvLayerKind,
 ): {
   readonly env: EnvValues;
   readonly declaredKeys: ReadonlySet<string>;
@@ -105,7 +111,7 @@ const parseWorkspaceEnv = (
         `${label} env key ${JSON.stringify(key)} must be a portable environment variable name`,
       );
     }
-    const parsed = parseWorkspaceValue(label, key, value, references);
+    const parsed = parseWorkspaceValue(label, key, value, layerKind);
     problems.push(...parsed.problems);
     if (portableName && parsed.value !== null) {
       env[key] = parsed.value;
@@ -118,7 +124,7 @@ const parseWorkspaces = (
   source: string,
   group: string,
   workspaces: Record<string, unknown>,
-  references: DevEnvReferencesMode,
+  layerKind: DevEnvLayerKind,
 ): ParsedWorkspaces => {
   const problems: Array<string> = [];
   const targets: Array<DevEnvTarget> = [];
@@ -133,7 +139,7 @@ const parseWorkspaces = (
       const parsed = parseWorkspaceEnv(
         `${source} "${group}.${workspace}"`,
         env,
-        references,
+        layerKind,
       );
       problems.push(...parsed.problems);
       if (validWorkspace) {
@@ -156,23 +162,31 @@ const parseWorkspaces = (
 export const parseDevEnvDocument = (
   raw: unknown,
   source: string,
-  references: DevEnvReferencesMode,
+  layerKind: DevEnvLayerKind,
 ): DevEnvDocument => {
   if (!isRecord(raw)) {
     return {
       targets: [],
+      brokeredReferences: new Set(),
       problems: [`${source} must decrypt to a YAML object`],
     };
   }
   const problems: Array<string> = [];
   const targets: Array<DevEnvTarget> = [];
+  const brokeredReferences = new Set<string>();
   for (const [group, workspaces] of Object.entries(raw)) {
-    if (!WORKSPACE_GROUPS.includes(group)) {
+    if (group === BROKERED_REFERENCES_KEY) {
+      const parsed = parseBrokeredAllowlist(source, workspaces, layerKind);
+      problems.push(...parsed.problems);
+      for (const entry of parsed.entries) {
+        brokeredReferences.add(entry);
+      }
+    } else if (!WORKSPACE_GROUPS.includes(group)) {
       problems.push(
-        `${source} top-level key "${group}" must be "apps" or "packages"`,
+        `${source} top-level key "${group}" must be "apps" or "packages"${layerKind === 'secrets' ? ` or "${BROKERED_REFERENCES_KEY}"` : ''}`,
       );
     } else if (isRecord(workspaces)) {
-      const parsed = parseWorkspaces(source, group, workspaces, references);
+      const parsed = parseWorkspaces(source, group, workspaces, layerKind);
       problems.push(...parsed.problems);
       targets.push(...parsed.targets);
     } else {
@@ -181,5 +195,5 @@ export const parseDevEnvDocument = (
       );
     }
   }
-  return { targets, problems };
+  return { targets, brokeredReferences, problems };
 };

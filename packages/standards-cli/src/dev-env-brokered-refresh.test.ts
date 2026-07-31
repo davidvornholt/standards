@@ -43,7 +43,10 @@ const fixture = (): string => {
   writeFileSync(join(consumer, 'secrets/r2-dev.yaml'), 'encrypted\n');
   const bin = join(root, 'bin');
   mkdirSync(bin);
-  const devSecrets = JSON.stringify({ apps: { web: { AUTH_SECRET: 's' } } });
+  const devSecrets = JSON.stringify({
+    brokeredReferences: ['r2-dev:r2.dev_rw'],
+    apps: { web: { AUTH_SECRET: 's' } },
+  });
   const pair = JSON.stringify({
     r2: { dev_rw: { access_key_id: 'AKID', secret_access_key: 'SECRET' } },
   });

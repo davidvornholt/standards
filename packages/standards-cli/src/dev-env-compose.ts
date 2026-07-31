@@ -24,6 +24,7 @@ export type ComposedDevEnvTarget = {
 
 export type ComposedDevEnv = {
   readonly targets: ReadonlyArray<ComposedDevEnvTarget>;
+  readonly brokeredReferences: ReadonlySet<string>;
   readonly problems: ReadonlyArray<string>;
 };
 
@@ -120,5 +121,9 @@ export const composeDevEnv = (
       env: target.env,
       sources: target.sources,
     }));
-  return { targets, problems };
+  return {
+    targets,
+    brokeredReferences: secrets.document.brokeredReferences,
+    problems,
+  };
 };

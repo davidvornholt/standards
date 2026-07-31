@@ -33,7 +33,7 @@ const documentProblems = (
 ): ReadonlyArray<string> =>
   input === null
     ? []
-    : parseDevEnvDocument(input.raw, source, 'allowed').problems;
+    : parseDevEnvDocument(input.raw, source, 'configuration').problems;
 
 export type DevEnvPlan = {
   readonly writes: ReadonlyArray<DevEnvWrite>;
@@ -48,7 +48,10 @@ export const planDevEnvChanges = (
   const layer = (source: string, input: DevEnvPlainInput) =>
     input === null
       ? null
-      : { source, document: parseDevEnvDocument(input.raw, source, 'allowed') };
+      : {
+          source,
+          document: parseDevEnvDocument(input.raw, source, 'configuration'),
+        };
   const composed = composeDevEnv(
     layer(DEV_CONFIG_FILE, inputs.config),
     {
@@ -56,12 +59,16 @@ export const planDevEnvChanges = (
       document: parseDevEnvDocument(
         inputs.secrets,
         DEV_SECRETS_FILE,
-        'forbidden',
+        'secrets',
       ),
     },
     layer(DEV_LOCAL_FILE, inputs.local),
   );
-  const resolved = resolveBrokeredReferences(consumer, composed.targets);
+  const resolved = resolveBrokeredReferences(
+    consumer,
+    composed.targets,
+    composed.brokeredReferences,
+  );
   const problems: Array<string> = [...composed.problems, ...resolved.problems];
   const writes: Array<DevEnvWrite> = [];
   for (const target of resolved.targets) {
@@ -109,8 +116,7 @@ export const runDevEnv = async (consumer: string): Promise<boolean> => {
     ...(localIgnoreProblem === null ? [] : [localIgnoreProblem]),
     ...documentProblems(DEV_CONFIG_FILE, config.input),
     ...(secrets.ok
-      ? parseDevEnvDocument(secrets.value, DEV_SECRETS_FILE, 'forbidden')
-          .problems
+      ? parseDevEnvDocument(secrets.value, DEV_SECRETS_FILE, 'secrets').problems
       : []),
     ...documentProblems(DEV_LOCAL_FILE, local.input),
   ];
