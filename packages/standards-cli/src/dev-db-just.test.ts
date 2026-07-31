@@ -7,12 +7,15 @@ import {
   calls,
   control,
   createFixture,
+  expectedReadinessArguments,
+  expectedRunArguments,
   inspectedOnly,
   managed,
   present,
   readinessAttempts,
   rejectedBeforePodman,
   run,
+  runFakePodman,
   transientAttempts,
 } from './dev-db-just-test-support';
 
@@ -68,16 +71,20 @@ describe('canonical dev database managed lifecycle', () => {
     const running = fixture();
     present(running);
     expect(run(running, 'dev-db-start').status).toBe(0);
-    expect(calls(running)).not.toContain(`start ${running.name}`);
+    expect(calls(running)).not.toContain(
+      JSON.stringify(['start', running.name]),
+    );
     const stopped = fixture();
     present(stopped, managed(stopped.name, false));
     expect(run(stopped, 'dev-db-start').status).toBe(0);
-    expect(calls(stopped)).toContain(`start ${stopped.name}`);
+    expect(calls(stopped)).toContain(JSON.stringify(['start', stopped.name]));
     expect(run(stopped, 'dev-db-stop').stdout).toContain('stopped');
     for (const action of ['dev-db-stop', 'dev-db-status']) {
       const absent = fixture();
       expect(run(absent, action).status).toBe(0);
-      expect(calls(absent)).toBe(`container exists ${absent.name}\n`);
+      expect(calls(absent)).toBe(
+        `${JSON.stringify(['container', 'exists', absent.name])}\n`,
+      );
     }
   });
 
@@ -99,12 +106,38 @@ describe('canonical dev database managed lifecycle', () => {
 });
 
 describe('canonical dev database failures and readiness', () => {
+  it('rejects option and value pairs combined into one argument', () => {
+    const value = fixture();
+    const runArguments = [...expectedRunArguments(value.name)];
+    runArguments.splice(
+      runArguments.indexOf('-e'),
+      2,
+      '-e POSTGRES_USER=file-user',
+    );
+    const runResult = runFakePodman(value, runArguments);
+    expect(runResult.status).not.toBe(0);
+    expect(runResult.stderr).toContain('unexpected Podman argument array');
+    const readinessArguments = [...expectedReadinessArguments(value.name)];
+    readinessArguments.splice(
+      readinessArguments.indexOf('--host'),
+      2,
+      '--host 127.0.0.1',
+    );
+    const readinessResult = runFakePodman(value, readinessArguments);
+    expect(readinessResult.status).not.toBe(0);
+    expect(readinessResult.stderr).toContain(
+      'unexpected Podman argument array',
+    );
+  });
+
   it('fails closed when absence checks error', () => {
     for (const action of ['dev-db-start', 'dev-db-stop', 'dev-db-status']) {
       const value = fixture();
       control(value, 'exists-error');
       expect(run(value, action).status).not.toBe(0);
-      expect(calls(value)).toBe(`container exists ${value.name}\n`);
+      expect(calls(value)).toBe(
+        `${JSON.stringify(['container', 'exists', value.name])}\n`,
+      );
     }
   });
 
@@ -131,7 +164,7 @@ describe('canonical dev database failures and readiness', () => {
       control(value, failure);
       const action = failure === 'stop-error' ? 'dev-db-stop' : 'dev-db-start';
       expect(run(value, action).status).not.toBe(0);
-      expect(calls(value)).not.toContain('exec --env PGPASSWORD');
+      expect(calls(value)).not.toContain('"exec","--env","PGPASSWORD"');
     }
   });
 
@@ -140,9 +173,9 @@ describe('canonical dev database failures and readiness', () => {
     present(transient);
     control(transient, 'transient', '2');
     expect(run(transient, 'dev-db-start').status).toBe(0);
-    expect(calls(transient).match(/exec --env PGPASSWORD/gu)).toHaveLength(
-      transientAttempts,
-    );
+    expect(
+      calls(transient).match(/"exec","--env","PGPASSWORD"/gu),
+    ).toHaveLength(transientAttempts);
     for (const reason of 'password authentication failed|role does not exist|database does not exist|server is starting'.split(
       '|',
     )) {
@@ -152,7 +185,7 @@ describe('canonical dev database failures and readiness', () => {
       const result = run(value, 'dev-db-start');
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain(reason);
-      expect(calls(value).match(/exec --env PGPASSWORD/gu)).toHaveLength(
+      expect(calls(value).match(/"exec","--env","PGPASSWORD"/gu)).toHaveLength(
         readinessAttempts,
       );
     }
