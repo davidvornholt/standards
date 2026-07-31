@@ -16,11 +16,14 @@ type BunLock = {
   readonly workspaces: Readonly<Record<string, { readonly version: string }>>;
 };
 
+const README_NIX_RELEASE_TAG =
+  /url = "github:davidvornholt\/standards\/v(?<version>\d+\.\d+\.\d+)";/u;
+
 const readJson = <T>(relativePath: string): T =>
   JSON.parse(readFileSync(join(ACTUAL_UPSTREAM, relativePath), 'utf8')) as T;
 
 describe('standards CLI release version', () => {
-  it('keeps the published manifest, template pin, and lock metadata aligned', () => {
+  it('keeps the manifest, template pin, lock metadata, and README tag aligned', () => {
     const packageManifest = readJson<PublishedPackageManifest>(
       'packages/standards-cli/package.json',
     );
@@ -30,6 +33,10 @@ describe('standards CLI release version', () => {
     const lock = JSONC.parse(
       readFileSync(join(ACTUAL_UPSTREAM, 'bun.lock'), 'utf8'),
     ) as BunLock;
+    const readmeReleaseTag = readFileSync(
+      join(ACTUAL_UPSTREAM, 'README.md'),
+      'utf8',
+    ).match(README_NIX_RELEASE_TAG)?.groups?.version;
 
     expect(templateManifest.devDependencies['@davidvornholt/standards']).toBe(
       packageManifest.version,
@@ -37,5 +44,6 @@ describe('standards CLI release version', () => {
     expect(lock.workspaces['packages/standards-cli']?.version).toBe(
       packageManifest.version,
     );
+    expect(readmeReleaseTag).toBe(packageManifest.version);
   });
 });
