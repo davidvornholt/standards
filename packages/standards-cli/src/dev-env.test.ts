@@ -3,7 +3,13 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { planDevEnvWrites } from './dev-env';
+import { type DevEnvInputs, planDevEnvWrites } from './dev-env';
+
+const secretsOnly = (raw: unknown): DevEnvInputs => ({
+  config: null,
+  secrets: raw,
+  local: null,
+});
 
 const EMPTY_EXPANSION = ['$', '{:-}'].join('');
 const INVALID_WORKSPACE_COUNT = 4;
@@ -29,9 +35,12 @@ describe('dev env plan', () => {
   it('plans one gitignored .env.local per declared workspace', () => {
     const consumer = buildConsumer();
     try {
-      const plan = planDevEnvWrites(consumer, {
-        apps: { web: { AUTH_SECRET: 'dev-secret' } },
-      });
+      const plan = planDevEnvWrites(
+        consumer,
+        secretsOnly({
+          apps: { web: { AUTH_SECRET: 'dev-secret' } },
+        }),
+      );
 
       expect(plan.problems).toEqual([]);
       expect(plan.writes.map((write) => write.rel)).toEqual([
@@ -48,10 +57,13 @@ describe('dev env plan', () => {
   it('gathers missing-workspace and document problems together', () => {
     const consumer = buildConsumer();
     try {
-      const plan = planDevEnvWrites(consumer, {
-        apps: { web: { OK: 'yes' }, ghost: { OK: 'yes' } },
-        infra: { host: {} },
-      });
+      const plan = planDevEnvWrites(
+        consumer,
+        secretsOnly({
+          apps: { web: { OK: 'yes' }, ghost: { OK: 'yes' } },
+          infra: { host: {} },
+        }),
+      );
 
       expect(plan.problems).toEqual([
         'secrets/dev.yaml top-level key "infra" must be "apps" or "packages"',
@@ -68,9 +80,12 @@ describe('dev env plan', () => {
   it('refuses a target git would track', () => {
     const consumer = buildConsumer({ gitignore: 'node_modules/\n' });
     try {
-      const plan = planDevEnvWrites(consumer, {
-        apps: { web: { OK: 'yes' } },
-      });
+      const plan = planDevEnvWrites(
+        consumer,
+        secretsOnly({
+          apps: { web: { OK: 'yes' } },
+        }),
+      );
 
       expect(plan.writes).toEqual([]);
       expect(plan.problems).toEqual([
@@ -87,9 +102,12 @@ describe('dev env plan', () => {
       mkdirSync(join(consumer, 'apps/web'), { recursive: true });
       writeFileSync(join(consumer, 'apps/web/package.json'), '{}\n');
 
-      const plan = planDevEnvWrites(consumer, {
-        apps: { web: { OK: 'yes' } },
-      });
+      const plan = planDevEnvWrites(
+        consumer,
+        secretsOnly({
+          apps: { web: { OK: 'yes' } },
+        }),
+      );
 
       expect(plan.writes).toEqual([]);
       expect(plan.problems).toEqual([
@@ -103,14 +121,17 @@ describe('dev env plan', () => {
   it('does not plan path-like workspace names', () => {
     const consumer = buildConsumer();
     try {
-      const plan = planDevEnvWrites(consumer, {
-        apps: {
-          '..': { OK: 'yes' },
-          'nested/name': { OK: 'yes' },
-          '/absolute': { OK: 'yes' },
-          'with space': { OK: 'yes' },
-        },
-      });
+      const plan = planDevEnvWrites(
+        consumer,
+        secretsOnly({
+          apps: {
+            '..': { OK: 'yes' },
+            'nested/name': { OK: 'yes' },
+            '/absolute': { OK: 'yes' },
+            'with space': { OK: 'yes' },
+          },
+        }),
+      );
 
       expect(plan.writes).toEqual([]);
       expect(plan.problems).toHaveLength(INVALID_WORKSPACE_COUNT);

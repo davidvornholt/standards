@@ -1,46 +1,19 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { composeDevEnv } from './dev-env-compose';
 import {
   type DevEnvWrite,
   devEnvDestinationProblems,
 } from './dev-env-destination';
 import { parseDevEnvDocument } from './dev-env-document';
 import { renderDotenv } from './dev-env-dotenv';
+import { DEV_SECRETS_FILE, decryptDevSecrets } from './dev-env-secrets';
 import { writeDevEnvFiles } from './dev-env-transaction';
-import { runSops } from './sops-exec';
+import { parseYaml } from './yaml-parse';
 
-export const DEV_SECRETS_FILE = 'secrets/dev.yaml';
-
-const SOPS_ARGS = ['--decrypt', '--output-type', 'json', DEV_SECRETS_FILE];
-
-type DecryptResult =
-  | { readonly ok: true; readonly value: unknown }
-  | { readonly ok: false; readonly problem: string };
-
-// sops emits JSON here so the CLI never parses the encrypted YAML itself.
-const decryptDevSecrets = (consumer: string): DecryptResult => {
-  const result = runSops(SOPS_ARGS, consumer);
-  if (result.status !== 0) {
-    const detail = result.errorMessage ?? result.stderr.trim();
-    return {
-      ok: false,
-      problem: detail
-        ? `could not decrypt ${DEV_SECRETS_FILE}: ${detail}`
-        : `could not decrypt ${DEV_SECRETS_FILE}`,
-    };
-  }
-  try {
-    return { ok: true, value: JSON.parse(result.stdout) as unknown };
-  } catch (error) {
-    return {
-      ok: false,
-      problem: `could not parse decrypted ${DEV_SECRETS_FILE} as JSON: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    };
-  }
-};
+export const DEV_CONFIG_FILE = 'config/dev.yaml';
+export const DEV_LOCAL_FILE = 'config/dev.local.yaml';
 
 // Writing decrypted values into the tree is only safe when git will never
 // track them. `git check-ignore` is authoritative; anything but a clear
@@ -61,6 +34,40 @@ const gitIgnoreProblem = (consumer: string, rel: string): string | null => {
   return `cannot verify ${rel} is gitignored (git check-ignore exited ${result.status})`;
 };
 
+export type DevEnvPlainInput = { readonly raw: unknown } | null;
+
+export type DevEnvInputs = {
+  readonly config: DevEnvPlainInput;
+  readonly secrets: unknown;
+  readonly local: DevEnvPlainInput;
+};
+
+type PlainLayerResult = {
+  readonly input: DevEnvPlainInput;
+  readonly problems: ReadonlyArray<string>;
+};
+
+// A plain layer file may hold only comments while a repo declares nothing in
+// it; that parses to null and composes as an empty document.
+const readPlainLayer = (consumer: string, rel: string): PlainLayerResult => {
+  const path = join(consumer, rel);
+  if (!existsSync(path)) {
+    return { input: null, problems: [] };
+  }
+  let raw: string;
+  try {
+    raw = readFileSync(path, 'utf8');
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return { input: null, problems: [`could not read ${rel}: ${detail}`] };
+  }
+  const parsed = parseYaml(raw, rel);
+  if (parsed.problem !== null) {
+    return { input: null, problems: [parsed.problem] };
+  }
+  return { input: { raw: parsed.value ?? {} }, problems: [] };
+};
+
 export type DevEnvPlan = {
   readonly writes: ReadonlyArray<DevEnvWrite>;
   readonly problems: ReadonlyArray<string>;
@@ -68,12 +75,23 @@ export type DevEnvPlan = {
 
 export const planDevEnvWrites = (
   consumer: string,
-  raw: unknown,
+  inputs: DevEnvInputs,
 ): DevEnvPlan => {
-  const document = parseDevEnvDocument(raw, DEV_SECRETS_FILE);
-  const problems: Array<string> = [...document.problems];
+  const layer = (source: string, input: DevEnvPlainInput) =>
+    input === null
+      ? null
+      : { source, document: parseDevEnvDocument(input.raw, source) };
+  const composed = composeDevEnv(
+    layer(DEV_CONFIG_FILE, inputs.config),
+    {
+      source: DEV_SECRETS_FILE,
+      document: parseDevEnvDocument(inputs.secrets, DEV_SECRETS_FILE),
+    },
+    layer(DEV_LOCAL_FILE, inputs.local),
+  );
+  const problems: Array<string> = [...composed.problems];
   const writes: Array<DevEnvWrite> = [];
-  for (const target of document.targets) {
+  for (const target of composed.targets) {
     const workspaceDir = `${target.group}/${target.workspace}`;
     const rel = `${workspaceDir}/.env.local`;
     if (existsSync(join(consumer, workspaceDir, 'package.json'))) {
@@ -83,7 +101,7 @@ export const planDevEnvWrites = (
           rel,
           content: renderDotenv(
             `${target.group}.${target.workspace}`,
-            DEV_SECRETS_FILE,
+            target.sources,
             target.env,
           ),
         });
@@ -92,7 +110,7 @@ export const planDevEnvWrites = (
       }
     } else {
       problems.push(
-        `${DEV_SECRETS_FILE} defines ${target.group}.${target.workspace}, but ${workspaceDir}/package.json does not exist`,
+        `${target.sources.join(' + ')} defines ${target.group}.${target.workspace}, but ${workspaceDir}/package.json does not exist`,
       );
     }
   }
@@ -111,8 +129,21 @@ export const runDevEnv = async (consumer: string): Promise<boolean> => {
     console.error(`standards dev-env: ${decrypted.problem}`);
     return false;
   }
-  const plan = planDevEnvWrites(consumer, decrypted.value);
+  const config = readPlainLayer(consumer, DEV_CONFIG_FILE);
+  const local = readPlainLayer(consumer, DEV_LOCAL_FILE);
+  // The local layer may override secret values, so it must be as untrackable
+  // as the generated env files it feeds.
+  const localIgnoreProblem =
+    local.input === null ? null : gitIgnoreProblem(consumer, DEV_LOCAL_FILE);
+  const plan = planDevEnvWrites(consumer, {
+    config: config.input,
+    secrets: decrypted.value,
+    local: local.input,
+  });
   const problems = [
+    ...config.problems,
+    ...local.problems,
+    ...(localIgnoreProblem === null ? [] : [localIgnoreProblem]),
     ...plan.problems,
     ...(await devEnvDestinationProblems(consumer, plan.writes)),
   ];
@@ -140,8 +171,13 @@ export const runDevEnv = async (consumer: string): Promise<boolean> => {
   for (const write of plan.writes) {
     console.log(`  wrote ${write.rel}`);
   }
+  const inputFiles = [
+    ...(config.input === null ? [] : [DEV_CONFIG_FILE]),
+    DEV_SECRETS_FILE,
+    ...(local.input === null ? [] : [DEV_LOCAL_FILE]),
+  ];
   console.log(
-    `standards dev-env: generated ${plan.writes.length} env file(s) from ${DEV_SECRETS_FILE}`,
+    `standards dev-env: generated ${plan.writes.length} env file(s) from ${inputFiles.join(' + ')}`,
   );
   return true;
 };

@@ -965,7 +965,7 @@ Commands:
   doctor      Validate extension seams only
   structure   Validate monorepo structure rules only
   dependabot  Verify (--check) or regenerate (--write) the composed .github/dependabot.yml
-  dev-env     Write each workspace's generated .env.local from the SOPS-encrypted secrets/dev.yaml
+  dev-env     Compose each workspace's generated .env.local from config/dev.yaml, the SOPS-encrypted secrets/dev.yaml, and gitignored config/dev.local.yaml overrides
   github      Compare (--check) or converge (--apply) live GitHub settings
   creds       Mint, rotate, and revoke brokered credentials (see \`standards creds help\`)
   poller      Run one fix-poller tick over the configured repositories (host automation)

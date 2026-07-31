@@ -12,7 +12,7 @@ Reusable engineering standards live in one upstream repo, `davidvornholt/standar
 ## The three buckets
 
 - **Bucket 1 — synced (upstream-owned, read-only).** Mirrored on every `sync`, including deletions. Listed in `sync-standards.json` under `paths`.
-- **Bucket 2 — repo-owned (seeded once or created by the consumer, then diverges).** Seeded files are written from the template's seed dir during `init`; other designated seams can be created when needed. `sync` never touches either kind. Examples: `biome.jsonc`, `AGENTS.local.md`, `local.just`, `.github/dependabot.local.yml`, `.sops.yaml`, `secrets/*`, root `package.json`, `turbo.json`, `README.md`.
+- **Bucket 2 — repo-owned (seeded once or created by the consumer, then diverges).** Seeded files are written from the template's seed dir during `init`; other designated seams can be created when needed. `sync` never touches either kind. Examples: `biome.jsonc`, `AGENTS.local.md`, `local.just`, `.github/dependabot.local.yml`, `.sops.yaml`, `secrets/*`, `config/*`, root `package.json`, `turbo.json`, `README.md`.
 - **Bucket 3 — generated (engine-owned output).** Recomposed by every `init`/`sync` (and by `dependabot --write`) from a bucket-1 source plus a bucket-2 seam; hand edits are drift that `check` flags. Currently: `.github/dependabot.yml`, composed from `.github/dependabot.base.yml` + `.github/dependabot.local.yml`.
 
 ## Symlinks are first-class managed paths

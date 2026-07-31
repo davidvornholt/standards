@@ -121,6 +121,10 @@ in
 }
 ```
 
+### Migration to 0.21.0
+
+Version 0.21.0 makes `standards dev-env` compose each workspace's generated `.env.local` from three workspace-keyed layers instead of one: the tracked plain `config/dev.yaml` for shared non-secret configuration, the SOPS-encrypted `secrets/dev.yaml` for shared secrets (still required), and the gitignored plain `config/dev.local.yaml` for per-developer/per-machine overrides, which wins over both and may override secret values. Later layers override earlier ones per env key; a key declared in both tracked layers fails validation, because a value is either configuration or a secret. Plain layers are optional and may be comment-only. Gitignore `config/dev.local.yaml` before running the command — it refuses to run while git would track that file, exactly as it refuses trackable `.env.local` targets. The generated file is now the complete effective dev environment, so repo-local mechanisms that layered extra configuration onto workspace processes at launch time (wrapper recipes, launcher packages, per-workspace tracked env files) should migrate their values into the new layers and be deleted. Upgrade `@davidvornholt/standards` and `bun.lock` to 0.21.0 before or with the sync that delivers the updated `AGENTS.md` and `justfile` text, so the described composition actually runs.
+
 ### Breaking migration to 0.17.0
 
 Poller Codex runs now receive the host's GitHub token and use `gh` for repository collaboration instead of converting every GitHub operation into a clarification or a poller-side deferred action. Before upgrading a polling host, add `gh` to the service PATH and confirm the existing fine-grained PAT grants Issues, Pull requests, and Contents write on every watched repository. There is no restricted-token fallback: a host that does not provide authenticated `gh` is misconfigured and review runs fail rather than silently returning to the old question-only behavior. Sealed review plans from the earlier protocol are rejected rather than migrated or partially published; their legacy output branches are ignored, so leave the approval in place and the review reruns on a fresh protocol-versioned branch.

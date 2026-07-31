@@ -10,7 +10,7 @@ import? 'local.just'
 default:
     @just --list
 
-# Generate each workspace's .env.local from the SOPS-encrypted secrets/dev.yaml
+# Compose each workspace's .env.local from tracked config/dev.yaml, the SOPS-encrypted secrets/dev.yaml, and gitignored config/dev.local.yaml overrides
 dev-env-generate:
     bun standards dev-env
 
