@@ -25,20 +25,10 @@ export type DevEnvInputs = {
   readonly local: DevEnvPlainInput;
 };
 
-type PlainLayerResult = {
-  readonly input: DevEnvPlainInput;
-  readonly present: boolean;
-  readonly problems: ReadonlyArray<string>;
-};
-
 const isMissingPathError = (error: unknown): boolean =>
-  typeof error === 'object' &&
-  error !== null &&
-  'code' in error &&
-  error.code === 'ENOENT';
+  (error as { readonly code?: unknown } | null)?.code === 'ENOENT';
 
-// Comment-only files parse to null and compose as empty documents.
-const readPlainLayer = (consumer: string, rel: string): PlainLayerResult => {
+const readPlainLayer = (consumer: string, rel: string) => {
   const path = join(consumer, rel);
   try {
     lstatSync(path);
@@ -70,6 +60,12 @@ const readPlainLayer = (consumer: string, rel: string): PlainLayerResult => {
   }
   return { input: { raw: parsed.value ?? {} }, present: true, problems: [] };
 };
+
+const documentProblems = (
+  source: string,
+  input: DevEnvPlainInput,
+): ReadonlyArray<string> =>
+  input === null ? [] : parseDevEnvDocument(input.raw, source).problems;
 
 export type DevEnvPlan = {
   readonly writes: ReadonlyArray<DevEnvWrite>;
@@ -133,16 +129,20 @@ export const runDevEnv = async (consumer: string): Promise<boolean> => {
   const localIgnoreProblem = local.present
     ? devEnvGitIgnoreProblem(consumer, DEV_LOCAL_FILE)
     : null;
-  const acquisitionProblems = [
+  const inputProblems = [
     ...config.problems,
     ...(secrets.ok ? [] : [secrets.problem]),
     ...local.problems,
+    ...(localIgnoreProblem === null ? [] : [localIgnoreProblem]),
+    ...documentProblems(DEV_CONFIG_FILE, config.input),
+    ...(secrets.ok
+      ? parseDevEnvDocument(secrets.value, DEV_SECRETS_FILE).problems
+      : []),
+    ...documentProblems(DEV_LOCAL_FILE, local.input),
   ];
-  const localProblems = localIgnoreProblem === null ? [] : [localIgnoreProblem];
-  if (acquisitionProblems.length > 0 || !secrets.ok) {
-    const problems = [...acquisitionProblems, ...localProblems];
-    console.error(`standards dev-env: ${problems.length} problem(s):`);
-    console.error(problems.map((problem) => `  - ${problem}`).join('\n'));
+  if (inputProblems.length > 0 || !secrets.ok) {
+    console.error(`standards dev-env: ${inputProblems.length} problem(s):`);
+    console.error(inputProblems.map((problem) => `  - ${problem}`).join('\n'));
     return false;
   }
   const plan = planDevEnvChanges(consumer, {
@@ -151,7 +151,6 @@ export const runDevEnv = async (consumer: string): Promise<boolean> => {
     local: local.input,
   });
   const problems = [
-    ...localProblems,
     ...plan.problems,
     ...(await devEnvDestinationProblems(consumer, [
       ...plan.writes,
