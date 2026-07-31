@@ -11,6 +11,7 @@ describe('dev env document', () => {
         packages: { db: { DATABASE_URL: 'postgres://dev' } },
       },
       'secrets/dev.yaml',
+      'forbidden',
     );
 
     expect(document.problems).toEqual([]);
@@ -31,9 +32,9 @@ describe('dev env document', () => {
   });
 
   it('rejects a document that is not an object', () => {
-    expect(parseDevEnvDocument(['apps'], 'secrets/dev.yaml').problems).toEqual([
-      'secrets/dev.yaml must decrypt to a YAML object',
-    ]);
+    expect(
+      parseDevEnvDocument(['apps'], 'secrets/dev.yaml', 'forbidden').problems,
+    ).toEqual(['secrets/dev.yaml must decrypt to a YAML object']);
   });
 
   it('gathers every problem instead of failing on the first', () => {
@@ -44,6 +45,7 @@ describe('dev env document', () => {
         packages: 'nope',
       },
       'secrets/dev.yaml',
+      'forbidden',
     );
 
     expect(document.problems).toEqual([
@@ -74,6 +76,7 @@ describe('dev env document', () => {
         },
       },
       'secrets/dev.yaml',
+      'forbidden',
     );
 
     expect(document.problems).toHaveLength(INVALID_ENTRY_COUNT);
@@ -103,6 +106,7 @@ describe('dev env document', () => {
     const document = parseDevEnvDocument(
       { apps: { web: { VALID: '\\\n', INVALID: '\\\r' } } },
       'secrets/dev.yaml',
+      'forbidden',
     );
 
     expect(document.problems).toEqual([

@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'bun:test';
+import { resolveBrokeredReferences } from './dev-env-brokered-resolve';
 import { composeDevEnv, type DevEnvLayer } from './dev-env-compose';
 import { parseDevEnvDocument } from './dev-env-document';
 import { renderDotenv } from './dev-env-dotenv';
 
 const layer = (source: string, raw: unknown): DevEnvLayer => ({
   source,
-  document: parseDevEnvDocument(raw, source),
+  document: parseDevEnvDocument(raw, source, 'allowed'),
 });
 
 const PORTABLE_ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u;
@@ -134,9 +135,11 @@ describe('dev env prototype names', () => {
             })
           : null;
       const composed = composeDevEnv(config, secrets, local);
-      const [target] = composed.targets;
+      const resolved = resolveBrokeredReferences('.', composed.targets);
+      const [target] = resolved.targets;
 
       expect(composed.problems).toEqual([]);
+      expect(resolved.problems).toEqual([]);
       expect(target).toBeDefined();
       const rendered = renderDotenv(
         'apps.web',

@@ -1,4 +1,3 @@
-import type { EnvValues } from './dev-env-document';
 import { encodeBunDotenvValue } from './dev-env-dotenv-value';
 
 export const DEV_ENV_GENERATED_HEADER =
@@ -21,7 +20,7 @@ const renderValue = (key: string, value: string): string => {
 export const renderDotenv = (
   sourcePath: string,
   sources: ReadonlyArray<string>,
-  env: EnvValues,
+  env: Readonly<Record<string, string>>,
 ): string =>
   [
     DEV_ENV_GENERATED_HEADER,

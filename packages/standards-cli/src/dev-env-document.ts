@@ -1,12 +1,24 @@
-// Workspace-group keyed dev secrets document: `apps.<name>` and
-// `packages.<name>` map env keys to string values — the shape mirrored in
-// secrets/dev.example.yaml. Parsing gathers every problem instead of failing
-// on the first one so a malformed document is repaired in one pass.
+// Workspace-group keyed dev env document: `apps.<name>` and
+// `packages.<name>` map env keys to values — the shape mirrored in
+// secrets/dev.example.yaml. Plain configuration layers may also declare a
+// brokered S3 pair reference instead of a literal; the secrets layer may
+// not, because a reference is configuration. Parsing gathers every problem
+// instead of failing on the first one so a malformed document is repaired
+// in one pass.
 
+import {
+  type BrokeredS3Reference,
+  isBrokeredS3ReferenceShape,
+  parseBrokeredS3Reference,
+} from './dev-env-brokered';
 import { encodeBunDotenvValue } from './dev-env-dotenv-value';
 import { isRecord } from './github-settings-parse';
 
-export type EnvValues = Readonly<Record<string, string>>;
+export type DevEnvValue = string | BrokeredS3Reference;
+
+export type EnvValues = Readonly<Record<string, DevEnvValue>>;
+
+export type DevEnvReferencesMode = 'allowed' | 'forbidden';
 
 export type DevEnvTarget = {
   readonly group: string;
@@ -29,16 +41,60 @@ type ParsedWorkspaces = {
   readonly problems: ReadonlyArray<string>;
 };
 
+const parseWorkspaceValue = (
+  label: string,
+  key: string,
+  value: unknown,
+  references: DevEnvReferencesMode,
+): {
+  readonly value: DevEnvValue | null;
+  readonly problems: ReadonlyArray<string>;
+} => {
+  if (typeof value === 'string') {
+    return encodeBunDotenvValue(value) === null
+      ? {
+          value: null,
+          problems: [
+            `${label}.${key} cannot be represented losslessly in Bun dotenv syntax`,
+          ],
+        }
+      : { value, problems: [] };
+  }
+  if (isBrokeredS3ReferenceShape(value)) {
+    if (references === 'forbidden') {
+      return {
+        value: null,
+        problems: [
+          `${label}.${key} is a brokered S3 pair reference; references are configuration and belong in config/dev.yaml or config/dev.local.yaml, not the secrets layer`,
+        ],
+      };
+    }
+    const parsed = parseBrokeredS3Reference(`${label}.${key}`, value);
+    return parsed.ok
+      ? { value: parsed.reference, problems: [] }
+      : { value: null, problems: parsed.problems };
+  }
+  return {
+    value: null,
+    problems: [
+      references === 'allowed'
+        ? `${label}.${key} must be a string value or a brokered S3 pair reference`
+        : `${label}.${key} must be a string value`,
+    ],
+  };
+};
+
 const parseWorkspaceEnv = (
   label: string,
   raw: Record<string, unknown>,
+  references: DevEnvReferencesMode,
 ): {
   readonly env: EnvValues;
   readonly declaredKeys: ReadonlySet<string>;
   readonly problems: ReadonlyArray<string>;
 } => {
   const problems: Array<string> = [];
-  const env = Object.create(null) as Record<string, string>;
+  const env = Object.create(null) as Record<string, DevEnvValue>;
   const declaredKeys = new Set<string>();
   for (const [key, value] of Object.entries(raw)) {
     const portableName = PORTABLE_ENV_NAME.test(key);
@@ -49,14 +105,10 @@ const parseWorkspaceEnv = (
         `${label} env key ${JSON.stringify(key)} must be a portable environment variable name`,
       );
     }
-    if (typeof value !== 'string') {
-      problems.push(`${label}.${key} must be a string value`);
-    } else if (encodeBunDotenvValue(value) === null) {
-      problems.push(
-        `${label}.${key} cannot be represented losslessly in Bun dotenv syntax`,
-      );
-    } else if (portableName) {
-      env[key] = value;
+    const parsed = parseWorkspaceValue(label, key, value, references);
+    problems.push(...parsed.problems);
+    if (portableName && parsed.value !== null) {
+      env[key] = parsed.value;
     }
   }
   return { env, declaredKeys, problems };
@@ -66,6 +118,7 @@ const parseWorkspaces = (
   source: string,
   group: string,
   workspaces: Record<string, unknown>,
+  references: DevEnvReferencesMode,
 ): ParsedWorkspaces => {
   const problems: Array<string> = [];
   const targets: Array<DevEnvTarget> = [];
@@ -80,6 +133,7 @@ const parseWorkspaces = (
       const parsed = parseWorkspaceEnv(
         `${source} "${group}.${workspace}"`,
         env,
+        references,
       );
       problems.push(...parsed.problems);
       if (validWorkspace) {
@@ -102,6 +156,7 @@ const parseWorkspaces = (
 export const parseDevEnvDocument = (
   raw: unknown,
   source: string,
+  references: DevEnvReferencesMode,
 ): DevEnvDocument => {
   if (!isRecord(raw)) {
     return {
@@ -117,7 +172,7 @@ export const parseDevEnvDocument = (
         `${source} top-level key "${group}" must be "apps" or "packages"`,
       );
     } else if (isRecord(workspaces)) {
-      const parsed = parseWorkspaces(source, group, workspaces);
+      const parsed = parseWorkspaces(source, group, workspaces, references);
       problems.push(...parsed.problems);
       targets.push(...parsed.targets);
     } else {

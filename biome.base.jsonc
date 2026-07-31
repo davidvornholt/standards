@@ -276,7 +276,10 @@
     {
       // CLI output is the user interface; dev-env does not read process
       // environment variables directly.
-      "includes": ["packages/standards-cli/src/dev-env.ts"],
+      "includes": [
+        "packages/standards-cli/src/dev-env.ts",
+        "packages/standards-cli/src/dev-env-brokered-refresh.ts"
+      ],
       "linter": {
         "rules": {
           "suspicious": {
@@ -297,6 +300,9 @@
         "packages/standards-cli/src/creds-login-github.test.ts",
         "packages/standards-cli/src/dev-env-compose.test.ts",
         "packages/standards-cli/src/dev-env-document.test.ts",
+        "packages/standards-cli/src/dev-env-brokered-refresh.test.ts",
+        "packages/standards-cli/src/dev-env-brokered-resolve.test.ts",
+        "packages/standards-cli/src/dev-env-brokered.test.ts",
         "packages/standards-cli/src/dev-env-dotenv.test.ts",
         "packages/standards-cli/src/dev-env-layers.test.ts",
         "packages/standards-cli/src/dev-env.test.ts",

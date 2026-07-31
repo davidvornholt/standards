@@ -19,6 +19,7 @@ import {
   s3PairPaths,
 } from './creds-r2';
 import { readEncryptedKeys, setSopsValues } from './creds-sops';
+import { refreshDevEnvForSopsWrites } from './dev-env-brokered-refresh';
 
 const DEFAULT_TTL_DAYS = 90;
 const DAY_MS = 86_400_000;
@@ -168,5 +169,5 @@ export const runCredsAddCloudflare = async (
         : DEFAULT_R2_JURISDICTION,
     policies: resolved.policies,
   });
-  return true;
+  return await refreshDevEnvForSopsWrites(consumer, [context.rel]);
 };

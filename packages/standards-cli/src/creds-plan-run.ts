@@ -1,4 +1,4 @@
-import { listSecretsTargets } from './creds-dest';
+import { listSecretsTargets, resolveTargetRel } from './creds-dest';
 import { identifyCloudflareBootstrapAuthority } from './creds-login-cloudflare';
 import { computeCredsPlan } from './creds-plan';
 import { renewPlannedToken } from './creds-plan-renew';
@@ -11,6 +11,7 @@ import {
   readBrokerStore,
   resolveBrokerPath,
 } from './creds-store';
+import { refreshDevEnvForSopsWrites } from './dev-env-brokered-refresh';
 import { resolveGithubRepo } from './github-api';
 
 const gatherRepoState = async (consumer: string, store: BrokerStore) => {
@@ -125,5 +126,12 @@ export const runCredsPlan = async (
   for (const failure of failures) {
     console.error(`standards creds: ${failure}`);
   }
-  return failures.length === 0;
+  if (failures.length > 0) {
+    return false;
+  }
+  const renewedRels = plan.actions
+    .filter((action) => action.kind === 'renew')
+    .map((action) => resolveTargetRel(consumer, action.target))
+    .filter((rel): rel is string => rel !== null);
+  return await refreshDevEnvForSopsWrites(consumer, renewedRels);
 };

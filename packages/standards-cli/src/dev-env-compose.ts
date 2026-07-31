@@ -4,7 +4,11 @@
 // per env key. A key declared by both tracked shared layers is a placement
 // error: a value is either configuration or a secret, never both.
 
-import type { DevEnvDocument, EnvValues } from './dev-env-document';
+import type {
+  DevEnvDocument,
+  DevEnvValue,
+  EnvValues,
+} from './dev-env-document';
 
 export type DevEnvLayer = {
   readonly source: string;
@@ -26,12 +30,12 @@ export type ComposedDevEnv = {
 type MutableTarget = {
   readonly group: string;
   readonly workspace: string;
-  readonly env: Record<string, string>;
+  readonly env: Record<string, DevEnvValue>;
   readonly sources: Array<string>;
 };
 
-const copyEnv = (source: EnvValues): Record<string, string> => {
-  const copy = Object.create(null) as Record<string, string>;
+const copyEnv = (source: EnvValues): Record<string, DevEnvValue> => {
+  const copy = Object.create(null) as Record<string, DevEnvValue>;
   for (const [key, value] of Object.entries(source)) {
     copy[key] = value;
   }
