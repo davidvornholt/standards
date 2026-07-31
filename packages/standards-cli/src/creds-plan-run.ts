@@ -1,7 +1,10 @@
-import { listSecretsTargets, resolveTargetRel } from './creds-dest';
+import { listSecretsTargets } from './creds-dest';
 import { identifyCloudflareBootstrapAuthority } from './creds-login-cloudflare';
 import { computeCredsPlan } from './creds-plan';
-import { renewPlannedToken } from './creds-plan-renew';
+import {
+  type RenewPlannedTokenResult,
+  renewPlannedToken,
+} from './creds-plan-renew';
 import { reportCredsPlan } from './creds-plan-report';
 import { revokePlannedToken } from './creds-plan-revoke';
 import type { AccountToken, PlannedAction } from './creds-plan-types';
@@ -62,18 +65,23 @@ const applyAction = (
   consumer: string,
   store: BrokerStore,
   action: PlannedAction,
-): Promise<string | null> => {
+): Promise<RenewPlannedTokenResult> => {
   const account = store.cloudflare.find(
     (entry) => entry.accountId === action.accountId,
   );
   if (account === undefined) {
-    return Promise.resolve(
-      `${action.name}: account ${action.accountId} is not in the broker store`,
-    );
+    return Promise.resolve({
+      failure: `${action.name}: account ${action.accountId} is not in the broker store`,
+      writtenRel: null,
+    });
   }
-  return action.kind === 'revoke'
-    ? revokePlannedToken(account, action)
-    : renewPlannedToken(consumer, account, action);
+  if (action.kind === 'renew') {
+    return renewPlannedToken(consumer, account, action);
+  }
+  return revokePlannedToken(account, action).then((failure) => ({
+    failure,
+    writtenRel: null,
+  }));
 };
 
 const fail = (message: string): false => {
@@ -118,20 +126,18 @@ export const runCredsPlan = async (
   if (!apply || plan.actions.length === 0) {
     return true;
   }
-  const failures = (
-    await Promise.all(
-      plan.actions.map((action) => applyAction(consumer, store, action)),
-    )
-  ).filter((failure): failure is string => failure !== null);
+  const results = await Promise.all(
+    plan.actions.map((action) => applyAction(consumer, store, action)),
+  );
+  const failures = results.flatMap(({ failure }) =>
+    failure === null ? [] : [failure],
+  );
   for (const failure of failures) {
     console.error(`standards creds: ${failure}`);
   }
-  if (failures.length > 0) {
-    return false;
-  }
-  const renewedRels = plan.actions
-    .filter((action) => action.kind === 'renew')
-    .map((action) => resolveTargetRel(consumer, action.target))
-    .filter((rel): rel is string => rel !== null);
-  return await refreshDevEnvForSopsWrites(consumer, renewedRels);
+  const writtenRels = results.flatMap(({ writtenRel }) =>
+    writtenRel === null ? [] : [writtenRel],
+  );
+  const refreshed = await refreshDevEnvForSopsWrites(consumer, writtenRels);
+  return failures.length === 0 && refreshed;
 };
