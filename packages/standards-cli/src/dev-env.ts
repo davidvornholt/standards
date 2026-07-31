@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { composeDevEnv } from './dev-env-compose';
 import {
@@ -8,16 +8,14 @@ import {
 } from './dev-env-destination';
 import { parseDevEnvDocument } from './dev-env-document';
 import { renderDotenv } from './dev-env-dotenv';
-import { DEV_SECRETS_FILE, decryptDevSecrets } from './dev-env-secrets';
+import { DEV_SECRETS_FILE, readDevSecrets } from './dev-env-secrets';
 import { writeDevEnvFiles } from './dev-env-transaction';
 import { parseYaml } from './yaml-parse';
 
 export const DEV_CONFIG_FILE = 'config/dev.yaml';
 export const DEV_LOCAL_FILE = 'config/dev.local.yaml';
 
-// Writing decrypted values into the tree is only safe when git will never
-// track them. `git check-ignore` is authoritative; anything but a clear
-// "ignored" answer fails closed, including running outside a git checkout.
+// Decrypted values are safe only when git proves it will ignore them.
 const gitIgnoreProblem = (consumer: string, rel: string): string | null => {
   const result = spawnSync('git', ['check-ignore', '-q', '--', rel], {
     cwd: consumer,
@@ -44,28 +42,48 @@ export type DevEnvInputs = {
 
 type PlainLayerResult = {
   readonly input: DevEnvPlainInput;
+  readonly present: boolean;
   readonly problems: ReadonlyArray<string>;
 };
 
-// A plain layer file may hold only comments while a repo declares nothing in
-// it; that parses to null and composes as an empty document.
+const isMissingPathError = (error: unknown): boolean =>
+  typeof error === 'object' &&
+  error !== null &&
+  'code' in error &&
+  error.code === 'ENOENT';
+
+// Comment-only files parse to null and compose as empty documents.
 const readPlainLayer = (consumer: string, rel: string): PlainLayerResult => {
   const path = join(consumer, rel);
-  if (!existsSync(path)) {
-    return { input: null, problems: [] };
+  try {
+    lstatSync(path);
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      return { input: null, present: false, problems: [] };
+    }
+    const detail = error instanceof Error ? error.message : String(error);
+    return {
+      input: null,
+      present: true,
+      problems: [`could not inspect ${rel}: ${detail}`],
+    };
   }
   let raw: string;
   try {
     raw = readFileSync(path, 'utf8');
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    return { input: null, problems: [`could not read ${rel}: ${detail}`] };
+    return {
+      input: null,
+      present: true,
+      problems: [`could not read ${rel}: ${detail}`],
+    };
   }
   const parsed = parseYaml(raw, rel);
   if (parsed.problem !== null) {
-    return { input: null, problems: [parsed.problem] };
+    return { input: null, present: true, problems: [parsed.problem] };
   }
-  return { input: { raw: parsed.value ?? {} }, problems: [] };
+  return { input: { raw: parsed.value ?? {} }, present: true, problems: [] };
 };
 
 export type DevEnvPlan = {
@@ -118,32 +136,31 @@ export const planDevEnvWrites = (
 };
 
 export const runDevEnv = async (consumer: string): Promise<boolean> => {
-  if (!existsSync(join(consumer, DEV_SECRETS_FILE))) {
-    console.error(
-      `standards dev-env: ${DEV_SECRETS_FILE} not found; create it with \`just secrets edit dev\``,
-    );
-    return false;
-  }
-  const decrypted = decryptDevSecrets(consumer);
-  if (!decrypted.ok) {
-    console.error(`standards dev-env: ${decrypted.problem}`);
-    return false;
-  }
   const config = readPlainLayer(consumer, DEV_CONFIG_FILE);
+  const secrets = readDevSecrets(consumer);
   const local = readPlainLayer(consumer, DEV_LOCAL_FILE);
-  // The local layer may override secret values, so it must be as untrackable
-  // as the generated env files it feeds.
-  const localIgnoreProblem =
-    local.input === null ? null : gitIgnoreProblem(consumer, DEV_LOCAL_FILE);
+  const localIgnoreProblem = local.present
+    ? gitIgnoreProblem(consumer, DEV_LOCAL_FILE)
+    : null;
+  const acquisitionProblems = [
+    ...config.problems,
+    ...(secrets.ok ? [] : [secrets.problem]),
+    ...local.problems,
+  ];
+  const localProblems = localIgnoreProblem === null ? [] : [localIgnoreProblem];
+  if (acquisitionProblems.length > 0 || !secrets.ok) {
+    const problems = [...acquisitionProblems, ...localProblems];
+    console.error(`standards dev-env: ${problems.length} problem(s):`);
+    console.error(problems.map((problem) => `  - ${problem}`).join('\n'));
+    return false;
+  }
   const plan = planDevEnvWrites(consumer, {
     config: config.input,
-    secrets: decrypted.value,
+    secrets: secrets.value,
     local: local.input,
   });
   const problems = [
-    ...config.problems,
-    ...local.problems,
-    ...(localIgnoreProblem === null ? [] : [localIgnoreProblem]),
+    ...localProblems,
     ...plan.problems,
     ...(await devEnvDestinationProblems(consumer, plan.writes)),
   ];
