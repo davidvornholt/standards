@@ -23,6 +23,7 @@ export type DevEnvTransactionHooks = {
   readonly beforeStage?: (index: number) => void | Promise<void>;
   readonly beforeCommit?: (index: number) => void | Promise<void>;
   readonly afterDestinationCheck?: (index: number) => void | Promise<void>;
+  readonly beforeRemovalRestore?: (index: number) => void | Promise<void>;
   readonly beforeCleanup?: () => void | Promise<void>;
 };
 
@@ -86,18 +87,21 @@ const stageAll = async (
 const commitRemoval = async (
   destination: DevEnvDestination,
   removal: DevEnvRemoval,
+  index: number,
+  hooks: DevEnvTransactionHooks,
 ): Promise<void> => {
+  const beforeRestore = () => hooks.beforeRemovalRestore?.(index);
   await requireParent(destination);
   await rename(destination.dest, destination.backup);
   destination.backupCreated = true;
   if (!(await matchesDevEnvRemoval(destination.backup, removal))) {
-    await restoreClaimedDevEnvRemoval(destination);
+    await restoreClaimedDevEnvRemoval(destination, beforeRestore);
     throw new Error(`${removal.rel} changed after preflight`);
   }
   const parentProblem = await devEnvParentProblem(destination);
   const replacement = await devEnvStatOrNull(destination.dest);
   if (parentProblem !== null || replacement !== null) {
-    await restoreClaimedDevEnvRemoval(destination);
+    await restoreClaimedDevEnvRemoval(destination, beforeRestore);
     throw new Error(`${removal.rel} changed after preflight`);
   }
   destination.committed = true;
@@ -114,7 +118,7 @@ const commitOne = async (
   }
   await hooks.afterDestinationCheck?.(index);
   if (!isWrite(destination.mutation)) {
-    await commitRemoval(destination, destination.mutation);
+    await commitRemoval(destination, destination.mutation, index, hooks);
     return;
   }
   if (destination.previous !== null) {

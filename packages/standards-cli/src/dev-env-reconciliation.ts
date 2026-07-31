@@ -79,7 +79,10 @@ const inspectRemoval = (
   const envPath = join(consumer, envRel);
   let file: number | null = null;
   try {
-    file = openSync(envPath, constants.O_RDONLY + constants.O_NOFOLLOW);
+    file = openSync(
+      envPath,
+      constants.O_RDONLY + constants.O_NOFOLLOW + constants.O_NONBLOCK,
+    );
     const stats = fstatSync(file);
     if (!stats.isFile() || stats.isSymbolicLink()) {
       return { removal: null, problem: null };
@@ -116,7 +119,10 @@ export const matchesDevEnvRemoval = async (
   removal: DevEnvRemoval,
 ): Promise<boolean> => {
   try {
-    const file = await open(path, constants.O_RDONLY + constants.O_NOFOLLOW);
+    const file = await open(
+      path,
+      constants.O_RDONLY + constants.O_NOFOLLOW + constants.O_NONBLOCK,
+    );
     try {
       const stats = await file.stat();
       return (

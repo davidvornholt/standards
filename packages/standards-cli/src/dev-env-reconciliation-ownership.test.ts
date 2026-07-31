@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -88,6 +89,37 @@ describe('dev env removal ownership transaction', () => {
         problems: ['packages/db/.env.local changed after preflight'],
       });
       expect(readFileSync(env, 'utf8')).toBe('HAND_OWNED=same-inode\n');
+    } finally {
+      rmSync(consumer, { recursive: true, force: true });
+    }
+  });
+
+  it('does not overwrite a destination created immediately before restore', async () => {
+    const { consumer, env } = fixture();
+    try {
+      const removal = plannedRemoval(consumer);
+      const result = await applyDevEnvChanges(consumer, [removal], {
+        afterDestinationCheck: () => replaceWithHandOwnedFile(env),
+        beforeRemovalRestore: () => {
+          writeFileSync(env, 'HAND_OWNED=second-creator\n');
+        },
+      });
+
+      expect(result).toEqual({
+        ok: false,
+        problems: [
+          'packages/db/.env.local changed after preflight',
+          'rollback failed: packages/db/.env.local: rollback blocked because destination changed',
+        ],
+      });
+      expect(readFileSync(env, 'utf8')).toBe('HAND_OWNED=second-creator\n');
+      const backup = readdirSync(join(consumer, 'packages/db')).find((name) =>
+        name.endsWith('.bak'),
+      );
+      expect(backup).toBeDefined();
+      expect(
+        readFileSync(join(consumer, 'packages/db', backup ?? ''), 'utf8'),
+      ).toBe('HAND_OWNED=preserve-me\n');
     } finally {
       rmSync(consumer, { recursive: true, force: true });
     }

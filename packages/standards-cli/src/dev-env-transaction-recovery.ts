@@ -1,4 +1,4 @@
-import { rename, rm } from 'node:fs/promises';
+import { link, rm } from 'node:fs/promises';
 import {
   type DevEnvDestination,
   devEnvParentProblem,
@@ -15,17 +15,42 @@ const requireParent = async (
 const isWrite = (destination: DevEnvDestination): boolean =>
   'content' in destination.mutation;
 
+const rollbackBlockedProblem = (destination: DevEnvDestination): string =>
+  `${destination.mutation.rel}: rollback blocked because destination changed`;
+
+const restoreBackupNoReplace = async (
+  destination: DevEnvDestination,
+): Promise<boolean> => {
+  try {
+    await link(destination.backup, destination.dest);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+      destination.rollbackBlocked = true;
+      return false;
+    }
+    throw error;
+  }
+  try {
+    await rm(destination.backup);
+  } catch (error) {
+    destination.rollbackBlocked = true;
+    throw error;
+  }
+  destination.backupCreated = false;
+  return true;
+};
+
 export const restoreClaimedDevEnvRemoval = async (
   destination: DevEnvDestination,
+  beforeRestore: () => void | Promise<void> = () => undefined,
 ): Promise<void> => {
   const parentProblem = await devEnvParentProblem(destination);
-  const current = await devEnvStatOrNull(destination.dest);
-  if (parentProblem !== null || current !== null) {
+  if (parentProblem !== null) {
     destination.rollbackBlocked = true;
     return;
   }
-  await rename(destination.backup, destination.dest);
-  destination.backupCreated = false;
+  await beforeRestore();
+  await restoreBackupNoReplace(destination);
 };
 
 const removeCommittedDestination = async (
@@ -38,7 +63,7 @@ const removeCommittedDestination = async (
   const current = await devEnvStatOrNull(destination.dest);
   if (!isWrite(destination) && current !== null) {
     destination.rollbackBlocked = true;
-    return `${destination.mutation.rel}: destination changed during removal`;
+    return rollbackBlockedProblem(destination);
   }
   if (isWrite(destination)) {
     await rm(destination.dest, { force: true });
@@ -52,7 +77,7 @@ const rollbackOne = async (
 ): Promise<ReadonlyArray<string>> => {
   const problems: Array<string> = [];
   if (destination.rollbackBlocked) {
-    return [`${destination.mutation.rel}: destination changed during removal`];
+    return [rollbackBlockedProblem(destination)];
   }
   if (destination.committed) {
     try {
@@ -70,8 +95,9 @@ const rollbackOne = async (
       return [parentProblem];
     }
     try {
-      await rename(destination.backup, destination.dest);
-      destination.backupCreated = false;
+      if (!(await restoreBackupNoReplace(destination))) {
+        return [rollbackBlockedProblem(destination)];
+      }
     } catch (error) {
       problems.push(`${destination.mutation.rel}: ${message(error)}`);
     }
