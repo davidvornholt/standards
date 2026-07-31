@@ -12,7 +12,8 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { writeDevEnvFiles } from './dev-env-transaction';
+import { initializeDevEnvGit } from './dev-env-test-support';
+import { applyDevEnvChanges } from './dev-env-transaction';
 
 type SwappedParent = {
   readonly external: string;
@@ -21,6 +22,7 @@ type SwappedParent = {
 
 const buildConsumer = (): string => {
   const consumer = mkdtempSync(join(tmpdir(), 'dev-env-parent-race-'));
+  initializeDevEnvGit(consumer);
   mkdirSync(join(consumer, 'apps/web'), { recursive: true });
   return consumer;
 };
@@ -53,7 +55,7 @@ describe('dev env parent identity', () => {
     const swaps: Array<SwappedParent> = [];
     let external = '';
     try {
-      const result = await writeDevEnvFiles(
+      const result = await applyDevEnvChanges(
         consumer,
         [{ rel: 'apps/web/.env.local', content: 'SECRET=1\n' }],
         {
@@ -87,7 +89,7 @@ describe('dev env parent identity', () => {
     const swaps: Array<SwappedParent> = [];
     let external = '';
     try {
-      const result = await writeDevEnvFiles(
+      const result = await applyDevEnvChanges(
         consumer,
         [{ rel: 'apps/web/.env.local', content: 'SECRET=1\n' }],
         {

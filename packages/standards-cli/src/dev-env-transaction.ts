@@ -1,13 +1,19 @@
 import { link, open, rename } from 'node:fs/promises';
 import {
   type DevEnvDestination,
+  type DevEnvMutation,
+  type DevEnvRemoval,
   type DevEnvWrite,
   devEnvParentProblem,
-  devEnvStatOrNull,
   preflightDevEnvDestinations,
 } from './dev-env-destination';
 import {
+  devEnvStatOrNull,
+  matchesDevEnvRemoval,
+} from './dev-env-reconciliation';
+import {
   cleanupDevEnvArtifacts,
+  restoreClaimedDevEnvRemoval,
   rollbackDevEnvFiles,
 } from './dev-env-transaction-recovery';
 
@@ -16,6 +22,8 @@ const OWNER_ONLY_FILE_MODE = 0o600;
 export type DevEnvTransactionHooks = {
   readonly beforeStage?: (index: number) => void | Promise<void>;
   readonly beforeCommit?: (index: number) => void | Promise<void>;
+  readonly afterDestinationCheck?: (index: number) => void | Promise<void>;
+  readonly beforeRemovalRestore?: (index: number) => void | Promise<void>;
   readonly beforeCleanup?: () => void | Promise<void>;
 };
 
@@ -30,12 +38,18 @@ const requireParent = async (destination: DevEnvDestination): Promise<void> => {
   }
 };
 
+const isWrite = (mutation: DevEnvMutation): mutation is DevEnvWrite =>
+  'content' in mutation;
+
 const stage = async (destination: DevEnvDestination): Promise<void> => {
+  if (!isWrite(destination.mutation)) {
+    return;
+  }
   await requireParent(destination);
   const file = await open(destination.temp, 'wx', OWNER_ONLY_FILE_MODE);
   try {
     await file.chmod(OWNER_ONLY_FILE_MODE);
-    await file.writeFile(destination.write.content, 'utf8');
+    await file.writeFile(destination.mutation.content, 'utf8');
     await file.sync();
   } finally {
     await file.close();
@@ -60,20 +74,52 @@ const stageAll = async (
   destinations: ReadonlyArray<DevEnvDestination>,
   hooks: DevEnvTransactionHooks,
 ): Promise<void> => {
-  await destinations.reduce<Promise<void>>(
-    async (previous, destination, index) => {
-      await previous;
-      await hooks.beforeStage?.(index);
-      await stage(destination);
-    },
-    Promise.resolve(),
+  const writes = destinations.filter((destination) =>
+    isWrite(destination.mutation),
   );
+  await writes.reduce<Promise<void>>(async (previous, destination, index) => {
+    await previous;
+    await hooks.beforeStage?.(index);
+    await stage(destination);
+  }, Promise.resolve());
 };
 
-const commitOne = async (destination: DevEnvDestination): Promise<void> => {
+const commitRemoval = async (
+  destination: DevEnvDestination,
+  removal: DevEnvRemoval,
+  index: number,
+  hooks: DevEnvTransactionHooks,
+): Promise<void> => {
+  const beforeRestore = () => hooks.beforeRemovalRestore?.(index);
+  await requireParent(destination);
+  await rename(destination.dest, destination.backup);
+  destination.backupCreated = true;
+  if (!(await matchesDevEnvRemoval(destination.backup, removal))) {
+    await restoreClaimedDevEnvRemoval(destination, beforeRestore);
+    throw new Error(`${removal.rel} changed after preflight`);
+  }
+  const parentProblem = await devEnvParentProblem(destination);
+  const replacement = await devEnvStatOrNull(destination.dest);
+  if (parentProblem !== null || replacement !== null) {
+    await restoreClaimedDevEnvRemoval(destination, beforeRestore);
+    throw new Error(`${removal.rel} changed after preflight`);
+  }
+  destination.committed = true;
+};
+
+const commitOne = async (
+  destination: DevEnvDestination,
+  index: number,
+  hooks: DevEnvTransactionHooks,
+): Promise<void> => {
   await requireParent(destination);
   if (!(await unchanged(destination))) {
-    throw new Error(`${destination.write.rel} changed after preflight`);
+    throw new Error(`${destination.mutation.rel} changed after preflight`);
+  }
+  await hooks.afterDestinationCheck?.(index);
+  if (!isWrite(destination.mutation)) {
+    await commitRemoval(destination, destination.mutation, index, hooks);
+    return;
   }
   if (destination.previous !== null) {
     await requireParent(destination);
@@ -93,7 +139,7 @@ const commitAll = async (
     async (previous, destination, index) => {
       await previous;
       await hooks.beforeCommit?.(index);
-      await commitOne(destination);
+      await commitOne(destination, index, hooks);
     },
     Promise.resolve(),
   );
@@ -121,12 +167,12 @@ const recoverFailure = async (
   };
 };
 
-export const writeDevEnvFiles = async (
+export const applyDevEnvChanges = async (
   consumer: string,
-  writes: ReadonlyArray<DevEnvWrite>,
+  mutations: ReadonlyArray<DevEnvMutation>,
   hooks: DevEnvTransactionHooks = {},
 ): Promise<DevEnvTransactionResult> => {
-  const checked = await preflightDevEnvDestinations(consumer, writes);
+  const checked = await preflightDevEnvDestinations(consumer, mutations);
   if (!checked.ok) {
     return checked;
   }

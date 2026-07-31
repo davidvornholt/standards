@@ -1,89 +1,107 @@
-import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { composeDevEnv } from './dev-env-compose';
 import {
+  type DevEnvRemoval,
   type DevEnvWrite,
   devEnvDestinationProblems,
 } from './dev-env-destination';
+import { devEnvGitIgnoreProblem } from './dev-env-destination-gitignore';
 import { parseDevEnvDocument } from './dev-env-document';
 import { renderDotenv } from './dev-env-dotenv';
-import { writeDevEnvFiles } from './dev-env-transaction';
-import { runSops } from './sops-exec';
+import { planDevEnvRemovals } from './dev-env-reconciliation';
+import { DEV_SECRETS_FILE, readDevSecrets } from './dev-env-secrets';
+import { applyDevEnvChanges } from './dev-env-transaction';
+import { parseYaml } from './yaml-parse';
 
-export const DEV_SECRETS_FILE = 'secrets/dev.yaml';
+export const DEV_CONFIG_FILE = 'config/dev.yaml';
+export const DEV_LOCAL_FILE = 'config/dev.local.yaml';
 
-const SOPS_ARGS = ['--decrypt', '--output-type', 'json', DEV_SECRETS_FILE];
+export type DevEnvPlainInput = { readonly raw: unknown } | null;
 
-type DecryptResult =
-  | { readonly ok: true; readonly value: unknown }
-  | { readonly ok: false; readonly problem: string };
+export type DevEnvInputs = {
+  readonly config: DevEnvPlainInput;
+  readonly secrets: unknown;
+  readonly local: DevEnvPlainInput;
+};
 
-// sops emits JSON here so the CLI never parses the encrypted YAML itself.
-const decryptDevSecrets = (consumer: string): DecryptResult => {
-  const result = runSops(SOPS_ARGS, consumer);
-  if (result.status !== 0) {
-    const detail = result.errorMessage ?? result.stderr.trim();
-    return {
-      ok: false,
-      problem: detail
-        ? `could not decrypt ${DEV_SECRETS_FILE}: ${detail}`
-        : `could not decrypt ${DEV_SECRETS_FILE}`,
-    };
-  }
+const isMissingPathError = (error: unknown): boolean =>
+  (error as { readonly code?: unknown } | null)?.code === 'ENOENT';
+
+const readPlainLayer = (consumer: string, rel: string) => {
+  const path = join(consumer, rel);
   try {
-    return { ok: true, value: JSON.parse(result.stdout) as unknown };
+    lstatSync(path);
   } catch (error) {
+    if (isMissingPathError(error)) {
+      return { input: null, present: false, problems: [] };
+    }
+    const detail = error instanceof Error ? error.message : String(error);
     return {
-      ok: false,
-      problem: `could not parse decrypted ${DEV_SECRETS_FILE} as JSON: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
+      input: null,
+      present: true,
+      problems: [`could not inspect ${rel}: ${detail}`],
     };
   }
+  let raw: string;
+  try {
+    raw = readFileSync(path, 'utf8');
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return {
+      input: null,
+      present: true,
+      problems: [`could not read ${rel}: ${detail}`],
+    };
+  }
+  const parsed = parseYaml(raw, rel);
+  if (parsed.problem !== null) {
+    return { input: null, present: true, problems: [parsed.problem] };
+  }
+  return { input: { raw: parsed.value ?? {} }, present: true, problems: [] };
 };
 
-// Writing decrypted values into the tree is only safe when git will never
-// track them. `git check-ignore` is authoritative; anything but a clear
-// "ignored" answer fails closed, including running outside a git checkout.
-const gitIgnoreProblem = (consumer: string, rel: string): string | null => {
-  const result = spawnSync('git', ['check-ignore', '-q', '--', rel], {
-    cwd: consumer,
-  });
-  if (result.error !== undefined || result.status === null) {
-    return `cannot run git to verify ${rel} is gitignored`;
-  }
-  if (result.status === 0) {
-    return null;
-  }
-  if (result.status === 1) {
-    return `${rel} is not gitignored; ignore it before generating dev env files`;
-  }
-  return `cannot verify ${rel} is gitignored (git check-ignore exited ${result.status})`;
-};
+const documentProblems = (
+  source: string,
+  input: DevEnvPlainInput,
+): ReadonlyArray<string> =>
+  input === null ? [] : parseDevEnvDocument(input.raw, source).problems;
 
 export type DevEnvPlan = {
   readonly writes: ReadonlyArray<DevEnvWrite>;
+  readonly removals: ReadonlyArray<DevEnvRemoval>;
   readonly problems: ReadonlyArray<string>;
 };
 
-export const planDevEnvWrites = (
+export const planDevEnvChanges = (
   consumer: string,
-  raw: unknown,
+  inputs: DevEnvInputs,
 ): DevEnvPlan => {
-  const document = parseDevEnvDocument(raw, DEV_SECRETS_FILE);
-  const problems: Array<string> = [...document.problems];
+  const layer = (source: string, input: DevEnvPlainInput) =>
+    input === null
+      ? null
+      : { source, document: parseDevEnvDocument(input.raw, source) };
+  const composed = composeDevEnv(
+    layer(DEV_CONFIG_FILE, inputs.config),
+    {
+      source: DEV_SECRETS_FILE,
+      document: parseDevEnvDocument(inputs.secrets, DEV_SECRETS_FILE),
+    },
+    layer(DEV_LOCAL_FILE, inputs.local),
+  );
+  const problems: Array<string> = [...composed.problems];
   const writes: Array<DevEnvWrite> = [];
-  for (const target of document.targets) {
+  for (const target of composed.targets) {
     const workspaceDir = `${target.group}/${target.workspace}`;
     const rel = `${workspaceDir}/.env.local`;
     if (existsSync(join(consumer, workspaceDir, 'package.json'))) {
-      const ignoreProblem = gitIgnoreProblem(consumer, rel);
+      const ignoreProblem = devEnvGitIgnoreProblem(consumer, rel);
       if (ignoreProblem === null) {
         writes.push({
           rel,
           content: renderDotenv(
             `${target.group}.${target.workspace}`,
-            DEV_SECRETS_FILE,
+            target.sources,
             target.env,
           ),
         });
@@ -92,36 +110,62 @@ export const planDevEnvWrites = (
       }
     } else {
       problems.push(
-        `${DEV_SECRETS_FILE} defines ${target.group}.${target.workspace}, but ${workspaceDir}/package.json does not exist`,
+        `${target.sources.join(' + ')} defines ${target.group}.${target.workspace}, but ${workspaceDir}/package.json does not exist`,
       );
     }
   }
-  return { writes, problems };
+  const removalPlan = planDevEnvRemovals(consumer, writes);
+  return {
+    writes,
+    removals: removalPlan.removals,
+    problems: [...problems, ...removalPlan.problems],
+  };
 };
 
 export const runDevEnv = async (consumer: string): Promise<boolean> => {
-  if (!existsSync(join(consumer, DEV_SECRETS_FILE))) {
-    console.error(
-      `standards dev-env: ${DEV_SECRETS_FILE} not found; create it with \`just secrets edit dev\``,
-    );
+  const config = readPlainLayer(consumer, DEV_CONFIG_FILE);
+  const secrets = readDevSecrets(consumer);
+  const local = readPlainLayer(consumer, DEV_LOCAL_FILE);
+  const localIgnoreProblem = local.present
+    ? devEnvGitIgnoreProblem(consumer, DEV_LOCAL_FILE)
+    : null;
+  const inputProblems = [
+    ...config.problems,
+    ...(secrets.ok ? [] : [secrets.problem]),
+    ...local.problems,
+    ...(localIgnoreProblem === null ? [] : [localIgnoreProblem]),
+    ...documentProblems(DEV_CONFIG_FILE, config.input),
+    ...(secrets.ok
+      ? parseDevEnvDocument(secrets.value, DEV_SECRETS_FILE).problems
+      : []),
+    ...documentProblems(DEV_LOCAL_FILE, local.input),
+  ];
+  if (inputProblems.length > 0 || !secrets.ok) {
+    console.error(`standards dev-env: ${inputProblems.length} problem(s):`);
+    console.error(inputProblems.map((problem) => `  - ${problem}`).join('\n'));
     return false;
   }
-  const decrypted = decryptDevSecrets(consumer);
-  if (!decrypted.ok) {
-    console.error(`standards dev-env: ${decrypted.problem}`);
-    return false;
-  }
-  const plan = planDevEnvWrites(consumer, decrypted.value);
+  const plan = planDevEnvChanges(consumer, {
+    config: config.input,
+    secrets: secrets.value,
+    local: local.input,
+  });
   const problems = [
     ...plan.problems,
-    ...(await devEnvDestinationProblems(consumer, plan.writes)),
+    ...(await devEnvDestinationProblems(consumer, [
+      ...plan.writes,
+      ...plan.removals,
+    ])),
   ];
   if (problems.length > 0) {
     console.error(`standards dev-env: ${problems.length} problem(s):`);
     console.error(problems.map((problem) => `  - ${problem}`).join('\n'));
     return false;
   }
-  const generated = await writeDevEnvFiles(consumer, plan.writes);
+  const generated = await applyDevEnvChanges(consumer, [
+    ...plan.writes,
+    ...plan.removals,
+  ]);
   if (!generated.ok) {
     console.error('standards dev-env: generation failed:');
     console.error(
@@ -140,8 +184,16 @@ export const runDevEnv = async (consumer: string): Promise<boolean> => {
   for (const write of plan.writes) {
     console.log(`  wrote ${write.rel}`);
   }
+  for (const removal of plan.removals) {
+    console.log(`  removed ${removal.rel}`);
+  }
+  const inputFiles = [
+    ...(config.input === null ? [] : [DEV_CONFIG_FILE]),
+    DEV_SECRETS_FILE,
+    ...(local.input === null ? [] : [DEV_LOCAL_FILE]),
+  ];
   console.log(
-    `standards dev-env: generated ${plan.writes.length} env file(s) from ${DEV_SECRETS_FILE}`,
+    `standards dev-env: generated ${plan.writes.length} and removed ${plan.removals.length} env file(s) from ${inputFiles.join(' + ')}`,
   );
   return true;
 };

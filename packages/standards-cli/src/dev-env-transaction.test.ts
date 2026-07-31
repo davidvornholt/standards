@@ -12,7 +12,8 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { writeDevEnvFiles } from './dev-env-transaction';
+import { initializeDevEnvGit } from './dev-env-test-support';
+import { applyDevEnvChanges } from './dev-env-transaction';
 
 const PERMISSION_BITS_MODULUS = 0o1000;
 const OWNER_ONLY_FILE_MODE = 0o600;
@@ -23,6 +24,7 @@ const STAGING_FAILURE_INDEX = 1;
 
 const buildConsumer = (): string => {
   const consumer = mkdtempSync(join(tmpdir(), 'dev-env-transaction-'));
+  initializeDevEnvGit(consumer);
   for (const workspace of ['apps/web', 'apps/api', 'packages/db']) {
     mkdirSync(join(consumer, workspace), { recursive: true });
   }
@@ -47,7 +49,7 @@ describe('dev env transaction', () => {
       writeFileSync(existing, 'OLD=1\n');
       chmodSync(existing, DEFAULT_FILE_MODE);
 
-      const result = await writeDevEnvFiles(consumer, [
+      const result = await applyDevEnvChanges(consumer, [
         { rel: 'apps/web/.env.local', content: 'NEW=1\n' },
         { rel: 'packages/db/.env.local', content: 'DB=1\n' },
       ]);
@@ -78,7 +80,7 @@ describe('dev env transaction', () => {
       writeFileSync(api, 'OLD_API=1\n');
       chmodSync(api, GROUP_READABLE_FILE_MODE);
 
-      const result = await writeDevEnvFiles(
+      const result = await applyDevEnvChanges(
         consumer,
         [
           { rel: 'apps/web/.env.local', content: 'NEW_WEB=1\n' },
@@ -118,7 +120,7 @@ describe('dev env transaction', () => {
     const stagedFiles: Array<string> = [];
     const stagedModes: Array<number> = [];
     try {
-      const result = await writeDevEnvFiles(
+      const result = await applyDevEnvChanges(
         consumer,
         [
           { rel: 'apps/web/.env.local', content: 'WEB=1\n' },
@@ -165,7 +167,7 @@ describe('dev env transaction cleanup', () => {
       writeFileSync(dest, 'OLD=1\n');
       chmodSync(dest, DEFAULT_FILE_MODE);
 
-      const result = await writeDevEnvFiles(
+      const result = await applyDevEnvChanges(
         consumer,
         [{ rel: 'apps/web/.env.local', content: 'NEW=1\n' }],
         {

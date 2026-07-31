@@ -1,0 +1,6 @@
+# Shared non-secret development configuration, keyed like secrets/dev.yaml
+# (apps.<name>, packages.<name>). `just dev-env-generate` composes each
+# workspace's .env.local from this file, the SOPS-encrypted secrets/dev.yaml,
+# and the gitignored per-machine config/dev.local.yaml, in that order of
+# precedence. A key never lives in both this file and secrets/dev.yaml.
+# This file is seeded once and then owned by your repo.

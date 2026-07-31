@@ -60,7 +60,11 @@ describe('Bun dotenv value codec', () => {
       ).not.toContain(null);
       writeFileSync(
         envFile,
-        renderDotenv('apps.web', 'secrets/dev.yaml', Object.fromEntries(CASES)),
+        renderDotenv(
+          'apps.web',
+          ['secrets/dev.yaml'],
+          Object.fromEntries(CASES),
+        ),
       );
 
       const loaded = loadWithBun(

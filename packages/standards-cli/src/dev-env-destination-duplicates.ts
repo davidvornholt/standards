@@ -1,19 +1,19 @@
 import { resolve } from 'node:path';
-import type { DevEnvWrite } from './dev-env-destination';
+import type { DevEnvMutation } from './dev-env-destination';
 
 export const duplicateDestinationProblems = (
   root: string,
-  writes: ReadonlyArray<DevEnvWrite>,
+  mutations: ReadonlyArray<DevEnvMutation>,
 ): ReadonlyArray<string> => {
-  const rawDuplicates = writes.flatMap((write, index) => {
-    const firstIndex = writes.findIndex(({ rel }) => rel === write.rel);
+  const rawDuplicates = mutations.flatMap((mutation, index) => {
+    const firstIndex = mutations.findIndex(({ rel }) => rel === mutation.rel);
     return firstIndex < index
-      ? [`${write.rel} is declared more than once`]
+      ? [`${mutation.rel} is declared more than once`]
       : [];
   });
-  const resolved = writes.map((write) => ({
-    write,
-    dest: resolve(root, write.rel),
+  const resolved = mutations.map((mutation) => ({
+    mutation,
+    dest: resolve(root, mutation.rel),
   }));
   const normalizedDuplicates = resolved.flatMap((destination, index) => {
     const firstIndex = resolved.findIndex(
@@ -22,9 +22,9 @@ export const duplicateDestinationProblems = (
     const first = resolved[firstIndex];
     return firstIndex < index &&
       first !== undefined &&
-      first.write.rel !== destination.write.rel
+      first.mutation.rel !== destination.mutation.rel
       ? [
-          `${destination.write.rel} resolves to the same destination as ${first.write.rel}`,
+          `${destination.mutation.rel} resolves to the same destination as ${first.mutation.rel}`,
         ]
       : [];
   });
