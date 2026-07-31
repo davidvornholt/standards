@@ -11,16 +11,22 @@ import {
   readBrokerStore,
   resolveBrokerPath,
 } from './creds-store';
+import {
+  isSafeSecretsTargetName,
+  resolveTargetRelResult,
+} from './creds-target';
 import { resolveGithubRepo } from './github-api';
 import { isRecord } from './github-settings-parse';
-
-const SAFE_TARGET = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9_-])?$/u;
 
 export type CredsDestination = {
   readonly target: string;
   readonly key: string;
 };
 export type SecretsTarget = { readonly target: string; readonly rel: string };
+export type SecretsTargetInventory = {
+  readonly targets: ReadonlyArray<SecretsTarget>;
+  readonly problems: ReadonlyArray<string>;
+};
 export type ResolvedContext = {
   readonly repo: string;
   readonly rel: string;
@@ -34,7 +40,7 @@ export const parseDestination = (raw: string): CredsDestination | null => {
   const key = raw.slice(separator + 1);
   return separator > 0 &&
     separator < raw.length - 1 &&
-    SAFE_TARGET.test(target) &&
+    isSafeSecretsTargetName(target) &&
     parseSopsKeyPath(key) !== null
     ? { target, key }
     : null;
@@ -88,38 +94,38 @@ const isHostTargetCandidate = (consumer: string, name: string): boolean => {
 
 export const listSecretsTargets = (
   consumer: string,
-): ReadonlyArray<SecretsTarget> => {
+): SecretsTargetInventory => {
   const flat = listDir(consumer, 'secrets')
     .filter(isYamlSecrets)
     .map((name) => ({
       target: name.slice(0, -'.yaml'.length),
       rel: `secrets/${name}`,
     }))
-    .filter(({ target }) => SAFE_TARGET.test(target));
+    .filter(({ target }) => isSafeSecretsTargetName(target));
   const hosts = listDir(consumer, 'infra/hosts')
     .filter(
-      (name) => SAFE_TARGET.test(name) && isHostTargetCandidate(consumer, name),
+      (name) =>
+        isSafeSecretsTargetName(name) && isHostTargetCandidate(consumer, name),
     )
     .map((name) => ({
       target: name,
       rel: `infra/hosts/${name}/secrets.yaml`,
     }));
-  return [...flat, ...hosts];
-};
-
-export const resolveTargetRel = (
-  consumer: string,
-  target: string,
-): string | null => {
-  if (!SAFE_TARGET.test(target)) {
-    return null;
+  const targets = [...flat, ...hosts];
+  const relsByTarget = new Map<string, Array<string>>();
+  for (const { target, rel } of targets) {
+    const rels = relsByTarget.get(target) ?? [];
+    rels.push(rel);
+    relsByTarget.set(target, rels);
   }
-  const host = `infra/hosts/${target}/secrets.yaml`;
-  if (isContainedSopsPath(consumer, host, 'file')) {
-    return host;
-  }
-  const flat = `secrets/${target}.yaml`;
-  return isContainedSopsPath(consumer, flat, 'file') ? flat : null;
+  const problems = [...relsByTarget.entries()].flatMap(([target, rels]) =>
+    rels.length > 1
+      ? [
+          `secrets target "${target}" is ambiguous because ${rels.join(' and ')} both claim that identity; rename one target so the name binds exactly one encrypted file`,
+        ]
+      : [],
+  );
+  return { targets, problems };
 };
 
 export const resolveContext = async (
@@ -144,14 +150,23 @@ export const resolveContext = async (
     );
     return null;
   }
-  const rel = resolveTargetRel(consumer, dest.target);
-  if (rel === null) {
+  const resolved = resolveTargetRelResult(consumer, dest.target);
+  if (!resolved.ok) {
     console.error(
-      `standards creds: secrets target "${dest.target}" not found; create it with \`just secrets edit ${dest.target}\` first`,
+      `standards creds: ${
+        resolved.kind === 'missing'
+          ? `${resolved.problem}; create it with \`just secrets edit ${dest.target}\` first`
+          : resolved.problem
+      }`,
     );
     return null;
   }
-  return { repo, rel, dest, store: await readBrokerStore(resolveBrokerPath()) };
+  return {
+    repo,
+    rel: resolved.rel,
+    dest,
+    store: await readBrokerStore(resolveBrokerPath()),
+  };
 };
 
 export const selectAccount = (

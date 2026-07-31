@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'bun:test';
+import { resolveBrokeredReferences } from './dev-env-brokered-resolve';
 import { composeDevEnv, type DevEnvLayer } from './dev-env-compose';
 import { parseDevEnvDocument } from './dev-env-document';
 import { renderDotenv } from './dev-env-dotenv';
 
 const layer = (source: string, raw: unknown): DevEnvLayer => ({
   source,
-  document: parseDevEnvDocument(raw, source),
+  document: parseDevEnvDocument(
+    raw,
+    source,
+    source === 'secrets/dev.yaml' ? 'secrets' : 'configuration',
+  ),
 });
 
 const PORTABLE_ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u;
@@ -93,7 +98,9 @@ describe('dev env composition', () => {
   it('does not treat a local override of a secret as an overlap', () => {
     const composed = composeDevEnv(
       null,
-      layer('secrets/dev.yaml', { apps: { web: { AUTH_SECRET: 'shared' } } }),
+      layer('secrets/dev.yaml', {
+        apps: { web: { AUTH_SECRET: 'shared' } },
+      }),
       layer('config/dev.local.yaml', {
         apps: { web: { AUTH_SECRET: 'mine' } },
       }),
@@ -134,9 +141,15 @@ describe('dev env prototype names', () => {
             })
           : null;
       const composed = composeDevEnv(config, secrets, local);
-      const [target] = composed.targets;
+      const resolved = resolveBrokeredReferences(
+        '.',
+        composed.targets,
+        composed.brokeredReferences,
+      );
+      const [target] = resolved.targets;
 
       expect(composed.problems).toEqual([]);
+      expect(resolved.problems).toEqual([]);
       expect(target).toBeDefined();
       const rendered = renderDotenv(
         'apps.web',
@@ -173,18 +186,5 @@ describe('dev env validation', () => {
     expect(composed.problems.at(-1)).toBe(
       'apps.web.DATABASE_URL is declared in both config/dev.yaml and secrets/dev.yaml; a value is either configuration or a secret, so keep it in exactly one',
     );
-  });
-
-  it('gathers document problems from every layer', () => {
-    const composed = composeDevEnv(
-      layer('config/dev.yaml', { infra: {} }),
-      layer('secrets/dev.yaml', { apps: { web: { OK: 'yes' } } }),
-      layer('config/dev.local.yaml', { apps: { web: { 'bad key': 'x' } } }),
-    );
-
-    expect(composed.problems).toEqual([
-      'config/dev.yaml top-level key "infra" must be "apps" or "packages"',
-      'config/dev.local.yaml "apps.web" env key "bad key" must be a portable environment variable name',
-    ]);
   });
 });

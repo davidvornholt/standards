@@ -21,6 +21,25 @@ import {
 afterEach(cleanupPlanRun);
 
 describe('creds plan/apply safety', () => {
+  it('rejects duplicate flat and host target identities before provider mutation', async () => {
+    const { consumer, events } = initialize(ENCRYPTED_SECRETS);
+    mkdirSync(join(consumer, 'infra/hosts/ci'), { recursive: true });
+    writeFileSync(
+      join(consumer, 'infra/hosts/ci/secrets.yaml'),
+      'host:\n  unrelated: ENC[AES256_GCM,data:x]\nsops:\n  mac: ENC[AES256_GCM,data:y]\n',
+    );
+    stubCloudflare('ci');
+    const error = spyOn(console, 'error').mockImplementation(() => undefined);
+
+    expect(await runCredsPlan(consumer, true)).toBe(false);
+    expect(readFileSync(events, 'utf8')).toBe('');
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'secrets target "ci" is ambiguous because secrets/ci.yaml and infra/hosts/ci/secrets.yaml both claim that identity',
+      ),
+    );
+  });
+
   it.each([
     ['malformed YAML', 'ci: [\n'],
     ['missing SOPS metadata', 'ci:\n  token: plaintext\n'],

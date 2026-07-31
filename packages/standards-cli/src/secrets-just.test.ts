@@ -124,6 +124,20 @@ describe('canonical secrets Just module', () => {
     expect(existsSync(injectionMarker)).toBe(false);
   });
 
+  it('rejects duplicate flat and host targets before invoking SOPS', () => {
+    const fixture = createFixture();
+    write(fixture.root, 'secrets/prod.yaml', 'encrypted\n');
+    write(fixture.root, 'infra/hosts/prod/secrets.yaml', 'encrypted\n');
+
+    const result = runSecrets(fixture, 'updatekeys', 'prod');
+
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}${result.stderr}`).toContain(
+      'Ambiguous secrets target prod: both secrets/prod.yaml and infra/hosts/prod/secrets.yaml exist',
+    );
+    expect(sopsCalls(fixture)).toBe('');
+  });
+
   it('returns nonzero when an earlier updatekeys target fails', () => {
     const fixture = createFixture('secrets/a.yaml');
     write(fixture.root, 'secrets/a.yaml', 'encrypted\n');

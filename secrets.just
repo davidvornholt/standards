@@ -46,12 +46,12 @@ updatekeys-all:
     done; \
     exit "$status"
 
-# Resolve a target name to its secrets file and run sops against it. A target
-# is `infra/hosts/<target>/secrets.yaml` when that host directory exists and
-# `secrets/<target>.yaml` otherwise; unresolved names still map to
-# secrets/<target>.yaml so sops can create new targets from the repo-owned
-# .sops.yaml creation rules. Target names start with an ASCII letter or digit
-# and otherwise contain only letters, digits, dots, underscores, or hyphens.
+# Resolve a target name to exactly one secrets file and run sops against it.
+# Existing flat and host files bind their own target; when neither exists, an
+# existing host directory selects its secrets file and other names select the
+# flat file. Two existing files with the same target name are rejected as
+# ambiguous. Target names start with an ASCII letter or digit and otherwise
+# contain only letters, digits, dots, underscores, or hyphens.
 _sops target mode="":
     @target={{ quote(target) }}; mode={{ quote(mode) }}; \
     case "$target" in \
@@ -64,10 +64,18 @@ _sops target mode="":
       ''|updatekeys) ;; \
       *) printf 'Invalid SOPS mode\n' >&2; exit 1 ;; \
     esac; \
-    if [ -d "infra/hosts/$target" ]; then \
-      just secrets _sops-file "infra/hosts/$target/secrets.yaml" "$mode"; \
+    host_file="infra/hosts/$target/secrets.yaml"; flat_file="secrets/$target.yaml"; \
+    if [ -f "$host_file" ] && [ -f "$flat_file" ]; then \
+      printf 'Ambiguous secrets target %s: both %s and %s exist; rename one target\n' "$target" "$flat_file" "$host_file" >&2; \
+      exit 1; \
+    elif [ -f "$host_file" ]; then \
+      just secrets _sops-file "$host_file" "$mode"; \
+    elif [ -f "$flat_file" ]; then \
+      just secrets _sops-file "$flat_file" "$mode"; \
+    elif [ -d "infra/hosts/$target" ]; then \
+      just secrets _sops-file "$host_file" "$mode"; \
     else \
-      just secrets _sops-file "secrets/$target.yaml" "$mode"; \
+      just secrets _sops-file "$flat_file" "$mode"; \
     fi
 
 # Run sops (or the nix-provided sops) against a secrets file

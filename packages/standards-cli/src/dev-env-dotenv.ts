@@ -1,4 +1,3 @@
-import type { EnvValues } from './dev-env-document';
 import { encodeBunDotenvValue } from './dev-env-dotenv-value';
 
 export const DEV_ENV_GENERATED_HEADER =
@@ -21,7 +20,7 @@ const renderValue = (key: string, value: string): string => {
 export const renderDotenv = (
   sourcePath: string,
   sources: ReadonlyArray<string>,
-  env: EnvValues,
+  env: Readonly<Record<string, string>>,
 ): string =>
   [
     DEV_ENV_GENERATED_HEADER,
@@ -29,3 +28,40 @@ export const renderDotenv = (
     ...Object.entries(env).map(([key, value]) => renderValue(key, value)),
     '',
   ].join('\n');
+
+export type PreservedDotenvResult =
+  | { readonly ok: true; readonly content: string }
+  | { readonly ok: false; readonly problem: string };
+
+export const preserveRenderedDotenvValues = (
+  previous: string,
+  rendered: string,
+  keys: ReadonlyArray<string>,
+): PreservedDotenvResult => {
+  if (!hasDevEnvGeneratedHeader(previous)) {
+    return {
+      ok: false,
+      problem: 'the prior file is not owned by `bun standards dev-env`',
+    };
+  }
+  const previousLines = previous.split('\n');
+  const nextLines = rendered.split('\n');
+  for (const key of keys) {
+    const prefix = `${key}=`;
+    const prior = previousLines.filter((line) => line.startsWith(prefix));
+    const nextIndexes = nextLines.flatMap((line, index) =>
+      line.startsWith(prefix) ? [index] : [],
+    );
+    if (prior.length !== 1 || nextIndexes.length !== 1) {
+      return {
+        ok: false,
+        problem: `the prior generated file does not contain exactly one ${key} value to preserve`,
+      };
+    }
+    const [nextIndex] = nextIndexes;
+    if (nextIndex !== undefined) {
+      nextLines[nextIndex] = prior[0] as string;
+    }
+  }
+  return { ok: true, content: nextLines.join('\n') };
+};

@@ -1,7 +1,10 @@
 import { listSecretsTargets } from './creds-dest';
 import { identifyCloudflareBootstrapAuthority } from './creds-login-cloudflare';
 import { computeCredsPlan } from './creds-plan';
-import { renewPlannedToken } from './creds-plan-renew';
+import {
+  type RenewPlannedTokenResult,
+  renewPlannedToken,
+} from './creds-plan-renew';
 import { reportCredsPlan } from './creds-plan-report';
 import { revokePlannedToken } from './creds-plan-revoke';
 import type { AccountToken, PlannedAction } from './creds-plan-types';
@@ -11,12 +14,21 @@ import {
   readBrokerStore,
   resolveBrokerPath,
 } from './creds-store';
+import { refreshDevEnvForSopsWrites } from './dev-env-brokered-refresh';
 import { resolveGithubRepo } from './github-api';
 
 const gatherRepoState = async (consumer: string, store: BrokerStore) => {
+  const inventory = listSecretsTargets(consumer);
+  if (inventory.problems.length > 0) {
+    return {
+      keysByTarget: new Map<string, ReadonlySet<string>>(),
+      tokens: [] as Array<AccountToken>,
+      problems: inventory.problems,
+    };
+  }
   const keysByTarget = new Map<string, ReadonlySet<string>>();
   const targetKeys = await Promise.all(
-    listSecretsTargets(consumer).map(async ({ target, rel }) => ({
+    inventory.targets.map(async ({ target, rel }) => ({
       target,
       rel,
       keys: await readEncryptedKeys(consumer, rel),
@@ -61,18 +73,23 @@ const applyAction = (
   consumer: string,
   store: BrokerStore,
   action: PlannedAction,
-): Promise<string | null> => {
+): Promise<RenewPlannedTokenResult> => {
   const account = store.cloudflare.find(
     (entry) => entry.accountId === action.accountId,
   );
   if (account === undefined) {
-    return Promise.resolve(
-      `${action.name}: account ${action.accountId} is not in the broker store`,
-    );
+    return Promise.resolve({
+      failure: `${action.name}: account ${action.accountId} is not in the broker store`,
+      refreshEvidence: null,
+    });
   }
-  return action.kind === 'revoke'
-    ? revokePlannedToken(account, action)
-    : renewPlannedToken(consumer, account, action);
+  if (action.kind === 'renew') {
+    return renewPlannedToken(consumer, account, action);
+  }
+  return revokePlannedToken(account, action).then((failure) => ({
+    failure,
+    refreshEvidence: null,
+  }));
 };
 
 const fail = (message: string): false => {
@@ -117,13 +134,18 @@ export const runCredsPlan = async (
   if (!apply || plan.actions.length === 0) {
     return true;
   }
-  const failures = (
-    await Promise.all(
-      plan.actions.map((action) => applyAction(consumer, store, action)),
-    )
-  ).filter((failure): failure is string => failure !== null);
+  const results = await Promise.all(
+    plan.actions.map((action) => applyAction(consumer, store, action)),
+  );
+  const failures = results.flatMap(({ failure }) =>
+    failure === null ? [] : [failure],
+  );
   for (const failure of failures) {
     console.error(`standards creds: ${failure}`);
   }
-  return failures.length === 0;
+  const refreshEvidence = results.flatMap(({ refreshEvidence: evidence }) =>
+    evidence === null ? [] : [evidence],
+  );
+  const refreshed = await refreshDevEnvForSopsWrites(consumer, refreshEvidence);
+  return failures.length === 0 && refreshed;
 };

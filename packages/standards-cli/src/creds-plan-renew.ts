@@ -4,14 +4,33 @@
 // mismatch deletes the replacement and preserves the old token.
 
 import { createAccountToken, deleteAccountToken } from './creds-cloudflare';
-import { resolveTargetRel } from './creds-dest';
 import type { PlannedAction } from './creds-plan-types';
 import { destinationWrites, s3AccessKeyPath, s3PairPaths } from './creds-r2';
 import { inspectSopsScalarDestination, setSopsValues } from './creds-sops';
 import { verifySopsStoredValue } from './creds-sops-value';
 import type { CloudflareBrokerAccount } from './creds-store';
+import { resolveTargetRelResult } from './creds-target';
+import type { BrokeredRefreshEvidence } from './dev-env-brokered-refresh';
 
 type RenewAction = Extract<PlannedAction, { readonly kind: 'renew' }>;
+
+export type RenewPlannedTokenResult = {
+  readonly failure: string | null;
+  readonly refreshEvidence: BrokeredRefreshEvidence | null;
+};
+
+const renewalResult = (
+  failure: string | null,
+  evidence: BrokeredRefreshEvidence | null = null,
+): RenewPlannedTokenResult => ({ failure, refreshEvidence: evidence });
+
+const refreshEvidence = (
+  action: RenewAction,
+  safety: BrokeredRefreshEvidence['safety'],
+): BrokeredRefreshEvidence | null =>
+  action.format === 's3'
+    ? { target: action.target, key: action.key, safety }
+    : null;
 
 const cleanupReplacement = async (
   account: CloudflareBrokerAccount,
@@ -48,19 +67,20 @@ export const renewPlannedToken = async (
   consumer: string,
   account: CloudflareBrokerAccount,
   action: RenewAction,
-): Promise<string | null> => {
+): Promise<RenewPlannedTokenResult> => {
   const { accountId, token: bootstrapToken } = account;
-  const rel = resolveTargetRel(consumer, action.target);
-  if (rel === null) {
-    return `${action.name}: secrets target ${action.target} not found`;
+  const resolved = resolveTargetRelResult(consumer, action.target);
+  if (!resolved.ok) {
+    return renewalResult(`${action.name}: ${resolved.problem}`);
   }
+  const { rel } = resolved;
   const destinationProblem = await inspectRenewDestinations(
     consumer,
     rel,
     action,
   );
   if (destinationProblem !== null) {
-    return destinationProblem;
+    return renewalResult(destinationProblem, refreshEvidence(action, 'unsafe'));
   }
   if (action.format === 's3') {
     const accessKey = verifySopsStoredValue(
@@ -70,7 +90,10 @@ export const renewPlannedToken = async (
       action.tokenId,
     );
     if (!(accessKey.ok && accessKey.matches)) {
-      return `${action.name}: could not prove the stored S3 access key belongs to the managed token; renewal stopped before mutation`;
+      return renewalResult(
+        `${action.name}: could not prove the stored S3 access key belongs to the managed token; renewal stopped before mutation`,
+        refreshEvidence(action, 'unsafe'),
+      );
     }
   }
   const replacement = await createAccountToken(accountId, bootstrapToken, {
@@ -80,7 +103,7 @@ export const renewPlannedToken = async (
     condition: action.condition,
   });
   if (!replacement.ok) {
-    return `${action.name}: ${replacement.problem}`;
+    return renewalResult(`${action.name}: ${replacement.problem}`);
   }
   const { id: replacementId, value } = replacement.value;
   const writes = destinationWrites(
@@ -99,7 +122,10 @@ export const renewPlannedToken = async (
   );
   if (unverifiable.length > 0) {
     const detail = unverifiable.join('; ');
-    return `${action.name}: ${written.ok ? detail : `${written.problem}; ${detail}`}; account ${accountId} replacement ${replacementId} and old token ${action.tokenId} remain active because the stored value is unverifiable`;
+    return renewalResult(
+      `${action.name}: ${written.ok ? detail : `${written.problem}; ${detail}`}; account ${accountId} replacement ${replacementId} and old token ${action.tokenId} remain active because the stored value is unverifiable`,
+      refreshEvidence(action, 'unsafe'),
+    );
   }
   const mismatched = verified.flatMap(({ path, result }) =>
     result.ok && !result.matches ? [path] : [],
@@ -108,14 +134,20 @@ export const renewPlannedToken = async (
     const problem = written.ok
       ? `${action.name}: ${rel} at ${mismatched.join(', ')} now holds a value matching neither the old nor the replacement token; repair the stored value manually`
       : `${action.name}: ${written.problem}`;
-    return cleanupReplacement(account, replacementId, action.tokenId, problem);
+    return renewalResult(
+      await cleanupReplacement(account, replacementId, action.tokenId, problem),
+      refreshEvidence(action, 'unsafe'),
+    );
   }
   const deleted = await deleteAccountToken(
     accountId,
     bootstrapToken,
     action.tokenId,
   );
-  return deleted.ok
-    ? null
-    : `${action.name}: replacement ${replacementId} is stored, but old token ${action.tokenId} could not be revoked: ${deleted.problem}`;
+  return renewalResult(
+    deleted.ok
+      ? null
+      : `${action.name}: replacement ${replacementId} is stored, but old token ${action.tokenId} could not be revoked: ${deleted.problem}`,
+    refreshEvidence(action, 'verified'),
+  );
 };

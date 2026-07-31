@@ -14,9 +14,9 @@ import {
   listSecretsTargets,
   parseDestination,
   resolveContext,
-  resolveTargetRel,
 } from './creds-dest';
 import { setSopsValues } from './creds-sops';
+import { resolveTargetRel } from './creds-target';
 
 const dirs: Array<string> = [];
 afterEach(() => {
@@ -101,9 +101,10 @@ describe('credential destinations', () => {
     writeFileSync(outside, 'ci:\n  token: outside\nsops: {}\n');
     symlinkSync(outside, join(consumer, 'secrets', 'ci.yaml'));
 
-    expect(listSecretsTargets(consumer)).toEqual([
-      { target: 'ci', rel: 'secrets/ci.yaml' },
-    ]);
+    expect(listSecretsTargets(consumer)).toEqual({
+      targets: [{ target: 'ci', rel: 'secrets/ci.yaml' }],
+      problems: [],
+    });
     expect(resolveTargetRel(consumer, 'ci')).toBeNull();
     expect(await resolveContext(consumer, 'ci:ci.token')).toBeNull();
     expect(
@@ -131,8 +132,9 @@ describe('credential destinations', () => {
     symlinkSync(outsideHost, join(consumer, 'infra', 'hosts', 'prod'), 'dir');
 
     expect(resolveTargetRel(consumer, 'prod')).toBeNull();
-    expect(listSecretsTargets(consumer)).toEqual([
-      { target: 'prod', rel: 'infra/hosts/prod/secrets.yaml' },
-    ]);
+    expect(listSecretsTargets(consumer)).toEqual({
+      targets: [{ target: 'prod', rel: 'infra/hosts/prod/secrets.yaml' }],
+      problems: [],
+    });
   });
 });
