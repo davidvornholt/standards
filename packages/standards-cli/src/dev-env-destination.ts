@@ -3,11 +3,18 @@ import type { Stats } from 'node:fs';
 import { lstat, realpath } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { duplicateDestinationProblems } from './dev-env-destination-duplicates';
+import { devEnvGitIgnoreProblem } from './dev-env-destination-gitignore';
 
 export type DevEnvWrite = {
   readonly rel: string;
   readonly content: string;
 };
+
+export type DevEnvRemoval = {
+  readonly rel: string;
+};
+
+export type DevEnvMutation = DevEnvWrite | DevEnvRemoval;
 
 type DevEnvPathIdentity = {
   readonly path: string;
@@ -16,7 +23,7 @@ type DevEnvPathIdentity = {
 };
 
 export type DevEnvDestination = {
-  readonly write: DevEnvWrite;
+  readonly mutation: DevEnvMutation;
   readonly dest: string;
   readonly previous: Stats | null;
   readonly temp: string;
@@ -54,13 +61,13 @@ export const devEnvStatOrNull = async (path: string): Promise<Stats | null> => {
 const inspectDestination = async (
   root: string,
   realRoot: string,
-  write: DevEnvWrite,
+  mutation: DevEnvMutation,
 ): Promise<string | DevEnvDestination> => {
-  const dest = resolve(root, write.rel);
+  const dest = resolve(root, mutation.rel);
   if (!containedBy(root, dest)) {
-    return `${write.rel} escapes the consumer repository`;
+    return `${mutation.rel} escapes the consumer repository`;
   }
-  const paths = dirname(write.rel)
+  const paths = dirname(mutation.rel)
     .split(sep)
     .map((_segment, index, segments) =>
       join(root, ...segments.slice(0, index + 1)),
@@ -73,19 +80,19 @@ const inspectDestination = async (
         entry === null || !entry.isDirectory() || entry.isSymbolicLink(),
     )
   ) {
-    return `${write.rel} has an unsafe destination directory`;
+    return `${mutation.rel} has an unsafe destination directory`;
   }
   const realParent = await realpath(dirname(dest));
   if (!containedBy(realRoot, realParent)) {
-    return `${write.rel} resolves outside the consumer repository`;
+    return `${mutation.rel} resolves outside the consumer repository`;
   }
   const previous = await devEnvStatOrNull(dest);
   if (previous !== null && (!previous.isFile() || previous.isSymbolicLink())) {
-    return `${write.rel} must be absent or a regular file, not a symlink or other file type`;
+    return `${mutation.rel} must be absent or a regular file, not a symlink or other file type`;
   }
   const suffix = randomUUID();
   return {
-    write,
+    mutation,
     dest,
     previous,
     temp: join(dirname(dest), `.env.local.standards-${suffix}.tmp`),
@@ -104,27 +111,38 @@ const inspectDestination = async (
 
 export const preflightDevEnvDestinations = async (
   consumer: string,
-  writes: ReadonlyArray<DevEnvWrite>,
+  mutations: ReadonlyArray<DevEnvMutation>,
 ): Promise<PreflightResult> => {
   const root = resolve(consumer);
   const realRoot = await realpath(root);
-  const duplicates = duplicateDestinationProblems(root, writes);
+  const duplicates = duplicateDestinationProblems(root, mutations);
   const checked = await Promise.all(
-    writes.map(async (write) => {
+    mutations.map(async (mutation) => {
       try {
-        return await inspectDestination(root, realRoot, write);
+        return await inspectDestination(root, realRoot, mutation);
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
-        return `${write.rel} could not be preflighted: ${detail}`;
+        return `${mutation.rel} could not be preflighted: ${detail}`;
       }
     }),
   );
   const destinations = checked.filter(
     (item): item is DevEnvDestination => typeof item !== 'string',
   );
+  const gitignoreProblems = destinations.flatMap((destination) =>
+    [
+      destination.mutation.rel,
+      relative(root, destination.temp),
+      relative(root, destination.backup),
+    ].flatMap((rel) => {
+      const problem = devEnvGitIgnoreProblem(consumer, rel);
+      return problem === null ? [] : [problem];
+    }),
+  );
   const problems = [
     ...duplicates,
     ...checked.filter((item): item is string => typeof item === 'string'),
+    ...gitignoreProblems,
   ];
   return problems.length > 0
     ? { ok: false, problems }
@@ -158,18 +176,18 @@ export const devEnvParentProblem = async (
       realParent !== destination.realParent ||
       !containedBy(destination.realRoot, realParent)
     ) {
-      return `${destination.write.rel} destination directory changed after preflight`;
+      return `${destination.mutation.rel} destination directory changed after preflight`;
     }
     return null;
   } catch {
-    return `${destination.write.rel} destination directory changed after preflight`;
+    return `${destination.mutation.rel} destination directory changed after preflight`;
   }
 };
 
 export const devEnvDestinationProblems = async (
   consumer: string,
-  writes: ReadonlyArray<DevEnvWrite>,
+  mutations: ReadonlyArray<DevEnvMutation>,
 ): Promise<ReadonlyArray<string>> => {
-  const checked = await preflightDevEnvDestinations(consumer, writes);
+  const checked = await preflightDevEnvDestinations(consumer, mutations);
   return checked.ok ? [] : checked.problems;
 };

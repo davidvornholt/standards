@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { planDevEnvWrites } from './dev-env';
+import { planDevEnvChanges } from './dev-env';
 
 const EMPTY_EXPANSION = ['$', '{:-}'].join('');
 
@@ -23,7 +23,7 @@ describe('dev env layered plan', () => {
   it('renders composed values with a header naming every source', () => {
     const consumer = buildConsumer();
     try {
-      const plan = planDevEnvWrites(consumer, {
+      const plan = planDevEnvChanges(consumer, {
         config: { raw: { apps: { web: { PORT: '3000' } } } },
         secrets: { apps: { web: { AUTH_SECRET: 'shared' } } },
         local: { raw: { apps: { web: { PORT: '3100' } } } },
@@ -44,7 +44,7 @@ describe('dev env layered plan', () => {
   it('plans a workspace declared only in tracked configuration', () => {
     const consumer = buildConsumer();
     try {
-      const plan = planDevEnvWrites(consumer, {
+      const plan = planDevEnvChanges(consumer, {
         config: { raw: { apps: { web: { PORT: '3000' } } } },
         secrets: {},
         local: null,
@@ -65,7 +65,7 @@ describe('dev env layered plan', () => {
   it('names every declaring source for a missing workspace', () => {
     const consumer = buildConsumer();
     try {
-      const plan = planDevEnvWrites(consumer, {
+      const plan = planDevEnvChanges(consumer, {
         config: { raw: { apps: { ghost: { PORT: '1' } } } },
         secrets: { apps: { ghost: { AUTH_SECRET: 's' } } },
         local: null,
@@ -83,7 +83,7 @@ describe('dev env layered plan', () => {
   it('treats a comment-only layer as an empty document', () => {
     const consumer = buildConsumer();
     try {
-      const plan = planDevEnvWrites(consumer, {
+      const plan = planDevEnvChanges(consumer, {
         config: { raw: {} },
         secrets: { apps: { web: { AUTH_SECRET: 'shared' } } },
         local: { raw: {} },

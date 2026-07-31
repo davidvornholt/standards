@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { execFileSync } from 'node:child_process';
 import {
   chmodSync,
   mkdirSync,
@@ -13,13 +14,15 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { writeDevEnvFiles } from './dev-env-transaction';
+import { initializeDevEnvGit } from './dev-env-test-support';
+import { applyDevEnvChanges } from './dev-env-transaction';
 
 const PERMISSION_BITS_MODULUS = 0o1000;
 const PRIOR_MODE = 0o640;
 
 const buildConsumer = (): string => {
   const consumer = mkdtempSync(join(tmpdir(), 'dev-env-recovery-failure-'));
+  initializeDevEnvGit(consumer);
   mkdirSync(join(consumer, 'apps/web'), { recursive: true });
   mkdirSync(join(consumer, 'packages/db'), { recursive: true });
   const web = join(consumer, 'apps/web/.env.local');
@@ -43,7 +46,7 @@ describe('dev env recovery failures', () => {
     const consumer = buildConsumer();
     const web = join(consumer, 'apps/web/.env.local');
     try {
-      const result = await writeDevEnvFiles(consumer, writes, {
+      const result = await applyDevEnvChanges(consumer, writes, {
         beforeCommit: (index) => {
           if (index === 1) {
             rmSync(web);
@@ -70,6 +73,23 @@ describe('dev env recovery failures', () => {
       const backup = backups[0] ?? 'missing-backup';
       expect(readFileSync(backup, 'utf8')).toBe('OLD=1\n');
       expect(statSync(backup).mode % PERMISSION_BITS_MODULUS).toBe(PRIOR_MODE);
+      const artifactStatus = execFileSync(
+        'git',
+        ['-C', consumer, 'status', '--porcelain', '--untracked-files=all'],
+        { encoding: 'utf8' },
+      )
+        .split('\n')
+        .filter((line) => line.includes('.standards-'));
+      execFileSync('git', ['-C', consumer, 'add', '-A']);
+      const stagedArtifacts = execFileSync(
+        'git',
+        ['-C', consumer, 'diff', '--cached', '--name-only'],
+        { encoding: 'utf8' },
+      )
+        .split('\n')
+        .filter((line) => line.includes('.standards-'));
+      expect(artifactStatus).toEqual([]);
+      expect(stagedArtifacts).toEqual([]);
       expect(
         readdirSync(join(consumer, 'packages/db')).filter((name) =>
           name.endsWith('.tmp'),
@@ -86,7 +106,7 @@ describe('dev env recovery failures', () => {
     const external = mkdtempSync(join(tmpdir(), 'dev-env-recovery-external-'));
     writeFileSync(join(external, 'marker'), 'UNTOUCHED\n');
     try {
-      const result = await writeDevEnvFiles(consumer, writes, {
+      const result = await applyDevEnvChanges(consumer, writes, {
         beforeCommit: (index) => {
           if (index === 1) {
             renameSync(join(consumer, 'apps/web'), parked);

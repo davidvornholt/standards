@@ -1,36 +1,21 @@
-import { spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { composeDevEnv } from './dev-env-compose';
 import {
+  type DevEnvRemoval,
   type DevEnvWrite,
   devEnvDestinationProblems,
 } from './dev-env-destination';
+import { devEnvGitIgnoreProblem } from './dev-env-destination-gitignore';
 import { parseDevEnvDocument } from './dev-env-document';
 import { renderDotenv } from './dev-env-dotenv';
+import { planDevEnvRemovals } from './dev-env-reconciliation';
 import { DEV_SECRETS_FILE, readDevSecrets } from './dev-env-secrets';
-import { writeDevEnvFiles } from './dev-env-transaction';
+import { applyDevEnvChanges } from './dev-env-transaction';
 import { parseYaml } from './yaml-parse';
 
 export const DEV_CONFIG_FILE = 'config/dev.yaml';
 export const DEV_LOCAL_FILE = 'config/dev.local.yaml';
-
-// Decrypted values are safe only when git proves it will ignore them.
-const gitIgnoreProblem = (consumer: string, rel: string): string | null => {
-  const result = spawnSync('git', ['check-ignore', '-q', '--', rel], {
-    cwd: consumer,
-  });
-  if (result.error !== undefined || result.status === null) {
-    return `cannot run git to verify ${rel} is gitignored`;
-  }
-  if (result.status === 0) {
-    return null;
-  }
-  if (result.status === 1) {
-    return `${rel} is not gitignored; ignore it before generating dev env files`;
-  }
-  return `cannot verify ${rel} is gitignored (git check-ignore exited ${result.status})`;
-};
 
 export type DevEnvPlainInput = { readonly raw: unknown } | null;
 
@@ -88,10 +73,11 @@ const readPlainLayer = (consumer: string, rel: string): PlainLayerResult => {
 
 export type DevEnvPlan = {
   readonly writes: ReadonlyArray<DevEnvWrite>;
+  readonly removals: ReadonlyArray<DevEnvRemoval>;
   readonly problems: ReadonlyArray<string>;
 };
 
-export const planDevEnvWrites = (
+export const planDevEnvChanges = (
   consumer: string,
   inputs: DevEnvInputs,
 ): DevEnvPlan => {
@@ -113,7 +99,7 @@ export const planDevEnvWrites = (
     const workspaceDir = `${target.group}/${target.workspace}`;
     const rel = `${workspaceDir}/.env.local`;
     if (existsSync(join(consumer, workspaceDir, 'package.json'))) {
-      const ignoreProblem = gitIgnoreProblem(consumer, rel);
+      const ignoreProblem = devEnvGitIgnoreProblem(consumer, rel);
       if (ignoreProblem === null) {
         writes.push({
           rel,
@@ -132,7 +118,12 @@ export const planDevEnvWrites = (
       );
     }
   }
-  return { writes, problems };
+  const removalPlan = planDevEnvRemovals(consumer, writes);
+  return {
+    writes,
+    removals: removalPlan.removals,
+    problems: [...problems, ...removalPlan.problems],
+  };
 };
 
 export const runDevEnv = async (consumer: string): Promise<boolean> => {
@@ -140,7 +131,7 @@ export const runDevEnv = async (consumer: string): Promise<boolean> => {
   const secrets = readDevSecrets(consumer);
   const local = readPlainLayer(consumer, DEV_LOCAL_FILE);
   const localIgnoreProblem = local.present
-    ? gitIgnoreProblem(consumer, DEV_LOCAL_FILE)
+    ? devEnvGitIgnoreProblem(consumer, DEV_LOCAL_FILE)
     : null;
   const acquisitionProblems = [
     ...config.problems,
@@ -154,7 +145,7 @@ export const runDevEnv = async (consumer: string): Promise<boolean> => {
     console.error(problems.map((problem) => `  - ${problem}`).join('\n'));
     return false;
   }
-  const plan = planDevEnvWrites(consumer, {
+  const plan = planDevEnvChanges(consumer, {
     config: config.input,
     secrets: secrets.value,
     local: local.input,
@@ -162,14 +153,20 @@ export const runDevEnv = async (consumer: string): Promise<boolean> => {
   const problems = [
     ...localProblems,
     ...plan.problems,
-    ...(await devEnvDestinationProblems(consumer, plan.writes)),
+    ...(await devEnvDestinationProblems(consumer, [
+      ...plan.writes,
+      ...plan.removals,
+    ])),
   ];
   if (problems.length > 0) {
     console.error(`standards dev-env: ${problems.length} problem(s):`);
     console.error(problems.map((problem) => `  - ${problem}`).join('\n'));
     return false;
   }
-  const generated = await writeDevEnvFiles(consumer, plan.writes);
+  const generated = await applyDevEnvChanges(consumer, [
+    ...plan.writes,
+    ...plan.removals,
+  ]);
   if (!generated.ok) {
     console.error('standards dev-env: generation failed:');
     console.error(
@@ -188,13 +185,16 @@ export const runDevEnv = async (consumer: string): Promise<boolean> => {
   for (const write of plan.writes) {
     console.log(`  wrote ${write.rel}`);
   }
+  for (const removal of plan.removals) {
+    console.log(`  removed ${removal.rel}`);
+  }
   const inputFiles = [
     ...(config.input === null ? [] : [DEV_CONFIG_FILE]),
     DEV_SECRETS_FILE,
     ...(local.input === null ? [] : [DEV_LOCAL_FILE]),
   ];
   console.log(
-    `standards dev-env: generated ${plan.writes.length} env file(s) from ${inputFiles.join(' + ')}`,
+    `standards dev-env: generated ${plan.writes.length} and removed ${plan.removals.length} env file(s) from ${inputFiles.join(' + ')}`,
   );
   return true;
 };

@@ -24,7 +24,7 @@ const rollbackOne = async (
       await rm(destination.dest, { force: true });
       destination.committed = false;
     } catch (error) {
-      problems.push(`${destination.write.rel}: ${message(error)}`);
+      problems.push(`${destination.mutation.rel}: ${message(error)}`);
     }
   }
   if (destination.backupCreated && problems.length === 0) {
@@ -36,7 +36,7 @@ const rollbackOne = async (
       await rename(destination.backup, destination.dest);
       destination.backupCreated = false;
     } catch (error) {
-      problems.push(`${destination.write.rel}: ${message(error)}`);
+      problems.push(`${destination.mutation.rel}: ${message(error)}`);
     }
   }
   return problems;

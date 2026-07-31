@@ -12,13 +12,15 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { writeDevEnvFiles } from './dev-env-transaction';
+import { initializeDevEnvGit } from './dev-env-test-support';
+import { applyDevEnvChanges } from './dev-env-transaction';
 
 const PERMISSION_BITS_MODULUS = 0o1000;
 const DEFAULT_FILE_MODE = 0o644;
 
 const buildConsumer = (): string => {
   const consumer = mkdtempSync(join(tmpdir(), 'dev-env-destination-'));
+  initializeDevEnvGit(consumer);
   mkdirSync(join(consumer, 'apps/web'), { recursive: true });
   mkdirSync(join(consumer, 'packages/db'), { recursive: true });
   return consumer;
@@ -37,7 +39,7 @@ describe('dev env destination safety', () => {
       chmodSync(target, DEFAULT_FILE_MODE);
       symlinkSync('../../README.md', link);
 
-      const result = await writeDevEnvFiles(consumer, [
+      const result = await applyDevEnvChanges(consumer, [
         { rel: 'apps/web/.env.local', content: 'SECRET=leak\n' },
       ]);
 
@@ -57,7 +59,7 @@ describe('dev env destination safety', () => {
     try {
       symlinkSync('../../README.md', join(consumer, 'apps/web/.env.local'));
       mkdirSync(join(consumer, 'packages/db/.env.local'));
-      const result = await writeDevEnvFiles(consumer, [
+      const result = await applyDevEnvChanges(consumer, [
         { rel: 'apps/web/.env.local', content: 'WEB=1\n' },
         { rel: 'packages/db/.env.local', content: 'DB=1\n' },
         { rel: '../escape/.env.local', content: 'ESCAPE=1\n' },
@@ -84,7 +86,7 @@ describe('dev env destination safety', () => {
   it('rejects different paths that resolve to one destination', async () => {
     const consumer = buildConsumer();
     try {
-      const result = await writeDevEnvFiles(consumer, [
+      const result = await applyDevEnvChanges(consumer, [
         { rel: 'apps/web/.env.local', content: 'FIRST=1\n' },
         { rel: 'apps/web/../web/.env.local', content: 'SECOND=1\n' },
       ]);
@@ -105,7 +107,7 @@ describe('dev env destination safety', () => {
     const consumer = buildConsumer();
     try {
       symlinkSync('../../README.md', join(consumer, 'apps/web/.env.local'));
-      const result = await writeDevEnvFiles(consumer, [
+      const result = await applyDevEnvChanges(consumer, [
         { rel: 'apps/web/.env.local', content: 'FIRST=1\n' },
         { rel: 'apps/web/.env.local', content: 'SECOND=1\n' },
         { rel: 'apps/web/../web/.env.local', content: 'THIRD=1\n' },

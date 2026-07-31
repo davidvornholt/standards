@@ -11,7 +11,8 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { writeDevEnvFiles } from './dev-env-transaction';
+import { initializeDevEnvGit } from './dev-env-test-support';
+import { applyDevEnvChanges } from './dev-env-transaction';
 
 const PERMISSION_BITS_MODULUS = 0o1000;
 const OWNER_ONLY_FILE_MODE = 0o600;
@@ -22,11 +23,12 @@ describe('dev env cleanup failures', () => {
     const consumer = mkdtempSync(join(tmpdir(), 'dev-env-cleanup-failure-'));
     const workspace = join(consumer, 'apps/web');
     const dest = join(workspace, '.env.local');
+    initializeDevEnvGit(consumer);
     mkdirSync(workspace, { recursive: true });
     writeFileSync(dest, 'OLD=1\n');
     chmodSync(dest, DEFAULT_FILE_MODE);
     try {
-      const result = await writeDevEnvFiles(
+      const result = await applyDevEnvChanges(
         consumer,
         [{ rel: 'apps/web/.env.local', content: 'NEW=1\n' }],
         {

@@ -1,9 +1,9 @@
 import { resolve } from 'node:path';
-import type { DevEnvWrite } from './dev-env-destination';
+import type { DevEnvMutation } from './dev-env-destination';
 
 export const duplicateDestinationProblems = (
   root: string,
-  writes: ReadonlyArray<DevEnvWrite>,
+  writes: ReadonlyArray<DevEnvMutation>,
 ): ReadonlyArray<string> => {
   const rawDuplicates = writes.flatMap((write, index) => {
     const firstIndex = writes.findIndex(({ rel }) => rel === write.rel);

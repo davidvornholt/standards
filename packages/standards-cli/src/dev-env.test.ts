@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type DevEnvInputs, planDevEnvWrites } from './dev-env';
+import { type DevEnvInputs, planDevEnvChanges } from './dev-env';
 
 const secretsOnly = (raw: unknown): DevEnvInputs => ({
   config: null,
@@ -35,7 +35,7 @@ describe('dev env plan', () => {
   it('plans one gitignored .env.local per declared workspace', () => {
     const consumer = buildConsumer();
     try {
-      const plan = planDevEnvWrites(
+      const plan = planDevEnvChanges(
         consumer,
         secretsOnly({
           apps: { web: { AUTH_SECRET: 'dev-secret' } },
@@ -57,7 +57,7 @@ describe('dev env plan', () => {
   it('gathers missing-workspace and document problems together', () => {
     const consumer = buildConsumer();
     try {
-      const plan = planDevEnvWrites(
+      const plan = planDevEnvChanges(
         consumer,
         secretsOnly({
           apps: { web: { OK: 'yes' }, ghost: { OK: 'yes' } },
@@ -80,7 +80,7 @@ describe('dev env plan', () => {
   it('refuses a target git would track', () => {
     const consumer = buildConsumer({ gitignore: 'node_modules/\n' });
     try {
-      const plan = planDevEnvWrites(
+      const plan = planDevEnvChanges(
         consumer,
         secretsOnly({
           apps: { web: { OK: 'yes' } },
@@ -102,7 +102,7 @@ describe('dev env plan', () => {
       mkdirSync(join(consumer, 'apps/web'), { recursive: true });
       writeFileSync(join(consumer, 'apps/web/package.json'), '{}\n');
 
-      const plan = planDevEnvWrites(
+      const plan = planDevEnvChanges(
         consumer,
         secretsOnly({
           apps: { web: { OK: 'yes' } },
@@ -121,7 +121,7 @@ describe('dev env plan', () => {
   it('does not plan path-like workspace names', () => {
     const consumer = buildConsumer();
     try {
-      const plan = planDevEnvWrites(
+      const plan = planDevEnvChanges(
         consumer,
         secretsOnly({
           apps: {
