@@ -78,6 +78,7 @@ _dev-db-action action:
         fail(`DATABASE_URL is not a valid URL: ${error instanceof Error ? error.message : String(error)}`);
       }
       if (!['postgres:', 'postgresql:'].includes(url.protocol)) fail('DATABASE_URL must use the postgres: or postgresql: protocol.');
+      if (url.search || url.hash) fail('DATABASE_URL must not include query parameters or a fragment; dev-db validates and applies only the URL authority and path.');
       const host = url.hostname.toLowerCase();
       if (host === '[::1]' || host === '::1') fail('DATABASE_URL must use localhost or 127.0.0.1; the managed listener is IPv4 only.');
       if (!['localhost', '127.0.0.1'].includes(host)) fail(`DATABASE_URL points at ${url.hostname || 'no host'}; dev-db manages only IPv4 loopback databases.`);
@@ -141,7 +142,7 @@ _dev-db-action action:
           process.exit(0);
         }
         lastReadinessError = detail(verified);
-        if (attempt < 29) Bun.spawnSync(['sleep', '1']);
+        if (attempt < 29) await Bun.sleep(1000);
       }
       fail(`${name} started but the configured DATABASE_URL did not become usable${lastReadinessError ? `: ${lastReadinessError}` : ''}. Inspect with: podman logs ${name}`);
     }
