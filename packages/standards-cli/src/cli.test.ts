@@ -415,7 +415,7 @@ const runWorkflowVersionGuard = (version: string): RunResult => {
       '-c',
       workflowRunScript('Require compatible standards CLI'),
     ],
-    { MINIMUM_STANDARDS_VERSION: '0.18.0' },
+    { MINIMUM_STANDARDS_VERSION: '0.21.0' },
   );
 };
 
@@ -1885,9 +1885,9 @@ describe('canonical standards workflow settings security', () => {
     expect(checkoutStep).toContain('persist-credentials: false');
     expect(installStep).toContain('bun_version=1.3.14');
     expect(installStep.match(/bun_sha=[a-f0-9]{64}/gu)).toHaveLength(2);
-    expect(installStep).toContain('standards_version=0.18.0');
+    expect(installStep).toContain('standards_version=0.21.0');
     expect(installStep).toContain(
-      'standards_sha=001e736ce8c87548c699877ee4322dbec773bf99f7d4f4f591ccfe80bd07420aceffc345bb840daaf7688d82174ee3da38a3c60c7f9d8a65cd7a58bfa5d02004',
+      'standards_sha=afb8576434e62730e06d30d8249b1d275f586a874826ad7b50fe5e4d1b32b0da0e4adea176c6151160fc50a8ac049bab91095d18867b2a2544f40408f9e8f8ff',
     );
     expect(installStep).toContain('yaml_version=2.9.0');
     expect(installStep.match(/sha=[a-f0-9]{128}/gu)).toHaveLength(2);
@@ -2451,23 +2451,26 @@ describe('standards sync workflow policy', () => {
     '0.15.1',
     '0.16.0',
     '0.17.3',
+    '0.18.0',
+    '0.18.1',
+    '0.20.0',
   ])('rejects installed CLI version %s without a policy file', (version) => {
     const result = runWorkflowVersionGuard(version);
     expect(result.status).toBe(1);
     expect(`${result.stdout}${result.stderr}`).toContain('::error::');
   });
 
-  it('makes the 0.18.0 guard unconditional', () => {
+  it('makes the 0.21.0 guard unconditional', () => {
     const workflow = readFileSync(SYNC_WORKFLOW, 'utf8');
-    expect(workflow).toContain('MINIMUM_STANDARDS_VERSION: "0.18.0"');
+    expect(workflow).toContain('MINIMUM_STANDARDS_VERSION: "0.21.0"');
     expect(workflow).not.toContain(
       "if: needs.policy.outputs.present == 'true'",
     );
   });
 
   it.each([
-    '0.18.0',
-    '0.18.1',
+    '0.21.0',
+    '0.21.1',
     '1.0.0',
   ])('accepts installed CLI version %s without a policy file', (version) => {
     expect(runWorkflowVersionGuard(version).status).toBe(0);

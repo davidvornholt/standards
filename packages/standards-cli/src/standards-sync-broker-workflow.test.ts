@@ -182,7 +182,7 @@ describe('Standards sync broker documentation contract', () => {
     expect(rootReadme).toContain('`bun.lock`');
     expect(rootReadme).not.toContain('current 0.12 workflow');
     expect(rootReadme).toContain(
-      'current credential-free settings-verification cutover raises the minimum again to 0.18.0',
+      'the 0.21 dev-env composition cutover raises it to 0.21.0',
     );
   });
 });
