@@ -3,6 +3,7 @@ import {
   type DevEnvDestination,
   devEnvParentProblem,
 } from './dev-env-destination';
+import { devEnvStatOrNull } from './dev-env-reconciliation';
 
 const message = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
@@ -11,18 +12,54 @@ const requireParent = async (
   destination: DevEnvDestination,
 ): Promise<string | null> => devEnvParentProblem(destination);
 
+const isWrite = (destination: DevEnvDestination): boolean =>
+  'content' in destination.mutation;
+
+export const restoreClaimedDevEnvRemoval = async (
+  destination: DevEnvDestination,
+): Promise<void> => {
+  const parentProblem = await devEnvParentProblem(destination);
+  const current = await devEnvStatOrNull(destination.dest);
+  if (parentProblem !== null || current !== null) {
+    destination.rollbackBlocked = true;
+    return;
+  }
+  await rename(destination.backup, destination.dest);
+  destination.backupCreated = false;
+};
+
+const removeCommittedDestination = async (
+  destination: DevEnvDestination,
+): Promise<string | null> => {
+  const parentProblem = await requireParent(destination);
+  if (parentProblem !== null) {
+    return parentProblem;
+  }
+  const current = await devEnvStatOrNull(destination.dest);
+  if (!isWrite(destination) && current !== null) {
+    destination.rollbackBlocked = true;
+    return `${destination.mutation.rel}: destination changed during removal`;
+  }
+  if (isWrite(destination)) {
+    await rm(destination.dest, { force: true });
+  }
+  destination.committed = false;
+  return null;
+};
+
 const rollbackOne = async (
   destination: DevEnvDestination,
 ): Promise<ReadonlyArray<string>> => {
   const problems: Array<string> = [];
+  if (destination.rollbackBlocked) {
+    return [`${destination.mutation.rel}: destination changed during removal`];
+  }
   if (destination.committed) {
-    const parentProblem = await requireParent(destination);
-    if (parentProblem !== null) {
-      return [parentProblem];
-    }
     try {
-      await rm(destination.dest, { force: true });
-      destination.committed = false;
+      const problem = await removeCommittedDestination(destination);
+      if (problem !== null) {
+        return [problem];
+      }
     } catch (error) {
       problems.push(`${destination.mutation.rel}: ${message(error)}`);
     }

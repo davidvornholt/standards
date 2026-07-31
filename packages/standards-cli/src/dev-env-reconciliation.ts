@@ -1,13 +1,18 @@
 import {
+  closeSync,
+  constants,
   type Dirent,
   existsSync,
+  fstatSync,
   lstatSync,
+  openSync,
   readdirSync,
   readFileSync,
 } from 'node:fs';
+import { lstat, open } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { DevEnvRemoval, DevEnvWrite } from './dev-env-destination';
-import { DEV_ENV_GENERATED_HEADER } from './dev-env-dotenv';
+import { hasDevEnvGeneratedHeader } from './dev-env-dotenv';
 
 const WORKSPACE_GROUPS = ['apps', 'packages'] as const;
 
@@ -19,9 +24,15 @@ export type DevEnvRemovalPlan = {
 const message = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
-const firstLine = (content: string): string => {
-  const newline = content.indexOf('\n');
-  return newline === -1 ? content : content.slice(0, newline);
+export const devEnvStatOrNull = async (path: string) => {
+  try {
+    return await lstat(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return null;
+    }
+    throw error;
+  }
 };
 
 type WorkspaceDiscovery = {
@@ -66,28 +77,59 @@ const inspectRemoval = (
   envRel: string,
 ): RemovalInspection => {
   const envPath = join(consumer, envRel);
+  let file: number | null = null;
   try {
-    const stats = lstatSync(envPath);
+    file = openSync(envPath, constants.O_RDONLY + constants.O_NOFOLLOW);
+    const stats = fstatSync(file);
     if (!stats.isFile() || stats.isSymbolicLink()) {
       return { removal: null, problem: null };
     }
+    const owned = hasDevEnvGeneratedHeader(readFileSync(file, 'utf8'));
+    return {
+      removal: owned
+        ? {
+            rel: envRel,
+            identity: { device: stats.dev, inode: stats.ino },
+          }
+        : null,
+      problem: null,
+    };
   } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'ENOENT'
-      ? { removal: null, problem: null }
-      : {
-          removal: null,
-          problem: `could not inspect ${envRel}: ${message(error)}`,
-        };
-  }
-  try {
-    const owned =
-      firstLine(readFileSync(envPath, 'utf8')) === DEV_ENV_GENERATED_HEADER;
-    return { removal: owned ? { rel: envRel } : null, problem: null };
-  } catch (error) {
+    if (
+      ['ELOOP', 'ENOENT'].includes((error as NodeJS.ErrnoException).code ?? '')
+    ) {
+      return { removal: null, problem: null };
+    }
     return {
       removal: null,
-      problem: `could not read ${envRel}: ${message(error)}`,
+      problem: `could not inspect ${envRel}: ${message(error)}`,
     };
+  } finally {
+    if (file !== null) {
+      closeSync(file);
+    }
+  }
+};
+
+export const matchesDevEnvRemoval = async (
+  path: string,
+  removal: DevEnvRemoval,
+): Promise<boolean> => {
+  try {
+    const file = await open(path, constants.O_RDONLY + constants.O_NOFOLLOW);
+    try {
+      const stats = await file.stat();
+      return (
+        stats.isFile() &&
+        stats.dev === removal.identity.device &&
+        stats.ino === removal.identity.inode &&
+        hasDevEnvGeneratedHeader(await file.readFile('utf8'))
+      );
+    } finally {
+      await file.close();
+    }
+  } catch {
+    return false;
   }
 };
 

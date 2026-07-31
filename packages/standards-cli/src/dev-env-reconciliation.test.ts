@@ -56,9 +56,12 @@ describe('dev env stale workspace discovery', () => {
         `${DEV_ENV_GENERATED_HEADER}\nSECRET=old\n`,
       );
 
-      expect(planDevEnvRemovals(consumer, [])).toEqual({
-        removals: [{ rel: 'apps/owned/.env.local' }],
-        problems: [],
+      const plan = planDevEnvRemovals(consumer, []);
+      expect(plan.problems).toEqual([]);
+      expect(plan.removals).toHaveLength(1);
+      expect(plan.removals[0]).toMatchObject({
+        rel: 'apps/owned/.env.local',
+        identity: { device: expect.any(Number), inode: expect.any(Number) },
       });
     } finally {
       rmSync(consumer, { recursive: true, force: true });

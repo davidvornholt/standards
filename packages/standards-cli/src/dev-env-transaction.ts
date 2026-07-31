@@ -1,14 +1,19 @@
-import { link, open, rename, rm } from 'node:fs/promises';
+import { link, open, rename } from 'node:fs/promises';
 import {
   type DevEnvDestination,
   type DevEnvMutation,
+  type DevEnvRemoval,
   type DevEnvWrite,
   devEnvParentProblem,
-  devEnvStatOrNull,
   preflightDevEnvDestinations,
 } from './dev-env-destination';
 import {
+  devEnvStatOrNull,
+  matchesDevEnvRemoval,
+} from './dev-env-reconciliation';
+import {
   cleanupDevEnvArtifacts,
+  restoreClaimedDevEnvRemoval,
   rollbackDevEnvFiles,
 } from './dev-env-transaction-recovery';
 
@@ -17,6 +22,7 @@ const OWNER_ONLY_FILE_MODE = 0o600;
 export type DevEnvTransactionHooks = {
   readonly beforeStage?: (index: number) => void | Promise<void>;
   readonly beforeCommit?: (index: number) => void | Promise<void>;
+  readonly afterDestinationCheck?: (index: number) => void | Promise<void>;
   readonly beforeCleanup?: () => void | Promise<void>;
 };
 
@@ -77,10 +83,39 @@ const stageAll = async (
   }, Promise.resolve());
 };
 
-const commitOne = async (destination: DevEnvDestination): Promise<void> => {
+const commitRemoval = async (
+  destination: DevEnvDestination,
+  removal: DevEnvRemoval,
+): Promise<void> => {
+  await requireParent(destination);
+  await rename(destination.dest, destination.backup);
+  destination.backupCreated = true;
+  if (!(await matchesDevEnvRemoval(destination.backup, removal))) {
+    await restoreClaimedDevEnvRemoval(destination);
+    throw new Error(`${removal.rel} changed after preflight`);
+  }
+  const parentProblem = await devEnvParentProblem(destination);
+  const replacement = await devEnvStatOrNull(destination.dest);
+  if (parentProblem !== null || replacement !== null) {
+    await restoreClaimedDevEnvRemoval(destination);
+    throw new Error(`${removal.rel} changed after preflight`);
+  }
+  destination.committed = true;
+};
+
+const commitOne = async (
+  destination: DevEnvDestination,
+  index: number,
+  hooks: DevEnvTransactionHooks,
+): Promise<void> => {
   await requireParent(destination);
   if (!(await unchanged(destination))) {
     throw new Error(`${destination.mutation.rel} changed after preflight`);
+  }
+  await hooks.afterDestinationCheck?.(index);
+  if (!isWrite(destination.mutation)) {
+    await commitRemoval(destination, destination.mutation);
+    return;
   }
   if (destination.previous !== null) {
     await requireParent(destination);
@@ -88,13 +123,7 @@ const commitOne = async (destination: DevEnvDestination): Promise<void> => {
     destination.backupCreated = true;
   }
   await requireParent(destination);
-  if (isWrite(destination.mutation)) {
-    await rename(destination.temp, destination.dest);
-  } else if (destination.previous === null) {
-    return;
-  } else {
-    await rm(destination.dest);
-  }
+  await rename(destination.temp, destination.dest);
   destination.committed = true;
 };
 
@@ -106,7 +135,7 @@ const commitAll = async (
     async (previous, destination, index) => {
       await previous;
       await hooks.beforeCommit?.(index);
-      await commitOne(destination);
+      await commitOne(destination, index, hooks);
     },
     Promise.resolve(),
   );

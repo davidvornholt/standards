@@ -1,9 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import type { Stats } from 'node:fs';
-import { lstat, realpath } from 'node:fs/promises';
+import { realpath } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { duplicateDestinationProblems } from './dev-env-destination-duplicates';
 import { devEnvGitIgnoreProblem } from './dev-env-destination-gitignore';
+import {
+  devEnvStatOrNull,
+  matchesDevEnvRemoval,
+} from './dev-env-reconciliation';
 
 export type DevEnvWrite = {
   readonly rel: string;
@@ -12,6 +16,10 @@ export type DevEnvWrite = {
 
 export type DevEnvRemoval = {
   readonly rel: string;
+  readonly identity: {
+    readonly device: number;
+    readonly inode: number;
+  };
 };
 
 export type DevEnvMutation = DevEnvWrite | DevEnvRemoval;
@@ -33,6 +41,7 @@ export type DevEnvDestination = {
   readonly realRoot: string;
   backupCreated: boolean;
   committed: boolean;
+  rollbackBlocked: boolean;
 };
 
 type PreflightResult =
@@ -45,17 +54,6 @@ type PreflightResult =
 const containedBy = (root: string, candidate: string): boolean => {
   const rel = relative(root, candidate);
   return rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
-};
-
-export const devEnvStatOrNull = async (path: string): Promise<Stats | null> => {
-  try {
-    return await lstat(path);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return null;
-    }
-    throw error;
-  }
 };
 
 const inspectDestination = async (
@@ -90,6 +88,11 @@ const inspectDestination = async (
   if (previous !== null && (!previous.isFile() || previous.isSymbolicLink())) {
     return `${mutation.rel} must be absent or a regular file, not a symlink or other file type`;
   }
+  if (
+    !('content' in mutation || (await matchesDevEnvRemoval(dest, mutation)))
+  ) {
+    return `${mutation.rel} changed after planning`;
+  }
   const suffix = randomUUID();
   return {
     mutation,
@@ -106,6 +109,7 @@ const inspectDestination = async (
     realRoot,
     backupCreated: false,
     committed: false,
+    rollbackBlocked: false,
   };
 };
 
