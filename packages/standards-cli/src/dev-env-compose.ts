@@ -30,6 +30,14 @@ type MutableTarget = {
   readonly sources: Array<string>;
 };
 
+const copyEnv = (source: EnvValues): Record<string, string> => {
+  const copy = Object.create(null) as Record<string, string>;
+  for (const [key, value] of Object.entries(source)) {
+    copy[key] = value;
+  }
+  return copy;
+};
+
 const applyLayer = (
   merged: Map<string, MutableTarget>,
   layer: DevEnvLayer,
@@ -41,11 +49,13 @@ const applyLayer = (
       merged.set(key, {
         group: target.group,
         workspace: target.workspace,
-        env: { ...target.env },
+        env: copyEnv(target.env),
         sources: [layer.source],
       });
     } else {
-      Object.assign(existing.env, target.env);
+      for (const [envKey, value] of Object.entries(target.env)) {
+        existing.env[envKey] = value;
+      }
       existing.sources.push(layer.source);
     }
   }
@@ -68,8 +78,8 @@ const sharedOverlapProblems = (
     if (counterpart === undefined) {
       return [];
     }
-    return Object.keys(target.env)
-      .filter((key) => key in counterpart.env)
+    return [...target.declaredKeys]
+      .filter((key) => counterpart.declaredKeys.has(key))
       .map(
         (key) =>
           `${target.group}.${target.workspace}.${key} is declared in both ${config.source} and ${secrets.source}; a value is either configuration or a secret, so keep it in exactly one`,

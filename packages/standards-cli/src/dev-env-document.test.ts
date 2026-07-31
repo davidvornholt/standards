@@ -19,11 +19,13 @@ describe('dev env document', () => {
         group: 'apps',
         workspace: 'web',
         env: { DATABASE_URL: 'postgres://dev', AUTH_SECRET: 's' },
+        declaredKeys: new Set(['DATABASE_URL', 'AUTH_SECRET']),
       },
       {
         group: 'packages',
         workspace: 'db',
         env: { DATABASE_URL: 'postgres://dev' },
+        declaredKeys: new Set(['DATABASE_URL']),
       },
     ]);
   });
@@ -51,7 +53,12 @@ describe('dev env document', () => {
       'secrets/dev.yaml "packages" must map workspace names to env objects',
     ]);
     expect(document.targets).toEqual([
-      { group: 'apps', workspace: 'web', env: { NAME: 'ok' } },
+      {
+        group: 'apps',
+        workspace: 'web',
+        env: { NAME: 'ok' },
+        declaredKeys: new Set(['PORT', 'NAME']),
+      },
     ]);
   });
 
@@ -83,7 +90,12 @@ describe('dev env document', () => {
       '"apps...".BAD=NAME must be a string value',
     );
     expect(document.targets).toEqual([
-      { group: 'apps', workspace: 'web', env: { _VALID: '' } },
+      {
+        group: 'apps',
+        workspace: 'web',
+        env: { _VALID: '' },
+        declaredKeys: new Set(['_VALID']),
+      },
     ]);
   });
 
@@ -97,7 +109,12 @@ describe('dev env document', () => {
       'secrets/dev.yaml "apps.web".INVALID cannot be represented losslessly in Bun dotenv syntax',
     ]);
     expect(document.targets).toEqual([
-      { group: 'apps', workspace: 'web', env: { VALID: '\\\n' } },
+      {
+        group: 'apps',
+        workspace: 'web',
+        env: { VALID: '\\\n' },
+        declaredKeys: new Set(['VALID', 'INVALID']),
+      },
     ]);
   });
 });

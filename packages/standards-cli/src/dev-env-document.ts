@@ -12,6 +12,7 @@ export type DevEnvTarget = {
   readonly group: string;
   readonly workspace: string;
   readonly env: EnvValues;
+  readonly declaredKeys: ReadonlySet<string>;
 };
 
 export type DevEnvDocument = {
@@ -31,12 +32,19 @@ type ParsedWorkspaces = {
 const parseWorkspaceEnv = (
   label: string,
   raw: Record<string, unknown>,
-): { readonly env: EnvValues; readonly problems: ReadonlyArray<string> } => {
+): {
+  readonly env: EnvValues;
+  readonly declaredKeys: ReadonlySet<string>;
+  readonly problems: ReadonlyArray<string>;
+} => {
   const problems: Array<string> = [];
-  const entries: Array<readonly [string, string]> = [];
+  const env = Object.create(null) as Record<string, string>;
+  const declaredKeys = new Set<string>();
   for (const [key, value] of Object.entries(raw)) {
     const portableName = PORTABLE_ENV_NAME.test(key);
-    if (!portableName) {
+    if (portableName) {
+      declaredKeys.add(key);
+    } else {
       problems.push(
         `${label} env key ${JSON.stringify(key)} must be a portable environment variable name`,
       );
@@ -48,10 +56,10 @@ const parseWorkspaceEnv = (
         `${label}.${key} cannot be represented losslessly in Bun dotenv syntax`,
       );
     } else if (portableName) {
-      entries.push([key, value]);
+      env[key] = value;
     }
   }
-  return { env: Object.fromEntries(entries), problems };
+  return { env, declaredKeys, problems };
 };
 
 const parseWorkspaces = (
@@ -75,7 +83,12 @@ const parseWorkspaces = (
       );
       problems.push(...parsed.problems);
       if (validWorkspace) {
-        targets.push({ group, workspace, env: parsed.env });
+        targets.push({
+          group,
+          workspace,
+          env: parsed.env,
+          declaredKeys: parsed.declaredKeys,
+        });
       }
     } else {
       problems.push(
