@@ -70,6 +70,11 @@ const STD_PATHS: ReadonlyArray<string> = [
 
 type Lock = { upstream: string; sha: string; files: Record<string, string> };
 type WorkflowJob = Record<string, unknown>;
+type WorkflowStep = Record<string, unknown>;
+type ParsedWorkflow = {
+  env?: Record<string, unknown>;
+  jobs: Record<string, WorkflowJob>;
+};
 
 const INVALID_POLICY_CASES = [
   [
@@ -223,24 +228,51 @@ const yamlJobs = (path: string): Record<string, WorkflowJob> => {
   return jobs;
 };
 
+const workflowSteps = (
+  job: WorkflowJob | undefined,
+  jobName: string,
+): ReadonlyArray<WorkflowStep> => {
+  if (job === undefined || !Array.isArray(job.steps)) {
+    throw new Error(`Workflow job ${jobName} must contain a steps array`);
+  }
+  return job.steps.map((step, index) => {
+    if (typeof step !== 'object' || step === null) {
+      throw new Error(
+        `Workflow job ${jobName} step ${index} must be a mapping`,
+      );
+    }
+    return step as WorkflowStep;
+  });
+};
+
+const parseWorkflow = (path: string): ParsedWorkflow => {
+  const workflow: unknown = parseYaml(readFileSync(path, 'utf8'));
+  if (
+    typeof workflow !== 'object' ||
+    workflow === null ||
+    !('jobs' in workflow) ||
+    typeof workflow.jobs !== 'object' ||
+    workflow.jobs === null
+  ) {
+    throw new Error(`${path} must contain a jobs mapping`);
+  }
+  return workflow as ParsedWorkflow;
+};
+
 // The block-scalar entries of a checkout step's `sparse-checkout` input, so a
 // test can pin the whole list instead of spot-checking individual paths.
-const sparseCheckoutPaths = (step: string): ReadonlyArray<string> => {
-  const lines = step.split('\n');
-  const startIndex = lines.findIndex(
-    (line) => line.trim() === 'sparse-checkout: |',
-  );
-  if (startIndex === -1) {
+const sparseCheckoutPaths = (step: WorkflowStep): ReadonlyArray<string> => {
+  const inputs = step.with;
+  if (
+    typeof inputs !== 'object' ||
+    inputs === null ||
+    !('sparse-checkout' in inputs) ||
+    typeof inputs['sparse-checkout'] !== 'string'
+  ) {
     throw new Error('Step has no block-scalar sparse-checkout input');
   }
-  const indentOf = (line: string): number =>
-    line.length - line.trimStart().length;
-  const body = lines.slice(startIndex + 1);
-  const indent = indentOf(body[0] ?? '');
-  const endIndex = body.findIndex(
-    (line) => line.trim().length > 0 && indentOf(line) < indent,
-  );
-  return (endIndex === -1 ? body : body.slice(0, endIndex))
+  return inputs['sparse-checkout']
+    .split('\n')
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
 };
@@ -1849,59 +1881,158 @@ describe('canonical standards workflow security boundaries', () => {
   });
 });
 
+const SETTINGS_CHECK_STEP_NAMES = [
+  'Checkout settings inputs',
+  'Install pinned settings checker',
+  'Check GitHub settings',
+  'Require all standards gates',
+] as const;
+const SETTINGS_SKIP_ENVIRONMENT = 'STANDARDS_SKIP_GITHUB_CHECK';
+
+const requireExactWorkflowValue = (
+  actual: unknown,
+  expected: unknown,
+  message: string,
+): void => {
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    throw new Error(message);
+  }
+};
+
+const settingsSkipBindings = (
+  workflow: ParsedWorkflow,
+): ReadonlyArray<{ readonly location: string; readonly value: unknown }> => {
+  const bindings: Array<{
+    readonly location: string;
+    readonly value: unknown;
+  }> = [];
+  const recordBinding = (env: unknown, location: string): void => {
+    if (
+      typeof env === 'object' &&
+      env !== null &&
+      SETTINGS_SKIP_ENVIRONMENT in env
+    ) {
+      bindings.push({
+        location,
+        value: (env as Record<string, unknown>)[SETTINGS_SKIP_ENVIRONMENT],
+      });
+    }
+  };
+
+  recordBinding(workflow.env, 'workflow.env');
+  for (const [jobName, job] of Object.entries(workflow.jobs)) {
+    recordBinding(job.env, `jobs.${jobName}.env`);
+    for (const [index, step] of workflowSteps(job, jobName).entries()) {
+      const stepName = typeof step.name === 'string' ? step.name : `${index}`;
+      recordBinding(step.env, `jobs.${jobName}.steps.${stepName}.env`);
+    }
+  }
+  return bindings;
+};
+
+const assertSettingsTrustBoundary = (
+  workflow: ParsedWorkflow,
+): ReadonlyArray<WorkflowStep> => {
+  const checkSteps = workflowSteps(workflow.jobs.check, 'check');
+  requireExactWorkflowValue(
+    checkSteps.map((step) => step.name),
+    SETTINGS_CHECK_STEP_NAMES,
+    'The check job must contain only the four trusted steps in order',
+  );
+
+  const [checkoutStep] = checkSteps;
+  requireExactWorkflowValue(
+    checkoutStep?.uses,
+    'actions/checkout@v7',
+    'The check job must use the canonical checkout action',
+  );
+  requireExactWorkflowValue(
+    sparseCheckoutPaths(checkoutStep ?? {}),
+    ['.github/settings.json', '.github/settings.local.json'],
+    'The check job may check out only declarative settings inputs',
+  );
+  requireExactWorkflowValue(
+    checkoutStep?.with,
+    {
+      'persist-credentials': false,
+      'sparse-checkout': '.github/settings.json\n.github/settings.local.json\n',
+      'sparse-checkout-cone-mode': false,
+    },
+    'The check job checkout must stay sparse and credential-free',
+  );
+  requireExactWorkflowValue(
+    settingsSkipBindings(workflow),
+    [
+      {
+        location: 'jobs.quality.steps.Check.env',
+        value: 'true',
+      },
+    ],
+    'Only the quality Check step may skip its nested GitHub settings check',
+  );
+  return checkSteps;
+};
+
 describe('canonical standards workflow settings security', () => {
   it('isolates the settings comparison from repository-controlled executable code', () => {
-    const workflow = readFileSync(STANDARDS_WORKFLOW, 'utf8');
-    const installStep = yamlStep(
-      STANDARDS_WORKFLOW,
-      'Install pinned settings checker',
-    );
-    const settingsStep = yamlStep(STANDARDS_WORKFLOW, 'Check GitHub settings');
-    const checkoutStep = yamlStep(
-      STANDARDS_WORKFLOW,
-      'Checkout settings inputs',
-    );
+    const workflowSource = readFileSync(STANDARDS_WORKFLOW, 'utf8');
+    const workflow = parseWorkflow(STANDARDS_WORKFLOW);
+    const [, installStep, settingsStep] = assertSettingsTrustBoundary(workflow);
+    const installRun = String(installStep?.run);
+    const settingsRun = String(settingsStep?.run);
+
     // The job holds no durable credential, so it needs no executable file from
     // the repository at all: declarative settings inputs and nothing else.
-    // Pinning the whole list keeps an unreviewed executable path out of the
-    // sparse checkout.
-    expect(sparseCheckoutPaths(checkoutStep)).toEqual([
-      '.github/settings.json',
-      '.github/settings.local.json',
-    ]);
-    expect(workflow).not.toContain('GITHUB_ENV');
-    expect(workflow).not.toContain('GH_TOKEN:');
-    expect(settingsStep).not.toContain('GITHUB_OUTPUT');
-    expect(settingsStep).toContain('GH_TOKEN="$SETTINGS_TOKEN"');
+    expect(workflowSource).not.toContain('GITHUB_ENV');
+    expect(workflowSource).not.toContain('GH_TOKEN:');
+    expect(settingsRun).not.toContain('GITHUB_OUTPUT');
+    expect(settingsRun).toContain('GH_TOKEN="$SETTINGS_TOKEN"');
     // An empty or multi-line token must stop the job rather than reach the CLI,
     // where an empty GH_TOKEN would silently downgrade to anonymous reads.
-    expect(settingsStep).toContain('exit 1');
-    expect(settingsStep).toContain(
+    expect(settingsRun).toContain('exit 1');
+    expect(settingsRun).toContain(
       '[ -z "$SETTINGS_TOKEN" ] || [[ "$SETTINGS_TOKEN" == *$\'\\n\'* ]] || [[ "$SETTINGS_TOKEN" == *$\'\\r\'* ]]',
     );
-    expect(workflow).toContain('STANDARDS_SKIP_GITHUB_CHECK: "true"');
-    expect(checkoutStep).toContain('sparse-checkout-cone-mode: false');
-    expect(checkoutStep).toContain('persist-credentials: false');
-    expect(installStep).toContain('bun_version=1.3.14');
-    expect(installStep.match(/bun_sha=[a-f0-9]{64}/gu)).toHaveLength(2);
-    expect(installStep).toContain('standards_version=0.21.0');
-    expect(installStep).toContain(
+    expect(installRun).toContain('bun_version=1.3.14');
+    expect(installRun.match(/bun_sha=[a-f0-9]{64}/gu)).toHaveLength(2);
+    expect(installRun).toContain('standards_version=0.21.0');
+    expect(installRun).toContain(
       'standards_sha=afb8576434e62730e06d30d8249b1d275f586a874826ad7b50fe5e4d1b32b0da0e4adea176c6151160fc50a8ac049bab91095d18867b2a2544f40408f9e8f8ff',
     );
-    expect(installStep).toContain('yaml_version=2.9.0');
-    expect(installStep.match(/sha=[a-f0-9]{128}/gu)).toHaveLength(2);
-    expect(installStep).toContain('sha512sum --check --quiet');
-    expect(installStep).not.toContain('bun add');
-    expect(settingsStep).not.toContain('SOPS_AGE_KEY');
+    expect(installRun).toContain('yaml_version=2.9.0');
+    expect(installRun.match(/sha=[a-f0-9]{128}/gu)).toHaveLength(2);
+    expect(installRun).toContain('sha512sum --check --quiet');
+    expect(installRun).not.toContain('bun add');
+    expect(settingsRun).not.toContain('SOPS_AGE_KEY');
+  });
+
+  it('rejects a full checkout or a hoisted quality-check skip seam', () => {
+    const fullCheckoutWorkflow = structuredClone(
+      parseWorkflow(STANDARDS_WORKFLOW),
+    );
+    const [fullCheckoutStep] = workflowSteps(
+      fullCheckoutWorkflow.jobs.check,
+      'check',
+    );
+    if (fullCheckoutStep !== undefined) {
+      fullCheckoutStep.with = undefined;
+    }
+    expect(() => assertSettingsTrustBoundary(fullCheckoutWorkflow)).toThrow();
+
+    const hoistedSkipWorkflow = structuredClone(
+      parseWorkflow(STANDARDS_WORKFLOW),
+    );
+    hoistedSkipWorkflow.env = { [SETTINGS_SKIP_ENVIRONMENT]: 'true' };
+    expect(() => assertSettingsTrustBoundary(hoistedSkipWorkflow)).toThrow();
   });
 
   it('pins the isolated settings checker to the sync workflow minimum', () => {
-    const installStep = yamlStep(
-      STANDARDS_WORKFLOW,
-      'Install pinned settings checker',
+    const [, installStep] = assertSettingsTrustBoundary(
+      parseWorkflow(STANDARDS_WORKFLOW),
     );
+    const installRun = String(installStep?.run);
     const syncWorkflow = readFileSync(SYNC_WORKFLOW, 'utf8');
-    const pinnedVersion = installStep.match(PINNED_STANDARDS_VERSION_PATTERN)
+    const pinnedVersion = installRun.match(PINNED_STANDARDS_VERSION_PATTERN)
       ?.groups?.version;
     const minimumVersion = syncWorkflow.match(MINIMUM_STANDARDS_VERSION_PATTERN)
       ?.groups?.version;
@@ -1915,7 +2046,10 @@ describe('canonical standards workflow settings security', () => {
 describe('canonical standards workflow settings credential', () => {
   it('reads settings with the workflow token and no durable credential', () => {
     const workflow = readFileSync(STANDARDS_WORKFLOW, 'utf8');
-    const settingsStep = yamlStep(STANDARDS_WORKFLOW, 'Check GitHub settings');
+    const [, , settingsStep] = assertSettingsTrustBoundary(
+      parseWorkflow(STANDARDS_WORKFLOW),
+    );
+    const settingsRun = String(settingsStep?.run);
 
     // A probe against a private repository compared a broker App installation
     // token against a token holding exactly this job's grants across every read
@@ -1923,20 +2057,20 @@ describe('canonical standards workflow settings credential', () => {
     // no visibility, so the gate must not decrypt the durable App key: doing so
     // would put the one credential every consumer keeps for the weekly sync
     // into a job that gains nothing from it.
-    expect(settingsStep).toContain(
-      `SETTINGS_TOKEN: ${githubExpression('github.token')}`,
-    );
+    expect(settingsStep?.env).toEqual({
+      SETTINGS_TOKEN: githubExpression('github.token'),
+    });
     expect(workflow).not.toContain('sops-secret');
     expect(workflow).not.toContain('secrets/ci.yaml');
     expect(workflow).not.toContain('SOPS_AGE_KEY');
     expect(workflow).not.toContain('create-github-app-token');
     // No silent degradation path: there is one credential, so a green result
     // never means "verified with something weaker than intended".
-    expect(settingsStep).not.toContain('::warning::');
+    expect(settingsRun).not.toContain('::warning::');
     expect(workflow).not.toMatch(WRITE_PERMISSION_INPUT);
   });
 
-  it('grants label reads only to the isolated settings job', () => {
+  it('grants label reads only to the check aggregator job', () => {
     const parsedWorkflow = parseYaml(
       readFileSync(STANDARDS_WORKFLOW, 'utf8'),
     ) as { readonly permissions?: unknown };
@@ -1944,11 +2078,11 @@ describe('canonical standards workflow settings credential', () => {
 
     expect(parsedWorkflow.permissions).toEqual({ contents: 'read' });
     expect(jobs.quality.permissions).toBeUndefined();
-    expect(jobs.check.permissions).toBeUndefined();
-    expect(jobs['github-settings'].permissions).toEqual({
+    expect(jobs.check.permissions).toEqual({
       contents: 'read',
       issues: 'read',
     });
+    expect(jobs['github-settings']).toBeUndefined();
   });
 
   it('pins and verifies architecture-specific actionlint release assets', () => {
@@ -2092,12 +2226,7 @@ describe('canonical standards workflow Nix aggregation', () => {
     );
 
     expect(jobs.check.if).toBe('always()');
-    expect(jobs.check.needs).toEqual([
-      'quality',
-      'github-settings',
-      'nix-discovery',
-      'nix',
-    ]);
+    expect(jobs.check.needs).toEqual(['quality', 'nix-discovery', 'nix']);
 
     for (const [isSourceRepository, expectedNixResult] of [
       ['true', 'success'],
@@ -2106,7 +2235,6 @@ describe('canonical standards workflow Nix aggregation', () => {
       for (const nixDiscoveryResult of needsResults) {
         for (const nixResult of needsResults) {
           const status = runAggregate(aggregateScript, {
-            GITHUB_SETTINGS_RESULT: 'success',
             IS_SOURCE_REPOSITORY: isSourceRepository,
             NIX_DISCOVERY_RESULT: nixDiscoveryResult,
             NIX_RESULT: nixResult,
@@ -2135,7 +2263,6 @@ describe('canonical standards workflow Nix aggregation', () => {
         for (const nixResult of needsResults) {
           expect(
             runAggregate(aggregateScript, {
-              GITHUB_SETTINGS_RESULT: 'success',
               IS_SOURCE_REPOSITORY: isSourceRepository,
               NIX_DISCOVERY_RESULT: nixDiscoveryResult,
               NIX_RESULT: nixResult,
@@ -2147,7 +2274,7 @@ describe('canonical standards workflow Nix aggregation', () => {
     }
   });
 
-  it('requires both ordinary gates in source and consumer modes', () => {
+  it('requires the quality gate in source and consumer modes', () => {
     const aggregateScript = yamlRunScript(
       STANDARDS_WORKFLOW,
       'Require all standards gates',
@@ -2157,20 +2284,15 @@ describe('canonical standards workflow Nix aggregation', () => {
       ['true', 'success'],
       ['false', 'skipped'],
     ] as const) {
-      for (const failedGate of [
-        'GITHUB_SETTINGS_RESULT',
-        'QUALITY_RESULT',
-      ] as const) {
-        expect(
-          runAggregate(aggregateScript, {
-            GITHUB_SETTINGS_RESULT: 'success',
-            IS_SOURCE_REPOSITORY: isSourceRepository,
-            NIX_DISCOVERY_RESULT: nixResult,
-            NIX_RESULT: nixResult,
-            QUALITY_RESULT: 'success',
-            [failedGate]: 'failure',
-          }),
-        ).not.toBe(0);
+      for (const qualityResult of needsResults) {
+        const status = runAggregate(aggregateScript, {
+          IS_SOURCE_REPOSITORY: isSourceRepository,
+          NIX_DISCOVERY_RESULT: nixResult,
+          NIX_RESULT: nixResult,
+          QUALITY_RESULT: qualityResult,
+        });
+
+        expect(status).toBe(qualityResult === 'success' ? 0 : 1);
       }
     }
   });
@@ -2198,7 +2320,6 @@ describe('canonical workflow runner boundaries', () => {
       '.github/workflows/standards-sync.yml:policy': 'ubuntu-latest',
       '.github/workflows/standards-sync.yml:sync': 'ubuntu-latest',
       '.github/workflows/standards.yml:check': 'ubuntu-latest',
-      '.github/workflows/standards.yml:github-settings': 'ubuntu-latest',
       '.github/workflows/standards.yml:nix-discovery': 'ubuntu-latest',
       '.github/workflows/standards.yml:nix': githubMatrixExpression('runner'),
     });
