@@ -7,7 +7,6 @@ import { OUTCOME_DIR, OUTCOME_FILE } from './poller-protocol';
 
 const dirs: Array<string> = [];
 const ISSUE_NUMBER = 7;
-
 const workDirWithOutcome = (outcome: unknown): string => {
   const dir = mkdtempSync(join(tmpdir(), 'poller-outcome-'));
   dirs.push(dir);
@@ -91,12 +90,16 @@ describe('readFixOutcome', () => {
     expect(outcome).toBeNull();
   });
 
-  it('rejects a fixed outcome with a malformed PR title', async () => {
+  it.each([
+    ['an unsupported type', 'banana(auth): reject expired session tokens'],
+    ['a scope containing spaces', 'fix(auth tokens): reject expired tokens'],
+    ...[...'\n\r\u2028\u2029'].map((char) => ['break', `fix: ${char}reject`]),
+  ])('rejects a fixed outcome with %s', async (_name, prTitle) => {
     const outcome = await readFixOutcome(
       workDirWithOutcome({
         status: 'fixed',
         summary: 'done',
-        prTitle: 'Fixed the thing',
+        prTitle,
         prBody: 'Fixes #7',
       }),
       ISSUE_NUMBER,

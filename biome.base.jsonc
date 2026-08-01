@@ -191,7 +191,8 @@
         "**/*.test.ts",
         "**/*.test.tsx",
         "packages/standards-cli/src/creds-add-test-support.ts",
-        "packages/standards-cli/src/creds-plan-run-test-support.ts"
+        "packages/standards-cli/src/creds-plan-run-test-support.ts",
+        "packages/standards-cli/src/test-setup.ts"
       ],
       "linter": {
         "rules": {
