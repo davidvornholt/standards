@@ -58,7 +58,7 @@ const REVIEW_STATUSES: ReadonlySet<string> = new Set([
 // commit subject on main, and no CI gate lints it, so this validation is
 // the enforcement point for poller-authored PRs.
 const PR_TITLE_PATTERN =
-  /^(?:build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(?:\([a-z0-9./-]+\))?!?: [^ ]/u;
+  /^(?:build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(?:\([a-z0-9./-]+\))?!?: [^ \n\r\u2028\u2029]/u;
 
 export const readFixOutcome = async (
   workDir: string,
