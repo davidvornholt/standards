@@ -27,7 +27,6 @@
     "packages/a11y-testing",
     ".github/workflows/standards.yml",
     ".github/workflows/standards-sync.yml",
-    ".github/workflows/pr-title.yml",
     ".github/workflows/notify-pause.yml"
   ]
 }

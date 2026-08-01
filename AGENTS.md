@@ -31,7 +31,7 @@ Before generating code, inspect the `description` frontmatter for every local sk
 
 ## Pull requests and issues
 
-- Changes land on main through squash-merged PRs. The PR title becomes the commit subject on main, so it must be a Conventional Commit subject (`<type>(scope): <imperative description>`); CI lints it. Branch commit messages carry no format requirement.
+- Changes land on main through squash-merged PRs. The PR title becomes the commit subject on main, so it must be a Conventional Commit subject (`<type>(scope): <imperative description>`). Branch commit messages carry no format requirement.
 - Every issue and pull request description opens with the statement "Writing for the decider" requires, before any other section.
 
 ## Package management

@@ -54,8 +54,9 @@ const REVIEW_STATUSES: ReadonlySet<string> = new Set([
   'cannot-review',
 ]);
 
-// Conventional Commit subject: consumers lint PR titles in CI, so a
-// malformed title is caught here instead of as a red check later.
+// Conventional Commit subject: squash merges promote the PR title to the
+// commit subject on main, and no CI gate lints it, so this validation is
+// the enforcement point for poller-authored PRs.
 const PR_TITLE_PATTERN = /^[a-z]+(?:\([^)]+\))?!?: .+/u;
 
 export const readFixOutcome = async (
