@@ -53,16 +53,27 @@ describe('SOPS structure reading', () => {
     });
   });
 
-  it('rejects ambiguous literal-dot keys and arrays', () => {
+  it('rejects ambiguous literal-dot keys', () => {
     const dotted = `ci:\n  "nested.token": encrypted\nsops: {}\n`;
-    const array = 'ci:\n  tokens: [encrypted]\nsops: {}\n';
     expect(listEncryptedKeys(dotted)).toMatchObject({
       ok: false,
       kind: 'unsupported-shape',
     });
-    expect(listEncryptedKeys(array)).toMatchObject({
-      ok: false,
-      kind: 'unsupported-shape',
+  });
+
+  it('skips encrypted arrays while inventorying sibling S3 pair leaves', () => {
+    const secrets = `brokeredReferences:
+  - ENC[AES256_GCM,data:allowlist,type:str]
+r2:
+  pair:
+    access_key_id: ENC[AES256_GCM,data:id,type:str]
+    secret_access_key: ENC[AES256_GCM,data:secret,type:str]
+sops:
+  mac: ENC[AES256_GCM,data:mac,type:str]
+`;
+    expect(listEncryptedKeys(secrets)).toEqual({
+      ok: true,
+      keys: ['r2.pair.access_key_id', 'r2.pair.secret_access_key'],
     });
   });
 

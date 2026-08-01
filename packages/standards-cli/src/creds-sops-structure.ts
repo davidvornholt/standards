@@ -104,7 +104,8 @@ const collectLeaves = (
   keys: Array<string>,
 ): string | null => {
   if (isSeq(node)) {
-    return `arrays are not supported at ${prefix.join('.')}`;
+    // Broker destinations use mapping-only paths, so arrays have no brokered leaves.
+    return null;
   }
   if (isAlias(node)) {
     return `aliases are not supported at ${prefix.join('.')}`;
