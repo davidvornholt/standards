@@ -91,12 +91,15 @@ describe('readFixOutcome', () => {
     expect(outcome).toBeNull();
   });
 
-  it('rejects a fixed outcome with a malformed PR title', async () => {
+  it.each([
+    ['an unsupported type', 'banana(auth): reject expired session tokens'],
+    ['a scope containing spaces', 'fix(auth tokens): reject expired tokens'],
+  ])('rejects a fixed outcome with %s', async (_name, prTitle) => {
     const outcome = await readFixOutcome(
       workDirWithOutcome({
         status: 'fixed',
         summary: 'done',
-        prTitle: 'Fixed the thing',
+        prTitle,
         prBody: 'Fixes #7',
       }),
       ISSUE_NUMBER,

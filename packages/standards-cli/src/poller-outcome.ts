@@ -57,7 +57,8 @@ const REVIEW_STATUSES: ReadonlySet<string> = new Set([
 // Conventional Commit subject: squash merges promote the PR title to the
 // commit subject on main, and no CI gate lints it, so this validation is
 // the enforcement point for poller-authored PRs.
-const PR_TITLE_PATTERN = /^[a-z]+(?:\([^)]+\))?!?: .+/u;
+const PR_TITLE_PATTERN =
+  /^(?:build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(?:\([a-z0-9./-]+\))?!?: [^ ]/u;
 
 export const readFixOutcome = async (
   workDir: string,
