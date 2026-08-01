@@ -177,20 +177,34 @@ jobs:
       - name: Build Nix check
         run: nix build ".#checks.${{ matrix.system }}.standards-cli" -L
 
-  # The live settings comparison runs with the workflow token and no durable
-  # credential at all. A probe against a private repository compared every read
-  # this gate performs — list rulesets, get each ruleset, list labels, and the
-  # GraphQL merge-settings and bypass-actor query — across a broker App
-  # installation token and a token carrying exactly this job's grants, and the
-  # answers were identical, including the fields GitHub withholds from both.
-  # Minting a broker token here would therefore add no visibility while
-  # decrypting the one durable App key that every consumer keeps for the weekly
-  # sync, so this job never touches it. The checkout carries the declarative
-  # settings inputs and nothing else, and the CLI that consumes the token is a
-  # published, checksum-pinned artifact installed under RUNNER_TEMP from direct,
-  # checksum-pinned release URLs, so a pull request cannot substitute the code
-  # that performs the comparison.
-  github-settings:
+  # Keep the stable required-check name while making all independent gates
+  # mandatory. `always()` ensures a failed or cancelled dependency cannot turn
+  # this required check into a skipped success. The source repository owns the
+  # Nix release gate; every consumer must skip both source-only jobs.
+  #
+  # The live settings comparison runs here, with the workflow token and no
+  # durable credential at all. A probe against a private repository compared
+  # every read this gate performs — list rulesets, get each ruleset, list
+  # labels, and the GraphQL merge-settings and bypass-actor query — across a
+  # broker App installation token and a token carrying exactly this job's
+  # grants, and the answers were identical, including the fields GitHub
+  # withholds from both. Minting a broker token here would therefore add no
+  # visibility while decrypting the one durable App key that every consumer
+  # keeps for the weekly sync, so this job never touches it. The checkout
+  # carries the declarative settings inputs and nothing else, and the CLI that
+  # consumes the token is a published, checksum-pinned artifact installed under
+  # RUNNER_TEMP from direct, checksum-pinned release URLs, so a pull request
+  # cannot substitute the code that performs the comparison. The comparison
+  # shares this aggregator job instead of owning one because both run on the
+  # fixed GitHub-hosted runner with only the workflow token and no repository
+  # executable code, and a per-run job below sixty seconds of work still bills
+  # a full runner minute in every consumer.
+  check:
+    if: always()
+    needs:
+      - quality
+      - nix-discovery
+      - nix
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -268,22 +282,8 @@ jobs:
           GH_TOKEN="$SETTINGS_TOKEN" "$RUNNER_TEMP/standards-bin/bun" \
             package/src/cli.ts github --check --dir "$GITHUB_WORKSPACE"
 
-  # Keep the stable required-check name while making all independent gates
-  # mandatory. `always()` ensures a failed or cancelled dependency cannot turn
-  # this required check into a skipped success. The source repository owns the
-  # Nix release gate; every consumer must skip both source-only jobs.
-  check:
-    if: always()
-    needs:
-      - quality
-      - github-settings
-      - nix-discovery
-      - nix
-    runs-on: ubuntu-latest
-    steps:
       - name: Require all standards gates
         env:
-          GITHUB_SETTINGS_RESULT: ${{ needs.github-settings.result }}
           IS_SOURCE_REPOSITORY: ${{ github.repository == 'davidvornholt/standards' }}
           NIX_DISCOVERY_RESULT: ${{ needs.nix-discovery.result }}
           NIX_RESULT: ${{ needs.nix.result }}
@@ -301,8 +301,8 @@ jobs:
               exit 1
               ;;
           esac
-          if [ "$QUALITY_RESULT" != success ] || [ "$GITHUB_SETTINGS_RESULT" != success ]; then
-            echo "::error::Standards gates did not all succeed (quality=$QUALITY_RESULT, github-settings=$GITHUB_SETTINGS_RESULT, nix-discovery=$NIX_DISCOVERY_RESULT, nix=$NIX_RESULT)"
+          if [ "$QUALITY_RESULT" != success ]; then
+            echo "::error::Standards gates did not all succeed (quality=$QUALITY_RESULT, nix-discovery=$NIX_DISCOVERY_RESULT, nix=$NIX_RESULT)"
             exit 1
           fi
           if [ "$NIX_DISCOVERY_RESULT" != "$expected_nix_result" ] || [ "$NIX_RESULT" != "$expected_nix_result" ]; then

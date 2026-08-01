@@ -86,7 +86,7 @@ describe('runGithubCheck fail-closed visibility', () => {
     // The canonical workflow already grants it, so CI readers must be sent at
     // the real causes rather than at a synced file they must not edit.
     expect(errors).toContain(
-      'the canonical github-settings job already grants',
+      'the canonical check aggregator job already grants',
     );
     expect(errors).not.toContain('secrets/ci.yaml');
     expect(errors).not.toContain('GitHub API unreachable');

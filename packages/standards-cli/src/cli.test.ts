@@ -1936,7 +1936,7 @@ describe('canonical standards workflow settings credential', () => {
     expect(workflow).not.toMatch(WRITE_PERMISSION_INPUT);
   });
 
-  it('grants label reads only to the isolated settings job', () => {
+  it('grants label reads only to the check aggregator job', () => {
     const parsedWorkflow = parseYaml(
       readFileSync(STANDARDS_WORKFLOW, 'utf8'),
     ) as { readonly permissions?: unknown };
@@ -1944,11 +1944,11 @@ describe('canonical standards workflow settings credential', () => {
 
     expect(parsedWorkflow.permissions).toEqual({ contents: 'read' });
     expect(jobs.quality.permissions).toBeUndefined();
-    expect(jobs.check.permissions).toBeUndefined();
-    expect(jobs['github-settings'].permissions).toEqual({
+    expect(jobs.check.permissions).toEqual({
       contents: 'read',
       issues: 'read',
     });
+    expect(jobs['github-settings']).toBeUndefined();
   });
 
   it('pins and verifies architecture-specific actionlint release assets', () => {
@@ -2092,12 +2092,7 @@ describe('canonical standards workflow Nix aggregation', () => {
     );
 
     expect(jobs.check.if).toBe('always()');
-    expect(jobs.check.needs).toEqual([
-      'quality',
-      'github-settings',
-      'nix-discovery',
-      'nix',
-    ]);
+    expect(jobs.check.needs).toEqual(['quality', 'nix-discovery', 'nix']);
 
     for (const [isSourceRepository, expectedNixResult] of [
       ['true', 'success'],
@@ -2106,7 +2101,6 @@ describe('canonical standards workflow Nix aggregation', () => {
       for (const nixDiscoveryResult of needsResults) {
         for (const nixResult of needsResults) {
           const status = runAggregate(aggregateScript, {
-            GITHUB_SETTINGS_RESULT: 'success',
             IS_SOURCE_REPOSITORY: isSourceRepository,
             NIX_DISCOVERY_RESULT: nixDiscoveryResult,
             NIX_RESULT: nixResult,
@@ -2135,7 +2129,6 @@ describe('canonical standards workflow Nix aggregation', () => {
         for (const nixResult of needsResults) {
           expect(
             runAggregate(aggregateScript, {
-              GITHUB_SETTINGS_RESULT: 'success',
               IS_SOURCE_REPOSITORY: isSourceRepository,
               NIX_DISCOVERY_RESULT: nixDiscoveryResult,
               NIX_RESULT: nixResult,
@@ -2147,7 +2140,7 @@ describe('canonical standards workflow Nix aggregation', () => {
     }
   });
 
-  it('requires both ordinary gates in source and consumer modes', () => {
+  it('requires the quality gate in source and consumer modes', () => {
     const aggregateScript = yamlRunScript(
       STANDARDS_WORKFLOW,
       'Require all standards gates',
@@ -2157,21 +2150,14 @@ describe('canonical standards workflow Nix aggregation', () => {
       ['true', 'success'],
       ['false', 'skipped'],
     ] as const) {
-      for (const failedGate of [
-        'GITHUB_SETTINGS_RESULT',
-        'QUALITY_RESULT',
-      ] as const) {
-        expect(
-          runAggregate(aggregateScript, {
-            GITHUB_SETTINGS_RESULT: 'success',
-            IS_SOURCE_REPOSITORY: isSourceRepository,
-            NIX_DISCOVERY_RESULT: nixResult,
-            NIX_RESULT: nixResult,
-            QUALITY_RESULT: 'success',
-            [failedGate]: 'failure',
-          }),
-        ).not.toBe(0);
-      }
+      expect(
+        runAggregate(aggregateScript, {
+          IS_SOURCE_REPOSITORY: isSourceRepository,
+          NIX_DISCOVERY_RESULT: nixResult,
+          NIX_RESULT: nixResult,
+          QUALITY_RESULT: 'failure',
+        }),
+      ).not.toBe(0);
     }
   });
 });
@@ -2198,7 +2184,6 @@ describe('canonical workflow runner boundaries', () => {
       '.github/workflows/standards-sync.yml:policy': 'ubuntu-latest',
       '.github/workflows/standards-sync.yml:sync': 'ubuntu-latest',
       '.github/workflows/standards.yml:check': 'ubuntu-latest',
-      '.github/workflows/standards.yml:github-settings': 'ubuntu-latest',
       '.github/workflows/standards.yml:nix-discovery': 'ubuntu-latest',
       '.github/workflows/standards.yml:nix': githubMatrixExpression('runner'),
     });

@@ -1216,13 +1216,13 @@ const runCheckCommand = async (consumer: string): Promise<boolean> => {
 };
 
 // The canonical workflow sets this only for its unprivileged quality job,
-// where a separate isolated job runs the same live check with its own workflow
+// where the check aggregator job runs the same live check with its own workflow
 // token. Absent that exact workflow seam, local and explicit checks remain
 // fail-closed.
 const runGithubCheckGate = (consumer: string): Promise<boolean> => {
   if (process.env[SKIP_GITHUB_CHECK_ENV] === 'true') {
     console.log(
-      `standards github: live settings check skipped because ${SKIP_GITHUB_CHECK_ENV}=true; the canonical workflow's isolated github-settings job must own this check`,
+      `standards github: live settings check skipped because ${SKIP_GITHUB_CHECK_ENV}=true; the canonical workflow's check aggregator job must own this check`,
     );
     return Promise.resolve(true);
   }
