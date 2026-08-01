@@ -13,6 +13,7 @@ import {
 } from 'node:fs';
 import { join, relative } from 'node:path';
 import process from 'node:process';
+import { isDeepStrictEqual } from 'node:util';
 import { parse as parseYaml } from 'yaml';
 import {
   ACTUAL_UPSTREAM,
@@ -305,7 +306,7 @@ const assertQualityCacheContract = (workflow: ParsedWorkflow): void => {
       },
     },
   ];
-  if (JSON.stringify(cacheSteps) !== JSON.stringify(expectedCacheSteps)) {
+  if (!isDeepStrictEqual(cacheSteps, expectedCacheSteps)) {
     throw new Error('Quality cache actions do not match the approved contract');
   }
 
@@ -2205,8 +2206,26 @@ describe('canonical standards workflow quality caching', () => {
     expect(workflow).not.toContain('~/.cache/ms-playwright');
   });
 
+  it('accepts semantically identical cache mappings in any key order', () => {
+    const workflow = structuredClone(parseWorkflow(STANDARDS_WORKFLOW));
+    qualityStep(workflow, 'Restore the Turbo cache').with = {
+      key: TURBO_CACHE_KEY,
+      path: '.turbo/cache',
+      'restore-keys': `${TURBO_CACHE_RESTORE_PREFIX}\n`,
+    };
+
+    expect(() => assertQualityCacheContract(workflow)).not.toThrow();
+  });
+
   it('rejects stale, unverified, and untrusted cache mutations', () => {
     const mutations: ReadonlyArray<(workflow: ParsedWorkflow) => void> = [
+      (workflow) => {
+        qualityStep(workflow, 'Restore the Turbo cache').with = {
+          path: '.turbo/other-cache',
+          key: TURBO_CACHE_KEY,
+          'restore-keys': `${TURBO_CACHE_RESTORE_PREFIX}\n`,
+        };
+      },
       (workflow) => {
         qualityStep(workflow, 'Restore the Turbo cache').with = {
           path: '.turbo/cache',
@@ -2235,6 +2254,36 @@ describe('canonical standards workflow quality caching', () => {
       },
       (workflow) => {
         qualityStep(workflow, 'Save the Turbo cache').if = 'success()';
+      },
+      (workflow) => {
+        qualityStep(workflow, 'Restore the Turbo cache').uses =
+          'actions/cache@v4';
+      },
+      (workflow) => {
+        qualityStep(workflow, 'Restore the Turbo cache').unexpected = true;
+      },
+      (workflow) => {
+        const qualityJob = workflow.jobs.quality;
+        if (qualityJob === undefined || !Array.isArray(qualityJob.steps)) {
+          throw new Error('Quality job must contain a steps array');
+        }
+        const restoreIndex = qualityJob.steps.findIndex(
+          (step) =>
+            typeof step === 'object' &&
+            step !== null &&
+            step.name === 'Restore the Turbo cache',
+        );
+        const checkIndex = qualityJob.steps.findIndex(
+          (step) =>
+            typeof step === 'object' && step !== null && step.name === 'Check',
+        );
+        if (restoreIndex < 0 || checkIndex < 0) {
+          throw new Error('Expected quality cache steps are missing');
+        }
+        [qualityJob.steps[restoreIndex], qualityJob.steps[checkIndex]] = [
+          qualityJob.steps[checkIndex],
+          qualityJob.steps[restoreIndex],
+        ];
       },
       (workflow) => {
         const qualityJob = workflow.jobs.quality;
