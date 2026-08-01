@@ -112,7 +112,7 @@ Pin a released tag and, when the consumer already owns nixpkgs, make the standar
 
 ```nix
 inputs.standards = {
-  url = "github:davidvornholt/standards/v0.22.1";
+  url = "github:davidvornholt/standards/v0.22.2";
   inputs.nixpkgs.follows = "nixpkgs";
 };
 
@@ -180,7 +180,7 @@ The weekly `Standards sync` workflow now requires `@davidvornholt/standards` 0.1
 
 The canonical GitHub settings now own `allow_merge_commit`, `allow_rebase_merge`, and `allow_squash_merge`, and enforce squash as the only merge method in the default-branch ruleset. A consumer whose repo-owned `.github/settings.local.json` previously declared any of those three repository keys must remove only those keys during the hard cutover; preserving them would be an attempted override of newly canonical policy.
 
-After the standards-sync pull request opens, check out its branch, remove those local keys if present, and run `bun standards github --apply` with admin auth from that branch before merging. Commit and push any local-seam cleanup, then wait for or rerun the isolated GitHub settings gate. Merge the sync pull request only after every required check passes. The live settings must converge before merge because the new declaration deliberately makes its own pull request fail closed on the old merge policy.
+After the standards-sync pull request opens, check out its branch, remove those local keys if present, and run `bun standards github --apply` with admin auth from that branch before merging. Commit and push any local-seam cleanup, then wait for or rerun the fixed GitHub-hosted `check` aggregator. Merge the sync pull request only after every required check passes. The live settings must converge before merge because the new declaration deliberately makes its own pull request fail closed on the old merge policy.
 
 ### Breaking migration to 0.7.0
 
@@ -206,7 +206,7 @@ Version 0.11.1 makes `standards check` reject the raw token formed by `biome-` +
 
 ### Breaking migration to 0.11.0
 
-Version 0.11.0 adds canonical and repo-local `labels` declarations to `.github/settings.json` and `.github/settings.local.json`. Older CLIs reject that key, so upgrade `@davidvornholt/standards` and `bun.lock` to 0.11.0 before accepting or running the new canonical sync workflow; its unconditional version guard refuses older installations before sync can mirror settings they cannot parse. Also grant read-only "Issues" access to the fine-grained PAT stored as `ci.github_settings_read_token`; label reads require it in addition to the existing read-only "Administration" access. Update the matching entry in your repo-owned `secrets/ci.example.yaml` as well as the encrypted PAT, because sync does not overwrite seeded secret examples. That PAT step is superseded — credential-free settings verification retired the token entirely, so a repo migrating today skips it and follows that section instead; the Issues read it describes now lives in the `github-settings` job's workflow-token permissions. Run `bun standards github --apply` after syncing to create the canonical poller protocol labels. The poller is declarative-only in 0.11: remove any host setup that calls `poller --install`, use `poller --print-units --config <path>` as input to the polling host's infrastructure repository, and let that owner provide the service identity, PATH, token environment, lingering, and deployment.
+Version 0.11.0 adds canonical and repo-local `labels` declarations to `.github/settings.json` and `.github/settings.local.json`. Older CLIs reject that key, so upgrade `@davidvornholt/standards` and `bun.lock` to 0.11.0 before accepting or running the new canonical sync workflow; its unconditional version guard refuses older installations before sync can mirror settings they cannot parse. Also grant read-only "Issues" access to the fine-grained PAT stored as `ci.github_settings_read_token`; label reads require it in addition to the existing read-only "Administration" access. Update the matching entry in your repo-owned `secrets/ci.example.yaml` as well as the encrypted PAT, because sync does not overwrite seeded secret examples. That PAT step is superseded — credential-free settings verification retired the token entirely, so a repo migrating today skips it and follows that section instead; the Issues read it describes now lives in the fixed GitHub-hosted `check` aggregator's workflow-token permissions. Run `bun standards github --apply` after syncing to create the canonical poller protocol labels. The poller is declarative-only in 0.11: remove any host setup that calls `poller --install`, use `poller --print-units --config <path>` as input to the polling host's infrastructure repository, and let that owner provide the service identity, PATH, token environment, lingering, and deployment.
 
 ## Release the CLI
 

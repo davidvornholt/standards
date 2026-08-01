@@ -131,8 +131,9 @@ jobs:
 
       - name: Check
         env:
-          # The isolated github-settings job owns this live check in CI. This
-          # workflow-only seam keeps local `bun run check` fail-closed.
+          # The fixed GitHub-hosted `check` aggregator job owns this live check
+          # in CI. This workflow-only seam keeps local `bun run check`
+          # fail-closed.
           STANDARDS_SKIP_GITHUB_CHECK: "true"
         run: bun run check
 
