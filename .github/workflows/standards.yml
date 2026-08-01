@@ -109,6 +109,32 @@ jobs:
         with:
           bun-version: 1.3.14
 
+      # The three caches below are pure accelerators: every consumer of a
+      # restored artifact re-verifies it (bun against the frozen lockfile,
+      # Playwright against its pinned browser revision, Turbo against the
+      # content hash of each task's inputs), so a stale or missing cache
+      # changes wall-clock time, never outcomes. Keys scope by OS and
+      # architecture because all three stores contain platform-specific
+      # binaries or outputs.
+      - name: Restore the Bun package cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-packages-${{ runner.os }}-${{ runner.arch }}-
+
+      # Saved under a per-run key so each run persists the tasks it added;
+      # restore-keys picks the most recent snapshot. The prune step at the end
+      # of the job bounds growth before the post-job save.
+      - name: Restore the Turbo cache
+        uses: actions/cache@v4
+        with:
+          path: .turbo/cache
+          key: turbo-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}-${{ github.run_id }}
+          restore-keys: |
+            turbo-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
@@ -118,6 +144,15 @@ jobs:
       # npm-latest CLI instead. That CLI downloads the browser build matching
       # itself, not the one the pinned @playwright/test launches, and every spec
       # then fails on a missing executable the moment upstream ships a release.
+      - name: Restore the Playwright browser cache
+        if: steps.a11y.outputs.present == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Install Playwright Chromium
         if: steps.a11y.outputs.present == 'true'
         run: |
@@ -136,6 +171,23 @@ jobs:
           # fail-closed.
           STANDARDS_SKIP_GITHUB_CHECK: "true"
         run: bun run check
+
+      # Bound the Turbo store before the post-job cache save: keep the most
+      # recently written artifacts up to a fixed budget so snapshots stay far
+      # from GitHub's 10 GB per-repository cache quota. Turbo artifact names
+      # are content hashes, so newline parsing is safe. `always()` bounds the
+      # save a red gate would otherwise still perform.
+      - name: Prune the Turbo cache before save
+        if: always()
+        run: |
+          set -euo pipefail
+          cache_dir=.turbo/cache
+          [ -d "$cache_dir" ] || exit 0
+          find "$cache_dir" -type f -printf '%T@\t%k\t%p\n' |
+            sort -rn |
+            awk -F'\t' -v budget=$((2 * 1024 * 1024)) \
+              '{ total += $2; if (total > budget) print $3 }' |
+            xargs -r rm -f --
 
   nix-discovery:
     if: github.repository == 'davidvornholt/standards'

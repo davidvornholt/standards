@@ -2102,6 +2102,54 @@ describe('canonical standards workflow settings credential', () => {
   });
 });
 
+describe('canonical standards workflow quality caching', () => {
+  it('caches only self-verifying accelerator stores with platform-scoped keys', () => {
+    const bunCache = yamlStep(
+      STANDARDS_WORKFLOW,
+      'Restore the Bun package cache',
+    );
+    const turboCache = yamlStep(STANDARDS_WORKFLOW, 'Restore the Turbo cache');
+    const playwrightCache = yamlStep(
+      STANDARDS_WORKFLOW,
+      'Restore the Playwright browser cache',
+    );
+
+    // Every cached store is re-verified by its consumer (frozen lockfile,
+    // pinned browser revision, content-hashed task inputs), so a cache can
+    // change wall-clock time but never a gate outcome. All three stores carry
+    // platform-specific content, so every key scopes by OS and architecture.
+    for (const step of [bunCache, turboCache, playwrightCache]) {
+      expect(step).toContain('uses: actions/cache@v4');
+      expect(step).toContain(
+        `${githubExpression('runner.os')}-${githubExpression('runner.arch')}`,
+      );
+      expect(step).toContain('restore-keys:');
+    }
+    expect(bunCache).toContain('path: ~/.bun/install/cache');
+    expect(turboCache).toContain('path: .turbo/cache');
+    expect(playwrightCache).toContain('path: ~/.cache/ms-playwright');
+    expect(playwrightCache).toContain(
+      "if: steps.a11y.outputs.present == 'true'",
+    );
+  });
+
+  it('bounds the Turbo store before every post-job save', () => {
+    const prune = yamlStep(
+      STANDARDS_WORKFLOW,
+      'Prune the Turbo cache before save',
+    );
+    const pruneScript = yamlRunScript(
+      STANDARDS_WORKFLOW,
+      'Prune the Turbo cache before save',
+    );
+
+    expect(prune).toContain('if: always()');
+    expect(pruneScript).toContain('.turbo/cache');
+    expect(pruneScript).toContain('sort -rn');
+    expect(pruneScript).toContain('xargs -r rm -f --');
+  });
+});
+
 describe('canonical standards workflow Nix gate', () => {
   it('derives every native Nix job from validated metadata at the tested commit', () => {
     const jobs = yamlJobs(STANDARDS_WORKFLOW);
