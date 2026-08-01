@@ -8,10 +8,12 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { join, relative } from 'node:path';
 import process from 'node:process';
+import { isDeepStrictEqual } from 'node:util';
 import { parse as parseYaml } from 'yaml';
 import {
   ACTUAL_UPSTREAM,
@@ -62,6 +64,12 @@ const MAJOR_ACTION_REF = /^[^@\s]+@v\d+$/u;
 const WRITE_PERMISSION_INPUT = /permission-\S+: write/u;
 const SOURCE_REPOSITORY_CONDITION =
   "github.repository == 'davidvornholt/standards'";
+const TURBO_CACHE_SAVE_CONDITION =
+  "success() && github.ref == 'refs/heads/main' && steps.turbo-cache.outputs.cache-hit != 'true'";
+const CACHE_FIXTURE_FILE_SIZE = 4096;
+const OLDEST_CACHE_MTIME = 100;
+const MIDDLE_CACHE_MTIME = 200;
+const NEWEST_CACHE_MTIME = 300;
 const STD_PATHS: ReadonlyArray<string> = [
   'sync-standards.json',
   '.github/dependabot.base.yml',
@@ -175,6 +183,8 @@ const githubExpression = (expression: string): string =>
   `${'$'}{{ ${expression} }}`;
 const githubMatrixExpression = (property: string): string =>
   githubExpression(`matrix.${property}`);
+const TURBO_CACHE_KEY = `turbo-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-${githubExpression('github.sha')}`;
+const TURBO_CACHE_RESTORE_PREFIX = `turbo-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-`;
 const runNixDiscovery = ({
   filter,
   metadata,
@@ -257,6 +267,91 @@ const parseWorkflow = (path: string): ParsedWorkflow => {
     throw new Error(`${path} must contain a jobs mapping`);
   }
   return workflow as ParsedWorkflow;
+};
+
+const qualityStep = (workflow: ParsedWorkflow, name: string): WorkflowStep => {
+  const step = workflowSteps(workflow.jobs.quality, 'quality').find(
+    (candidate) => candidate.name === name,
+  );
+  if (step === undefined) {
+    throw new Error(`Quality step not found: ${name}`);
+  }
+  return step;
+};
+
+const assertQualityCacheContract = (workflow: ParsedWorkflow): void => {
+  const steps = workflowSteps(workflow.jobs.quality, 'quality');
+  const cacheSteps = steps.filter(
+    (step) =>
+      typeof step.uses === 'string' && step.uses.startsWith('actions/cache'),
+  );
+  const expectedCacheSteps = [
+    {
+      name: 'Restore the Turbo cache',
+      id: 'turbo-cache',
+      uses: 'actions/cache/restore@v4',
+      with: {
+        path: '.turbo/cache',
+        key: TURBO_CACHE_KEY,
+        'restore-keys': `${TURBO_CACHE_RESTORE_PREFIX}\n`,
+      },
+    },
+    {
+      name: 'Save the Turbo cache',
+      if: TURBO_CACHE_SAVE_CONDITION,
+      uses: 'actions/cache/save@v4',
+      with: {
+        path: '.turbo/cache',
+        key: TURBO_CACHE_KEY,
+      },
+    },
+  ];
+  if (!isDeepStrictEqual(cacheSteps, expectedCacheSteps)) {
+    throw new Error('Quality cache actions do not match the approved contract');
+  }
+
+  const restoreIndex = steps.indexOf(cacheSteps[0] as WorkflowStep);
+  const installIndex = steps.indexOf(
+    qualityStep(workflow, 'Install dependencies'),
+  );
+  const checkIndex = steps.indexOf(qualityStep(workflow, 'Check'));
+  const pruneIndex = steps.indexOf(
+    qualityStep(workflow, 'Prune the Turbo cache before save'),
+  );
+  const saveIndex = steps.indexOf(cacheSteps[1] as WorkflowStep);
+  if (
+    qualityStep(workflow, 'Install dependencies').run !==
+    'bun install --frozen-lockfile'
+  ) {
+    throw new Error('The dependency consumer must use the frozen lockfile');
+  }
+  if (qualityStep(workflow, 'Check').run !== 'bun run check') {
+    throw new Error('The Turbo cache consumer must run the complete gate');
+  }
+  const orderedIndices = [
+    restoreIndex,
+    installIndex,
+    checkIndex,
+    pruneIndex,
+    saveIndex,
+  ];
+  for (const [index, stepIndex] of orderedIndices.entries()) {
+    const previousIndex = orderedIndices[index - 1];
+    if (
+      stepIndex < 0 ||
+      (previousIndex !== undefined && previousIndex >= stepIndex)
+    ) {
+      throw new Error(
+        'Cache restore, consumers, prune, and save are out of order',
+      );
+    }
+  }
+  if (
+    qualityStep(workflow, 'Prune the Turbo cache before save').if !==
+    TURBO_CACHE_SAVE_CONDITION
+  ) {
+    throw new Error('Turbo pruning must match the successful save condition');
+  }
 };
 
 // The block-scalar entries of a checkout step's `sparse-checkout` input, so a
@@ -2099,6 +2194,179 @@ describe('canonical standards workflow settings credential', () => {
     const workflow = readFileSync(STANDARDS_WORKFLOW, 'utf8');
     expect(workflow).toContain('uses: extractions/setup-just@v4');
     expect(workflow).toContain('just-version: "1.57.0"');
+  });
+});
+
+describe('canonical standards workflow quality caching', () => {
+  it('allows only a commit-fresh Turbo cache with trusted publication', () => {
+    assertQualityCacheContract(parseWorkflow(STANDARDS_WORKFLOW));
+
+    const workflow = readFileSync(STANDARDS_WORKFLOW, 'utf8');
+    expect(workflow).not.toContain('~/.bun/install/cache');
+    expect(workflow).not.toContain('~/.cache/ms-playwright');
+  });
+
+  it('accepts semantically identical cache mappings in any key order', () => {
+    const workflow = structuredClone(parseWorkflow(STANDARDS_WORKFLOW));
+    qualityStep(workflow, 'Restore the Turbo cache').with = {
+      key: TURBO_CACHE_KEY,
+      path: '.turbo/cache',
+      'restore-keys': `${TURBO_CACHE_RESTORE_PREFIX}\n`,
+    };
+
+    expect(() => assertQualityCacheContract(workflow)).not.toThrow();
+  });
+
+  it('rejects stale, unverified, and untrusted cache mutations', () => {
+    const mutations: ReadonlyArray<(workflow: ParsedWorkflow) => void> = [
+      (workflow) => {
+        qualityStep(workflow, 'Restore the Turbo cache').with = {
+          path: '.turbo/other-cache',
+          key: TURBO_CACHE_KEY,
+          'restore-keys': `${TURBO_CACHE_RESTORE_PREFIX}\n`,
+        };
+      },
+      (workflow) => {
+        qualityStep(workflow, 'Restore the Turbo cache').with = {
+          path: '.turbo/cache',
+          key: `turbo-${githubExpression('runner.os')}-${githubExpression('runner.arch')}`,
+          'restore-keys': `${TURBO_CACHE_RESTORE_PREFIX}\n`,
+        };
+      },
+      (workflow) => {
+        qualityStep(workflow, 'Save the Turbo cache').with = {
+          path: '.turbo/cache',
+          key: `turbo-${githubExpression('runner.os')}-${githubExpression('runner.arch')}`,
+        };
+      },
+      (workflow) => {
+        qualityStep(workflow, 'Restore the Turbo cache').with = {
+          path: '.turbo/cache',
+          key: TURBO_CACHE_KEY,
+          'restore-keys': `turbo-${githubExpression('runner.os')}-`,
+        };
+      },
+      (workflow) => {
+        qualityStep(workflow, 'Install dependencies').run = 'bun install';
+      },
+      (workflow) => {
+        qualityStep(workflow, 'Check').run = 'bun run lint';
+      },
+      (workflow) => {
+        qualityStep(workflow, 'Save the Turbo cache').if = 'success()';
+      },
+      (workflow) => {
+        qualityStep(workflow, 'Restore the Turbo cache').uses =
+          'actions/cache@v4';
+      },
+      (workflow) => {
+        qualityStep(workflow, 'Restore the Turbo cache').unexpected = true;
+      },
+      (workflow) => {
+        const qualityJob = workflow.jobs.quality;
+        if (qualityJob === undefined || !Array.isArray(qualityJob.steps)) {
+          throw new Error('Quality job must contain a steps array');
+        }
+        const restoreIndex = qualityJob.steps.findIndex(
+          (step) =>
+            typeof step === 'object' &&
+            step !== null &&
+            step.name === 'Restore the Turbo cache',
+        );
+        const checkIndex = qualityJob.steps.findIndex(
+          (step) =>
+            typeof step === 'object' && step !== null && step.name === 'Check',
+        );
+        if (restoreIndex < 0 || checkIndex < 0) {
+          throw new Error('Expected quality cache steps are missing');
+        }
+        [qualityJob.steps[restoreIndex], qualityJob.steps[checkIndex]] = [
+          qualityJob.steps[checkIndex],
+          qualityJob.steps[restoreIndex],
+        ];
+      },
+      (workflow) => {
+        const qualityJob = workflow.jobs.quality;
+        if (qualityJob === undefined || !Array.isArray(qualityJob.steps)) {
+          throw new Error('Quality job must contain a steps array');
+        }
+        qualityJob.steps.push({
+          name: 'Restore an executable cache',
+          uses: 'actions/cache@v4',
+          with: { path: '~/.cache/ms-playwright', key: 'unapproved' },
+        });
+      },
+    ];
+
+    for (const mutate of mutations) {
+      const workflow = structuredClone(parseWorkflow(STANDARDS_WORKFLOW));
+      mutate(workflow);
+      expect(() => assertQualityCacheContract(workflow)).toThrow();
+    }
+  });
+});
+
+describe('canonical standards workflow Turbo cache pruning', () => {
+  it('keeps the newest Turbo artifacts within the declared save budget', () => {
+    const pruneScript = yamlRunScript(
+      STANDARDS_WORKFLOW,
+      'Prune the Turbo cache before save',
+    );
+    expect(pruneScript).toContain('budget=$((2 * 1024 * 1024))');
+
+    const absentFixture = mkTmp('turbo-prune-absent-');
+    expect(
+      runExecutable('bash', absentFixture, ['-c', pruneScript]).status,
+    ).toBe(0);
+
+    const fixture = mkTmp('turbo-prune-');
+    const cachePath = '.turbo/cache';
+    const files = [
+      ['oldest', OLDEST_CACHE_MTIME],
+      ['middle', MIDDLE_CACHE_MTIME],
+      ['newest', NEWEST_CACHE_MTIME],
+    ] as const;
+    for (const [name, mtime] of files) {
+      write(
+        fixture,
+        `${cachePath}/${name}`,
+        'x'.repeat(CACHE_FIXTURE_FILE_SIZE),
+      );
+      utimesSync(join(fixture, cachePath, name), mtime, mtime);
+    }
+
+    const fixtureScript = pruneScript.replace(
+      'budget=$((2 * 1024 * 1024))',
+      'budget=8',
+    );
+    expect(runExecutable('bash', fixture, ['-c', fixtureScript]).status).toBe(
+      0,
+    );
+    expect(readdirSync(join(fixture, cachePath)).sort()).toEqual([
+      'middle',
+      'newest',
+    ]);
+
+    const invertedScript = fixtureScript.replace(
+      'if (total > budget)',
+      'if (total < budget)',
+    );
+    const invertedFixture = mkTmp('turbo-prune-inverted-');
+    for (const [name, mtime] of files) {
+      write(
+        invertedFixture,
+        `${cachePath}/${name}`,
+        'x'.repeat(CACHE_FIXTURE_FILE_SIZE),
+      );
+      utimesSync(join(invertedFixture, cachePath, name), mtime, mtime);
+    }
+    expect(
+      runExecutable('bash', invertedFixture, ['-c', invertedScript]).status,
+    ).toBe(0);
+    expect(readdirSync(join(invertedFixture, cachePath)).sort()).not.toEqual([
+      'middle',
+      'newest',
+    ]);
   });
 });
 
