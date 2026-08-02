@@ -61,8 +61,6 @@ jobs:
           --health-retries 10
     env:
       DATABASE_URL: postgresql://${{ vars.CI_POSTGRES_USER || 'app' }}:${{ vars.CI_POSTGRES_PASSWORD || 'app' }}@127.0.0.1:5432/${{ vars.CI_POSTGRES_DB || 'app' }}
-      BUN_INSTALL_CACHE_DIR: ${{ runner.temp }}/standards-bun-cache-${{ github.run_id }}-${{ github.run_attempt }}
-      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/standards-playwright-cache-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -132,7 +130,9 @@ jobs:
       - name: Initialize executable cache directories
         run: |
           set -euo pipefail
-          for cache_dir in "$BUN_INSTALL_CACHE_DIR" "$PLAYWRIGHT_BROWSERS_PATH"; do
+          bun_install_cache_dir="$RUNNER_TEMP/standards-bun-cache-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          playwright_browsers_path="$RUNNER_TEMP/standards-playwright-cache-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          for cache_dir in "$bun_install_cache_dir" "$playwright_browsers_path"; do
             case "$cache_dir" in
               "$RUNNER_TEMP"/standards-*-cache-*) ;;
               *)
@@ -143,6 +143,10 @@ jobs:
             rm -rf -- "$cache_dir"
             mkdir -p -- "$cache_dir"
           done
+          {
+            echo "BUN_INSTALL_CACHE_DIR=$bun_install_cache_dir"
+            echo "PLAYWRIGHT_BROWSERS_PATH=$playwright_browsers_path"
+          } >> "$GITHUB_ENV"
 
       - name: Restore the Bun package cache
         id: bun-cache

@@ -304,18 +304,20 @@ const assertQualityCacheConsumers = (
 ): ReadonlyArray<WorkflowStep> => {
   const environment = qualityEnvironment(workflow);
   if (
-    environment.BUN_INSTALL_CACHE_DIR !==
-      `${githubExpression('runner.temp')}/standards-bun-cache-${githubExpression('github.run_id')}-${githubExpression('github.run_attempt')}` ||
-    environment.PLAYWRIGHT_BROWSERS_PATH !==
-      `${githubExpression('runner.temp')}/standards-playwright-cache-${githubExpression('github.run_id')}-${githubExpression('github.run_attempt')}`
+    'BUN_INSTALL_CACHE_DIR' in environment ||
+    'PLAYWRIGHT_BROWSERS_PATH' in environment
   ) {
-    throw new Error('Executable caches must use isolated job-scoped paths');
+    throw new Error(
+      'Executable cache paths must be initialized after the runner context exists',
+    );
   }
   const expectedConsumerSteps = [
     {
       name: 'Initialize executable cache directories',
       run: `set -euo pipefail
-for cache_dir in "$BUN_INSTALL_CACHE_DIR" "$PLAYWRIGHT_BROWSERS_PATH"; do
+bun_install_cache_dir="$RUNNER_TEMP/standards-bun-cache-\${GITHUB_RUN_ID}-\${GITHUB_RUN_ATTEMPT}"
+playwright_browsers_path="$RUNNER_TEMP/standards-playwright-cache-\${GITHUB_RUN_ID}-\${GITHUB_RUN_ATTEMPT}"
+for cache_dir in "$bun_install_cache_dir" "$playwright_browsers_path"; do
   case "$cache_dir" in
     "$RUNNER_TEMP"/standards-*-cache-*) ;;
     *)
@@ -326,6 +328,10 @@ for cache_dir in "$BUN_INSTALL_CACHE_DIR" "$PLAYWRIGHT_BROWSERS_PATH"; do
   rm -rf -- "$cache_dir"
   mkdir -p -- "$cache_dir"
 done
+{
+  echo "BUN_INSTALL_CACHE_DIR=$bun_install_cache_dir"
+  echo "PLAYWRIGHT_BROWSERS_PATH=$playwright_browsers_path"
+} >> "$GITHUB_ENV"
 `,
     },
     {
@@ -2238,13 +2244,14 @@ describe('canonical standards workflow settings security', () => {
   it('isolates the settings comparison from repository-controlled executable code', () => {
     const workflowSource = readFileSync(STANDARDS_WORKFLOW, 'utf8');
     const workflow = parseWorkflow(STANDARDS_WORKFLOW);
+    const settingsJobSource = JSON.stringify(workflow.jobs.check);
     const [, installStep, settingsStep] = assertSettingsTrustBoundary(workflow);
     const installRun = String(installStep?.run);
     const settingsRun = String(settingsStep?.run);
 
     // The job holds no durable credential, so it needs no executable file from
     // the repository at all: declarative settings inputs and nothing else.
-    expect(workflowSource).not.toContain('GITHUB_ENV');
+    expect(settingsJobSource).not.toContain('GITHUB_ENV');
     expect(workflowSource).not.toContain('GH_TOKEN:');
     expect(settingsRun).not.toContain('GITHUB_OUTPUT');
     expect(settingsRun).toContain('GH_TOKEN="$SETTINGS_TOKEN"');
@@ -2497,43 +2504,44 @@ it('isolates executable caches across persistent-runner jobs', () => {
     STANDARDS_WORKFLOW,
     'Initialize executable cache directories',
   );
-  const prEnvironment = {
-    BUN_INSTALL_CACHE_DIR: join(runnerTemp, 'standards-bun-cache-pr-1'),
-    PLAYWRIGHT_BROWSERS_PATH: join(
-      runnerTemp,
-      'standards-playwright-cache-pr-1',
-    ),
-    RUNNER_TEMP: runnerTemp,
+  const initializeJob = (
+    runId: string,
+  ): {
+    readonly bunCache: string;
+    readonly playwrightCache: string;
+    readonly result: RunResult;
+  } => {
+    const githubEnvironment = join(fixture, `${runId}.env`);
+    const result = runExecutable('bash', fixture, ['-c', initialize], {
+      GITHUB_ENV: githubEnvironment,
+      GITHUB_RUN_ATTEMPT: '1',
+      GITHUB_RUN_ID: runId,
+      RUNNER_TEMP: runnerTemp,
+    });
+    const exported = Object.fromEntries(
+      readFileSync(githubEnvironment, 'utf8')
+        .trim()
+        .split('\n')
+        .map((line) => line.split('=', 2)),
+    );
+    const bunCache = exported.BUN_INSTALL_CACHE_DIR;
+    const playwrightCache = exported.PLAYWRIGHT_BROWSERS_PATH;
+    if (bunCache === undefined || playwrightCache === undefined) {
+      throw new Error('Initialization did not export both executable caches');
+    }
+    return { bunCache, playwrightCache, result };
   };
-  expect(
-    runExecutable('bash', fixture, ['-c', initialize], prEnvironment).status,
-  ).toBe(0);
-  writeFileSync(join(prEnvironment.BUN_INSTALL_CACHE_DIR, 'poisoned'), 'pr');
-  writeFileSync(join(prEnvironment.PLAYWRIGHT_BROWSERS_PATH, 'poisoned'), 'pr');
+  const prJob = initializeJob('pr');
+  expect(prJob.result.status).toBe(0);
+  writeFileSync(join(prJob.bunCache, 'poisoned'), 'pr');
+  writeFileSync(join(prJob.playwrightCache, 'poisoned'), 'pr');
 
-  const mainEnvironment = {
-    BUN_INSTALL_CACHE_DIR: join(runnerTemp, 'standards-bun-cache-main-1'),
-    PLAYWRIGHT_BROWSERS_PATH: join(
-      runnerTemp,
-      'standards-playwright-cache-main-1',
-    ),
-    RUNNER_TEMP: runnerTemp,
-  };
-  expect(
-    runExecutable('bash', fixture, ['-c', initialize], mainEnvironment).status,
-  ).toBe(0);
-  expect(
-    existsSync(join(mainEnvironment.BUN_INSTALL_CACHE_DIR, 'poisoned')),
-  ).toBeFalse();
-  expect(
-    existsSync(join(mainEnvironment.PLAYWRIGHT_BROWSERS_PATH, 'poisoned')),
-  ).toBeFalse();
-  expect(
-    existsSync(join(prEnvironment.BUN_INSTALL_CACHE_DIR, 'poisoned')),
-  ).toBeTrue();
-  expect(
-    existsSync(join(prEnvironment.PLAYWRIGHT_BROWSERS_PATH, 'poisoned')),
-  ).toBeTrue();
+  const mainJob = initializeJob('main');
+  expect(mainJob.result.status).toBe(0);
+  expect(existsSync(join(mainJob.bunCache, 'poisoned'))).toBeFalse();
+  expect(existsSync(join(mainJob.playwrightCache, 'poisoned'))).toBeFalse();
+  expect(existsSync(join(prJob.bunCache, 'poisoned'))).toBeTrue();
+  expect(existsSync(join(prJob.playwrightCache, 'poisoned'))).toBeTrue();
 });
 
 describe('canonical standards workflow Turbo cache pruning', () => {
