@@ -447,12 +447,15 @@ const assertQualityCacheContract = (workflow: ParsedWorkflow): void => {
     }
   }
   const pruneStep = qualityStep(workflow, 'Prune the Turbo cache before save');
+  const pruneRun = pruneStep.run;
   if (
     !isDeepStrictEqual(Object.keys(pruneStep).sort(), ['if', 'name', 'run']) ||
-    pruneStep.if !== TURBO_CACHE_SAVE_CONDITION
+    pruneStep.if !== TURBO_CACHE_SAVE_CONDITION ||
+    typeof pruneRun !== 'string' ||
+    !pruneRun.startsWith('set -euo pipefail\n')
   ) {
     throw new Error(
-      'Turbo pruning must fail closed on exactly the successful save condition',
+      'Turbo pruning must use strict shell failure handling on exactly the successful save condition',
     );
   }
 };
@@ -2471,6 +2474,16 @@ it('rejects softened executable-cache boundaries and consumers', () => {
         'success()';
     },
     (workflow) => {
+      const pruneStep = qualityStep(
+        workflow,
+        'Prune the Turbo cache before save',
+      );
+      pruneStep.run = String(pruneStep.run).replace(
+        'set -euo pipefail',
+        'set +e',
+      );
+    },
+    (workflow) => {
       moveQualityStepBefore(workflow, 'Save the Bun package cache', 'Check');
     },
     (workflow) => {
@@ -2510,6 +2523,14 @@ describe('canonical standards workflow Turbo cache pruning', () => {
     expect(
       runExecutable('bash', absentFixture, ['-c', pruneScript]).status,
     ).toBe(0);
+
+    const failingFindFixture = mkTmp('turbo-prune-failing-find-');
+    write(failingFindFixture, '.turbo/cache/artifact', 'cached');
+    const failingFindScript = `find() { return 42; }\n${pruneScript}`;
+    expect(
+      runExecutable('bash', failingFindFixture, ['-c', failingFindScript])
+        .status,
+    ).not.toBe(0);
 
     const fixture = mkTmp('turbo-prune-');
     const cachePath = '.turbo/cache';

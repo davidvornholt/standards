@@ -50,6 +50,10 @@ REST serves ruleset `bypass_actors` only to a user-scoped token holding reposito
 
 Production workflows use maintained major-version tags for external actions instead of full commit SHAs. The owner accepts the minimal risk that an upstream tag could be retargeted; reviews must not request immutable action pins unless that risk assessment changes.
 
+## WORKFLOW-GATES-001: Exact security-sensitive workflow step keys
+
+Security-sensitive workflow steps deliberately match their exact YAML mapping key sets. Every new field, including a benign field such as `timeout-minutes`, must therefore be added to the contract explicitly before the workflow passes. This conservative change-control boundary matches the existing Check-step strategy and does not weaken runtime behavior. The accepted cost is that safe metadata additions require a coordinated contract-test update instead of landing independently. This premise holds while every field on these steps deserves explicit review because workflow metadata can alter execution or failure semantics. Reopen this decision if GitHub requires an unavoidable field that cannot be represented in the contract, or if a different validation strategy preserves explicit review of every new field while materially reducing the maintenance cost.
+
 ## IMAGE-PROMOTION-001: Superseded promotions never reactivate
 
 When promotion B provably supersedes open promotion A, A enters the terminal `superseded` phase. Later announcements of A attach evidence but never reopen its PR, advance its phase, merge it, or deploy it. If B fails, recovery continues by repairing or retrying B or by announcing a newer source build. Restoring a previously deployed A digest is possible only through a distinct approved rollback operation with its own identity and audit trail; it never reactivates A.
