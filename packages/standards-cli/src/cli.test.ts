@@ -198,13 +198,13 @@ const TURBO_CACHE_KEY = `turbo-${githubExpression('runner.os')}-${githubExpressi
 const TURBO_CACHE_RESTORE_PREFIX = `turbo-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-`;
 const BUN_CACHE_KEY = `bun-packages-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-${githubExpression("hashFiles('bun.lock')")}`;
 const BUN_CACHE_RESTORE_PREFIX = `bun-packages-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-`;
-// Off-main runs may consume the newest prefix-matched snapshot, but main must
-// restore by exact lock key only so the snapshot it publishes is built from an
-// empty store and stays history-free. actions/cache filters empty strings out
-// of `restore-keys`, so the expression resolving to '' on main means no
-// fallback keys. The `!= main` orientation is load-bearing: the inverted
-// `== main && '' || prefix` form would leak the fallback onto main because ''
-// is falsy in Actions expressions.
+// Off-main runs may consume prefix-matched snapshots, but main must restore by
+// exact lock key so every snapshot it publishes is built from an empty store
+// and stays history-free. actions/cache filters empty strings out of
+// `restore-keys`, so resolving to '' on main means no fallback keys. The `!=
+// main` orientation is load-bearing: the inverted `== main && '' || prefix`
+// form would leak the fallback onto main because '' is falsy in Actions
+// expressions.
 const BUN_CACHE_RESTORE_KEYS = githubExpression(
   "github.ref != 'refs/heads/main' && format('bun-packages-{0}-{1}-', runner.os, runner.arch) || ''",
 );
@@ -213,6 +213,9 @@ const BUN_CACHE_SAVE_CONDITION =
   "success() && github.ref == 'refs/heads/main' && steps.bun-cache.outputs.cache-hit != 'true'";
 const PLAYWRIGHT_CACHE_KEY = `playwright-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-${githubExpression("hashFiles('bun.lock')")}`;
 const PLAYWRIGHT_CACHE_RESTORE_PREFIX = `playwright-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-`;
+const PLAYWRIGHT_CACHE_RESTORE_KEYS = githubExpression(
+  "github.ref != 'refs/heads/main' && format('playwright-{0}-{1}-', runner.os, runner.arch) || ''",
+);
 const PLAYWRIGHT_CACHE_PATH = '~/.cache/ms-playwright';
 const PLAYWRIGHT_CACHE_SAVE_CONDITION =
   "success() && github.ref == 'refs/heads/main' && steps.a11y.outputs.present == 'true' && steps.playwright-cache.outputs.cache-hit != 'true'";
@@ -401,10 +404,7 @@ const assertQualityCacheContract = (workflow: ParsedWorkflow): void => {
       with: {
         path: PLAYWRIGHT_CACHE_PATH,
         key: PLAYWRIGHT_CACHE_KEY,
-        // Unlike Bun, Playwright removes browser revisions that no installed
-        // package references. Keeping the fallback avoids a cold download
-        // after unrelated lockfile changes without accumulating stale builds.
-        'restore-keys': `${PLAYWRIGHT_CACHE_RESTORE_PREFIX}\n`,
+        'restore-keys': PLAYWRIGHT_CACHE_RESTORE_KEYS,
       },
     },
     {
@@ -2445,14 +2445,22 @@ it('rejects stale and untrusted cache action mutations', () => {
       };
     },
     (workflow) => {
-      // Applying Bun's exact-only strategy to Playwright is wasteful:
-      // Playwright already garbage-collects stale browser revisions during
-      // install, so the prefix fallback can safely reuse a current browser.
+      // An unconditional prefix fallback lets a Playwright downgrade publish
+      // browser families the older CLI cannot identify or garbage-collect.
+      qualityStep(workflow, 'Restore the Playwright browser cache').with = {
+        path: PLAYWRIGHT_CACHE_PATH,
+        key: PLAYWRIGHT_CACHE_KEY,
+        'restore-keys': `${PLAYWRIGHT_CACHE_RESTORE_PREFIX}\n`,
+      };
+    },
+    (workflow) => {
+      // The inverted conditional restores the fallback on main because the
+      // intended empty-string branch is falsy in Actions expressions.
       qualityStep(workflow, 'Restore the Playwright browser cache').with = {
         path: PLAYWRIGHT_CACHE_PATH,
         key: PLAYWRIGHT_CACHE_KEY,
         'restore-keys': githubExpression(
-          "github.ref != 'refs/heads/main' && format('playwright-{0}-{1}-', runner.os, runner.arch) || ''",
+          "github.ref == 'refs/heads/main' && '' || format('playwright-{0}-{1}-', runner.os, runner.arch)",
         ),
       };
     },

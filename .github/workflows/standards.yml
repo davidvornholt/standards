@@ -134,18 +134,18 @@ jobs:
       # property of that runner pool, tracked upstream, and is not fixable
       # here without breaking the strict-env seam.
       #
-      # Bun snapshots must also be history-free. Bun installs only ever add
-      # packages to a restored store, so a snapshot built on top of a fallback
-      # restore would carry every previous lockfile's packages forward and
-      # grow without bound, spending cache quota on unreachable content. Main
-      # therefore restores Bun by exact lock key only: the ref-conditional
+      # Published Bun and Playwright snapshots must be history-free. A main
+      # snapshot published after a lock change contains only what the current
+      # lock's tooling produced from an empty store. Bun accumulates unreachable
+      # packages in a restored store. Playwright garbage collection is not
+      # reliable across version downgrades because an older permitted CLI
+      # cannot identify browser families introduced by a newer release. Main
+      # therefore restores both stores by exact lock key only: each conditional
       # `restore-keys` resolves to an empty string on main, which actions/cache
-      # treats as no fallback keys at all. A main run with an unchanged
-      # lockfile still exact-hits; only the first main run after a lockfile
-      # change installs from the network, and that is exactly the run that
-      # publishes — so its snapshot contains only packages reachable from the
-      # current lock. Pull requests keep the prefix fallback because they
-      # consume snapshots but never publish them.
+      # treats as no fallback keys. An unchanged lock still exact-hits. After a
+      # lock change, the cold install runs against an empty store and the
+      # successful run publishes only that result. Pull requests keep prefix
+      # fallbacks because they consume trusted snapshots but never publish.
       - name: Restore the Bun package cache
         id: bun-cache
         uses: actions/cache/restore@v4
@@ -157,10 +157,6 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      # Playwright deliberately keeps the prefix fallback on every ref. Its
-      # install command garbage-collects browser revisions no live package link
-      # references, so main can reuse a still-current browser after an unrelated
-      # lockfile change without carrying stale revisions into the next snapshot.
       # Run the *installed* binary, never `bunx playwright`: a11y suites live in
       # a workspace, Bun keeps that workspace's binaries under it rather than at
       # the repo root, so bunx would find nothing there and silently resolve the
@@ -174,8 +170,7 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
-          restore-keys: |
-            playwright-${{ runner.os }}-${{ runner.arch }}-
+          restore-keys: ${{ github.ref != 'refs/heads/main' && format('playwright-{0}-{1}-', runner.os, runner.arch) || '' }}
 
       - name: Install Playwright Chromium
         if: steps.a11y.outputs.present == 'true'
