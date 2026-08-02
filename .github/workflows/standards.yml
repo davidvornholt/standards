@@ -122,6 +122,41 @@ jobs:
           restore-keys: |
             turbo-${{ runner.os }}-${{ runner.arch }}-
 
+      # Bun's package store and Playwright's browser store hold executable
+      # content. Each job starts them in unique run-scoped directories, so a
+      # persistent runner cannot carry PR-written bytes into a later main run.
+      # Pull requests may restore trusted remote snapshots but cannot publish;
+      # main publishes only after the complete quality gate succeeds.
+      - name: Initialize executable cache directories
+        run: |
+          set -euo pipefail
+          bun_install_cache_dir="$RUNNER_TEMP/standards-bun-cache-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          playwright_browsers_path="$RUNNER_TEMP/standards-playwright-cache-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          for cache_dir in "$bun_install_cache_dir" "$playwright_browsers_path"; do
+            case "$cache_dir" in
+              "$RUNNER_TEMP"/standards-*-cache-*) ;;
+              *)
+                echo "::error::Refusing to initialize cache outside the job-scoped runner temp directory: $cache_dir"
+                exit 1
+                ;;
+            esac
+            rm -rf -- "$cache_dir"
+            mkdir -p -- "$cache_dir"
+          done
+          {
+            echo "BUN_INSTALL_CACHE_DIR=$bun_install_cache_dir"
+            echo "PLAYWRIGHT_BROWSERS_PATH=$playwright_browsers_path"
+          } >> "$GITHUB_ENV"
+
+      - name: Restore the Bun package cache
+        id: bun-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.BUN_INSTALL_CACHE_DIR }}
+          key: bun-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-packages-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
@@ -131,6 +166,16 @@ jobs:
       # npm-latest CLI instead. That CLI downloads the browser build matching
       # itself, not the one the pinned @playwright/test launches, and every spec
       # then fails on a missing executable the moment upstream ships a release.
+      - name: Restore the Playwright browser cache
+        if: steps.a11y.outputs.present == 'true'
+        id: playwright-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.PLAYWRIGHT_BROWSERS_PATH }}
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Install Playwright Chromium
         if: steps.a11y.outputs.present == 'true'
         run: |
@@ -149,6 +194,20 @@ jobs:
           # fail-closed.
           STANDARDS_SKIP_GITHUB_CHECK: "true"
         run: bun run check
+
+      - name: Save the Bun package cache
+        if: success() && github.ref == 'refs/heads/main' && steps.bun-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.BUN_INSTALL_CACHE_DIR }}
+          key: bun-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
+
+      - name: Save the Playwright browser cache
+        if: success() && github.ref == 'refs/heads/main' && steps.a11y.outputs.present == 'true' && steps.playwright-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.PLAYWRIGHT_BROWSERS_PATH }}
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
 
       # Keep the newest artifacts within 2 GiB before the successful
       # default-branch save. Failed, cancelled, PR, and exact-key rerun jobs do

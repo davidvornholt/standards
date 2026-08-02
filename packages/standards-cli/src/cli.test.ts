@@ -185,6 +185,16 @@ const githubMatrixExpression = (property: string): string =>
   githubExpression(`matrix.${property}`);
 const TURBO_CACHE_KEY = `turbo-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-${githubExpression('github.sha')}`;
 const TURBO_CACHE_RESTORE_PREFIX = `turbo-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-`;
+const BUN_CACHE_KEY = `bun-packages-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-${githubExpression("hashFiles('bun.lock')")}`;
+const BUN_CACHE_RESTORE_PREFIX = `bun-packages-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-`;
+const BUN_CACHE_PATH = githubExpression('env.BUN_INSTALL_CACHE_DIR');
+const BUN_CACHE_SAVE_CONDITION =
+  "success() && github.ref == 'refs/heads/main' && steps.bun-cache.outputs.cache-hit != 'true'";
+const PLAYWRIGHT_CACHE_KEY = `playwright-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-${githubExpression("hashFiles('bun.lock')")}`;
+const PLAYWRIGHT_CACHE_RESTORE_PREFIX = `playwright-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-`;
+const PLAYWRIGHT_CACHE_PATH = githubExpression('env.PLAYWRIGHT_BROWSERS_PATH');
+const PLAYWRIGHT_CACHE_SAVE_CONDITION =
+  "success() && github.ref == 'refs/heads/main' && steps.a11y.outputs.present == 'true' && steps.playwright-cache.outputs.cache-hit != 'true'";
 const runNixDiscovery = ({
   filter,
   metadata,
@@ -279,6 +289,84 @@ const qualityStep = (workflow: ParsedWorkflow, name: string): WorkflowStep => {
   return step;
 };
 
+const qualityEnvironment = (
+  workflow: ParsedWorkflow,
+): Record<string, unknown> => {
+  const environment = workflow.jobs.quality.env;
+  if (typeof environment !== 'object' || environment === null) {
+    throw new Error('Quality job must contain an environment mapping');
+  }
+  return environment as Record<string, unknown>;
+};
+
+const assertQualityCacheConsumers = (
+  workflow: ParsedWorkflow,
+): ReadonlyArray<WorkflowStep> => {
+  const environment = qualityEnvironment(workflow);
+  if (
+    'BUN_INSTALL_CACHE_DIR' in environment ||
+    'PLAYWRIGHT_BROWSERS_PATH' in environment
+  ) {
+    throw new Error(
+      'Executable cache paths must be initialized after the runner context exists',
+    );
+  }
+  const expectedConsumerSteps = [
+    {
+      name: 'Initialize executable cache directories',
+      run: `set -euo pipefail
+bun_install_cache_dir="$RUNNER_TEMP/standards-bun-cache-\${GITHUB_RUN_ID}-\${GITHUB_RUN_ATTEMPT}"
+playwright_browsers_path="$RUNNER_TEMP/standards-playwright-cache-\${GITHUB_RUN_ID}-\${GITHUB_RUN_ATTEMPT}"
+for cache_dir in "$bun_install_cache_dir" "$playwright_browsers_path"; do
+  case "$cache_dir" in
+    "$RUNNER_TEMP"/standards-*-cache-*) ;;
+    *)
+      echo "::error::Refusing to initialize cache outside the job-scoped runner temp directory: $cache_dir"
+      exit 1
+      ;;
+  esac
+  rm -rf -- "$cache_dir"
+  mkdir -p -- "$cache_dir"
+done
+{
+  echo "BUN_INSTALL_CACHE_DIR=$bun_install_cache_dir"
+  echo "PLAYWRIGHT_BROWSERS_PATH=$playwright_browsers_path"
+} >> "$GITHUB_ENV"
+`,
+    },
+    {
+      name: 'Install dependencies',
+      run: 'bun install --frozen-lockfile',
+    },
+    {
+      name: 'Install Playwright Chromium',
+      if: "steps.a11y.outputs.present == 'true'",
+      run: `set -euo pipefail
+playwright=$(find . -path '*/node_modules/.bin/playwright' -print -quit)
+if [ -z "$playwright" ]; then
+  echo "::error::Found a browser a11y suite but no installed playwright binary. Declare @playwright/test in the workspace that owns the suite."
+  exit 1
+fi
+"$playwright" install --with-deps chromium
+`,
+    },
+    {
+      name: 'Check',
+      env: { STANDARDS_SKIP_GITHUB_CHECK: 'true' },
+      run: 'bun run check',
+    },
+  ];
+  const consumerSteps = expectedConsumerSteps.map(({ name }) =>
+    qualityStep(workflow, name),
+  );
+  if (!isDeepStrictEqual(consumerSteps, expectedConsumerSteps)) {
+    throw new Error(
+      'Executable cache initialization and consumers do not match the approved contract',
+    );
+  }
+  return consumerSteps;
+};
+
 const assertQualityCacheContract = (workflow: ParsedWorkflow): void => {
   const steps = workflowSteps(workflow.jobs.quality, 'quality');
   const cacheSteps = steps.filter(
@@ -297,41 +385,77 @@ const assertQualityCacheContract = (workflow: ParsedWorkflow): void => {
       },
     },
     {
+      name: 'Restore the Bun package cache',
+      id: 'bun-cache',
+      uses: 'actions/cache/restore@v4',
+      with: {
+        path: BUN_CACHE_PATH,
+        key: BUN_CACHE_KEY,
+        'restore-keys': `${BUN_CACHE_RESTORE_PREFIX}\n`,
+      },
+    },
+    {
+      name: 'Restore the Playwright browser cache',
+      if: "steps.a11y.outputs.present == 'true'",
+      id: 'playwright-cache',
+      uses: 'actions/cache/restore@v4',
+      with: {
+        path: PLAYWRIGHT_CACHE_PATH,
+        key: PLAYWRIGHT_CACHE_KEY,
+        'restore-keys': `${PLAYWRIGHT_CACHE_RESTORE_PREFIX}\n`,
+      },
+    },
+    {
+      name: 'Save the Bun package cache',
+      if: BUN_CACHE_SAVE_CONDITION,
+      uses: 'actions/cache/save@v4',
+      with: { path: BUN_CACHE_PATH, key: BUN_CACHE_KEY },
+    },
+    {
+      name: 'Save the Playwright browser cache',
+      if: PLAYWRIGHT_CACHE_SAVE_CONDITION,
+      uses: 'actions/cache/save@v4',
+      with: { path: PLAYWRIGHT_CACHE_PATH, key: PLAYWRIGHT_CACHE_KEY },
+    },
+    {
       name: 'Save the Turbo cache',
       if: TURBO_CACHE_SAVE_CONDITION,
       uses: 'actions/cache/save@v4',
-      with: {
-        path: '.turbo/cache',
-        key: TURBO_CACHE_KEY,
-      },
+      with: { path: '.turbo/cache', key: TURBO_CACHE_KEY },
     },
   ];
   if (!isDeepStrictEqual(cacheSteps, expectedCacheSteps)) {
     throw new Error('Quality cache actions do not match the approved contract');
   }
+  const consumerSteps = assertQualityCacheConsumers(workflow);
 
+  const initializeIndex = steps.indexOf(consumerSteps[0] as WorkflowStep);
   const restoreIndex = steps.indexOf(cacheSteps[0] as WorkflowStep);
+  const bunRestoreIndex = steps.indexOf(cacheSteps[1] as WorkflowStep);
   const installIndex = steps.indexOf(
     qualityStep(workflow, 'Install dependencies'),
   );
+  const playwrightRestoreIndex = steps.indexOf(cacheSteps[2] as WorkflowStep);
+  const playwrightInstallIndex = steps.indexOf(
+    qualityStep(workflow, 'Install Playwright Chromium'),
+  );
+  const playwrightSaveIndex = steps.indexOf(cacheSteps[4] as WorkflowStep);
   const checkIndex = steps.indexOf(qualityStep(workflow, 'Check'));
+  const bunSaveIndex = steps.indexOf(cacheSteps[3] as WorkflowStep);
   const pruneIndex = steps.indexOf(
     qualityStep(workflow, 'Prune the Turbo cache before save'),
   );
-  const saveIndex = steps.indexOf(cacheSteps[1] as WorkflowStep);
-  if (
-    qualityStep(workflow, 'Install dependencies').run !==
-    'bun install --frozen-lockfile'
-  ) {
-    throw new Error('The dependency consumer must use the frozen lockfile');
-  }
-  if (qualityStep(workflow, 'Check').run !== 'bun run check') {
-    throw new Error('The Turbo cache consumer must run the complete gate');
-  }
+  const saveIndex = steps.indexOf(cacheSteps[5] as WorkflowStep);
   const orderedIndices = [
     restoreIndex,
+    initializeIndex,
+    bunRestoreIndex,
     installIndex,
+    playwrightRestoreIndex,
+    playwrightInstallIndex,
     checkIndex,
+    bunSaveIndex,
+    playwrightSaveIndex,
     pruneIndex,
     saveIndex,
   ];
@@ -353,6 +477,54 @@ const assertQualityCacheContract = (workflow: ParsedWorkflow): void => {
     throw new Error('Turbo pruning must match the successful save condition');
   }
 };
+
+const moveQualityStepBefore = (
+  workflow: ParsedWorkflow,
+  stepName: string,
+  beforeStepName: string,
+): void => {
+  const qualityJob = workflow.jobs.quality;
+  if (!Array.isArray(qualityJob.steps)) {
+    throw new Error('Quality job must contain a steps array');
+  }
+  const stepIndex = qualityJob.steps.findIndex(
+    (candidate) =>
+      typeof candidate === 'object' &&
+      candidate !== null &&
+      candidate.name === stepName,
+  );
+  const beforeIndex = qualityJob.steps.findIndex(
+    (candidate) =>
+      typeof candidate === 'object' &&
+      candidate !== null &&
+      candidate.name === beforeStepName,
+  );
+  if (stepIndex < 0 || beforeIndex < 0) {
+    throw new Error('Expected quality cache steps are missing');
+  }
+  const [movedStep] = qualityJob.steps.splice(stepIndex, 1);
+  const adjustedBeforeIndex = qualityJob.steps.findIndex(
+    (candidate) =>
+      typeof candidate === 'object' &&
+      candidate !== null &&
+      candidate.name === beforeStepName,
+  );
+  qualityJob.steps.splice(adjustedBeforeIndex, 0, movedStep);
+};
+
+const rejectedQualityCacheMutations = (
+  mutations: ReadonlyArray<(workflow: ParsedWorkflow) => void>,
+): ReadonlyArray<boolean> =>
+  mutations.map((mutate) => {
+    const workflow = structuredClone(parseWorkflow(STANDARDS_WORKFLOW));
+    mutate(workflow);
+    try {
+      assertQualityCacheContract(workflow);
+      return false;
+    } catch {
+      return true;
+    }
+  });
 
 // The block-scalar entries of a checkout step's `sparse-checkout` input, so a
 // test can pin the whole list instead of spot-checking individual paths.
@@ -2072,13 +2244,14 @@ describe('canonical standards workflow settings security', () => {
   it('isolates the settings comparison from repository-controlled executable code', () => {
     const workflowSource = readFileSync(STANDARDS_WORKFLOW, 'utf8');
     const workflow = parseWorkflow(STANDARDS_WORKFLOW);
+    const settingsJobSource = JSON.stringify(workflow.jobs.check);
     const [, installStep, settingsStep] = assertSettingsTrustBoundary(workflow);
     const installRun = String(installStep?.run);
     const settingsRun = String(settingsStep?.run);
 
     // The job holds no durable credential, so it needs no executable file from
     // the repository at all: declarative settings inputs and nothing else.
-    expect(workflowSource).not.toContain('GITHUB_ENV');
+    expect(settingsJobSource).not.toContain('GITHUB_ENV');
     expect(workflowSource).not.toContain('GH_TOKEN:');
     expect(settingsRun).not.toContain('GITHUB_OUTPUT');
     expect(settingsRun).toContain('GH_TOKEN="$SETTINGS_TOKEN"');
@@ -2197,113 +2370,178 @@ describe('canonical standards workflow settings credential', () => {
   });
 });
 
-describe('canonical standards workflow quality caching', () => {
-  it('allows only a commit-fresh Turbo cache with trusted publication', () => {
-    assertQualityCacheContract(parseWorkflow(STANDARDS_WORKFLOW));
+it('allows only trusted-publication caches in the approved contract', () => {
+  expect(() =>
+    assertQualityCacheContract(parseWorkflow(STANDARDS_WORKFLOW)),
+  ).not.toThrow();
+});
 
-    const workflow = readFileSync(STANDARDS_WORKFLOW, 'utf8');
-    expect(workflow).not.toContain('~/.bun/install/cache');
-    expect(workflow).not.toContain('~/.cache/ms-playwright');
-  });
+it('accepts semantically identical cache mappings in any key order', () => {
+  const workflow = structuredClone(parseWorkflow(STANDARDS_WORKFLOW));
+  qualityStep(workflow, 'Restore the Turbo cache').with = {
+    key: TURBO_CACHE_KEY,
+    path: '.turbo/cache',
+    'restore-keys': `${TURBO_CACHE_RESTORE_PREFIX}\n`,
+  };
+  expect(() => assertQualityCacheContract(workflow)).not.toThrow();
+});
 
-  it('accepts semantically identical cache mappings in any key order', () => {
-    const workflow = structuredClone(parseWorkflow(STANDARDS_WORKFLOW));
-    qualityStep(workflow, 'Restore the Turbo cache').with = {
-      key: TURBO_CACHE_KEY,
-      path: '.turbo/cache',
-      'restore-keys': `${TURBO_CACHE_RESTORE_PREFIX}\n`,
-    };
+it('rejects stale and untrusted cache action mutations', () => {
+  const rejected = rejectedQualityCacheMutations([
+    (workflow) => {
+      qualityStep(workflow, 'Restore the Turbo cache').with = {
+        path: '.turbo/other-cache',
+        key: TURBO_CACHE_KEY,
+        'restore-keys': `${TURBO_CACHE_RESTORE_PREFIX}\n`,
+      };
+    },
+    (workflow) => {
+      qualityStep(workflow, 'Restore the Turbo cache').with = {
+        path: '.turbo/cache',
+        key: `turbo-${githubExpression('runner.os')}-${githubExpression('runner.arch')}`,
+        'restore-keys': `${TURBO_CACHE_RESTORE_PREFIX}\n`,
+      };
+    },
+    (workflow) => {
+      qualityStep(workflow, 'Save the Turbo cache').with = {
+        path: '.turbo/cache',
+        key: `turbo-${githubExpression('runner.os')}-${githubExpression('runner.arch')}`,
+      };
+    },
+    (workflow) => {
+      qualityStep(workflow, 'Restore the Turbo cache').with = {
+        path: '.turbo/cache',
+        key: TURBO_CACHE_KEY,
+        'restore-keys': `turbo-${githubExpression('runner.os')}-`,
+      };
+    },
+    (workflow) => {
+      qualityStep(workflow, 'Save the Turbo cache').if = 'success()';
+    },
+    (workflow) => {
+      qualityStep(workflow, 'Restore the Turbo cache').uses =
+        'actions/cache@v4';
+    },
+    (workflow) => {
+      qualityStep(workflow, 'Restore the Turbo cache').unexpected = true;
+    },
+    (workflow) => {
+      moveQualityStepBefore(workflow, 'Check', 'Restore the Turbo cache');
+    },
+    (workflow) => {
+      const qualityJob = workflow.jobs.quality;
+      if (!Array.isArray(qualityJob.steps)) {
+        throw new Error('Quality job must contain a steps array');
+      }
+      qualityJob.steps.push({
+        name: 'Restore an executable cache',
+        uses: 'actions/cache@v4',
+        with: { path: '~/.cache/ms-playwright', key: 'unapproved' },
+      });
+    },
+  ]);
+  expect(rejected).toEqual(rejected.map(() => true));
+});
 
-    expect(() => assertQualityCacheContract(workflow)).not.toThrow();
-  });
+it('rejects softened executable-cache boundaries and consumers', () => {
+  const rejected = rejectedQualityCacheMutations([
+    (workflow) => {
+      qualityEnvironment(workflow).BUN_INSTALL_CACHE_DIR =
+        '~/.bun/install/cache';
+    },
+    (workflow) => {
+      qualityEnvironment(workflow).PLAYWRIGHT_BROWSERS_PATH =
+        '~/.cache/ms-playwright';
+    },
+    (workflow) => {
+      qualityStep(workflow, 'Initialize executable cache directories').run =
+        'mkdir -p "$BUN_INSTALL_CACHE_DIR" "$PLAYWRIGHT_BROWSERS_PATH"';
+    },
+    (workflow) => {
+      qualityStep(workflow, 'Install dependencies').run = 'bun install';
+    },
+    (workflow) => {
+      qualityStep(workflow, 'Install dependencies')['continue-on-error'] = true;
+    },
+    (workflow) => {
+      qualityStep(workflow, 'Install Playwright Chromium').run = 'echo skipped';
+    },
+    (workflow) => {
+      qualityStep(workflow, 'Install Playwright Chromium').if = 'always()';
+    },
+    (workflow) => {
+      qualityStep(workflow, 'Install Playwright Chromium')[
+        'continue-on-error'
+      ] = true;
+    },
+    (workflow) => {
+      qualityStep(workflow, 'Check').run = 'bun run lint';
+    },
+    (workflow) => {
+      qualityStep(workflow, 'Check')['continue-on-error'] = true;
+    },
+    (workflow) => {
+      qualityStep(workflow, 'Check').if = 'always()';
+    },
+    (workflow) => {
+      moveQualityStepBefore(workflow, 'Save the Bun package cache', 'Check');
+    },
+    (workflow) => {
+      moveQualityStepBefore(
+        workflow,
+        'Save the Playwright browser cache',
+        'Check',
+      );
+    },
+  ]);
+  expect(rejected).toEqual(rejected.map(() => true));
+});
 
-  it('rejects stale, unverified, and untrusted cache mutations', () => {
-    const mutations: ReadonlyArray<(workflow: ParsedWorkflow) => void> = [
-      (workflow) => {
-        qualityStep(workflow, 'Restore the Turbo cache').with = {
-          path: '.turbo/other-cache',
-          key: TURBO_CACHE_KEY,
-          'restore-keys': `${TURBO_CACHE_RESTORE_PREFIX}\n`,
-        };
-      },
-      (workflow) => {
-        qualityStep(workflow, 'Restore the Turbo cache').with = {
-          path: '.turbo/cache',
-          key: `turbo-${githubExpression('runner.os')}-${githubExpression('runner.arch')}`,
-          'restore-keys': `${TURBO_CACHE_RESTORE_PREFIX}\n`,
-        };
-      },
-      (workflow) => {
-        qualityStep(workflow, 'Save the Turbo cache').with = {
-          path: '.turbo/cache',
-          key: `turbo-${githubExpression('runner.os')}-${githubExpression('runner.arch')}`,
-        };
-      },
-      (workflow) => {
-        qualityStep(workflow, 'Restore the Turbo cache').with = {
-          path: '.turbo/cache',
-          key: TURBO_CACHE_KEY,
-          'restore-keys': `turbo-${githubExpression('runner.os')}-`,
-        };
-      },
-      (workflow) => {
-        qualityStep(workflow, 'Install dependencies').run = 'bun install';
-      },
-      (workflow) => {
-        qualityStep(workflow, 'Check').run = 'bun run lint';
-      },
-      (workflow) => {
-        qualityStep(workflow, 'Save the Turbo cache').if = 'success()';
-      },
-      (workflow) => {
-        qualityStep(workflow, 'Restore the Turbo cache').uses =
-          'actions/cache@v4';
-      },
-      (workflow) => {
-        qualityStep(workflow, 'Restore the Turbo cache').unexpected = true;
-      },
-      (workflow) => {
-        const qualityJob = workflow.jobs.quality;
-        if (qualityJob === undefined || !Array.isArray(qualityJob.steps)) {
-          throw new Error('Quality job must contain a steps array');
-        }
-        const restoreIndex = qualityJob.steps.findIndex(
-          (step) =>
-            typeof step === 'object' &&
-            step !== null &&
-            step.name === 'Restore the Turbo cache',
-        );
-        const checkIndex = qualityJob.steps.findIndex(
-          (step) =>
-            typeof step === 'object' && step !== null && step.name === 'Check',
-        );
-        if (restoreIndex < 0 || checkIndex < 0) {
-          throw new Error('Expected quality cache steps are missing');
-        }
-        [qualityJob.steps[restoreIndex], qualityJob.steps[checkIndex]] = [
-          qualityJob.steps[checkIndex],
-          qualityJob.steps[restoreIndex],
-        ];
-      },
-      (workflow) => {
-        const qualityJob = workflow.jobs.quality;
-        if (qualityJob === undefined || !Array.isArray(qualityJob.steps)) {
-          throw new Error('Quality job must contain a steps array');
-        }
-        qualityJob.steps.push({
-          name: 'Restore an executable cache',
-          uses: 'actions/cache@v4',
-          with: { path: '~/.cache/ms-playwright', key: 'unapproved' },
-        });
-      },
-    ];
-
-    for (const mutate of mutations) {
-      const workflow = structuredClone(parseWorkflow(STANDARDS_WORKFLOW));
-      mutate(workflow);
-      expect(() => assertQualityCacheContract(workflow)).toThrow();
+it('isolates executable caches across persistent-runner jobs', () => {
+  const fixture = mkTmp('persistent-cache-runner-');
+  const runnerTemp = join(fixture, 'runner-temp');
+  const initialize = yamlRunScript(
+    STANDARDS_WORKFLOW,
+    'Initialize executable cache directories',
+  );
+  const initializeJob = (
+    runId: string,
+  ): {
+    readonly bunCache: string;
+    readonly playwrightCache: string;
+    readonly result: RunResult;
+  } => {
+    const githubEnvironment = join(fixture, `${runId}.env`);
+    const result = runExecutable('bash', fixture, ['-c', initialize], {
+      GITHUB_ENV: githubEnvironment,
+      GITHUB_RUN_ATTEMPT: '1',
+      GITHUB_RUN_ID: runId,
+      RUNNER_TEMP: runnerTemp,
+    });
+    const exported = Object.fromEntries(
+      readFileSync(githubEnvironment, 'utf8')
+        .trim()
+        .split('\n')
+        .map((line) => line.split('=', 2)),
+    );
+    const bunCache = exported.BUN_INSTALL_CACHE_DIR;
+    const playwrightCache = exported.PLAYWRIGHT_BROWSERS_PATH;
+    if (bunCache === undefined || playwrightCache === undefined) {
+      throw new Error('Initialization did not export both executable caches');
     }
-  });
+    return { bunCache, playwrightCache, result };
+  };
+  const prJob = initializeJob('pr');
+  expect(prJob.result.status).toBe(0);
+  writeFileSync(join(prJob.bunCache, 'poisoned'), 'pr');
+  writeFileSync(join(prJob.playwrightCache, 'poisoned'), 'pr');
+
+  const mainJob = initializeJob('main');
+  expect(mainJob.result.status).toBe(0);
+  expect(existsSync(join(mainJob.bunCache, 'poisoned'))).toBeFalse();
+  expect(existsSync(join(mainJob.playwrightCache, 'poisoned'))).toBeFalse();
+  expect(existsSync(join(prJob.bunCache, 'poisoned'))).toBeTrue();
+  expect(existsSync(join(prJob.playwrightCache, 'poisoned'))).toBeTrue();
 });
 
 describe('canonical standards workflow Turbo cache pruning', () => {
