@@ -122,8 +122,33 @@ jobs:
           restore-keys: |
             turbo-${{ runner.os }}-${{ runner.arch }}-
 
+      # Bun's package store and Playwright's browser store hold executable
+      # content, so unlike the Turbo store they were initially kept out of the
+      # cache entirely (see the source repository's #253). The poisoning
+      # concern was PR-written snapshots: with saves restricted to successful
+      # default-branch runs, every restored byte was published by a commit
+      # that passed the full gate on main, and pull requests are read-only
+      # consumers. Both stores are additionally re-verified by their
+      # consumers — Bun against the frozen lockfile's integrity hashes, and
+      # Playwright against its pinned browser revision.
+      - name: Restore the Bun package cache
+        id: bun-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-packages-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      - name: Save the Bun package cache
+        if: success() && github.ref == 'refs/heads/main' && steps.bun-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
 
       # Run the *installed* binary, never `bunx playwright`: a11y suites live in
       # a workspace, Bun keeps that workspace's binaries under it rather than at
@@ -131,6 +156,16 @@ jobs:
       # npm-latest CLI instead. That CLI downloads the browser build matching
       # itself, not the one the pinned @playwright/test launches, and every spec
       # then fails on a missing executable the moment upstream ships a release.
+      - name: Restore the Playwright browser cache
+        if: steps.a11y.outputs.present == 'true'
+        id: playwright-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Install Playwright Chromium
         if: steps.a11y.outputs.present == 'true'
         run: |
@@ -141,6 +176,13 @@ jobs:
             exit 1
           fi
           "$playwright" install --with-deps chromium
+
+      - name: Save the Playwright browser cache
+        if: success() && github.ref == 'refs/heads/main' && steps.a11y.outputs.present == 'true' && steps.playwright-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
 
       - name: Check
         env:

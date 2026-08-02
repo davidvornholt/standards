@@ -185,6 +185,14 @@ const githubMatrixExpression = (property: string): string =>
   githubExpression(`matrix.${property}`);
 const TURBO_CACHE_KEY = `turbo-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-${githubExpression('github.sha')}`;
 const TURBO_CACHE_RESTORE_PREFIX = `turbo-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-`;
+const BUN_CACHE_KEY = `bun-packages-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-${githubExpression("hashFiles('bun.lock')")}`;
+const BUN_CACHE_RESTORE_PREFIX = `bun-packages-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-`;
+const BUN_CACHE_SAVE_CONDITION =
+  "success() && github.ref == 'refs/heads/main' && steps.bun-cache.outputs.cache-hit != 'true'";
+const PLAYWRIGHT_CACHE_KEY = `playwright-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-${githubExpression("hashFiles('bun.lock')")}`;
+const PLAYWRIGHT_CACHE_RESTORE_PREFIX = `playwright-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-`;
+const PLAYWRIGHT_CACHE_SAVE_CONDITION =
+  "success() && github.ref == 'refs/heads/main' && steps.a11y.outputs.present == 'true' && steps.playwright-cache.outputs.cache-hit != 'true'";
 const runNixDiscovery = ({
   filter,
   metadata,
@@ -297,6 +305,45 @@ const assertQualityCacheContract = (workflow: ParsedWorkflow): void => {
       },
     },
     {
+      name: 'Restore the Bun package cache',
+      id: 'bun-cache',
+      uses: 'actions/cache/restore@v4',
+      with: {
+        path: '~/.bun/install/cache',
+        key: BUN_CACHE_KEY,
+        'restore-keys': `${BUN_CACHE_RESTORE_PREFIX}\n`,
+      },
+    },
+    {
+      name: 'Save the Bun package cache',
+      if: BUN_CACHE_SAVE_CONDITION,
+      uses: 'actions/cache/save@v4',
+      with: {
+        path: '~/.bun/install/cache',
+        key: BUN_CACHE_KEY,
+      },
+    },
+    {
+      name: 'Restore the Playwright browser cache',
+      if: "steps.a11y.outputs.present == 'true'",
+      id: 'playwright-cache',
+      uses: 'actions/cache/restore@v4',
+      with: {
+        path: '~/.cache/ms-playwright',
+        key: PLAYWRIGHT_CACHE_KEY,
+        'restore-keys': `${PLAYWRIGHT_CACHE_RESTORE_PREFIX}\n`,
+      },
+    },
+    {
+      name: 'Save the Playwright browser cache',
+      if: PLAYWRIGHT_CACHE_SAVE_CONDITION,
+      uses: 'actions/cache/save@v4',
+      with: {
+        path: '~/.cache/ms-playwright',
+        key: PLAYWRIGHT_CACHE_KEY,
+      },
+    },
+    {
       name: 'Save the Turbo cache',
       if: TURBO_CACHE_SAVE_CONDITION,
       uses: 'actions/cache/save@v4',
@@ -311,14 +358,21 @@ const assertQualityCacheContract = (workflow: ParsedWorkflow): void => {
   }
 
   const restoreIndex = steps.indexOf(cacheSteps[0] as WorkflowStep);
+  const bunRestoreIndex = steps.indexOf(cacheSteps[1] as WorkflowStep);
   const installIndex = steps.indexOf(
     qualityStep(workflow, 'Install dependencies'),
   );
+  const bunSaveIndex = steps.indexOf(cacheSteps[2] as WorkflowStep);
+  const playwrightRestoreIndex = steps.indexOf(cacheSteps[3] as WorkflowStep);
+  const playwrightInstallIndex = steps.indexOf(
+    qualityStep(workflow, 'Install Playwright Chromium'),
+  );
+  const playwrightSaveIndex = steps.indexOf(cacheSteps[4] as WorkflowStep);
   const checkIndex = steps.indexOf(qualityStep(workflow, 'Check'));
   const pruneIndex = steps.indexOf(
     qualityStep(workflow, 'Prune the Turbo cache before save'),
   );
-  const saveIndex = steps.indexOf(cacheSteps[1] as WorkflowStep);
+  const saveIndex = steps.indexOf(cacheSteps[5] as WorkflowStep);
   if (
     qualityStep(workflow, 'Install dependencies').run !==
     'bun install --frozen-lockfile'
@@ -330,7 +384,12 @@ const assertQualityCacheContract = (workflow: ParsedWorkflow): void => {
   }
   const orderedIndices = [
     restoreIndex,
+    bunRestoreIndex,
     installIndex,
+    bunSaveIndex,
+    playwrightRestoreIndex,
+    playwrightInstallIndex,
+    playwrightSaveIndex,
     checkIndex,
     pruneIndex,
     saveIndex,
@@ -2198,12 +2257,10 @@ describe('canonical standards workflow settings credential', () => {
 });
 
 describe('canonical standards workflow quality caching', () => {
-  it('allows only a commit-fresh Turbo cache with trusted publication', () => {
-    assertQualityCacheContract(parseWorkflow(STANDARDS_WORKFLOW));
-
-    const workflow = readFileSync(STANDARDS_WORKFLOW, 'utf8');
-    expect(workflow).not.toContain('~/.bun/install/cache');
-    expect(workflow).not.toContain('~/.cache/ms-playwright');
+  it('allows only trusted-publication caches in the approved contract', () => {
+    expect(() =>
+      assertQualityCacheContract(parseWorkflow(STANDARDS_WORKFLOW)),
+    ).not.toThrow();
   });
 
   it('accepts semantically identical cache mappings in any key order', () => {
