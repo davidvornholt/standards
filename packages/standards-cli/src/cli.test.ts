@@ -4,6 +4,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import {
+  chmodSync,
   existsSync,
   readdirSync,
   readFileSync,
@@ -66,6 +67,16 @@ const SOURCE_REPOSITORY_CONDITION =
   "github.repository == 'davidvornholt/standards'";
 const TURBO_CACHE_SAVE_CONDITION =
   "success() && github.ref == 'refs/heads/main' && steps.turbo-cache.outputs.cache-hit != 'true'";
+const TURBO_CACHE_PRUNE_RUN = `set -euo pipefail
+cache_dir=.turbo/cache
+[ -d "$cache_dir" ] || exit 0
+find "$cache_dir" -type f -printf '%T@\\t%k\\t%p\\n' |
+  sort -rn |
+  awk -F'\\t' -v budget=$((2 * 1024 * 1024)) \\
+    '{ total += $2; if (total > budget) print $3 }' |
+  xargs -r rm -f --
+`;
+const EXECUTABLE_MODE = 0o755;
 const CACHE_FIXTURE_FILE_SIZE = 4096;
 const OLDEST_CACHE_MTIME = 100;
 const MIDDLE_CACHE_MTIME = 200;
@@ -447,15 +458,15 @@ const assertQualityCacheContract = (workflow: ParsedWorkflow): void => {
     }
   }
   const pruneStep = qualityStep(workflow, 'Prune the Turbo cache before save');
-  const pruneRun = pruneStep.run;
   if (
-    !isDeepStrictEqual(Object.keys(pruneStep).sort(), ['if', 'name', 'run']) ||
-    pruneStep.if !== TURBO_CACHE_SAVE_CONDITION ||
-    typeof pruneRun !== 'string' ||
-    !pruneRun.startsWith('set -euo pipefail\n')
+    !isDeepStrictEqual(pruneStep, {
+      name: 'Prune the Turbo cache before save',
+      if: TURBO_CACHE_SAVE_CONDITION,
+      run: TURBO_CACHE_PRUNE_RUN,
+    })
   ) {
     throw new Error(
-      'Turbo pruning must use strict shell failure handling on exactly the successful save condition',
+      'Turbo pruning must match the complete approved fail-closed program',
     );
   }
 };
@@ -2484,6 +2495,36 @@ it('rejects softened executable-cache boundaries and consumers', () => {
       );
     },
     (workflow) => {
+      const pruneStep = qualityStep(
+        workflow,
+        'Prune the Turbo cache before save',
+      );
+      pruneStep.run = String(pruneStep.run).replace(
+        'set -euo pipefail\n',
+        'set -euo pipefail\nset +e\nset +o pipefail\n',
+      );
+    },
+    (workflow) => {
+      const pruneStep = qualityStep(
+        workflow,
+        'Prune the Turbo cache before save',
+      );
+      pruneStep.run = String(pruneStep.run).replace(
+        'xargs -r rm -f --',
+        'xargs -r rm -f -- || true',
+      );
+    },
+    (workflow) => {
+      const pruneStep = qualityStep(
+        workflow,
+        'Prune the Turbo cache before save',
+      );
+      pruneStep.run = String(pruneStep.run).replace(
+        'set -euo pipefail\n',
+        "set -euo pipefail\ntrap 'exit 0' ERR\n",
+      );
+    },
+    (workflow) => {
       moveQualityStepBefore(workflow, 'Save the Bun package cache', 'Check');
     },
     (workflow) => {
@@ -2524,13 +2565,22 @@ describe('canonical standards workflow Turbo cache pruning', () => {
       runExecutable('bash', absentFixture, ['-c', pruneScript]).status,
     ).toBe(0);
 
-    const failingFindFixture = mkTmp('turbo-prune-failing-find-');
-    write(failingFindFixture, '.turbo/cache/artifact', 'cached');
-    const failingFindScript = `find() { return 42; }\n${pruneScript}`;
-    expect(
-      runExecutable('bash', failingFindFixture, ['-c', failingFindScript])
-        .status,
-    ).not.toBe(0);
+    for (const command of ['find', 'sort', 'awk', 'xargs', 'rm']) {
+      const failingFixture = mkTmp(`turbo-prune-failing-${command}-`);
+      write(failingFixture, '.turbo/cache/artifact', 'cached');
+      const failingCommand = `bin/${command}`;
+      write(failingFixture, failingCommand, '#!/bin/sh\nexit 42\n');
+      chmodSync(join(failingFixture, failingCommand), EXECUTABLE_MODE);
+      const failingScript = pruneScript.replace(
+        'budget=$((2 * 1024 * 1024))',
+        'budget=0',
+      );
+      expect(
+        runExecutable('bash', failingFixture, ['-c', failingScript], {
+          PATH: `${join(failingFixture, 'bin')}:${process.env.PATH ?? ''}`,
+        }).status,
+      ).not.toBe(0);
+    }
 
     const fixture = mkTmp('turbo-prune-');
     const cachePath = '.turbo/cache';
