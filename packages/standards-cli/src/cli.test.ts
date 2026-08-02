@@ -446,11 +446,14 @@ const assertQualityCacheContract = (workflow: ParsedWorkflow): void => {
       );
     }
   }
+  const pruneStep = qualityStep(workflow, 'Prune the Turbo cache before save');
   if (
-    qualityStep(workflow, 'Prune the Turbo cache before save').if !==
-    TURBO_CACHE_SAVE_CONDITION
+    !isDeepStrictEqual(Object.keys(pruneStep).sort(), ['if', 'name', 'run']) ||
+    pruneStep.if !== TURBO_CACHE_SAVE_CONDITION
   ) {
-    throw new Error('Turbo pruning must match the successful save condition');
+    throw new Error(
+      'Turbo pruning must fail closed on exactly the successful save condition',
+    );
   }
 };
 
@@ -2456,6 +2459,18 @@ it('rejects softened executable-cache boundaries and consumers', () => {
       qualityStep(workflow, 'Check').if = 'always()';
     },
     (workflow) => {
+      qualityStep(workflow, 'Check').if = "github.event_name == 'pull_request'";
+    },
+    (workflow) => {
+      qualityStep(workflow, 'Prune the Turbo cache before save')[
+        'continue-on-error'
+      ] = true;
+    },
+    (workflow) => {
+      qualityStep(workflow, 'Prune the Turbo cache before save').if =
+        'success()';
+    },
+    (workflow) => {
       moveQualityStepBefore(workflow, 'Save the Bun package cache', 'Check');
     },
     (workflow) => {
@@ -2463,6 +2478,20 @@ it('rejects softened executable-cache boundaries and consumers', () => {
         workflow,
         'Save the Playwright browser cache',
         'Check',
+      );
+    },
+    (workflow) => {
+      moveQualityStepBefore(
+        workflow,
+        'Prune the Turbo cache before save',
+        'Check',
+      );
+    },
+    (workflow) => {
+      moveQualityStepBefore(
+        workflow,
+        'Save the Turbo cache',
+        'Prune the Turbo cache before save',
       );
     },
   ]);
