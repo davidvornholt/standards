@@ -213,9 +213,6 @@ const BUN_CACHE_SAVE_CONDITION =
   "success() && github.ref == 'refs/heads/main' && steps.bun-cache.outputs.cache-hit != 'true'";
 const PLAYWRIGHT_CACHE_KEY = `playwright-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-${githubExpression("hashFiles('bun.lock')")}`;
 const PLAYWRIGHT_CACHE_RESTORE_PREFIX = `playwright-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-`;
-const PLAYWRIGHT_CACHE_RESTORE_KEYS = githubExpression(
-  "github.ref != 'refs/heads/main' && format('playwright-{0}-{1}-', runner.os, runner.arch) || ''",
-);
 const PLAYWRIGHT_CACHE_PATH = '~/.cache/ms-playwright';
 const PLAYWRIGHT_CACHE_SAVE_CONDITION =
   "success() && github.ref == 'refs/heads/main' && steps.a11y.outputs.present == 'true' && steps.playwright-cache.outputs.cache-hit != 'true'";
@@ -404,7 +401,10 @@ const assertQualityCacheContract = (workflow: ParsedWorkflow): void => {
       with: {
         path: PLAYWRIGHT_CACHE_PATH,
         key: PLAYWRIGHT_CACHE_KEY,
-        'restore-keys': PLAYWRIGHT_CACHE_RESTORE_KEYS,
+        // Unlike Bun, Playwright removes browser revisions that no installed
+        // package references. Keeping the fallback avoids a cold download
+        // after unrelated lockfile changes without accumulating stale builds.
+        'restore-keys': `${PLAYWRIGHT_CACHE_RESTORE_PREFIX}\n`,
       },
     },
     {
@@ -2445,10 +2445,15 @@ it('rejects stale and untrusted cache action mutations', () => {
       };
     },
     (workflow) => {
+      // Applying Bun's exact-only strategy to Playwright is wasteful:
+      // Playwright already garbage-collects stale browser revisions during
+      // install, so the prefix fallback can safely reuse a current browser.
       qualityStep(workflow, 'Restore the Playwright browser cache').with = {
         path: PLAYWRIGHT_CACHE_PATH,
         key: PLAYWRIGHT_CACHE_KEY,
-        'restore-keys': `${PLAYWRIGHT_CACHE_RESTORE_PREFIX}\n`,
+        'restore-keys': githubExpression(
+          "github.ref != 'refs/heads/main' && format('playwright-{0}-{1}-', runner.os, runner.arch) || ''",
+        ),
       };
     },
     (workflow) => {
