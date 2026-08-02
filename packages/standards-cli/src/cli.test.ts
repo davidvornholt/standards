@@ -198,11 +198,24 @@ const TURBO_CACHE_KEY = `turbo-${githubExpression('runner.os')}-${githubExpressi
 const TURBO_CACHE_RESTORE_PREFIX = `turbo-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-`;
 const BUN_CACHE_KEY = `bun-packages-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-${githubExpression("hashFiles('bun.lock')")}`;
 const BUN_CACHE_RESTORE_PREFIX = `bun-packages-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-`;
+// Off-main runs may consume prefix-matched snapshots, but main must restore by
+// exact lock key so every snapshot it publishes is built from an empty store
+// and stays history-free. actions/cache filters empty strings out of
+// `restore-keys`, so resolving to '' on main means no fallback keys. The `!=
+// main` orientation is load-bearing: the inverted `== main && '' || prefix`
+// form would leak the fallback onto main because '' is falsy in Actions
+// expressions.
+const BUN_CACHE_RESTORE_KEYS = githubExpression(
+  "github.ref != 'refs/heads/main' && format('bun-packages-{0}-{1}-', runner.os, runner.arch) || ''",
+);
 const BUN_CACHE_PATH = '~/.bun/install/cache';
 const BUN_CACHE_SAVE_CONDITION =
   "success() && github.ref == 'refs/heads/main' && steps.bun-cache.outputs.cache-hit != 'true'";
 const PLAYWRIGHT_CACHE_KEY = `playwright-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-${githubExpression("hashFiles('bun.lock')")}`;
 const PLAYWRIGHT_CACHE_RESTORE_PREFIX = `playwright-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-`;
+const PLAYWRIGHT_CACHE_RESTORE_KEYS = githubExpression(
+  "github.ref != 'refs/heads/main' && format('playwright-{0}-{1}-', runner.os, runner.arch) || ''",
+);
 const PLAYWRIGHT_CACHE_PATH = '~/.cache/ms-playwright';
 const PLAYWRIGHT_CACHE_SAVE_CONDITION =
   "success() && github.ref == 'refs/heads/main' && steps.a11y.outputs.present == 'true' && steps.playwright-cache.outputs.cache-hit != 'true'";
@@ -380,7 +393,7 @@ const assertQualityCacheContract = (workflow: ParsedWorkflow): void => {
       with: {
         path: BUN_CACHE_PATH,
         key: BUN_CACHE_KEY,
-        'restore-keys': `${BUN_CACHE_RESTORE_PREFIX}\n`,
+        'restore-keys': BUN_CACHE_RESTORE_KEYS,
       },
     },
     {
@@ -391,7 +404,7 @@ const assertQualityCacheContract = (workflow: ParsedWorkflow): void => {
       with: {
         path: PLAYWRIGHT_CACHE_PATH,
         key: PLAYWRIGHT_CACHE_KEY,
-        'restore-keys': `${PLAYWRIGHT_CACHE_RESTORE_PREFIX}\n`,
+        'restore-keys': PLAYWRIGHT_CACHE_RESTORE_KEYS,
       },
     },
     {
@@ -2410,6 +2423,46 @@ it('rejects stale and untrusted cache action mutations', () => {
     },
     (workflow) => {
       qualityStep(workflow, 'Save the Turbo cache').if = 'success()';
+    },
+    (workflow) => {
+      // The pre-#257 shape: an unconditional prefix fallback lets a main run
+      // publish a snapshot that accumulates every previous lock's packages.
+      qualityStep(workflow, 'Restore the Bun package cache').with = {
+        path: BUN_CACHE_PATH,
+        key: BUN_CACHE_KEY,
+        'restore-keys': `${BUN_CACHE_RESTORE_PREFIX}\n`,
+      };
+    },
+    (workflow) => {
+      // The inverted conditional: '' is falsy in Actions expressions, so this
+      // form silently restores the fallback prefix on main as well.
+      qualityStep(workflow, 'Restore the Bun package cache').with = {
+        path: BUN_CACHE_PATH,
+        key: BUN_CACHE_KEY,
+        'restore-keys': githubExpression(
+          "github.ref == 'refs/heads/main' && '' || format('bun-packages-{0}-{1}-', runner.os, runner.arch)",
+        ),
+      };
+    },
+    (workflow) => {
+      // An unconditional prefix fallback lets a Playwright downgrade publish
+      // browser families the older CLI cannot identify or garbage-collect.
+      qualityStep(workflow, 'Restore the Playwright browser cache').with = {
+        path: PLAYWRIGHT_CACHE_PATH,
+        key: PLAYWRIGHT_CACHE_KEY,
+        'restore-keys': `${PLAYWRIGHT_CACHE_RESTORE_PREFIX}\n`,
+      };
+    },
+    (workflow) => {
+      // The inverted conditional restores the fallback on main because the
+      // intended empty-string branch is falsy in Actions expressions.
+      qualityStep(workflow, 'Restore the Playwright browser cache').with = {
+        path: PLAYWRIGHT_CACHE_PATH,
+        key: PLAYWRIGHT_CACHE_KEY,
+        'restore-keys': githubExpression(
+          "github.ref == 'refs/heads/main' && '' || format('playwright-{0}-{1}-', runner.os, runner.arch)",
+        ),
+      };
     },
     (workflow) => {
       qualityStep(workflow, 'Restore the Turbo cache').uses =

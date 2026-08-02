@@ -133,14 +133,26 @@ jobs:
       # saves. A persistent self-hosted runner's user-level cache reuse is a
       # property of that runner pool, tracked upstream, and is not fixable
       # here without breaking the strict-env seam.
+      #
+      # Published Bun and Playwright snapshots must be history-free. A main
+      # snapshot published after a lock change contains only what the current
+      # lock's tooling produced from an empty store. Bun accumulates unreachable
+      # packages in a restored store. Playwright garbage collection is not
+      # reliable across version downgrades because an older permitted CLI
+      # cannot identify browser families introduced by a newer release. Main
+      # therefore restores both stores by exact lock key only: each conditional
+      # `restore-keys` resolves to an empty string on main, which actions/cache
+      # treats as no fallback keys. An unchanged lock still exact-hits. After a
+      # lock change, the cold install runs against an empty store and the
+      # successful run publishes only that result. Pull requests keep prefix
+      # fallbacks because they consume trusted snapshots but never publish.
       - name: Restore the Bun package cache
         id: bun-cache
         uses: actions/cache/restore@v4
         with:
           path: ~/.bun/install/cache
           key: bun-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
-          restore-keys: |
-            bun-packages-${{ runner.os }}-${{ runner.arch }}-
+          restore-keys: ${{ github.ref != 'refs/heads/main' && format('bun-packages-{0}-{1}-', runner.os, runner.arch) || '' }}
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -158,8 +170,7 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
-          restore-keys: |
-            playwright-${{ runner.os }}-${{ runner.arch }}-
+          restore-keys: ${{ github.ref != 'refs/heads/main' && format('playwright-{0}-{1}-', runner.os, runner.arch) || '' }}
 
       - name: Install Playwright Chromium
         if: steps.a11y.outputs.present == 'true'
