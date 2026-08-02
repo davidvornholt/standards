@@ -187,12 +187,12 @@ const TURBO_CACHE_KEY = `turbo-${githubExpression('runner.os')}-${githubExpressi
 const TURBO_CACHE_RESTORE_PREFIX = `turbo-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-`;
 const BUN_CACHE_KEY = `bun-packages-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-${githubExpression("hashFiles('bun.lock')")}`;
 const BUN_CACHE_RESTORE_PREFIX = `bun-packages-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-`;
-const BUN_CACHE_PATH = githubExpression('env.BUN_INSTALL_CACHE_DIR');
+const BUN_CACHE_PATH = '~/.bun/install/cache';
 const BUN_CACHE_SAVE_CONDITION =
   "success() && github.ref == 'refs/heads/main' && steps.bun-cache.outputs.cache-hit != 'true'";
 const PLAYWRIGHT_CACHE_KEY = `playwright-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-${githubExpression("hashFiles('bun.lock')")}`;
 const PLAYWRIGHT_CACHE_RESTORE_PREFIX = `playwright-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-`;
-const PLAYWRIGHT_CACHE_PATH = githubExpression('env.PLAYWRIGHT_BROWSERS_PATH');
+const PLAYWRIGHT_CACHE_PATH = '~/.cache/ms-playwright';
 const PLAYWRIGHT_CACHE_SAVE_CONDITION =
   "success() && github.ref == 'refs/heads/main' && steps.a11y.outputs.present == 'true' && steps.playwright-cache.outputs.cache-hit != 'true'";
 const runNixDiscovery = ({
@@ -313,28 +313,6 @@ const assertQualityCacheConsumers = (
   }
   const expectedConsumerSteps = [
     {
-      name: 'Initialize executable cache directories',
-      run: `set -euo pipefail
-bun_install_cache_dir="$RUNNER_TEMP/standards-bun-cache-\${GITHUB_RUN_ID}-\${GITHUB_RUN_ATTEMPT}"
-playwright_browsers_path="$RUNNER_TEMP/standards-playwright-cache-\${GITHUB_RUN_ID}-\${GITHUB_RUN_ATTEMPT}"
-for cache_dir in "$bun_install_cache_dir" "$playwright_browsers_path"; do
-  case "$cache_dir" in
-    "$RUNNER_TEMP"/standards-*-cache-*) ;;
-    *)
-      echo "::error::Refusing to initialize cache outside the job-scoped runner temp directory: $cache_dir"
-      exit 1
-      ;;
-  esac
-  rm -rf -- "$cache_dir"
-  mkdir -p -- "$cache_dir"
-done
-{
-  echo "BUN_INSTALL_CACHE_DIR=$bun_install_cache_dir"
-  echo "PLAYWRIGHT_BROWSERS_PATH=$playwright_browsers_path"
-} >> "$GITHUB_ENV"
-`,
-    },
-    {
       name: 'Install dependencies',
       run: 'bun install --frozen-lockfile',
     },
@@ -427,9 +405,8 @@ const assertQualityCacheContract = (workflow: ParsedWorkflow): void => {
   if (!isDeepStrictEqual(cacheSteps, expectedCacheSteps)) {
     throw new Error('Quality cache actions do not match the approved contract');
   }
-  const consumerSteps = assertQualityCacheConsumers(workflow);
+  assertQualityCacheConsumers(workflow);
 
-  const initializeIndex = steps.indexOf(consumerSteps[0] as WorkflowStep);
   const restoreIndex = steps.indexOf(cacheSteps[0] as WorkflowStep);
   const bunRestoreIndex = steps.indexOf(cacheSteps[1] as WorkflowStep);
   const installIndex = steps.indexOf(
@@ -448,7 +425,6 @@ const assertQualityCacheContract = (workflow: ParsedWorkflow): void => {
   const saveIndex = steps.indexOf(cacheSteps[5] as WorkflowStep);
   const orderedIndices = [
     restoreIndex,
-    initializeIndex,
     bunRestoreIndex,
     installIndex,
     playwrightRestoreIndex,
@@ -2454,10 +2430,6 @@ it('rejects softened executable-cache boundaries and consumers', () => {
         '~/.cache/ms-playwright';
     },
     (workflow) => {
-      qualityStep(workflow, 'Initialize executable cache directories').run =
-        'mkdir -p "$BUN_INSTALL_CACHE_DIR" "$PLAYWRIGHT_BROWSERS_PATH"';
-    },
-    (workflow) => {
       qualityStep(workflow, 'Install dependencies').run = 'bun install';
     },
     (workflow) => {
@@ -2495,53 +2467,6 @@ it('rejects softened executable-cache boundaries and consumers', () => {
     },
   ]);
   expect(rejected).toEqual(rejected.map(() => true));
-});
-
-it('isolates executable caches across persistent-runner jobs', () => {
-  const fixture = mkTmp('persistent-cache-runner-');
-  const runnerTemp = join(fixture, 'runner-temp');
-  const initialize = yamlRunScript(
-    STANDARDS_WORKFLOW,
-    'Initialize executable cache directories',
-  );
-  const initializeJob = (
-    runId: string,
-  ): {
-    readonly bunCache: string;
-    readonly playwrightCache: string;
-    readonly result: RunResult;
-  } => {
-    const githubEnvironment = join(fixture, `${runId}.env`);
-    const result = runExecutable('bash', fixture, ['-c', initialize], {
-      GITHUB_ENV: githubEnvironment,
-      GITHUB_RUN_ATTEMPT: '1',
-      GITHUB_RUN_ID: runId,
-      RUNNER_TEMP: runnerTemp,
-    });
-    const exported = Object.fromEntries(
-      readFileSync(githubEnvironment, 'utf8')
-        .trim()
-        .split('\n')
-        .map((line) => line.split('=', 2)),
-    );
-    const bunCache = exported.BUN_INSTALL_CACHE_DIR;
-    const playwrightCache = exported.PLAYWRIGHT_BROWSERS_PATH;
-    if (bunCache === undefined || playwrightCache === undefined) {
-      throw new Error('Initialization did not export both executable caches');
-    }
-    return { bunCache, playwrightCache, result };
-  };
-  const prJob = initializeJob('pr');
-  expect(prJob.result.status).toBe(0);
-  writeFileSync(join(prJob.bunCache, 'poisoned'), 'pr');
-  writeFileSync(join(prJob.playwrightCache, 'poisoned'), 'pr');
-
-  const mainJob = initializeJob('main');
-  expect(mainJob.result.status).toBe(0);
-  expect(existsSync(join(mainJob.bunCache, 'poisoned'))).toBeFalse();
-  expect(existsSync(join(mainJob.playwrightCache, 'poisoned'))).toBeFalse();
-  expect(existsSync(join(prJob.bunCache, 'poisoned'))).toBeTrue();
-  expect(existsSync(join(prJob.playwrightCache, 'poisoned'))).toBeTrue();
 });
 
 describe('canonical standards workflow Turbo cache pruning', () => {
