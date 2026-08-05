@@ -1,9 +1,11 @@
 name: Standards
 
 on:
+  # Every pull request runs the gate regardless of its base branch: stacked
+  # pull requests need check runs on each layer's own commits, both as review
+  # signal before an atomic stack merge and because required-check rulesets
+  # refuse commits that carry no runs.
   pull_request:
-    branches:
-      - main
   push:
     branches:
       - main
