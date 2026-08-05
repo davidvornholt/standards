@@ -7,7 +7,7 @@ import {
   rootScriptExpectations,
   type StructureProfile,
 } from './structure-profile';
-import { hasSafeCommands, isSafeFilteredTurboAlias } from './structure-script';
+import { filteredTurboAliasProblem, hasSafeCommands } from './structure-script';
 import { inspectWorkspace, type Workspace } from './structure-workspace';
 
 const ROOT_FIXED_SCRIPTS = new Set(
@@ -145,15 +145,13 @@ const inspectRootScripts = (
           `package.json: root script "${name}" must run ${exact ? 'exactly ' : ''}${requirement}`,
         ];
   });
-  const aliasProblems = Object.entries(scripts).flatMap(([name, script]) =>
-    ROOT_FIXED_SCRIPTS.has(name) ||
-    typeof script !== 'string' ||
-    isSafeFilteredTurboAlias(script)
-      ? []
-      : [
-          `package.json: root script "${name}" must delegate through Turbo with an explicit --filter`,
-        ],
-  );
+  const aliasProblems = Object.entries(scripts).flatMap(([name, script]) => {
+    if (ROOT_FIXED_SCRIPTS.has(name) || typeof script !== 'string') {
+      return [];
+    }
+    const problem = filteredTurboAliasProblem(name, script);
+    return problem === null ? [] : [problem];
+  });
   return [...gateProblems, ...aliasProblems];
 };
 export const collectStructureProblems = async (
