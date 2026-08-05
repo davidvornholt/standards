@@ -261,6 +261,14 @@ A repo whose trusted CI builds and deploys NixOS system closures uses a private,
 - The bucket must never be publicly readable — for R2, no `r2.dev` hostname and no custom domain. Verify through the provider API in PR validation and again before deployment.
 - Document the credentials, signing-key rotation, and retention policy with the repo's other infrastructure configuration.
 
+## Deploy downtime
+
+A deploy that changes an app's image restarts `podman-<app>.service` in place: the old container stops before the new one starts, and Caddy has no upstream for that app until the new container is up. That brief interruption is the accepted default for this profile. The health readback in `image-promotion.md` verifies that the deploy completed; it does not keep the old container serving through the switch.
+
+Keep the window to container startup, not registry pull: after the deploy job's identity checks and immediately before `nix run .#deploy-rs`, the workflow pre-pulls every gated image reference on the target over the deploy SSH connection (`podman pull "$WEB_IMAGE"`). Pulling by digest is idempotent and additive, and a failed pre-pull fails the deploy before activation touches the running system.
+
+Zero-downtime switchover — a second container instance behind a Caddy upstream flip, with draining — is not part of the profile. A host whose availability requirement justifies that complexity documents the decision and its wiring in the host repo, and that requirement is often the signal the app has outgrown the single-host profile.
+
 ## Install and convergence
 
 - **First install**: nixos-anywhere with the disko layout, or a NixOS installer + `disko` run; capture `hardware-configuration.nix` from the target. After install, collect the host key and re-encrypt secrets for it.
