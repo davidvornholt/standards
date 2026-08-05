@@ -1,27 +1,17 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { collectStructureProblems } from './structure-check';
+import {
+  buildConsumer,
+  CANONICAL_SCRIPTS,
+  cleanupStructureTmps,
+  newStructureTmp,
+  consumerRootManifest as rootManifest,
+  writeInto as write,
+} from './structure-test-support';
 
-const tmps: Array<string> = [];
-afterEach(() => {
-  for (const dir of tmps.splice(0)) {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-const write = (root: string, rel: string, content: string): void => {
-  mkdirSync(dirname(join(root, rel)), { recursive: true });
-  writeFileSync(join(root, rel), content);
-};
-const CANONICAL_SCRIPTS = {
-  'check-types': 'tsc --noEmit',
-  lint: 'biome check --error-on-warnings .',
-  'lint:fix': 'biome check --write --error-on-warnings .',
-  test: 'bun test',
-};
-
-const TSCONFIG = '{ "extends": "@davidvornholt/typescript-config/base" }\n';
+afterEach(cleanupStructureTmps);
 const collect = (dir: string) => collectStructureProblems(dir, 'consumer');
 const WORKSPACES_REQUIREMENT =
   'package.json: "workspaces" must be a non-empty array of literal paths or one-level "<dir>/*" patterns';
@@ -30,61 +20,13 @@ const aliasProblem = (name: string): string =>
 const aliasSyntaxProblem = (name: string): string =>
   `package.json: root script "${name}" contains shell syntax the structure gate does not parse (quotes, |, ;, #, backticks, $(, CR/LF line breaks, or malformed ampersand separators); write one command with plain arguments, using --filter=./apps/* for a glob`;
 
-const rootManifest = (
-  overrides: Record<string, unknown> = {},
-): Record<string, unknown> => ({
-  name: 'app',
-  version: '0.0.0',
-  workspaces: ['apps/*', 'packages/*'],
-  scripts: {
-    standards: 'standards',
-    check: 'standards check && turbo run lint check-types test build test:a11y',
-    'check:fix':
-      'standards check && turbo run lint:fix check-types test build test:a11y',
-  },
-  ...overrides,
-});
-
-// A consumer with one app and one package, both canonical, no a11y suite.
-const buildConsumer = (
-  root: Record<string, unknown> = rootManifest(),
-): string => {
-  const consumer = mkdtempSync(join(tmpdir(), 'structure-'));
-  tmps.push(consumer);
-  write(consumer, 'package.json', JSON.stringify(root));
-  write(
-    consumer,
-    'apps/web/package.json',
-    JSON.stringify({
-      name: '@repo/web',
-      version: '0.0.0',
-      scripts: CANONICAL_SCRIPTS,
-      dependencies: { '@repo/ui': 'workspace:*' },
-    }),
-  );
-  write(consumer, 'apps/web/tsconfig.json', TSCONFIG);
-  write(
-    consumer,
-    'packages/ui/package.json',
-    JSON.stringify({
-      name: '@repo/ui',
-      version: '0.0.0',
-      exports: { './button': './src/button.tsx' },
-      scripts: CANONICAL_SCRIPTS,
-    }),
-  );
-  write(consumer, 'packages/ui/tsconfig.json', TSCONFIG);
-  return consumer;
-};
-
 describe('collectStructureProblems basics and scripts', () => {
   it('accepts a canonical consumer', async () => {
     expect(await collect(buildConsumer())).toEqual([]);
   });
 
   it('fails when package.json is missing', async () => {
-    const consumer = mkdtempSync(join(tmpdir(), 'structure-'));
-    tmps.push(consumer);
+    const consumer = newStructureTmp('structure-');
     expect(await collect(consumer)).toEqual([
       'package.json must exist and contain a JSON object',
     ]);
@@ -132,6 +74,17 @@ describe('collectStructureProblems basics and scripts', () => {
     expect(problems).toContain(
       'package.json: root script "test:a11y" must run turbo run test:a11y',
     );
+  });
+
+  it('surfaces README and CI secrets problems through the root entry point', async () => {
+    const consumer = buildConsumer();
+    rmSync(join(consumer, 'apps/web/README.md'));
+    rmSync(join(consumer, 'secrets/ci.yaml'));
+    const problems = await collect(consumer);
+    expect(problems).toEqual([
+      'apps/web: repo-owned workspace must have a non-empty README.md documenting the configuration and secrets it consumes',
+      'secrets/ci.yaml: must exist as a SOPS-encrypted file; the synced CI workflows read ci.ntfy_topic_url and ci.broker_app from it',
+    ]);
   });
 });
 

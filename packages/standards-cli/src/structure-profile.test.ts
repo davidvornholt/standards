@@ -1,28 +1,17 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
 import { collectStructureProblems } from './structure-check';
+import {
+  CANONICAL_SCRIPTS,
+  cleanupStructureTmps,
+  newStructureTmp,
+  TSCONFIG,
+  writeInto as write,
+  writeCiSecretsPair,
+} from './structure-test-support';
 
-const tmps: Array<string> = [];
-afterEach(() => {
-  for (const dir of tmps.splice(0)) {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-const write = (root: string, rel: string, content: string): void => {
-  mkdirSync(dirname(join(root, rel)), { recursive: true });
-  writeFileSync(join(root, rel), content);
-};
+afterEach(cleanupStructureTmps);
 
 const CLI = 'bun packages/standards-cli/src/cli.ts';
-const CANONICAL_SCRIPTS = {
-  'check-types': 'tsc --noEmit',
-  lint: 'biome check --error-on-warnings .',
-  'lint:fix': 'biome check --write --error-on-warnings .',
-  test: 'bun test',
-};
-const TSCONFIG = '{ "extends": "@davidvornholt/typescript-config/base" }\n';
 const SOURCE_GATE_COMMANDS = {
   check: [
     `${CLI} structure --profile source`,
@@ -90,12 +79,13 @@ const buildSource = (
   root: Record<string, unknown> = sourceRootManifest(),
   cli: Record<string, unknown> | null = cliManifest(),
 ): string => {
-  const dir = mkdtempSync(join(tmpdir(), 'structure-source-'));
-  tmps.push(dir);
+  const dir = newStructureTmp('structure-source-');
   write(dir, 'package.json', JSON.stringify(root));
+  writeCiSecretsPair(dir);
   if (cli !== null) {
     write(dir, 'packages/standards-cli/package.json', JSON.stringify(cli));
     write(dir, 'packages/standards-cli/tsconfig.json', TSCONFIG);
+    write(dir, 'packages/standards-cli/README.md', '# standards CLI\n');
   }
   return dir;
 };
@@ -111,6 +101,7 @@ describe('source profile', () => {
       'package.json: root script "check:fix" must run turbo run lint:fix check-types test build test:a11y',
       'packages/standards-cli: internal workspace version must be "0.0.0"',
       'packages/standards-cli: package must define its public API with "exports"',
+      'sync-standards.json: must contain a JSON object with a "paths" array of strings; the structure gate reads it to tell canonical workspaces from repo-owned ones',
     ]);
   });
 

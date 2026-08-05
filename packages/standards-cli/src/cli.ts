@@ -1181,7 +1181,9 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
 };
 
 // Canonical monorepo structure gate: workspace and root script shapes,
-// internal versioning, `exports`, tsconfig inheritance, and a11y wiring.
+// internal versioning, `exports`, tsconfig inheritance, a11y wiring,
+// repo-owned workspace READMEs, and the undecrypted CI secrets contract
+// (SOPS shape mirroring plus the keys the synced workflows require).
 // The `source` profile instead pins the standards template repository's own
 // deliberate exceptions to the consumer contract.
 const runStructure = async (
