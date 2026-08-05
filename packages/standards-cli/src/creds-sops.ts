@@ -6,6 +6,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
+import { isContainedPath } from './contained-path';
 import {
   type SopsValueChange as EditorValueChange,
   inspectSopsScalarStructure,
@@ -14,7 +15,6 @@ import {
 } from './creds-sops-editor';
 import {
   inspectSopsStructure,
-  isContainedSopsPath,
   type SopsShapeFailure,
 } from './creds-sops-structure';
 import { runSops } from './sops-exec';
@@ -45,7 +45,7 @@ export const readEncryptedKeys = async (
   consumer: string,
   rel: string,
 ): Promise<EncryptedKeysReadResult> => {
-  if (!isContainedSopsPath(consumer, rel, 'file')) {
+  if (!isContainedPath(consumer, rel, 'file')) {
     return {
       ok: false,
       kind: 'read-error',
@@ -68,7 +68,7 @@ export const inspectSopsScalarDestination = async (
   rel: string,
   dottedPath: string,
 ): Promise<SopsScalarDestinationResult> => {
-  if (!isContainedSopsPath(consumer, rel, 'file')) {
+  if (!isContainedPath(consumer, rel, 'file')) {
     return {
       ok: false,
       kind: 'read-error',
@@ -118,7 +118,7 @@ export const setSopsValues = (
   rel: string,
   changes: ReadonlyArray<EditorValueChange>,
 ): SopsWriteResult => {
-  if (!isContainedSopsPath(consumer, rel, 'file')) {
+  if (!isContainedPath(consumer, rel, 'file')) {
     return { ok: false, problem: `unsafe encrypted secrets target ${rel}` };
   }
   const result = runSops(['edit', rel], consumer, {

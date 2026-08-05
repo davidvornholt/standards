@@ -4,7 +4,8 @@
 
 import { lstatSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { isContainedSopsPath, parseSopsKeyPath } from './creds-sops-structure';
+import { isContainedPath } from './contained-path';
+import { parseSopsKeyPath } from './creds-sops-structure';
 import {
   type BrokerStore,
   type CloudflareBrokerAccount,
@@ -71,7 +72,7 @@ export const assertWritableSopsPath = (
 const isYamlSecrets = (name: string): boolean =>
   name.endsWith('.yaml') && !name.endsWith('.example.yaml');
 const listDir = (consumer: string, rel: string): ReadonlyArray<string> => {
-  if (!isContainedSopsPath(consumer, rel, 'directory')) {
+  if (!isContainedPath(consumer, rel, 'directory')) {
     return [];
   }
   try {
@@ -82,7 +83,7 @@ const listDir = (consumer: string, rel: string): ReadonlyArray<string> => {
 };
 const isHostTargetCandidate = (consumer: string, name: string): boolean => {
   const rel = `infra/hosts/${name}`;
-  if (isContainedSopsPath(consumer, rel, 'directory')) {
+  if (isContainedPath(consumer, rel, 'directory')) {
     return listDir(consumer, rel).includes('secrets.yaml');
   }
   try {

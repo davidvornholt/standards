@@ -1,13 +1,16 @@
 import { existsSync } from 'node:fs';
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { isRecord } from './github-settings-parse';
+import { readJsonFile } from './json-file';
 import {
   missingPublishedCliProblems,
   rootScriptExpectations,
   type StructureProfile,
 } from './structure-profile';
+import { collectWorkspaceReadmeProblems } from './structure-readme';
 import { filteredTurboAliasProblem, hasSafeCommands } from './structure-script';
+import { collectCiSecretsProblems } from './structure-secrets';
 import { inspectWorkspace, type Workspace } from './structure-workspace';
 
 const ROOT_FIXED_SCRIPTS = new Set(
@@ -17,20 +20,6 @@ const GLOB_SUFFIX = '/*';
 const WORKSPACES_REQUIREMENT =
   'package.json: "workspaces" must be a non-empty array of literal paths or one-level "<dir>/*" patterns';
 
-const readJson = async (
-  path: string,
-): Promise<Record<string, unknown> | null> => {
-  const raw = await readFile(path, 'utf8').catch(() => null);
-  if (raw === null) {
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return isRecord(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-};
 type ResolvedPattern = {
   readonly dirs: ReadonlyArray<string>;
   readonly problem: string | null;
@@ -116,7 +105,7 @@ const loadWorkspace = async (
   if (!existsSync(path)) {
     return { workspace: null, problem: null };
   }
-  const manifest = await readJson(path);
+  const manifest = await readJsonFile(path);
   if (manifest === null) {
     return {
       workspace: null,
@@ -158,9 +147,15 @@ export const collectStructureProblems = async (
   consumer: string,
   profile: StructureProfile,
 ): Promise<ReadonlyArray<string>> => {
-  const root = await readJson(join(consumer, 'package.json'));
+  const [root, secretsProblems] = await Promise.all([
+    readJsonFile(join(consumer, 'package.json')),
+    collectCiSecretsProblems(consumer),
+  ]);
   if (root === null) {
-    return ['package.json must exist and contain a JSON object'];
+    return [
+      'package.json must exist and contain a JSON object',
+      ...secretsProblems,
+    ];
   }
   const declaration = workspacePatternsOf(root);
   const resolved = await Promise.all(
@@ -178,9 +173,16 @@ export const collectStructureProblems = async (
       .map((ws) => ws.manifest.name)
       .filter((name): name is string => typeof name === 'string'),
   );
-  const inspections = await Promise.all(
-    workspaces.map((ws) => inspectWorkspace(ws, workspaceNames, profile)),
-  );
+  const [inspections, readmeProblems] = await Promise.all([
+    Promise.all(
+      workspaces.map((ws) => inspectWorkspace(ws, workspaceNames, profile)),
+    ),
+    collectWorkspaceReadmeProblems(
+      consumer,
+      profile,
+      workspaces.map((ws) => ws.rel),
+    ),
+  ]);
   const requireA11y = inspections.some((i) => i.hasA11ySuite);
   return [
     ...declaration.problems,
@@ -189,5 +191,7 @@ export const collectStructureProblems = async (
     ...missingPublishedCliProblems(profile, workspaces),
     ...inspectRootScripts(root, profile, requireA11y),
     ...inspections.flatMap((i) => [...i.problems]),
+    ...readmeProblems,
+    ...secretsProblems,
   ];
 };
