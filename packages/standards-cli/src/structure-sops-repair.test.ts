@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { collectCiSecretsProblems } from './structure-secrets';
 import {
   CI_EXAMPLE_YAML,
@@ -18,6 +20,10 @@ const REQUIRED_KEYS = [
   ['private_key', 'ci.broker_app.private_key'],
 ] as const;
 const NON_STRING_TYPES = ['bool', 'bytes', 'comment', 'float', 'int'] as const;
+const SOPS_3_13_TWO_AGE_KEY_GROUPS = readFileSync(
+  join(import.meta.dir, 'fixtures/sops-3.13-two-age-key-groups.yaml'),
+  'utf8',
+);
 const REQUIRED_TYPE_CASES = REQUIRED_KEYS.flatMap(([key, path]) =>
   NON_STRING_TYPES.map((type) => [key, path, type] as const),
 );
@@ -117,5 +123,42 @@ describe('SOPS recipient metadata structure', () => {
       '  key_groups:\n    - age:\n        - recipient: age1test\n          enc: recipient-envelope';
     write(dir, 'secrets/ci.yaml', withMetadata(CI_SECRETS_YAML, block));
     expect(await collectCiSecretsProblems(dir)).toEqual([]);
+  });
+
+  it('accepts unmodified SOPS 3.13 output with two age key groups', async () => {
+    const dir = buildSecrets();
+    write(dir, 'secrets/ci.yaml', SOPS_3_13_TWO_AGE_KEY_GROUPS);
+    expect(await collectCiSecretsProblems(dir)).toEqual([]);
+  });
+
+  it.each([
+    ['empty-only sources', '  key_groups:\n    - age: []\n      hc_vault: []'],
+    [
+      'a null sibling entry',
+      '  key_groups:\n    - age:\n        - recipient: age1test\n          enc: recipient-envelope\n      hc_vault:\n        - null',
+    ],
+    [
+      'an object sibling entry',
+      '  key_groups:\n    - age:\n        - recipient: age1test\n          enc: recipient-envelope\n      hc_vault:\n        - {}',
+    ],
+    [
+      'an incomplete non-empty sibling',
+      '  key_groups:\n    - age:\n        - recipient: age1test\n          enc: recipient-envelope\n      hc_vault:\n        - vault_address: https://vault.example',
+    ],
+  ])('rejects a key group with %s', async (_label, block) => {
+    const dir = buildSecrets();
+    write(dir, 'secrets/ci.yaml', withMetadata(CI_SECRETS_YAML, block));
+    expect(await collectCiSecretsProblems(dir)).toContain(
+      'secrets/ci.yaml: incomplete top-level "sops" metadata; encrypt the file with SOPS before committing it',
+    );
+  });
+
+  it('rejects an empty direct-source sibling', async () => {
+    const dir = buildSecrets();
+    const block = `${directSources[0][1]}\n  hc_vault: []`;
+    write(dir, 'secrets/ci.yaml', withMetadata(CI_SECRETS_YAML, block));
+    expect(await collectCiSecretsProblems(dir)).toContain(
+      'secrets/ci.yaml: incomplete top-level "sops" metadata; encrypt the file with SOPS before committing it',
+    );
   });
 });

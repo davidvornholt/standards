@@ -80,18 +80,28 @@ const hasCompleteSource = (value: unknown, source: SopsSource): boolean => {
   );
 };
 
-const hasCompleteSources = (value: Record<string, unknown>): boolean => {
+const hasCompleteSources = (
+  value: Record<string, unknown>,
+  allowEmptyPlaceholders: boolean,
+): boolean => {
   const present = SOPS_SOURCES.filter((source) => value[source] !== undefined);
   return (
     present.length > 0 &&
-    present.every((source) => hasCompleteSource(value[source], source))
+    present.some((source) => hasCompleteSource(value[source], source)) &&
+    present.every(
+      (source) =>
+        hasCompleteSource(value[source], source) ||
+        (allowEmptyPlaceholders &&
+          Array.isArray(value[source]) &&
+          value[source].length === 0),
+    )
   );
 };
 
 const hasCompleteKeyGroups = (value: unknown): boolean =>
   Array.isArray(value) &&
   value.length > 0 &&
-  value.every((group) => isRecord(group) && hasCompleteSources(group));
+  value.every((group) => isRecord(group) && hasCompleteSources(group, true));
 
 const hasCompleteRecipients = (value: Record<string, unknown>): boolean => {
   const hasDirectSource = SOPS_SOURCES.some(
@@ -100,7 +110,7 @@ const hasCompleteRecipients = (value: Record<string, unknown>): boolean => {
   const hasKeyGroups = value.key_groups !== undefined;
   return (
     (hasDirectSource || hasKeyGroups) &&
-    (!hasDirectSource || hasCompleteSources(value)) &&
+    (!hasDirectSource || hasCompleteSources(value, false)) &&
     (!hasKeyGroups || hasCompleteKeyGroups(value.key_groups))
   );
 };

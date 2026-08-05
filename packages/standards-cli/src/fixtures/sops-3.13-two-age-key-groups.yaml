@@ -1,0 +1,34 @@
+ci:
+    ntfy_topic_url: ENC[AES256_GCM,data:If4z4nujDvu2ktkMkT7H4A3GqKQ1l19B6Hw=,iv:7UJQHzeYsBeXd9gapNR+isxqixLF5YjlXUUeFEEnta8=,tag:ISlhhwGPomo1h/UacMuVNQ==,type:str]
+    broker_app:
+        app_id: ENC[AES256_GCM,data:7mar4reP1cW9uKw=,iv:23noVNl2OgYuYmdUVKt2nTsrxRJmYjeK/NZ46urvQaw=,tag:0ohs8BMIK/4NqUyePqojdw==,type:str]
+        private_key: ENC[AES256_GCM,data:DuHpz4DectYpRMKPxgZnJA==,iv:z/P8CaGEQbn/UUcDuIy6THX8JiY7exg8FBhQwOEf/kc=,tag:ht+pGkctyXsZXnX8h5PAPg==,type:str]
+sops:
+    key_groups:
+        - age:
+            - enc: |
+                -----BEGIN AGE ENCRYPTED FILE-----
+                YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBvcGFlbStPbFJyTVYwcFJG
+                N243cWdEejQ1dEJubVpiZDErUFRHMmRXSmdRCmJXY3J2T2NJY1Z3ZHJrQnFqZXgy
+                Tk81R0ZFSVg1YUFQemZ5bEp6QlV4V0EKLS0tIExIM2k5ZXUwWkRJS1pwUnJxNXYv
+                WDRqNFE5aW1BbFBjUGl5OWY2L3o3U2sKIJbgf0hGPtEyR5/e1HoqBfweAJ7i6Keh
+                zGDJwk8gQLnRekzGg0Zm6+3n4s9YGw3WqHdqfZR/agJoX8SQzkF4E8w=
+                -----END AGE ENCRYPTED FILE-----
+              recipient: age1gxzu2f027zu227f4wyf4jh5sw0w495482qfzv5flmfyjvgzxm3ys8p9muz
+          hc_vault: []
+        - age:
+            - enc: |
+                -----BEGIN AGE ENCRYPTED FILE-----
+                YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSAvTHVkamthSzVIcVFzbnBk
+                MGdNTVBCWDRmSEl6WW5qaEkxUmJlVDF4Q0Q4Cm9IQ0RwTGExQ0NCb25RUFRYQXpp
+                dWpJWmszZ0VOcXlxczRKSzFmdGZzSVEKLS0tIEVHcmJZL1ZMMVU0ZHY3cjhjbXdX
+                YXJkcU8rVEtzYTlPbHVRckc5V2pPdk0KUvebspFq11PlMu4KkhvEqj3e7sVGv4vd
+                rUTHPW9b1U+iJ7r/ApM4iFMZJ1BDhgDhPtm2CM/YVWKXdkGjp48DBn0=
+                -----END AGE ENCRYPTED FILE-----
+              recipient: age1j4lkxpdweugkfz900u023kx8p6k7yuhdp8jmxthj0qse3w6ahfesyqnj96
+          hc_vault: []
+    lastmodified: "2026-08-05T15:45:37Z"
+    mac: ENC[AES256_GCM,data:Npn7fL8QO4IBwBea0ashoNmasatxmys8XYeyQRFiLbbxSsFMqIa4GHumjDbpo4kYBZYD3QvcplVezavTN9NIMqTQG90TfsKHK23AcJq1Po4JqhhVTYID94s/0sg8qbq5cQgBoRkpxbt6yq6H76332xfa6aqGhcZhFWU9sm33sr0=,iv:0sYSwCVxXDLXn/JkPiyt+2sIj0YpL6nZ1pJt2uMLU+w=,tag:U/EOxIodXvfDFYSFS76XCQ==,type:str]
+    shamir_threshold: 2
+    unencrypted_suffix: _unencrypted
+    version: 3.13.0
