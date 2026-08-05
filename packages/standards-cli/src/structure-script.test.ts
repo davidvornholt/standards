@@ -17,6 +17,8 @@ import {
 const problem = (detail: string): string =>
   `package.json: root script "dev" ${detail}`;
 const EXECUTABLE_MODE = 0o755;
+const NON_EXECUTING_PROBLEM =
+  'must execute a task; Turbo help, version, and dry-run options are not allowed';
 
 describe('filteredTurboAliasProblem', () => {
   it.each([
@@ -36,18 +38,17 @@ describe('filteredTurboAliasProblem', () => {
       'turbo run --cache --filter @repo/web',
       'must put a task name immediately after "turbo run"',
     ],
-    [
-      'turbo run dev --help --filter @repo/web',
-      'must execute a task; Turbo help, version, and dry-run options are not allowed',
-    ],
-    [
-      'turbo run dev -v --filter @repo/web',
-      'must execute a task; Turbo help, version, and dry-run options are not allowed',
-    ],
-    [
-      'turbo run dev --dry --filter @repo/web',
-      'must execute a task; Turbo help, version, and dry-run options are not allowed',
-    ],
+    ['turbo run', 'must put a task name immediately after "turbo run"'],
+    ['turbo run dev -h --filter @repo/web', NON_EXECUTING_PROBLEM],
+    ['turbo run dev -v --filter @repo/web', NON_EXECUTING_PROBLEM],
+    ['turbo run dev --dry --filter @repo/web', NON_EXECUTING_PROBLEM],
+    ['turbo run dev --help --filter @repo/web', NON_EXECUTING_PROBLEM],
+    ['turbo run dev --version --filter @repo/web', NON_EXECUTING_PROBLEM],
+    ['turbo run dev -h=value --filter @repo/web', NON_EXECUTING_PROBLEM],
+    ['turbo run dev -v=value --filter @repo/web', NON_EXECUTING_PROBLEM],
+    ['turbo run dev --dry=value --filter @repo/web', NON_EXECUTING_PROBLEM],
+    ['turbo run dev --help=value --filter @repo/web', NON_EXECUTING_PROBLEM],
+    ['turbo run dev --version=value --filter @repo/web', NON_EXECUTING_PROBLEM],
     ['turbo run dev', 'must pass an explicit --filter'],
     ['turbo run dev --filter', 'must pass a non-empty value to --filter'],
     ['turbo run dev --filter=', 'must pass a non-empty value to --filter'],
@@ -79,6 +80,9 @@ describe('filteredTurboAliasProblem', () => {
     'turbo run dev --filter x\n',
     'turbo run dev --filter x &',
     'turbo run dev --filter x &&& echo done',
+    '&& turbo run dev --filter @repo/web',
+    'turbo run dev --filter @repo/web &&',
+    'turbo run dev --filter @repo/web && && turbo run lint --filter @repo/web',
   ])('names every parser-rejected syntax family for %j', (script) => {
     expect(filteredTurboAliasProblem('dev', script)).toBe(syntaxProblem);
     expect(isSafeFilteredTurboAlias(script)).toBeFalse();
@@ -94,7 +98,9 @@ describe('filteredTurboAliasProblem', () => {
     );
     expect(isSafeFilteredTurboAlias(script)).toBeFalse();
   });
+});
 
+describe('filtered Turbo glob guidance', () => {
   it('keeps the suggested glob filter in one argv value through a Bun package script', () => {
     const consumer = mkdtempSync(join(tmpdir(), 'structure-script-'));
     try {
