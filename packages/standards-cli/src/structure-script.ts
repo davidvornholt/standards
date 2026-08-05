@@ -39,6 +39,22 @@ export const hasSafeCommand = (
   expected: string,
 ): boolean => hasSafeCommands(script, [expected], false);
 
+/* Two distinct failures share the alias gate: syntax the safe-command parser
+   refuses outright (most often a quoted --filter value), and a parseable
+   script that is not a single filtered `turbo run`. Naming the right one
+   saves the consumer a source dive. */
+export const filteredTurboAliasProblem = (
+  name: string,
+  script: string,
+): string | null => {
+  if (isSafeFilteredTurboAlias(script)) {
+    return null;
+  }
+  return parseSafeCommands(script) === null
+    ? `package.json: root script "${name}" contains shell syntax the structure gate does not parse (quotes, |, ;, #, backticks, $(, or &); write a single Turbo command with unquoted arguments`
+    : `package.json: root script "${name}" must delegate through Turbo with an explicit --filter`;
+};
+
 export const isSafeFilteredTurboAlias = (script: string): boolean => {
   const commands = parseSafeCommands(script);
   if (commands?.length !== 1) {

@@ -103,20 +103,16 @@ describe('collectStructureProblems basics and scripts', () => {
     );
   });
 
+  /* Per-shape coverage (missing filter vs unparseable syntax, both --filter
+     forms) lives in structure-script.test.ts with the diagnostic itself. */
   it('requires safe filtered Turbo convenience aliases', async () => {
     const scripts = {
       ...(rootManifest().scripts as Record<string, string>),
       dev: 'turbo run dev --filter @repo/web',
-      start: 'turbo run dev --filter=@repo/web',
       db: 'bun run scripts/db.ts',
-      quoted: 'echo "turbo run dev --filter @repo/web"',
-      help: 'turbo run --help --filter @repo/web',
-      unfiltered: 'turbo run dev --filter',
     };
     const problems = await collect(buildConsumer(rootManifest({ scripts })));
-    expect(problems).toEqual(
-      ['db', 'quoted', 'help', 'unfiltered'].map(aliasProblem),
-    );
+    expect(problems).toEqual([aliasProblem('db')]);
   });
 
   it('requires a safe root test:a11y script once a workspace has a suite', async () => {
