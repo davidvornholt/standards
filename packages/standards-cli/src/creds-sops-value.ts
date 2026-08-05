@@ -4,7 +4,8 @@
 // unverifiable read, so the two negative answers must stay distinct: anything
 // that is not a leaf we can read as a scalar string is unverifiable.
 
-import { isContainedSopsPath, parseSopsKeyPath } from './creds-sops-structure';
+import { isContainedPath } from './contained-path';
+import { parseSopsKeyPath } from './creds-sops-structure';
 import { runSops } from './sops-exec';
 
 export type SopsStoredValueVerification =
@@ -51,7 +52,7 @@ export const verifySopsStoredValueWith = (
   const { consumer, rel, dottedPath, expectedValue } = input;
   const path = parseSopsKeyPath(dottedPath);
   const problem = `could not verify stored SOPS value at ${dottedPath} in ${rel}`;
-  if (path === null || !isContainedSopsPath(consumer, rel, 'file')) {
+  if (path === null || !isContainedPath(consumer, rel, 'file')) {
     return { ok: false, problem };
   }
   const extract = path

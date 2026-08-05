@@ -13,7 +13,7 @@ afterEach(cleanupStructureTmps);
 const MANIFEST_REQUIREMENT =
   'sync-standards.json: must contain a JSON object with a "paths" array of strings; the structure gate reads it to tell canonical workspaces from repo-owned ones';
 const readmeProblem = (rel: string): string =>
-  `${rel}: repo-owned workspace must have a non-empty README.md documenting the configuration and secrets it consumes`;
+  `${rel}: repo-owned workspace must have a non-empty README.md`;
 
 const buildRepo = (paths: ReadonlyArray<unknown> | null): string => {
   const dir = newStructureTmp('structure-readme-');

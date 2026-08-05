@@ -29,6 +29,16 @@ export const TSCONFIG =
 
 const fakeEnc = (data: string): string =>
   `ENC[AES256_GCM,data:${data},iv:aWl2,tag:dGFn,type:str]`;
+export const FAKE_ENC = fakeEnc('eA==');
+export const CI_SOPS_METADATA_YAML = [
+  'sops:',
+  '    age:',
+  '        - recipient: age1test',
+  '          enc: test-recipient-envelope',
+  '    version: 3.9.0',
+  `    mac: ${fakeEnc('bWFj')}`,
+  '',
+].join('\n');
 // The shape every consumer's encrypted CI secrets file must carry: the leaf
 // keys stay plaintext under SOPS, values are opaque ciphertext.
 export const CI_SECRETS_YAML = [
@@ -37,10 +47,7 @@ export const CI_SECRETS_YAML = [
   '    broker_app:',
   `        app_id: ${fakeEnc('YXBw')}`,
   `        private_key: ${fakeEnc('a2V5')}`,
-  'sops:',
-  '    version: 3.9.0',
-  `    mac: ${fakeEnc('bWFj')}`,
-  '',
+  CI_SOPS_METADATA_YAML,
 ].join('\n');
 export const CI_EXAMPLE_YAML = [
   'ci:',

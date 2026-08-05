@@ -147,9 +147,15 @@ export const collectStructureProblems = async (
   consumer: string,
   profile: StructureProfile,
 ): Promise<ReadonlyArray<string>> => {
-  const root = await readJsonFile(join(consumer, 'package.json'));
+  const [root, secretsProblems] = await Promise.all([
+    readJsonFile(join(consumer, 'package.json')),
+    collectCiSecretsProblems(consumer),
+  ]);
   if (root === null) {
-    return ['package.json must exist and contain a JSON object'];
+    return [
+      'package.json must exist and contain a JSON object',
+      ...secretsProblems,
+    ];
   }
   const declaration = workspacePatternsOf(root);
   const resolved = await Promise.all(
@@ -167,7 +173,7 @@ export const collectStructureProblems = async (
       .map((ws) => ws.manifest.name)
       .filter((name): name is string => typeof name === 'string'),
   );
-  const [inspections, readmeProblems, secretsProblems] = await Promise.all([
+  const [inspections, readmeProblems] = await Promise.all([
     Promise.all(
       workspaces.map((ws) => inspectWorkspace(ws, workspaceNames, profile)),
     ),
@@ -176,7 +182,6 @@ export const collectStructureProblems = async (
       profile,
       workspaces.map((ws) => ws.rel),
     ),
-    collectCiSecretsProblems(consumer),
   ]);
   const requireA11y = inspections.some((i) => i.hasA11ySuite);
   return [

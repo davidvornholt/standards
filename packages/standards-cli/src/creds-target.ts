@@ -1,4 +1,4 @@
-import { isContainedSopsPath } from './creds-sops-structure';
+import { isContainedPath } from './contained-path';
 
 const SAFE_TARGET = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9_-])?$/u;
 
@@ -26,8 +26,8 @@ export const resolveTargetRelResult = (
   }
   const host = `infra/hosts/${target}/secrets.yaml`;
   const flat = `secrets/${target}.yaml`;
-  const hostExists = isContainedSopsPath(consumer, host, 'file');
-  const flatExists = isContainedSopsPath(consumer, flat, 'file');
+  const hostExists = isContainedPath(consumer, host, 'file');
+  const flatExists = isContainedPath(consumer, flat, 'file');
   if (hostExists && flatExists) {
     return {
       ok: false,

@@ -29,6 +29,8 @@ describe('collectStructureProblems basics and scripts', () => {
     const consumer = newStructureTmp('structure-');
     expect(await collect(consumer)).toEqual([
       'package.json must exist and contain a JSON object',
+      'secrets/ci.yaml: must exist as a SOPS-encrypted file; the synced CI workflows read ci.ntfy_topic_url and, when automatic sync is enabled, ci.broker_app from it',
+      'secrets/ci.example.yaml: must exist and mirror the key shape of secrets/ci.yaml with plaintext placeholders',
     ]);
   });
 
@@ -82,8 +84,8 @@ describe('collectStructureProblems basics and scripts', () => {
     rmSync(join(consumer, 'secrets/ci.yaml'));
     const problems = await collect(consumer);
     expect(problems).toEqual([
-      'apps/web: repo-owned workspace must have a non-empty README.md documenting the configuration and secrets it consumes',
-      'secrets/ci.yaml: must exist as a SOPS-encrypted file; the synced CI workflows read ci.ntfy_topic_url and ci.broker_app from it',
+      'apps/web: repo-owned workspace must have a non-empty README.md',
+      'secrets/ci.yaml: must exist as a SOPS-encrypted file; the synced CI workflows read ci.ntfy_topic_url and, when automatic sync is enabled, ci.broker_app from it',
     ]);
   });
 });
