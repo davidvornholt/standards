@@ -352,6 +352,19 @@
       }
     },
     {
+      // The structure gate requires a playwright.config.* beside every
+      // browser a11y suite, and Playwright loads that config through a
+      // default export — every consumer with a browser app hits this.
+      "includes": ["**/playwright.config.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noDefaultExport": "off"
+          }
+        }
+      }
+    },
+    {
       // Files allowed to exceed the 200-line limit. Consumers extend this list
       // in their own biome.jsonc wrapper and document each entry.
       "includes": [
