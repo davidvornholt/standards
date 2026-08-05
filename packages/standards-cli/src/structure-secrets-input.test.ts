@@ -151,13 +151,13 @@ describe('CI secret ciphertext and metadata shape', () => {
     'ntfy_topic_url',
     'app_id',
     'private_key',
-  ])('requires workflow key %s to be an encrypted scalar', async (key) => {
+  ])('requires workflow key %s to be an encrypted string scalar', async (key) => {
     const dir = buildSecrets();
     write(dir, 'secrets/ci.yaml', replaceScalarWithArray(CI_SECRETS_YAML, key));
     expect(await collectCiSecretsProblems(dir)).toContain(
       `secrets/ci.yaml: required key "${
         key === 'ntfy_topic_url' ? 'ci.ntfy_topic_url' : `ci.broker_app.${key}`
-      }" must be one SOPS-encrypted scalar because its workflow resolves it as a string`,
+      }" must be one SOPS-encrypted string scalar because its workflow resolves it as a string`,
     );
   });
 

@@ -2,7 +2,7 @@ import { isRecord } from './github-settings-parse';
 import {
   hasCompleteSopsMetadata,
   isEncryptedLeafValue,
-  isSopsEncryptedScalar,
+  isSopsEncryptedString,
   looksEncrypted,
 } from './structure-sops-envelope';
 
@@ -105,9 +105,9 @@ export const inspectSecretDocument = (
           ];
         }
         return isEncryptedLeafValue(leaf.value) &&
-          !isSopsEncryptedScalar(leaf.value)
+          !isSopsEncryptedString(leaf.value)
           ? [
-              `${rel}: required key "${requirement.path.join('.')}" must be one SOPS-encrypted scalar because its workflow resolves it as a string`,
+              `${rel}: required key "${requirement.path.join('.')}" must be one SOPS-encrypted string scalar because its workflow resolves it as a string`,
             ]
           : [];
       }),
