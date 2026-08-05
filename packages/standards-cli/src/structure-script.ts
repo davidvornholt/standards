@@ -2,6 +2,18 @@ const UNSAFE_SCRIPT_SYNTAX = /[|;#"'`\r\n]/u;
 const SCRIPT_WHITESPACE = /\s+/u;
 const NON_EXECUTING_TURBO_OPTION = /^(?:-h|-v|--(?:dry|help|version))(?:=|$)/u;
 
+type FilteredTurboAliasViolation =
+  | 'empty'
+  | 'filter-empty'
+  | 'filter-missing'
+  | 'filter-option'
+  | 'multiple-commands'
+  | 'non-executing-option'
+  | 'not-run'
+  | 'not-turbo'
+  | 'syntax'
+  | 'task';
+
 export const parseSafeCommands = (
   script: string | null,
 ): ReadonlyArray<ReadonlyArray<string>> | null => {
@@ -39,28 +51,32 @@ export const hasSafeCommand = (
   expected: string,
 ): boolean => hasSafeCommands(script, [expected], false);
 
-/* Two distinct failures share the alias gate: syntax the safe-command parser
-   refuses outright (most often a quoted --filter value), and a parseable
-   script that is not a single filtered `turbo run`. Naming the right one
-   saves the consumer a source dive. */
-export const filteredTurboAliasProblem = (
-  name: string,
+const filteredTurboAliasViolation = (
   script: string,
-): string | null => {
-  if (isSafeFilteredTurboAlias(script)) {
-    return null;
+): FilteredTurboAliasViolation | null => {
+  if (script.trim() === '') {
+    return 'empty';
   }
-  return parseSafeCommands(script) === null
-    ? `package.json: root script "${name}" contains shell syntax the structure gate does not parse (quotes, |, ;, #, backticks, $(, or &); write a single Turbo command with unquoted arguments`
-    : `package.json: root script "${name}" must delegate through Turbo with an explicit --filter`;
-};
-
-export const isSafeFilteredTurboAlias = (script: string): boolean => {
   const commands = parseSafeCommands(script);
-  if (commands?.length !== 1) {
-    return false;
+  if (commands === null) {
+    return 'syntax';
+  }
+  if (commands.length !== 1) {
+    return 'multiple-commands';
   }
   const [tokens] = commands;
+  if (tokens[0] !== 'turbo') {
+    return 'not-turbo';
+  }
+  if (tokens[1] !== 'run') {
+    return 'not-run';
+  }
+  if (tokens.some((token) => NON_EXECUTING_TURBO_OPTION.test(token))) {
+    return 'non-executing-option';
+  }
+  if (tokens[2]?.startsWith('-') !== false) {
+    return 'task';
+  }
   const filterAt = tokens.findIndex(
     (token) => token === '--filter' || token.startsWith('--filter='),
   );
@@ -69,11 +85,40 @@ export const isSafeFilteredTurboAlias = (script: string): boolean => {
     filter === '--filter'
       ? tokens[filterAt + 1]
       : filter?.slice('--filter='.length);
-  return tokens[0] !== 'turbo' || tokens[1] !== 'run'
-    ? false
-    : tokens[2]?.startsWith('-') === false &&
-        !tokens.some((token) => NON_EXECUTING_TURBO_OPTION.test(token)) &&
-        filterValue !== undefined &&
-        filterValue !== '' &&
-        !filterValue.startsWith('-');
+  if (filter === undefined) {
+    return 'filter-missing';
+  }
+  if (filterValue === undefined || filterValue === '') {
+    return 'filter-empty';
+  }
+  return filterValue.startsWith('-') ? 'filter-option' : null;
 };
+
+export const filteredTurboAliasProblem = (
+  name: string,
+  script: string,
+): string | null => {
+  const violation = filteredTurboAliasViolation(script);
+  if (violation === null) {
+    return null;
+  }
+  const details: Record<FilteredTurboAliasViolation, string> = {
+    empty: 'must be a non-empty single filtered Turbo command',
+    'filter-empty': 'must pass a non-empty value to --filter',
+    'filter-missing': 'must pass an explicit --filter',
+    'filter-option': 'must pass a --filter value that is not another option',
+    'multiple-commands':
+      'must contain exactly one command; && command chains are not supported',
+    'non-executing-option':
+      'must execute a task; Turbo help, version, and dry-run options are not allowed',
+    'not-run': 'must invoke Turbo through "turbo run"',
+    'not-turbo': 'must invoke Turbo directly with "turbo"',
+    syntax:
+      'contains shell syntax the structure gate does not parse (quotes, |, ;, #, backticks, $(, CR/LF line breaks, or malformed ampersand separators); write one command with plain arguments, using --filter=./apps/* for a glob',
+    task: 'must put a task name immediately after "turbo run"',
+  };
+  return `package.json: root script "${name}" ${details[violation]}`;
+};
+
+export const isSafeFilteredTurboAlias = (script: string): boolean =>
+  filteredTurboAliasViolation(script) === null;

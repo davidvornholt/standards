@@ -26,7 +26,9 @@ const collect = (dir: string) => collectStructureProblems(dir, 'consumer');
 const WORKSPACES_REQUIREMENT =
   'package.json: "workspaces" must be a non-empty array of literal paths or one-level "<dir>/*" patterns';
 const aliasProblem = (name: string): string =>
-  `package.json: root script "${name}" must delegate through Turbo with an explicit --filter`;
+  `package.json: root script "${name}" must invoke Turbo directly with "turbo"`;
+const aliasSyntaxProblem = (name: string): string =>
+  `package.json: root script "${name}" contains shell syntax the structure gate does not parse (quotes, |, ;, #, backticks, $(, CR/LF line breaks, or malformed ampersand separators); write one command with plain arguments, using --filter=./apps/* for a glob`;
 
 const rootManifest = (
   overrides: Record<string, unknown> = {},
@@ -103,16 +105,20 @@ describe('collectStructureProblems basics and scripts', () => {
     );
   });
 
-  /* Per-shape coverage (missing filter vs unparseable syntax, both --filter
-     forms) lives in structure-script.test.ts with the diagnostic itself. */
+  /* Per-shape coverage lives in structure-script.test.ts with the diagnostic
+     itself; this keeps one parser-null input wired through root inspection. */
   it('requires safe filtered Turbo convenience aliases', async () => {
     const scripts = {
       ...(rootManifest().scripts as Record<string, string>),
       dev: 'turbo run dev --filter @repo/web',
       db: 'bun run scripts/db.ts',
+      preview: "turbo run dev --filter './apps/*'",
     };
     const problems = await collect(buildConsumer(rootManifest({ scripts })));
-    expect(problems).toEqual([aliasProblem('db')]);
+    expect(problems).toEqual([
+      aliasProblem('db'),
+      aliasSyntaxProblem('preview'),
+    ]);
   });
 
   it('requires a safe root test:a11y script once a workspace has a suite', async () => {
