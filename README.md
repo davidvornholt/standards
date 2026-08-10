@@ -80,7 +80,7 @@ bun standards github --apply  # converge the live repo (needs admin gh auth)
 bun standards help            # list commands and options
 ```
 
-The `Standards sync` workflow also runs `sync` weekly and opens a PR when upstream has moved, so you never have to remember to pull. It resolves `ci.broker_app.app_id` and `ci.broker_app.private_key` through the trusted pre-sync copy of the canonical SOPS action, mints a short-lived installation token for only the current repository with Contents read and Pull requests write, and never exposes that token to the sync command. External actions use their maintained major-version tags by policy. The PR is validated by the required `Standards` gate like any other change. Create one private broker GitHub App per owning user or organization, install it only on selected repositories, and provision each repository with `bun standards creds add github --dest ci:ci.broker_app`; the command selects the App by origin owner and verifies its installation before writing, while missing credentials or failed token minting stop the workflow without a fallback.
+The `Standards sync` workflow also runs `sync` weekly and opens a PR when upstream has moved, so you never have to remember to pull. It resolves `ci.broker_app.app_id` and `ci.broker_app.private_key` through the trusted pre-sync copy of the canonical SOPS action, mints a short-lived branch writer with Contents write and Workflows write plus a separate PR opener with Contents read and Pull requests write for only the current repository, and never exposes either token to the sync command. External actions use their maintained major-version tags by policy. The PR is validated by the required `Standards` gate like any other change. Create one private broker GitHub App per owning user or organization, install it only on selected repositories, and provision each repository with `bun standards creds add github --dest ci:ci.broker_app`; the command selects the App by origin owner and verifies its installation before writing, while missing credentials, unapproved App permissions, or failed token minting stop the workflow without a fallback.
 
 ### Local development database
 
@@ -136,6 +136,14 @@ in
   systemd.user.services.standards-poller-acknowledgements.path = pollerPath;
 }
 ```
+
+### Breaking migration to workflow-writing Standards sync
+
+Automatic standards updates previously synchronized workflow files successfully in the runner, then failed before opening a pull request because the branch push used GitHub's workflow token. That token can write ordinary contents but cannot update `.github/workflows/**`, so every canonical CI change blocked all consumers at once. The repaired workflow mints two short-lived current-repository tokens before sync: a branch writer with Contents write and Workflows write, and a PR opener with Contents read and Pull requests write. Neither token enters the sync process, each reaches only its post-sync operation, and the ordinary workflow token is read-only. Missing credentials, an unapproved App permission update, or a failed mint stops the job before sync.
+
+This is a deliberate expansion of the private broker App's permission ceiling. Before adopting the repaired workflow, open the existing App's **Permissions & events** settings, grant repository **Workflows: Read and write**, save, and approve the permission update for every account where the App is installed. The manifest in this repository controls newly created Apps only; changing it does not update an existing registration or approve its installations.
+
+The broken workflow cannot push its own repair because that repair changes a workflow file. Bootstrap each consumer once from a local checkout: upgrade the exact `@davidvornholt/standards` dependency and `bun.lock` to at least 0.21.0 with Bun, run `bun standards sync`, push the resulting branch with normal user or SSH authentication, and merge its pull request only after the required gate passes. Later weekly runs can update canonical workflows through the broker writer. The standards source repository is not a consumer and declares `{ "autoSync": false }` in its repo-owned `sync-standards.local.json`, so its scheduled policy job succeeds without entering the consumer-only dependency and credential path.
 
 ### Breaking migration to workspace README and CI secrets gating
 

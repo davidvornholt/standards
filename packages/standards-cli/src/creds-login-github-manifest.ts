@@ -47,6 +47,7 @@ const DEFAULT_PERMISSIONS = {
   issues: 'write',
   metadata: 'read',
   pull_requests: 'write',
+  workflows: 'write',
 } as const;
 
 export const buildAppManifest = (
