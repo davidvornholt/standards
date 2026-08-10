@@ -14,7 +14,7 @@ import { parseYaml } from './yaml-parse';
 const CI_SECRETS = 'secrets/ci.yaml';
 const CI_EXAMPLE = 'secrets/ci.example.yaml';
 const BROKER_REASON =
-  'the synced Standards sync workflow mints its pull request token from ci.broker_app; provision it with "bun standards creds add github --dest ci:ci.broker_app"';
+  'the synced Standards sync workflow mints a branch token with Contents write and Workflows write plus a pull request token with Contents read and Pull requests write from ci.broker_app; provision it with "bun standards creds add github --dest ci:ci.broker_app"';
 const NTFY_REQUIREMENT: RequiredSecretLeaf = {
   path: ['ci', 'ntfy_topic_url'],
   reason: 'the synced Notify pause workflow pushes to it',

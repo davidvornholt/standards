@@ -15,12 +15,22 @@ const TEMPLATE_EXAMPLE_PATH = join(
   ACTUAL_UPSTREAM,
   'template/secrets/ci.example.yaml',
 );
+const STRUCTURE_SECRETS_PATH = join(
+  ACTUAL_UPSTREAM,
+  'packages/standards-cli/src/structure-secrets.ts',
+);
 const OBSOLETE_SYNC_KEY = ['standards', 'sync', 'token'].join('_');
 // The retired settings PAT. Nothing reads it any more, so a seeded example that
 // still carries it would send every adopter to mint a credential for nothing —
 // and `template/secrets/ci.example.yaml` is what new consumers start from.
 const OBSOLETE_SETTINGS_KEY = ['github', 'settings', 'read', 'token'].join('_');
 const BROKER_DESTINATION = 'ci:ci.broker_app';
+const WRITER_PERMISSIONS = 'Contents write and Workflows write';
+const PR_PERMISSIONS = 'Contents read and Pull requests write';
+const OBSOLETE_ONE_TOKEN_GUIDANCE = [
+  'mints a short-lived token with Contents read and Pull requests write',
+  'mints its pull request token from ci.broker_app',
+];
 
 const brokerAppMapping = (
   document: Readonly<Record<string, unknown>>,
@@ -76,17 +86,29 @@ describe('Standards sync broker configuration', () => {
 });
 
 describe('Standards sync broker documentation contract', () => {
-  it('documents one provisioning command across source-owned guidance', () => {
+  it('documents both token roles and one provisioning command everywhere', () => {
     const rootReadme = readFileSync(join(ACTUAL_UPSTREAM, 'README.md'), 'utf8');
     const documents = [
       'packages/standards-cli/README.md',
       '.agents/skills/standards-sync/SKILL.md',
       '.agents/skills/declarative-infra/references/secrets.md',
     ].map((path) => readFileSync(join(ACTUAL_UPSTREAM, path), 'utf8'));
+    const sourceOwnedGuidance = [
+      rootReadme,
+      ...documents,
+      readFileSync(SOURCE_EXAMPLE_PATH, 'utf8'),
+      readFileSync(TEMPLATE_EXAMPLE_PATH, 'utf8'),
+      readFileSync(STRUCTURE_SECRETS_PATH, 'utf8'),
+    ];
 
-    for (const document of [rootReadme, ...documents]) {
+    for (const document of sourceOwnedGuidance) {
       expect(document).toContain(BROKER_DESTINATION);
+      expect(document).toContain(WRITER_PERMISSIONS);
+      expect(document).toContain(PR_PERMISSIONS);
       expect(document).not.toContain(OBSOLETE_SYNC_KEY);
+      for (const obsolete of OBSOLETE_ONE_TOKEN_GUIDANCE) {
+        expect(document).not.toContain(obsolete);
+      }
     }
     // Current guidance must not instruct anyone to provision the retired PAT.
     // The root README is excluded deliberately: it names the key in dated
@@ -99,6 +121,21 @@ describe('Standards sync broker documentation contract', () => {
     expect(rootReadme).not.toContain('current 0.12 workflow');
     expect(rootReadme).toContain(
       'the 0.21 dev-env composition cutover raises it to 0.21.0',
+    );
+  });
+
+  it('keeps the workflow repair bootstrap policy-aware', () => {
+    const rootReadme = readFileSync(join(ACTUAL_UPSTREAM, 'README.md'), 'utf8');
+
+    expect(rootReadme).toContain('A tracking-main consumer');
+    expect(rootReadme).toContain(
+      'A pinned consumer first updates the checked-in `sync-standards.local.json.ref`',
+    );
+    expect(rootReadme).toContain(
+      'a plain sync without that policy change honors the old pin and cannot fetch the repair',
+    );
+    expect(rootReadme).toContain(
+      'does not need to expand or approve its broker App permissions until scheduled sync is re-enabled',
     );
   });
 });
