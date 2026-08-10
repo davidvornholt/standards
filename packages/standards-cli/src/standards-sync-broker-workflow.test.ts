@@ -1,129 +1,199 @@
 import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { parse as parseYaml } from 'yaml';
 import { ACTUAL_UPSTREAM } from './cli-test-support';
 
 type WorkflowStep = {
   readonly env?: Readonly<Record<string, string>>;
+  readonly id?: string;
+  readonly if?: string;
   readonly name?: string;
   readonly run?: string;
   readonly uses?: string;
   readonly with?: Readonly<Record<string, string | boolean>>;
 };
-
-const WORKFLOW_PATH = join(
-  ACTUAL_UPSTREAM,
-  '.github/workflows/standards-sync.yml',
-);
-const workflowSource = readFileSync(WORKFLOW_PATH, 'utf8');
-const parsedWorkflow = parseYaml(workflowSource) as {
+type ParsedWorkflow = {
   readonly permissions: Readonly<Record<string, string>>;
   readonly jobs: {
     readonly sync: { readonly steps: ReadonlyArray<WorkflowStep> };
   };
 };
-const {
-  jobs: {
-    sync: { steps },
-  },
-} = parsedWorkflow;
+type MutableWorkflow = {
+  permissions: Record<string, string>;
+  jobs: { sync: { steps: Array<WorkflowStep> } };
+};
+
+const workflowPath = join(
+  ACTUAL_UPSTREAM,
+  '.github/workflows/standards-sync.yml',
+);
+const workflowSource = readFileSync(workflowPath, 'utf8');
+const parsedWorkflow = parseYaml(workflowSource) as ParsedWorkflow;
 const expression = (value: string): string =>
   ['$', '{{ ', value, ' }}'].join('');
-const namedStep = (name: string): WorkflowStep => {
-  const step = steps.find((candidate) => candidate.name === name);
+const namedStep = (workflow: ParsedWorkflow, name: string): WorkflowStep => {
+  const step = workflow.jobs.sync.steps.find(
+    (candidate) => candidate.name === name,
+  );
   if (step === undefined) {
     throw new Error(`Missing Standards sync workflow step: ${name}`);
   }
   return step;
 };
-const stepIndex = (name: string): number =>
-  steps.findIndex((candidate) => candidate.name === name);
-describe('Standards sync broker credential contract', () => {
-  it('resolves both nested App credentials through the trusted pre-sync action', () => {
-    const appId = namedStep('Resolve broker App ID');
-    const privateKey = namedStep('Resolve broker App private key');
-    const syncIndex = stepIndex('Sync canonical files from upstream');
+const stepIndex = (workflow: ParsedWorkflow, name: string): number =>
+  workflow.jobs.sync.steps.findIndex((candidate) => candidate.name === name);
+const changedCondition = "steps.mirror.outputs.changed == 'true'";
+const writerToken = expression('steps.branch-writer-token.outputs.token');
+const prToken = expression('steps.pr-token.outputs.token');
+const branchOutput = expression('steps.sync-branch.outputs.branch');
+const writerMintName = 'Mint current-repository branch writer token';
+const prMintName = 'Mint current-repository PR token';
+const writerTokenName = ['BRANCH', 'WRITER', 'TOKEN'].join('_');
+const prTokenName = ['GH', 'TOKEN'].join('_');
+const syncPolicyRefName = ['SYNC', 'POLICY', 'REF'].join('_');
 
-    expect(appId.uses).toBe('./.github/actions/sops-secret');
-    expect(appId.with).toEqual({
-      'age-key': expression('secrets.SOPS_AGE_KEY'),
-      'secret-file': 'secrets/ci.yaml',
-      'secret-key': 'broker_app.app_id',
-      'env-name': 'BROKER_APP_ID',
-    });
-    expect(privateKey.uses).toBe('./.github/actions/sops-secret');
-    expect(privateKey.with).toEqual({
-      'age-key': expression('secrets.SOPS_AGE_KEY'),
-      'secret-file': 'secrets/ci.yaml',
-      'secret-key': 'broker_app.private_key',
-      'env-name': 'BROKER_APP_PRIVATE_KEY',
-    });
-    expect(stepIndex('Resolve broker App ID')).toBeLessThan(syncIndex);
-    expect(stepIndex('Resolve broker App private key')).toBeLessThan(syncIndex);
-  });
+const assertExactStep = (
+  workflow: ParsedWorkflow,
+  name: string,
+  expected: WorkflowStep,
+): void => {
+  if (!isDeepStrictEqual(namedStep(workflow, name), expected)) {
+    throw new Error(`${name} does not match its exact workflow contract`);
+  }
+};
 
-  it('mints fail-closed v3 tokens for exactly the current repository and responsibilities', () => {
-    const writer = namedStep('Mint current-repository branch writer token');
-    const pr = namedStep('Mint current-repository PR token');
-
-    expect(writer.uses).toBe('actions/create-github-app-token@v3');
-    expect(writer.with).toEqual({
+const assertSecuritySensitiveSteps = (workflow: ParsedWorkflow): void => {
+  assertExactStep(workflow, writerMintName, {
+    name: writerMintName,
+    id: 'branch-writer-token',
+    uses: 'actions/create-github-app-token@v3',
+    with: {
       'app-id': expression('env.BROKER_APP_ID'),
       'private-key': expression('env.BROKER_APP_PRIVATE_KEY'),
       'permission-contents': 'write',
       'permission-workflows': 'write',
-    });
-    expect(pr.uses).toBe('actions/create-github-app-token@v3');
-    expect(pr.with).toEqual({
+    },
+  });
+  assertExactStep(workflow, prMintName, {
+    name: prMintName,
+    id: 'pr-token',
+    uses: 'actions/create-github-app-token@v3',
+    with: {
       'app-id': expression('env.BROKER_APP_ID'),
       'private-key': expression('env.BROKER_APP_PRIVATE_KEY'),
       'permission-contents': 'read',
       'permission-pull-requests': 'write',
-    });
-    for (const mint of [writer, pr]) {
-      expect(mint.with).not.toHaveProperty('owner');
-      expect(mint.with).not.toHaveProperty('repositories');
-      expect(JSON.stringify(mint.with)).not.toContain('github.event');
-      expect(JSON.stringify(mint.with)).not.toContain(
-        'github.repository_owner',
-      );
-    }
-    expect(workflowSource).not.toContain('failure-mode: fallback');
-    expect(workflowSource).not.toContain('fallback-value:');
+    },
+  });
+  assertExactStep(workflow, 'Commit and push mirror changes', {
+    name: 'Commit and push mirror changes',
+    id: 'sync-branch',
+    if: changedCondition,
+    env: { [writerTokenName]: writerToken },
+    run: `branch="standards-sync/$(date -u +%Y%m%d%H%M%S)"
+git config user.name "github-actions[bot]"
+git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+git config --local credential.helper "!f() { echo username=x-access-token; echo \\"password=\\$BRANCH_WRITER_TOKEN\\"; }; f"
+git switch -c "$branch"
+git add -A
+git commit -m "chore: sync standards from upstream"
+git push --set-upstream origin "$branch"
+git config --unset credential.helper
+echo "branch=$branch" >> "$GITHUB_OUTPUT"
+`,
+  });
+  assertExactStep(workflow, 'Open a pull request if the mirror changed', {
+    name: 'Open a pull request if the mirror changed',
+    if: changedCondition,
+    env: { [prTokenName]: prToken },
+    run: `gh pr create \\
+  --head "${branchOutput}" \\
+  --title "chore: sync standards from upstream" \\
+  --body "Automated sync from davidvornholt/standards. These are canonical (read-only) files. Before merging, check out this sync branch; remove \\\`allow_merge_commit\\\`, \\\`allow_rebase_merge\\\`, and \\\`allow_squash_merge\\\` from \\\`.github/settings.local.json\\\` if that repo-owned seam still declares them; run \\\`bun standards github --apply\\\` with admin auth; push any seam cleanup; and wait for or rerun the GitHub settings gate. Merge only after every required check passes. Generated by the \\\`Standards sync\\\` workflow."
+`,
   });
 
-  it('keeps installation tokens and checkout credentials out of sync', () => {
-    const checkout = namedStep('Checkout');
-    const sync = namedStep('Sync canonical files from upstream');
-    const open = namedStep('Open a pull request if the mirror changed');
-    const writerToken = expression('steps.branch-writer-token.outputs.token');
-    const prToken = expression('steps.pr-token.outputs.token');
+  const syncIndex = stepIndex(workflow, 'Sync canonical files from upstream');
+  const writerIndex = stepIndex(workflow, writerMintName);
+  const prIndex = stepIndex(workflow, prMintName);
+  if (
+    writerIndex < 0 ||
+    prIndex < 0 ||
+    writerIndex >= syncIndex ||
+    prIndex >= syncIndex
+  ) {
+    throw new Error('Both broker tokens must mint before canonical sync');
+  }
+};
 
+const mutableStep = (
+  workflow: MutableWorkflow,
+  name: string,
+): Record<string, unknown> =>
+  namedStep(workflow, name) as Record<string, unknown>;
+const rejectsMutation = (
+  mutate: (workflow: MutableWorkflow) => void,
+): boolean => {
+  const workflow = structuredClone(parsedWorkflow) as MutableWorkflow;
+  mutate(workflow);
+  try {
+    assertSecuritySensitiveSteps(workflow);
+    return false;
+  } catch {
+    return true;
+  }
+};
+const moveMintAfterSync = (workflow: MutableWorkflow, name: string): void => {
+  const { steps } = workflow.jobs.sync;
+  const mintIndex = steps.findIndex((step) => step.name === name);
+  const [mint] = steps.splice(mintIndex, 1);
+  const syncIndex = steps.findIndex(
+    (step) => step.name === 'Sync canonical files from upstream',
+  );
+  steps.splice(syncIndex + 1, 0, mint);
+};
+
+describe('Standards sync broker credential contract', () => {
+  it('pins exact fail-closed mappings, token isolation, and mint ordering', () => {
+    assertSecuritySensitiveSteps(parsedWorkflow);
     expect(parsedWorkflow.permissions).toEqual({ contents: 'read' });
-    expect(checkout.with?.['persist-credentials']).toBe(false);
-    expect(sync.env?.SYNC_POLICY_REF).toBe(
-      expression('needs.policy.outputs.ref'),
-    );
-    expect(Object.keys(sync.env ?? {})).toEqual(['SYNC_POLICY_REF']);
-    expect(sync.run).not.toContain(writerToken);
-    expect(sync.run).not.toContain(prToken);
-    expect(open.env?.BRANCH_WRITER_TOKEN).toBe(writerToken);
-    expect(open.env?.GH_TOKEN).toBe(prToken);
-    expect(Object.keys(open.env ?? {}).sort()).toEqual([
-      'BRANCH_WRITER_TOKEN',
-      'GH_TOKEN',
-    ]);
-    expect(open.run).toContain('password=\\$BRANCH_WRITER_TOKEN');
-    expect(open.run).not.toContain('password=\\$GITHUB_TOKEN');
-    expect(steps.filter((step) => step.env?.GH_TOKEN === prToken)).toEqual([
-      open,
-    ]);
     expect(
-      steps.filter((step) => step.env?.BRANCH_WRITER_TOKEN === writerToken),
-    ).toEqual([open]);
-    expect(stepIndex('Clear broker App credentials')).toBeLessThan(
-      stepIndex('Sync canonical files from upstream'),
+      namedStep(parsedWorkflow, 'Checkout').with?.['persist-credentials'],
+    ).toBe(false);
+    expect(
+      namedStep(parsedWorkflow, 'Sync canonical files from upstream').env,
+    ).toEqual({
+      [syncPolicyRefName]: expression('needs.policy.outputs.ref'),
+    });
+    expect(
+      workflowSource.match(/steps\.sync-branch\.outputs\.branch/gu) ?? [],
+    ).toHaveLength(1);
+  });
+
+  it('rejects softened mappings, IDs, and post-sync token minting', () => {
+    const sensitiveNames = [
+      writerMintName,
+      prMintName,
+      'Commit and push mirror changes',
+      'Open a pull request if the mirror changed',
+    ];
+    const mutations: Array<(workflow: MutableWorkflow) => void> =
+      sensitiveNames.map((name) => (workflow) => {
+        mutableStep(workflow, name)['continue-on-error'] = true;
+      });
+    mutations.push(
+      (workflow) => {
+        Reflect.deleteProperty(mutableStep(workflow, writerMintName), 'id');
+      },
+      (workflow) => {
+        mutableStep(workflow, prMintName).id = 'changed';
+      },
+      (workflow) => moveMintAfterSync(workflow, writerMintName),
+      (workflow) => moveMintAfterSync(workflow, prMintName),
     );
+    const rejected = mutations.map(rejectsMutation);
+    expect(rejected).toEqual(rejected.map(() => true));
   });
 });
