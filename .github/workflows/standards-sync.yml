@@ -3,8 +3,8 @@ name: Standards sync
 # Closes the one gap `standards check` cannot: it detects local tampering, not that
 # UPSTREAM moved on. This runs `sync` on a cadence and opens a PR when the
 # mirror actually changes, so a repo learns about new standards without anyone
-# remembering to pull. Synced from davidvornholt/standards; in the standards
-# repo itself it is a harmless no-op (nothing upstream of the source).
+# remembering to pull. Synced from davidvornholt/standards; the standards
+# source repository opts out through its repo-owned sync policy.
 #
 # Cadence and pinning are repo policy, not canonical content, so they live in
 # the consumer-owned sync-standards.local.json next to this (read-only) file,
@@ -20,7 +20,7 @@ on:
     - cron: "0 6 * * 1" # Mondays 06:00 UTC
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: standards-sync
@@ -138,8 +138,24 @@ jobs:
           secret-key: broker_app.private_key
           env-name: BROKER_APP_PRIVATE_KEY
 
+      # Mint both tokens before sync as a cheap, fail-closed permission check,
+      # but expose them only to the post-sync operation that needs each one.
+      # The writer needs GitHub's separate Workflows grant because canonical
+      # files include .github/workflows/**; Contents write alone cannot push
+      # those files.
+      - name: Mint current-repository branch writer token
+        id: branch-writer-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ env.BROKER_APP_ID }}
+          private-key: ${{ env.BROKER_APP_PRIVATE_KEY }}
+          # Omitting owner and repositories is the action's exact
+          # current-repository scope; never derive either from event payload.
+          permission-contents: write
+          permission-workflows: write
+
       - name: Mint current-repository PR token
-        id: broker-token
+        id: pr-token
         uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ env.BROKER_APP_ID }}
@@ -159,8 +175,8 @@ jobs:
       # Forward the validated policy pin explicitly as a second fail-closed
       # boundary. The CLI also reads and validates the same document, so local
       # init/sync commands and this workflow retain one policy owner. The
-      # broker token is an action output, not an ambient variable, so the sync
-      # engine and fetched canonical content never receive it.
+      # broker tokens are action outputs, not ambient variables, so the sync
+      # engine and fetched canonical content never receive them.
       - name: Sync canonical files from upstream
         env:
           SYNC_POLICY_REF: ${{ needs.policy.outputs.ref }}
@@ -181,10 +197,11 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # The PR-opening token is a short-lived installation token for only this
-      # repository. Its App credentials come from ci.broker_app in the
-      # SOPS-encrypted secrets/ci.yaml, resolved through the trusted pre-sync
-      # action. Missing credentials or failed token minting stop the job.
+      # The branch-writer and PR-opening tokens are short-lived installation
+      # tokens for only this repository. Their App credentials come from
+      # ci.broker_app in the SOPS-encrypted secrets/ci.yaml, resolved through
+      # the trusted pre-sync action. Missing credentials, an unapproved App
+      # permission update, or failed token minting stops the job.
 
       # This workflow deliberately runs no inline `bun run check`: the synced
       # result is validated by the required Standards gate on the PR it opens,
@@ -194,25 +211,33 @@ jobs:
       # consumer most needs to be visible — an open PR with a red required
       # check is the signal, and branch protection keeps it unmergeable.
       #
-      # `gh pr create` is left to default `--base` to the repository's default
-      # branch: the `schedule` event carries no payload, so expressions like
-      # `github.event.repository.default_branch` are empty here.
-      - name: Open a pull request if the mirror changed
+      - name: Commit and push mirror changes
+        id: sync-branch
         if: steps.mirror.outputs.changed == 'true'
         env:
-          GH_TOKEN: ${{ steps.broker-token.outputs.token }}
-          GITHUB_TOKEN: ${{ github.token }}
+          BRANCH_WRITER_TOKEN: ${{ steps.branch-writer-token.outputs.token }}
         run: |
           branch="standards-sync/$(date -u +%Y%m%d%H%M%S)"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git config --local credential.helper "!f() { echo username=x-access-token; echo \"password=\$GITHUB_TOKEN\"; }; f"
+          git config --local credential.helper "!f() { echo username=x-access-token; echo \"password=\$BRANCH_WRITER_TOKEN\"; }; f"
           git switch -c "$branch"
           git add -A
           git commit -m "chore: sync standards from upstream"
           git push --set-upstream origin "$branch"
           git config --unset credential.helper
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+
+      # `gh pr create` is left to default `--base` to the repository's default
+      # branch: the `schedule` event carries no payload, so expressions like
+      # `github.event.repository.default_branch` are empty here. Only the
+      # non-secret branch name crosses from the writer-token process.
+      - name: Open a pull request if the mirror changed
+        if: steps.mirror.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.pr-token.outputs.token }}
+        run: |
           gh pr create \
-            --head "$branch" \
+            --head "${{ steps.sync-branch.outputs.branch }}" \
             --title "chore: sync standards from upstream" \
             --body "Automated sync from davidvornholt/standards. These are canonical (read-only) files. Before merging, check out this sync branch; remove \`allow_merge_commit\`, \`allow_rebase_merge\`, and \`allow_squash_merge\` from \`.github/settings.local.json\` if that repo-owned seam still declares them; run \`bun standards github --apply\` with admin auth; push any seam cleanup; and wait for or rerun the GitHub settings gate. Merge only after every required check passes. Generated by the \`Standards sync\` workflow."

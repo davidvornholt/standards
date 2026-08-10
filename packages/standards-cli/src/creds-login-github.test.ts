@@ -40,6 +40,7 @@ describe('GitHub App manifest flow', () => {
       issues: 'write',
       metadata: 'read',
       pull_requests: 'write',
+      workflows: 'write',
     });
   });
 

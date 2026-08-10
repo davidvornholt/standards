@@ -29,10 +29,10 @@ describe('automatic sync credential policy', () => {
     removeBrokerCredentials(consumer);
     const problems = await collectStructureProblems(consumer, 'consumer');
     expect(problems).toContain(
-      'secrets/ci.yaml: missing required key "ci.broker_app.app_id" — the synced Standards sync workflow mints its pull request token from ci.broker_app; provision it with "bun standards creds add github --dest ci:ci.broker_app"',
+      'secrets/ci.yaml: missing required key "ci.broker_app.app_id" — the synced Standards sync workflow mints a branch token with Contents write and Workflows write plus a pull request token with Contents read and Pull requests write from ci.broker_app; provision it with "bun standards creds add github --dest ci:ci.broker_app"',
     );
     expect(problems).toContain(
-      'secrets/ci.yaml: missing required key "ci.broker_app.private_key" — the synced Standards sync workflow mints its pull request token from ci.broker_app; provision it with "bun standards creds add github --dest ci:ci.broker_app"',
+      'secrets/ci.yaml: missing required key "ci.broker_app.private_key" — the synced Standards sync workflow mints a branch token with Contents write and Workflows write plus a pull request token with Contents read and Pull requests write from ci.broker_app; provision it with "bun standards creds add github --dest ci:ci.broker_app"',
     );
   });
 
