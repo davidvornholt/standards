@@ -126,8 +126,18 @@ describe('Standards sync broker documentation contract', () => {
 
   it('keeps the workflow repair bootstrap policy-aware', () => {
     const rootReadme = readFileSync(join(ACTUAL_UPSTREAM, 'README.md'), 'utf8');
+    const upgrade =
+      'First upgrade the exact `@davidvornholt/standards` dependency and `bun.lock` to at least 0.21.0 with Bun.';
+    const trackingMain = 'A tracking-main consumer';
+    const pinned = 'A pinned consumer';
 
-    expect(rootReadme).toContain('A tracking-main consumer');
+    expect(rootReadme).toContain(upgrade);
+    expect(rootReadme.indexOf(upgrade)).toBeLessThan(
+      rootReadme.indexOf(trackingMain),
+    );
+    expect(rootReadme.indexOf(upgrade)).toBeLessThan(
+      rootReadme.indexOf(pinned),
+    );
     expect(rootReadme).toContain(
       'A pinned consumer first updates the checked-in `sync-standards.local.json.ref`',
     );
