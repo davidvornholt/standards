@@ -1,4 +1,9 @@
+import { isDeepStrictEqual } from 'node:util';
 import { yamlContract } from './image-promotion-reference-contract-test-support';
+import {
+  isLegacyAppState,
+  isValidAppState,
+} from './image-promotion-reference-state-test-support';
 import type {
   AppState,
   Metadata,
@@ -14,25 +19,30 @@ type MetadataContract = {
   readonly metadataFields: ReadonlyArray<keyof Metadata>;
   readonly operations: Readonly<
     Record<
-      'bootstrap' | 'disable' | 'metadata' | 'remove' | 'trustedPromotion',
+      | 'accessMigration'
+      | 'bootstrap'
+      | 'disable'
+      | 'metadata'
+      | 'remove'
+      | 'trustedPromotion',
       string
     >
   >;
 };
-export type Images = Readonly<Record<string, AppState>>;
+export type Images = Readonly<Record<string, unknown>>;
 export type MetadataOperation = keyof MetadataContract['operations'];
 export const metadataContract = yamlContract<MetadataContract>(
   'metadata-transition',
 );
 
 const equal = (left: unknown, right: unknown): boolean =>
-  JSON.stringify(left) === JSON.stringify(right);
+  isDeepStrictEqual(left, right);
 const metadataOf = (app: AppState): Metadata =>
   Object.fromEntries(
     metadataContract.metadataFields.map((field) => [field, app[field]]),
   ) as Metadata;
-const disabled = (app: AppState | undefined): boolean =>
-  app !== undefined &&
+const disabled = (app: unknown): app is AppState =>
+  isValidAppState(app) &&
   app.promotionEnabled === metadataContract.disabledPin.promotionEnabled &&
   app.digest === metadataContract.disabledPin.digest &&
   app.promotedSourceSha === metadataContract.disabledPin.promotedSourceSha;
@@ -46,6 +56,40 @@ const otherAppsUnchanged = (
   return equal(omit(before), omit(after));
 };
 
+const isPlainRecord = (value: unknown): value is Images =>
+  typeof value === 'object' &&
+  value !== null &&
+  !Array.isArray(value) &&
+  Object.getPrototypeOf(value) === Object.prototype;
+
+const allAppsValid = (images: Images): boolean =>
+  Object.values(images).every(isValidAppState);
+
+const validAccessMigration = (before: Images, after: Images): boolean => {
+  const names = Object.keys(before);
+  if (!equal([...names].sort(), Object.keys(after).sort())) {
+    return false;
+  }
+  let migrated = false;
+  for (const name of names) {
+    const current = before[name];
+    const next = after[name];
+    if (isLegacyAppState(current)) {
+      if (!isValidAppState(next)) {
+        return false;
+      }
+      const { registryAccess: _registryAccess, ...finalWithoutAccess } = next;
+      if (!equal(current, finalWithoutAccess)) {
+        return false;
+      }
+      migrated = true;
+    } else if (!(isValidAppState(current) && equal(current, next))) {
+      return false;
+    }
+  }
+  return migrated;
+};
+
 export const validMetadataTransition = ({
   after,
   app,
@@ -54,9 +98,9 @@ export const validMetadataTransition = ({
   operation,
   trustedProof,
 }: {
-  readonly after: Images;
+  readonly after: unknown;
   readonly app: string;
-  readonly before: Images;
+  readonly before: unknown;
   readonly changedFiles: ReadonlyArray<string>;
   readonly operation: MetadataOperation;
   readonly trustedProof: boolean;
@@ -64,9 +108,19 @@ export const validMetadataTransition = ({
   if (
     !(
       equal(changedFiles, [metadataContract.imagesPath]) &&
-      otherAppsUnchanged(before, after, app)
+      isPlainRecord(before) &&
+      isPlainRecord(after)
     )
   ) {
+    return false;
+  }
+  if (operation === 'accessMigration') {
+    return validAccessMigration(before, after);
+  }
+  if (!otherAppsUnchanged(before, after, app)) {
+    return false;
+  }
+  if (!(allAppsValid(before) && allAppsValid(after))) {
     return false;
   }
   const current = before[app];
@@ -76,16 +130,17 @@ export const validMetadataTransition = ({
   }
   if (operation === 'disable') {
     return (
-      current?.promotionEnabled === true &&
+      isValidAppState(current) &&
+      current.promotionEnabled === true &&
       disabled(next) &&
-      equal(metadataOf(current), metadataOf(next as AppState))
+      equal(metadataOf(current), metadataOf(next))
     );
   }
   if (operation === 'metadata') {
     return (
       disabled(current) &&
       disabled(next) &&
-      !equal(metadataOf(current as AppState), metadataOf(next as AppState))
+      !equal(metadataOf(current), metadataOf(next))
     );
   }
   if (operation === 'remove') {
@@ -95,9 +150,10 @@ export const validMetadataTransition = ({
     operation === 'trustedPromotion' &&
     trustedProof &&
     disabled(current) &&
-    next?.promotionEnabled === true &&
+    isValidAppState(next) &&
+    next.promotionEnabled === true &&
     typeof next.digest === 'string' &&
     typeof next.promotedSourceSha === 'string' &&
-    equal(metadataOf(current as AppState), metadataOf(next))
+    equal(metadataOf(current), metadataOf(next))
   );
 };

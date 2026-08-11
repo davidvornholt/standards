@@ -1,8 +1,10 @@
 import { yamlContract } from './image-promotion-reference-contract-test-support';
+import { isValidAppState } from './image-promotion-reference-state-test-support';
 
 export type Metadata = {
   readonly imageRepository: string;
   readonly promotionLatencyMinutes: number;
+  readonly registryAccess: 'public' | 'private';
   readonly sourceRef: string;
   readonly sourceRepository: string;
   readonly sourceWorkflow: { readonly id: number; readonly path: string };
@@ -68,6 +70,7 @@ export const writerContract = yamlContract<WriterContract>('writer-provenance');
 export const metadata: Metadata = {
   imageRepository: 'ghcr.io/example/app/web',
   promotionLatencyMinutes: 30,
+  registryAccess: 'private',
   sourceRef: 'refs/heads/main',
   sourceRepository: 'example/app',
   sourceWorkflow: { id: 123_456, path: '.github/workflows/build.yml' },
@@ -125,6 +128,7 @@ export const announce = ({
 }): ModelResult => {
   if (
     !(
+      isValidAppState(state.app) &&
       exactProof(candidate, proof) &&
       metadataMatches(state.app, candidate) &&
       evidencePasses(evidence)

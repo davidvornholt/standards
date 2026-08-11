@@ -1,6 +1,6 @@
 # Image promotion (source repo to infra home)
 
-When an app's infrastructure home is a dedicated infra repo, deployment freshness is automation-owned: the source repo announces every successful public-image build, and the home repo's trusted writer proposes the desired-state change. Never edit a live pin by hand or treat either PR merge as deployment completion.
+When an app's infrastructure home is a dedicated infra repo, deployment freshness is automation-owned: the source repo announces every successful image build, and the home repo's trusted writer proposes the desired-state change. Never edit a live pin by hand or treat either PR merge as deployment completion.
 
 **Completion invariant:** a source change is done only when the exact infra merge SHA has passed its fail-closed gate and every required target has returned a healthy readback of the expected digest. A failed or partial activation is incomplete; report it instead of attempting automatic cross-system rollback.
 
@@ -21,6 +21,7 @@ The home repo owns one `images.json` (`infra/images.json`, or root `images.json`
       "id": 123456
     },
     "imageRepository": "ghcr.io/example/app/web",
+    "registryAccess": "private",
     "trackedTag": "main",
     "promotionLatencyMinutes": 30,
     "promotionEnabled": true,
@@ -30,7 +31,7 @@ The home repo owns one `images.json` (`infra/images.json`, or root `images.json`
 }
 ```
 
-`sourceWorkflow.path` and `sourceWorkflow.id` bind the immutable authorized Actions workflow; a different successful workflow with a job named `build` is not evidence. Derive production references only as `imageRepository@digest`. `images.json` is the single declarative state owner being converged, not a third credential ledger of the kind rejected by `CREDS-CLOUDFLARE-001`.
+`sourceWorkflow.path` and `sourceWorkflow.id` bind the immutable authorized Actions workflow; a different successful workflow with a job named `build` is not evidence. `registryAccess` is required metadata with exactly two values: `public` requires anonymous manifest access, while `private` requires exact provider visibility `private`, anonymous denial, and authenticated workflow and host access. Every reader first requires a plain object document root, then validates each complete object at runtime: the exact metadata and pin key sets, a GHCR repository, the access enum, and valid paired pins. Arrays, primitives, prototype-bearing objects, unknown fields, and authentication material fail closed. Derive production references only as `imageRepository@digest`. `images.json` is the single declarative state owner being converged, not a third credential ledger of the kind rejected by `CREDS-CLOUDFLARE-001`; it never contains a credential, secret path, username, or authentication-file path.
 
 ## Source side: bind and announce the build
 
@@ -107,20 +108,36 @@ Supersession deliberately gives up the older candidate as an immediate availabil
 
 An approved rollback has a distinct operation identity, protected-environment approval, non-empty reason, operator, and exact ancestor/digest proof. It always opens a new audited PR and deploys again, including when its target was promoted previously.
 
-The trusted provenance check revalidates App-bot author, canonical same-repository branch, marker and payload, exact run proof, exact resulting object, current-main ancestry, merge-group execution, and an `images.json`-only diff. It runs on the merge candidate and every condition fails closed.
+Before branch creation, the writer runs the shared registry-access proof against the exact `imageRepository@digest`. Public proof resolves that digest anonymously. Private proof queries the exact GHCR package path and requires provider visibility `private`, denies anonymous resolution, and resolves the same digest with the job token. Missing package grants, inaccessible provider visibility, `internal` visibility, and any path or digest mismatch fail before a branch exists.
+
+The trusted provenance check revalidates App-bot author, canonical same-repository branch, marker and payload, exact run proof, exact registry-access proof, exact resulting object, current-main ancestry, merge-group execution, and an `images.json`-only diff. It runs on the merge candidate and every condition fails closed.
 
 ## Bootstrap and metadata transitions
 
 Reviewed metadata changes operate on full `images.json` state. Adoption adds only a disabled app with both pins null. A live app must first be disabled and both pins cleared without changing metadata; a later PR may change metadata or remove the app, without unrelated app or file edits. Only a subsequent trusted first promotion may enable and pin an adopted or changed app. Deployment rejects absent, disabled, or partially pinned required apps before mutation.
 
+The `registryAccess` hard cutover has one document-wide migration operation for an existing legacy `images.json`. Its before-state decoder accepts exact legacy entries only for this operation. In one atomic change, every legacy entry gains `registryAccess: public|private`, already-final entries remain semantically unchanged, and no pin, existing metadata value, app membership, or other file may change; object-key order is irrelevant. The complete after document must pass the strict final decoder, and every other operation rejects the legacy shape. This is a one-time durable-config migration, not an optional field or compatibility alias.
+
+Private host adoption has a separate two-stage boundary that runs before private metadata or promotion can require a pull. First deploy the SOPS secret, login unit, explicit auth files, and container-unit environment while a new app remains disabled or the existing app remains public. Read back the decrypted secret presence, successful login unit, and root-only private auth file. Only a later reviewed metadata change and trusted promotion may select `private` and require private pre-pull. The same sequence applies to a new private app and a public-to-private migration; an old host never has to pull a private image to install the credential plumbing needed for that pull.
+
 ## Deploy, completion, and drift
 
-The deploy workflow serializes production without cancellation. Its deploy job depends on a successful gate for exact `github.sha`. Immediately before its first mutation it requires checkout, gated, event, and current remote-main SHAs to be identical, so an old queued run performs zero mutations. It derives full references from the gated `images.json`; every activation must pass exact registry-digest and health readback, followed by all OpenTofu postconditions.
+The deploy workflow serializes production without cancellation. Its deploy job depends on a successful gate for exact `github.sha`. Immediately before its first mutation it requires checkout, gated, event, and current remote-main SHAs to be identical, then reruns the shared exact repository/digest registry-access proof from the gated `images.json`. A queued run therefore performs zero mutations when main moved, visibility changed, anonymous access changed, or the job token lost its package grant. It derives full references from the gated `images.json`; every activation must pass exact registry-digest and health readback, followed by all OpenTofu postconditions.
 
 Completion filters merged PRs before uniqueness, then authenticates the App bot, canonical same-repository branch, `images.json`-only file set, successful trusted provenance check, and exact resulting pin at the merge SHA. Open and closed marker copies are ignored; forged or multiple merged candidates fail closed. The exact merge-SHA deploy and its one successful deploy job are required.
 
-The scheduled detector has only Contents read and anonymous public-GHCR access. It records initial desired and observed tag digests. Only an unchanged mismatch after a complete latency window fails; movement of either value starts a new window. It never writes.
+The scheduled detector has Contents read and Packages read through its per-job `GITHUB_TOKEN`. It records initial desired and observed tag digests. A public entry resolves anonymously and fails when anonymous access stops working. A private entry queries the GitHub package API for the exact package path and fails unless visibility is exactly `private`; inability to read visibility also fails. It then proves anonymous denial and resolves the same digest with the workflow token; grant the infrastructure repository read access in that package's Actions access settings. `internal` is not private: broader organization or enterprise access fails the declared mode even though anonymous access is denied. Missing package access, a package that became public, an invalid access mode, or any registry error fails closed. Only an unchanged mismatch after a complete latency window fails; movement of either value starts a new window. The detector never writes and never decrypts a durable registry credential.
+
+## Private GHCR host access
+
+GitHub-hosted workflows authenticate private GHCR reads with their job-scoped `GITHUB_TOKEN`; a standalone host cannot. A host with any `private` entry keeps one classic GitHub PAT with the sole scope `read:packages` in its SOPS-encrypted host target at `registry.github_token`. The corresponding GitHub username is non-secret configuration. This is scope-minimal, not package-resource-minimal: the PAT can read every private package its owning account may read, and future account grants widen the host's authority. The infrastructure repo must either name a dedicated package-reader identity whose grants are limited to the host's declared packages or record an explicit acceptance of the account-wide readable-package blast radius. Do not store the PAT in `images.json`, a Nix expression, the Nix store, a workflow secret, or a GitHub App private key on the host.
+
+A `podman-ghcr-login` oneshot reads the SOPS path through stdin and atomically replaces `/run/containers/auth/ghcr-private.json`: it logs in to a same-directory `0600` temporary file, renames it only after success, and never passes the PAT as an argument. The SOPS declaration for `registry.github_token` includes `restartUnits = [ "podman-ghcr-login.service" ]`, so activating a replacement refreshes Podman's copied state. Every private-image migration and container unit orders after and requires that login unit. Its pre-pull and unit environment set `REGISTRY_AUTH_FILE` to the private path, and every explicit Podman registry command also passes `--authfile` with that path.
+
+Activation also creates `/run/containers/auth/anonymous.json` as a root-owned `0600` file containing exactly `{"auths":{}}`. Every public pre-pull, migration, and container unit sets `REGISTRY_AUTH_FILE` to that file, and explicit pulls also pass `--authfile` with it. An explicit auth file prevents fallback to Podman's ambient auth and `~/.docker/config.json`; valid, invalid, or stale private credentials therefore cannot affect a public cached or uncached pull. Public units have no login dependency, while private units never receive the anonymous file.
+
+Rotation is replace, refresh, verify, revoke: create a replacement classic PAT with only `read:packages`; re-check which intended and unrelated packages its owner can read; atomically replace `registry.github_token` in the SOPS host target; deploy and read back the restarted login unit and exact private auth file; then force an uncached authenticated digest lookup or pull with `REGISTRY_AUTH_FILE` and `--authfile` both naming that file. Revoke the old PAT only after the replacement succeeds from that exact state. GitHub provides no broker API for classic package PAT creation or rotation, so this credential is a documented manual exception to `bun standards creds`; `creds plan` and `creds apply` never claim to manage it.
 
 ## Adoption boundary
 
-This contract supports public GHCR images only. Prove the tracked manifest anonymously readable and record that adoption publishes layers even for a private source repository. If that is unacceptable, document the opt-out. Private-image promotion with least-privilege pull credentials and rotation is a designed follow-up, not an undocumented variant.
+This contract supports public and private GHCR images. Choose `registryAccess` explicitly during disabled adoption and prove that access mode before the first trusted promotion. Source-repository API access remains a separate plane: a private source repository uses the existing broker App's short-lived Actions-read token for provenance and drift timing, never the registry PAT. Registries other than GHCR and private-image credentials other than the host `read:packages` PAT are out of scope and require a new reviewed contract.

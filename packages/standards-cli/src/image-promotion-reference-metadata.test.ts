@@ -30,6 +30,10 @@ const changedMetadata = {
   ...metadata,
   trackedTag: 'production',
 };
+const changedRegistryAccess = {
+  ...metadata,
+  registryAccess: 'public' as const,
+};
 const transition = ({
   after,
   before,
@@ -42,6 +46,7 @@ const transition = ({
   readonly changedFiles?: ReadonlyArray<string>;
   readonly operation:
     | 'bootstrap'
+    | 'accessMigration'
     | 'disable'
     | 'metadata'
     | 'remove'
@@ -131,6 +136,13 @@ it('requires disable and clear before metadata change or removal', () => {
   ).toBeTrue();
   expect(
     transition({ after: { other }, before: changed, operation: 'remove' }),
+  ).toBeTrue();
+  expect(
+    transition({
+      after: { other, web: disabledApp(changedRegistryAccess) },
+      before: cleared,
+      operation: 'metadata',
+    }),
   ).toBeTrue();
 });
 
