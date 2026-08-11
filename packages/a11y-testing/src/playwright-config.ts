@@ -1,5 +1,6 @@
 import process from 'node:process';
-import { defineConfig, devices } from '@playwright/test';
+
+const playwright = await import('@playwright/test');
 
 const a11ySpecPattern = /.*\.a11y\.ts/u;
 
@@ -9,7 +10,7 @@ export const createA11yPlaywrightConfig = (options: {
 }) => {
   const isCi = process.env.CI !== undefined;
 
-  return defineConfig({
+  return playwright.defineConfig({
     testDir: './a11y',
     testMatch: a11ySpecPattern,
     fullyParallel: true,
@@ -28,11 +29,11 @@ export const createA11yPlaywrightConfig = (options: {
     projects: [
       {
         name: 'desktop-chromium',
-        use: { ...devices['Desktop Chrome'] },
+        use: { ...playwright.devices['Desktop Chrome'] },
       },
       {
         name: 'mobile-chromium',
-        use: { ...devices['Pixel 7'] },
+        use: { ...playwright.devices['Pixel 7'] },
       },
     ],
   });
