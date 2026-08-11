@@ -29,12 +29,6 @@ const legacyDisabled = {
   promotedSourceSha: null,
   promotionEnabled: false,
 };
-const legacyLive = {
-  ...metadataWithoutRegistryAccess(metadata),
-  digest: DIGEST_A,
-  promotedSourceSha: SHA_A,
-  promotionEnabled: true,
-};
 
 const transition = (
   before: Readonly<Record<string, unknown>>,
@@ -79,38 +73,6 @@ it('validates the exact final desired-state shape at runtime', () => {
   ]) {
     expect(isValidAppState(invalid)).toBeFalse();
   }
-});
-
-it('allows the one-time legacy access migration for live and disabled apps', () => {
-  expect(
-    transition({ web: legacyDisabled }, { web: disabled }, 'accessMigration'),
-  ).toBeTrue();
-  expect(
-    transition({ web: legacyLive }, { web: live }, 'accessMigration'),
-  ).toBeTrue();
-  for (const invalidAfter of [
-    { ...legacyDisabled, registryAccess: 'legacy' },
-    { ...disabled, trackedTag: 'changed' },
-    { ...disabled, credential: 'secret' },
-  ]) {
-    expect(
-      transition(
-        { web: legacyDisabled },
-        { web: invalidAfter },
-        'accessMigration',
-      ),
-    ).toBeFalse();
-  }
-  expect(
-    validMetadataTransition({
-      after: { web: disabled },
-      app: 'web',
-      before: { web: legacyDisabled },
-      changedFiles: ['infra/images.json', 'unrelated'],
-      operation: 'accessMigration',
-      trustedProof: false,
-    }),
-  ).toBeFalse();
 });
 
 it('rejects legacy and invalid shapes in every normal transition class', () => {

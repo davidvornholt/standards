@@ -70,7 +70,7 @@ pinFields: [promotionEnabled, digest, promotedSourceSha]
 disabledPin: { promotionEnabled: false, digest: null, promotedSourceSha: null }
 operations:
   bootstrap: absent-to-disabled
-  accessMigration: legacy-to-explicit-access-only
+  accessMigration: legacy-document-to-explicit-access-only
   disable: live-to-disabled-with-metadata-unchanged
   metadata: disabled-to-disabled
   remove: disabled-to-absent
