@@ -133,7 +133,7 @@ describe('canonical SOPS secret action script behavior', () => {
   // the only outcome an interface can ask for.
   it('offers no interface for substituting an unresolvable secret', () => {
     const action = parseYaml(readFileSync(SOPS_ACTION, 'utf8')) as {
-      readonly inputs: Record<string, unknown>;
+      readonly inputs: Record<string, { readonly default?: unknown }>;
       readonly outputs?: Record<string, unknown>;
     };
 
@@ -142,7 +142,9 @@ describe('canonical SOPS secret action script behavior', () => {
       'env-name',
       'secret-file',
       'secret-key',
+      'secret-root',
     ]);
+    expect(action.inputs['secret-root'].default).toBe('ci');
     expect(action.outputs).toBeUndefined();
   });
 });
@@ -160,6 +162,25 @@ describe('caller configuration errors', () => {
     );
     expect(actionRun.result.stderr).toBe('');
     // Rejected before any network or decrypt work happens.
+    expect(actionRun.curlCalled).toBe(false);
+    expect(actionRun.sopsExecuted).toBe(false);
+  });
+
+  it.each([
+    '',
+    'root',
+    '.ci',
+    'production\n',
+  ])('rejects invalid secret-root %j before network or decrypt work', (secretRoot) => {
+    const actionRun = runSopsAction({ secretRoot });
+
+    expect(actionRun.result.status).toBe(1);
+    expect(actionRun.environment).toBe('');
+    expect(actionRun.output).toBe('');
+    expect(actionRun.result.stdout).toBe(
+      '::error::secret-root must be ci or document\n',
+    );
+    expect(actionRun.result.stderr).toBe('');
     expect(actionRun.curlCalled).toBe(false);
     expect(actionRun.sopsExecuted).toBe(false);
   });

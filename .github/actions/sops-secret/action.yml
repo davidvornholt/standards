@@ -8,8 +8,12 @@ inputs:
   secret-file:
     description: SOPS-encrypted YAML file
     required: true
+  secret-root:
+    description: Mapping from which secret-key resolves; ci or document
+    required: false
+    default: ci
   secret-key:
-    description: Direct key or dotted path to resolve from the decrypted ci mapping
+    description: Direct key or dotted path to resolve from the selected mapping
     required: true
   env-name:
     description: Environment variable to export for later workflow steps
@@ -24,6 +28,7 @@ runs:
       env:
         SOPS_AGE_KEY: ${{ inputs.age-key }}
         SOPS_SECRET_FILE: ${{ inputs.secret-file }}
+        SOPS_SECRET_ROOT: ${{ inputs.secret-root }}
         SOPS_SECRET_KEY: ${{ inputs.secret-key }}
         SOPS_ENV_NAME: ${{ inputs.env-name }}
       run: |
@@ -33,6 +38,14 @@ runs:
           echo "::error::env-name must be a valid environment variable name"
           exit 1
         fi
+        case "$SOPS_SECRET_ROOT" in
+          ci) secret_path="ci.$SOPS_SECRET_KEY" ;;
+          document) secret_path="$SOPS_SECRET_KEY" ;;
+          *)
+            echo "::error::secret-root must be ci or document"
+            exit 1
+            ;;
+        esac
 
         decrypted_file=$(mktemp "$RUNNER_TEMP/sops-secret-decrypted.XXXXXX")
         value_file=$(mktemp "$RUNNER_TEMP/sops-secret-value.XXXXXX")
@@ -73,18 +86,20 @@ runs:
                     else { found: false, value: null }
                     end
                   );
+                def selected_root:
+                  if $secret_root == "ci" then .ci else . end;
                 def resolve:
-                  if (.ci | type) != "object" then
+                  selected_root as $root
+                  | if ($root | type) != "object" then
                     { status: "missing", value: null }
                   else
-                    .ci as $ci
-                    | ($key | split(".")) as $path
-                    | ($ci | has($key)) as $has_direct
-                    | descend($ci; $path) as $nested
+                    ($key | split(".")) as $path
+                    | ($root | has($key)) as $has_direct
+                    | descend($root; $path) as $nested
                     | if ($path | length) > 1 and $has_direct and $nested.found then
                         { status: "ambiguous", value: null }
                       elif $has_direct then
-                        { status: "found", value: $ci[$key] }
+                        { status: "found", value: $root[$key] }
                       elif $nested.found then
                         { status: "found", value: $nested.value }
                       else
@@ -98,27 +113,27 @@ runs:
                   end;
                 resolve
               '
-              if ! lookup_status=$(jq -r --arg key "$SOPS_SECRET_KEY" "$lookup_filter | .status" "$decrypted_file"); then
-                reason="Resolving ci.$SOPS_SECRET_KEY from $SOPS_SECRET_FILE failed"
+              if ! lookup_status=$(jq -r --arg key "$SOPS_SECRET_KEY" --arg secret_root "$SOPS_SECRET_ROOT" "$lookup_filter | .status" "$decrypted_file"); then
+                reason="Resolving $secret_path from $SOPS_SECRET_FILE failed"
               else
                 case "$lookup_status" in
                   found)
-                    jq -j --arg key "$SOPS_SECRET_KEY" "$lookup_filter | .value" "$decrypted_file" > "$value_file"
+                    jq -j --arg key "$SOPS_SECRET_KEY" --arg secret_root "$SOPS_SECRET_ROOT" "$lookup_filter | .value" "$decrypted_file" > "$value_file"
                     ;;
                   missing)
-                    reason="ci.$SOPS_SECRET_KEY is missing in $SOPS_SECRET_FILE"
+                    reason="$secret_path is missing in $SOPS_SECRET_FILE"
                     ;;
                   ambiguous)
-                    reason="ci.$SOPS_SECRET_KEY is ambiguous because both a direct key and nested path exist in $SOPS_SECRET_FILE"
+                    reason="$secret_path is ambiguous because both a direct key and nested path exist in $SOPS_SECRET_FILE"
                     ;;
                   non-string)
-                    reason="ci.$SOPS_SECRET_KEY is not a string in $SOPS_SECRET_FILE"
+                    reason="$secret_path is not a string in $SOPS_SECRET_FILE"
                     ;;
                   empty)
-                    reason="ci.$SOPS_SECRET_KEY is empty in $SOPS_SECRET_FILE"
+                    reason="$secret_path is empty in $SOPS_SECRET_FILE"
                     ;;
                   *)
-                    reason="Resolving ci.$SOPS_SECRET_KEY from $SOPS_SECRET_FILE returned an unknown status"
+                    reason="Resolving $secret_path from $SOPS_SECRET_FILE returned an unknown status"
                     ;;
                 esac
               fi

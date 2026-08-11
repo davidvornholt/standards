@@ -8,6 +8,29 @@ const runSopsAction = createSopsActionRunner(process.env);
 afterEach(cleanupTmpDirs);
 
 describe('nested SOPS secret action values', () => {
+  it('keeps resolving from the ci mapping by default', () => {
+    const actionRun = runSopsAction({
+      secretKey: 'github.app_id',
+      sopsOutput:
+        '{"github":{"app_id":"root-value"},"ci":{"github":{"app_id":"ci-value"}}}',
+    });
+
+    expect(actionRun.result.status).toBe(0);
+    expect(actionRun.environment).toBe('GH_TOKEN=ci-value\n');
+  });
+
+  it('resolves a purpose-shaped path from the decrypted document root', () => {
+    const actionRun = runSopsAction({
+      secretKey: 'github.fesk_source_app.app_id',
+      secretRoot: 'document',
+      sopsOutput:
+        '{"github":{"fesk_source_app":{"app_id":"purpose-app-id"}},"ci":{"github":{"fesk_source_app":{"app_id":"legacy-app-id"}}}}',
+    });
+
+    expect(actionRun.result.status).toBe(0);
+    expect(actionRun.environment).toBe('GH_TOKEN=purpose-app-id\n');
+  });
+
   it('transports and masks a multiline broker private key without a secret output', () => {
     const privateKey =
       '-----BEGIN RSA PRIVATE KEY-----\nkey\n-----END RSA PRIVATE KEY-----\n';
