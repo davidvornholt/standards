@@ -1,6 +1,6 @@
 import process from 'node:process';
 import AxeBuilder from '@axe-core/playwright';
-import type { Page } from '@playwright/test';
+import type * as playwright from '@playwright/test';
 
 export const wcag22AaTags: ReadonlyArray<string> = [
   'wcag2a',
@@ -33,7 +33,7 @@ const reactStreamingPlaceholders = ['P:', 'B:']
 const structuralSettleMilliseconds = 250;
 const structuralSettleDeadlineMilliseconds = 10_000;
 
-const waitForStreamedDom = async (page: Page): Promise<void> => {
+const waitForStreamedDom = async (page: playwright.Page): Promise<void> => {
   await page.waitForFunction(
     (selector) => document.querySelector(selector) === null,
     reactStreamingPlaceholders,
@@ -83,7 +83,7 @@ const waitForStreamedDom = async (page: Page): Promise<void> => {
 };
 
 export const scanWcag22AaViolations = async (
-  page: Page,
+  page: playwright.Page,
 ): Promise<ReadonlyArray<AccessibilityViolation>> => {
   await waitForStreamedDom(page);
   const results = await new AxeBuilder({ page })
