@@ -16,6 +16,15 @@ const SOPS_SOURCE_CONTRACTS = [
 ] as const;
 type SopsSource = (typeof SOPS_SOURCE_CONTRACTS)[number][0];
 const SOPS_SOURCES = SOPS_SOURCE_CONTRACTS.map(([source]) => source);
+const NON_AGE_SOURCE_NAMES = [
+  'azure_kv',
+  'azure_keyvault',
+  'gcp_kms',
+  'hc_vault',
+  'hc_vault_transit_uri',
+  'kms',
+  'pgp',
+] as const;
 const SOPS_SOURCE_FIELDS = new Map<SopsSource, ReadonlyArray<string>>(
   SOPS_SOURCE_CONTRACTS,
 );
@@ -143,4 +152,23 @@ export const sopsAgeRecipients = (value: unknown): ReadonlyArray<string> => {
         )
       : []),
   ];
+};
+
+const nonAgeSourcesFromMapping = (value: unknown): ReadonlyArray<string> =>
+  isRecord(value)
+    ? NON_AGE_SOURCE_NAMES.filter((source) => value[source] !== undefined)
+    : [];
+
+export const sopsNonAgeSources = (value: unknown): ReadonlyArray<string> => {
+  if (!isRecord(value)) {
+    return [];
+  }
+  return [
+    ...new Set([
+      ...nonAgeSourcesFromMapping(value),
+      ...(Array.isArray(value.key_groups)
+        ? value.key_groups.flatMap(nonAgeSourcesFromMapping)
+        : []),
+    ]),
+  ].sort();
 };

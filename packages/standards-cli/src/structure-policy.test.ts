@@ -69,6 +69,30 @@ const PLANE_EVIDENCE = {
     event: 'issues',
   },
 } as const;
+const NON_AGE_METADATA_BLOCKS = [
+  [
+    'azure_kv',
+    '    azure_kv:\n        - vault_url: https://vault.example\n          name: key\n          version: one\n          created_at: "2026-08-05T00:00:00Z"\n          enc: recipient-envelope',
+  ],
+  ['azure_keyvault', '    azure_keyvault:\n        - test'],
+  [
+    'gcp_kms',
+    '    gcp_kms:\n        - resource_id: projects/p/locations/l/keyRings/r/cryptoKeys/k\n          created_at: "2026-08-05T00:00:00Z"\n          enc: recipient-envelope',
+  ],
+  [
+    'hc_vault',
+    '    hc_vault:\n        - vault_address: https://vault.example\n          engine_path: transit\n          key_name: key\n          created_at: "2026-08-05T00:00:00Z"\n          enc: recipient-envelope',
+  ],
+  ['hc_vault_transit_uri', '    hc_vault_transit_uri:\n        - test'],
+  [
+    'kms',
+    '    kms:\n        - arn: arn:aws:kms:eu-west-1:123:key/test\n          created_at: "2026-08-05T00:00:00Z"\n          enc: recipient-envelope',
+  ],
+  [
+    'pgp',
+    '    pgp:\n        - created_at: "2026-08-05T00:00:00Z"\n          enc: recipient-envelope\n          fp: ABCDEF',
+  ],
+] as const;
 
 const metadataFor = (...recipients: ReadonlyArray<string>): string =>
   CI_SOPS_METADATA_YAML.replace(
@@ -79,6 +103,15 @@ const metadataFor = (...recipients: ReadonlyArray<string>): string =>
           `        - recipient: ${recipient}\n          enc: test-recipient-envelope`,
       )
       .join('\n'),
+  );
+
+const metadataWithNonAgeSource = (
+  recipient: string,
+  sourceBlock: string,
+): string =>
+  metadataFor(recipient).replace(
+    '    version: 3.9.0',
+    `${sourceBlock}\n    version: 3.9.0`,
   );
 
 const writeIsolationRules = (consumer: string): void => {
@@ -398,6 +431,72 @@ describe('automatic sync credential policy', () => {
     );
   });
 
+  it('rejects a full consumer whose purpose plane reuses its legacy recipient', async () => {
+    const consumer = buildConsumer();
+    const automation = { ...AUTOMATION, ageRecipient: LEGACY_RECIPIENT };
+    const policy = { automation, recoveryAgeRecipients: [] };
+    write(consumer, 'sync-standards.local.json', JSON.stringify(policy));
+    writeIsolationProof(consumer, policy);
+    write(
+      consumer,
+      'secrets/standards-sync.yaml',
+      `ci:\n  github:\n    repository_app:\n      app_id: ${FAKE_ENC}\n      private_key: ${FAKE_ENC}\n${metadataFor(LEGACY_RECIPIENT)}`,
+    );
+    write(
+      consumer,
+      'secrets/standards-sync.example.yaml',
+      'ci:\n  github:\n    repository_app:\n      app_id: placeholder\n      private_key: placeholder\n',
+    );
+    write(
+      consumer,
+      '.sops.yaml',
+      `creation_rules:\n  - path_regex: secrets/standards-sync\\.yaml$\n    key_groups:\n      - age:\n          - ${LEGACY_RECIPIENT}\n`,
+    );
+
+    expect(await collectStructureProblems(consumer, 'consumer')).toContain(
+      'sync-standards.environment-proof.json: automation age recipient reuses a legacy CI decryptor identity',
+    );
+  });
+
+  it.each(
+    NON_AGE_METADATA_BLOCKS,
+  )('rejects %s from purpose-target SOPS metadata', async (source, sourceBlock) => {
+    const consumer = buildConsumer();
+    const policy = { automation: AUTOMATION, recoveryAgeRecipients: [] };
+    write(consumer, 'sync-standards.local.json', JSON.stringify(policy));
+    writeIsolationProof(consumer, policy);
+    writeAutomationCredentials(consumer);
+    writeIsolationRules(consumer);
+    write(
+      consumer,
+      'secrets/standards-sync.yaml',
+      `ci:\n  github:\n    repository_app:\n      app_id: ${FAKE_ENC}\n      private_key: ${FAKE_ENC}\n${metadataWithNonAgeSource(AUTOMATION.ageRecipient, sourceBlock)}`,
+    );
+
+    expect(await collectStructureProblems(consumer, 'consumer')).toContain(
+      `secrets/standards-sync.yaml: SOPS metadata must use age decryptors only; remove non-age source(s): ${source}`,
+    );
+  });
+
+  it.each(
+    NON_AGE_METADATA_BLOCKS,
+  )('rejects %s from a purpose-target creation rule', async (source) => {
+    const consumer = buildConsumer();
+    const policy = { automation: AUTOMATION, recoveryAgeRecipients: [] };
+    write(consumer, 'sync-standards.local.json', JSON.stringify(policy));
+    writeIsolationProof(consumer, policy);
+    writeAutomationCredentials(consumer);
+    write(
+      consumer,
+      '.sops.yaml',
+      `creation_rules:\n  - path_regex: secrets/standards-sync\\.yaml$\n    key_groups:\n      - age:\n          - ${AUTOMATION.ageRecipient}\n        ${source}:\n          - test\n`,
+    );
+
+    expect(await collectStructureProblems(consumer, 'consumer')).toContain(
+      `.sops.yaml: creation rule for secrets/standards-sync.yaml must use age decryptors only; remove non-age source(s): ${source}`,
+    );
+  });
+
   it('allows only explicitly declared personal recovery recipients beside a plane identity', async () => {
     const consumer = buildConsumer();
     const policy = {
@@ -447,6 +546,38 @@ describe('automatic sync credential policy', () => {
 
     expect(await collectStructureProblems(consumer, 'consumer')).toContain(
       'sync-standards.environment-proof.json "root" has invalid fields',
+    );
+  });
+
+  it('rejects organization proof without observable absent organization secret scope', async () => {
+    const consumer = buildConsumer();
+    const policy = { automation: AUTOMATION, recoveryAgeRecipients: [] };
+    write(consumer, 'sync-standards.local.json', JSON.stringify(policy));
+    writeIsolationProof(consumer, policy);
+    writeAutomationCredentials(consumer);
+    writeIsolationRules(consumer);
+    const proof = JSON.parse(
+      readFileSync(
+        join(consumer, 'sync-standards.environment-proof.json'),
+        'utf8',
+      ),
+    ) as {
+      repository: Record<string, unknown>;
+      planes: { automation: Record<string, unknown> };
+    };
+    proof.repository.ownerType = 'Organization';
+    proof.repository.private = true;
+    proof.repository.ownerPlan = 'team';
+    proof.repository.capability = 'paid-private-owner';
+    proof.planes.automation.organizationSecret = 'not-applicable';
+    write(
+      consumer,
+      'sync-standards.environment-proof.json',
+      JSON.stringify(proof),
+    );
+
+    expect(await collectStructureProblems(consumer, 'consumer')).toContain(
+      'sync-standards.environment-proof.json has invalid organization secret-scope evidence',
     );
   });
 });

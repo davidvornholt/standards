@@ -310,6 +310,7 @@
         "packages/standards-cli/src/github-diff.test.ts",
         "packages/standards-cli/src/github-settings.test.ts",
         "packages/standards-cli/src/automation-verify.test.ts",
+        "packages/standards-cli/src/automation-verify-test-support.ts",
         "packages/standards-cli/src/poller-tick.test.ts",
         "packages/standards-cli/src/poller-trust.test.ts",
         "packages/standards-cli/src/sops-secret-action-test-support.ts",

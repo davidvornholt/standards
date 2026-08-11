@@ -167,7 +167,7 @@ runs:
                 and (.branchPolicyIds | type == "array" and length == 1 and .[0] > 0)
                 and (.secretName == $policy.ageKeySecret)
                 and (.repositorySecretAbsent == true)
-                and (.organizationSecret | IN("absent", "not-applicable", "unobservable"))
+                and (.organizationSecret | IN("absent", "not-applicable"))
                 and (.ageRecipient == $policy.ageRecipient)
                 and ((has("delivery") | not) or (.delivery | delivery($policy)));
               type == "object"
@@ -186,11 +186,18 @@ runs:
               and .repository.ownerId == $owner_id
               and (.repository.fullName | ascii_downcase) == ($repo | ascii_downcase)
               and .repository.defaultBranch == "main"
+              and (.repository.ownerType | IN("Organization", "User"))
+              and (.repository.private | type == "boolean")
               and (.repository.capability | IN("paid-private-owner", "public-repository"))
               and (
                 if .repository.private
-                then .repository.capability == "paid-private-owner" and (.repository.ownerPlan | ascii_downcase) != "free" and .repository.ownerPlan != ""
-                else .repository.capability == "public-repository"
+                then .repository.capability == "paid-private-owner" and (
+                  if .repository.ownerType == "User"
+                  then .repository.ownerPlan == "pro"
+                  else (.repository.ownerPlan | IN("team", "business", "enterprise"))
+                  end
+                )
+                else .repository.capability == "public-repository" and .repository.ownerPlan == "not-required"
                 end
               )
               and (.planes | type == "object")
@@ -199,6 +206,14 @@ runs:
               and ((.planes | keys | length) == (($policy_automation != null) | if . then 1 else 0 end) + (($policy_notifications != null) | if . then 1 else 0 end))
               and (($policy_automation == null) or (.planes.automation | plane($policy_automation)))
               and (($policy_notifications == null) or (.planes.notifications | plane($policy_notifications)))
+              and (($policy_automation == null) or (.legacyAgeRecipients | index($policy_automation.ageRecipient) == null))
+              and (($policy_notifications == null) or (.legacyAgeRecipients | index($policy_notifications.ageRecipient) == null))
+              and (
+                if .repository.ownerType == "Organization"
+                then all(.planes[]; .organizationSecret == "absent")
+                else all(.planes[]; .organizationSecret == "not-applicable")
+                end
+              )
             ' \
               --argjson policy_automation "$(jq -c '.automation // null' sync-standards.local.json)" \
               --argjson policy_notifications "$(jq -c '.notifications // null' sync-standards.local.json)" \

@@ -3085,6 +3085,7 @@ describe('standards sync workflow ordering', () => {
 const runPolicyPreflight = (
   policy: string | undefined,
   legacy: Readonly<Record<string, string>> = {},
+  proofMutator?: (proof: Record<string, unknown>) => void,
 ): { result: RunResult; output: string } => {
   const fixture = mkTmp('sync-policy-');
   if (policy !== undefined) {
@@ -3114,36 +3115,38 @@ const runPolicyPreflight = (
           organizationSecret: 'not-applicable',
           ageRecipient: selected.ageRecipient,
         });
+        const proof = {
+          version: 1,
+          repository: {
+            id: 1,
+            ownerId: 2,
+            fullName: 'owner/repo',
+            private: false,
+            defaultBranch: 'main',
+            ownerType: 'User',
+            ownerPlan: 'not-required',
+            capability: 'public-repository',
+          },
+          policySha256: isolationPolicySha256(parsed),
+          capabilityObservedAt: observedAt,
+          observedAt,
+          legacyAgeRecipients: [
+            'age1legacyrecipient00000000000000000000000000000000000000',
+          ],
+          planes: {
+            ...(parsed.automation === undefined
+              ? {}
+              : { automation: plane(parsed.automation) }),
+            ...(parsed.notifications === undefined
+              ? {}
+              : { notifications: plane(parsed.notifications) }),
+          },
+        };
+        proofMutator?.(proof);
         write(
           fixture,
           'sync-standards.environment-proof.json',
-          JSON.stringify({
-            version: 1,
-            repository: {
-              id: 1,
-              ownerId: 2,
-              fullName: 'owner/repo',
-              private: false,
-              defaultBranch: 'main',
-              ownerType: 'User',
-              ownerPlan: 'not-required',
-              capability: 'public-repository',
-            },
-            policySha256: isolationPolicySha256(parsed),
-            capabilityObservedAt: observedAt,
-            observedAt,
-            legacyAgeRecipients: [
-              'age1legacyrecipient00000000000000000000000000000000000000',
-            ],
-            planes: {
-              ...(parsed.automation === undefined
-                ? {}
-                : { automation: plane(parsed.automation) }),
-              ...(parsed.notifications === undefined
-                ? {}
-                : { notifications: plane(parsed.notifications) }),
-            },
-          }),
+          JSON.stringify(proof),
         );
       }
     } catch {
@@ -3261,6 +3264,17 @@ describe('notification workflow policy', () => {
   });
 });
 
+const ISOLATED_AUTOMATION_POLICY = {
+  automation: {
+    environment: 'standards-sync',
+    ageKeySecret: 'STANDARDS_SYNC_SOPS_AGE_KEY',
+    secretTarget: 'standards-sync',
+    brokerAppKey: 'github.repository_app',
+    ageRecipient: 'age1automationrecipient000000000000000000000000000000000000',
+  },
+  recoveryAgeRecipients: [],
+} as const;
+
 describe('Standards workflow policy validation', () => {
   it.each(
     CONTROL_CHARACTER_CORPUS,
@@ -3327,6 +3341,58 @@ describe('Standards workflow policy validation', () => {
       'sync-standards.local.json must contain valid autoSync/ref fields and complete, isolated automation/notifications objects when present',
     );
     expect(output).toBe('');
+  });
+});
+
+describe('Standards workflow environment proof validation', () => {
+  it('rejects an organization proof whose organization secret scope was not observed absent', () => {
+    const { result } = runPolicyPreflight(
+      JSON.stringify(ISOLATED_AUTOMATION_POLICY),
+      {},
+      (proof) => {
+        const repository = proof.repository as Record<string, unknown>;
+        repository.private = true;
+        repository.ownerType = 'Organization';
+        repository.ownerPlan = 'team';
+        repository.capability = 'paid-private-owner';
+      },
+    );
+
+    expect(result.status).toBe(1);
+  });
+
+  it('rejects an unknown private organization plan in persisted workflow proof', () => {
+    const { result } = runPolicyPreflight(
+      JSON.stringify(ISOLATED_AUTOMATION_POLICY),
+      {},
+      (proof) => {
+        const repository = proof.repository as Record<string, unknown>;
+        const planes = proof.planes as {
+          automation: Record<string, unknown>;
+        };
+        repository.private = true;
+        repository.ownerType = 'Organization';
+        repository.ownerPlan = 'mystery';
+        repository.capability = 'paid-private-owner';
+        planes.automation.organizationSecret = 'absent';
+      },
+    );
+
+    expect(result.status).toBe(1);
+  });
+
+  it('rejects persisted workflow proof that reuses a legacy recipient', () => {
+    const { result } = runPolicyPreflight(
+      JSON.stringify(ISOLATED_AUTOMATION_POLICY),
+      {},
+      (proof) => {
+        proof.legacyAgeRecipients = [
+          ISOLATED_AUTOMATION_POLICY.automation.ageRecipient,
+        ];
+      },
+    );
+
+    expect(result.status).toBe(1);
   });
 });
 

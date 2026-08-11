@@ -42,7 +42,7 @@ export type EnvironmentPlaneProof = {
   readonly branchPolicyIds: ReadonlyArray<number>;
   readonly secretName: string;
   readonly repositorySecretAbsent: true;
-  readonly organizationSecret: 'absent' | 'not-applicable' | 'unobservable';
+  readonly organizationSecret: 'absent' | 'not-applicable';
   readonly ageRecipient: string;
   readonly delivery?: DeliveryProof;
 };
@@ -199,9 +199,7 @@ const parsePlane = (value: unknown, label: string): EnvironmentPlaneProof => {
     typeof value.ageRecipient !== 'string' ||
     hasControlCharacter(value.ageRecipient) ||
     value.repositorySecretAbsent !== true ||
-    !['absent', 'not-applicable', 'unobservable'].includes(
-      String(value.organizationSecret),
-    ) ||
+    !['absent', 'not-applicable'].includes(String(value.organizationSecret)) ||
     !Array.isArray(value.branchPolicyIds) ||
     value.branchPolicyIds.length !== 1
   ) {
@@ -227,7 +225,69 @@ const parsePlane = (value: unknown, label: string): EnvironmentPlaneProof => {
   };
 };
 
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: The strict persisted-proof schema is clearest as one exact-field parser that returns only fully validated evidence.
+const hasValidRepositoryEvidence = (
+  repository: Record<string, unknown>,
+  policySha256: unknown,
+  legacyAgeRecipients: unknown,
+): legacyAgeRecipients is ReadonlyArray<string> =>
+  typeof repository.fullName === 'string' &&
+  !hasControlCharacter(repository.fullName) &&
+  typeof repository.private === 'boolean' &&
+  repository.defaultBranch === 'main' &&
+  ['Organization', 'User'].includes(String(repository.ownerType)) &&
+  typeof repository.ownerPlan === 'string' &&
+  !hasControlCharacter(repository.ownerPlan) &&
+  ['paid-private-owner', 'public-repository'].includes(
+    String(repository.capability),
+  ) &&
+  typeof policySha256 === 'string' &&
+  POLICY_SHA.test(policySha256) &&
+  Array.isArray(legacyAgeRecipients) &&
+  legacyAgeRecipients.every(
+    (entry) => typeof entry === 'string' && AGE_RECIPIENT.test(entry),
+  ) &&
+  new Set(legacyAgeRecipients).size === legacyAgeRecipients.length &&
+  (repository.private === true
+    ? repository.capability === 'paid-private-owner' &&
+      (repository.ownerType === 'User'
+        ? repository.ownerPlan === 'pro'
+        : ['team', 'business', 'enterprise'].includes(
+            String(repository.ownerPlan),
+          ))
+    : repository.capability === 'public-repository' &&
+      repository.ownerPlan === 'not-required');
+
+const parsePlanes = (
+  value: Record<string, unknown>,
+  ownerType: unknown,
+): AutomationProof['planes'] => {
+  const planes = {
+    ...(value.automation === undefined
+      ? {}
+      : { automation: parsePlane(value.automation, 'planes.automation') }),
+    ...(value.notifications === undefined
+      ? {}
+      : {
+          notifications: parsePlane(
+            value.notifications,
+            'planes.notifications',
+          ),
+        }),
+  };
+  const expectedOrganizationSecret =
+    ownerType === 'Organization' ? 'absent' : 'not-applicable';
+  if (
+    Object.values(planes).some(
+      (plane) => plane.organizationSecret !== expectedOrganizationSecret,
+    )
+  ) {
+    throw new Error(
+      `${AUTOMATION_PROOF_FILE} has invalid organization secret-scope evidence`,
+    );
+  }
+  return planes;
+};
+
 export const parseAutomationProof = (value: unknown): AutomationProof => {
   if (!isRecord(value)) {
     throw new Error(`${AUTOMATION_PROOF_FILE} must be a JSON object`);
@@ -275,72 +335,38 @@ export const parseAutomationProof = (value: unknown): AutomationProof => {
     'planes',
   );
   if (
-    typeof value.repository.fullName !== 'string' ||
-    hasControlCharacter(value.repository.fullName) ||
-    typeof value.repository.private !== 'boolean' ||
-    value.repository.defaultBranch !== 'main' ||
-    !['Organization', 'User'].includes(String(value.repository.ownerType)) ||
-    typeof value.repository.ownerPlan !== 'string' ||
-    hasControlCharacter(value.repository.ownerPlan) ||
-    !['paid-private-owner', 'public-repository'].includes(
-      String(value.repository.capability),
-    ) ||
-    typeof value.policySha256 !== 'string' ||
-    !POLICY_SHA.test(value.policySha256) ||
-    !Array.isArray(value.legacyAgeRecipients) ||
-    !value.legacyAgeRecipients.every(
-      (entry) => typeof entry === 'string' && AGE_RECIPIENT.test(entry),
-    ) ||
-    new Set(value.legacyAgeRecipients).size !==
-      value.legacyAgeRecipients.length ||
-    (value.repository.private === true
-      ? value.repository.capability !== 'paid-private-owner' ||
-        value.repository.ownerPlan === '' ||
-        value.repository.ownerPlan.toLowerCase() === 'free'
-      : value.repository.capability !== 'public-repository')
+    !hasValidRepositoryEvidence(
+      value.repository,
+      value.policySha256,
+      value.legacyAgeRecipients,
+    )
   ) {
     throw new Error(
       `${AUTOMATION_PROOF_FILE} has invalid repository or policy evidence`,
     );
   }
+  const planes = parsePlanes(value.planes, value.repository.ownerType);
   return {
     version: 1,
     repository: {
       id: positiveInteger(value.repository.id, 'repository.id'),
       ownerId: positiveInteger(value.repository.ownerId, 'repository.ownerId'),
-      fullName: value.repository.fullName,
-      private: value.repository.private,
+      fullName: String(value.repository.fullName),
+      private: value.repository.private === true,
       defaultBranch: 'main',
       ownerType: value.repository.ownerType as 'Organization' | 'User',
-      ownerPlan: value.repository.ownerPlan,
+      ownerPlan: String(value.repository.ownerPlan),
       capability: value.repository
         .capability as AutomationProof['repository']['capability'],
     },
-    policySha256: value.policySha256,
+    policySha256: String(value.policySha256),
     capabilityObservedAt: timestamp(
       value.capabilityObservedAt,
       'capabilityObservedAt',
     ),
     observedAt: timestamp(value.observedAt, 'observedAt'),
     legacyAgeRecipients: value.legacyAgeRecipients,
-    planes: {
-      ...(value.planes.automation === undefined
-        ? {}
-        : {
-            automation: parsePlane(
-              value.planes.automation,
-              'planes.automation',
-            ),
-          }),
-      ...(value.planes.notifications === undefined
-        ? {}
-        : {
-            notifications: parsePlane(
-              value.planes.notifications,
-              'planes.notifications',
-            ),
-          }),
-    },
+    planes,
   };
 };
 

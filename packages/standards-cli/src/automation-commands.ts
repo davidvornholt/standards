@@ -5,7 +5,7 @@ import {
   verifyAutomationEnvironments,
   writeAutomationProof,
 } from './automation-verify';
-import { request } from './github-api';
+import { request, resolveToken } from './github-api';
 
 const usage = `Usage: standards automation verify [--dir <path>] [--delivery <plane>=<run-id>]
 
@@ -69,12 +69,19 @@ export const runAutomationCommand = async (
     return false;
   }
   try {
-    const proof = await verifyAutomationEnvironments(
-      resolve(parsed.consumer),
-      request,
-      Date.now(),
-      parsed.deliveryRuns,
-    );
+    const token = resolveToken();
+    if (token === null) {
+      throw new Error(
+        'automation verification needs an admin token; authenticate gh or set GH_TOKEN',
+      );
+    }
+    const proof = await verifyAutomationEnvironments({
+      consumer: resolve(parsed.consumer),
+      token,
+      api: request,
+      now: Date.now(),
+      deliveryRuns: parsed.deliveryRuns,
+    });
     await writeAutomationProof(resolve(parsed.consumer), proof);
     process.stdout.write(
       `standards automation: verified and recorded ${Object.keys(proof.planes).join(' and ')} environment isolation\n`,

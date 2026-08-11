@@ -20,6 +20,7 @@ const planeProblems = (
   name: PlaneName,
   policy: SyncPolicy,
   proof: AutomationProof,
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This validator gathers every independent plane mismatch so one run reports the complete proof drift.
 ): ReadonlyArray<string> => {
   const selected = policy[name];
   if (selected === undefined) {
@@ -49,6 +50,11 @@ const planeProblems = (
   if (plane.ageRecipient !== selected.ageRecipient) {
     problems.push(
       `${AUTOMATION_PROOF_FILE}: ${name} age recipient does not match policy`,
+    );
+  }
+  if (proof.legacyAgeRecipients.includes(selected.ageRecipient)) {
+    problems.push(
+      `${AUTOMATION_PROOF_FILE}: ${name} age recipient reuses a legacy CI decryptor identity`,
     );
   }
   if (plane.delivery !== undefined) {

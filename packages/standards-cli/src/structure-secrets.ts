@@ -11,7 +11,10 @@ import {
   type RequiredSecretLeaf,
   secretShapeProblems,
 } from './structure-secret-document';
-import { sopsAgeRecipients } from './structure-sops-envelope';
+import {
+  sopsAgeRecipients,
+  sopsNonAgeSources,
+} from './structure-sops-envelope';
 import { readSyncPolicy } from './sync-policy';
 import { parseYaml } from './yaml-parse';
 
@@ -204,6 +207,17 @@ const recipientProblems = (
         `${rel}: ${source} age recipients must be exactly the plane recipient plus declared recovery recipients`,
       ];
 
+const nonAgeSourceProblems = (
+  rel: string,
+  actual: ReadonlyArray<string>,
+  source: string,
+): ReadonlyArray<string> =>
+  actual.length === 0
+    ? []
+    : [
+        `${rel}: ${source} must use age decryptors only; remove non-age source(s): ${actual.join(', ')}`,
+      ];
+
 const creationRuleRecipientProblems = async (
   consumer: string,
   contract: SecretPairContract,
@@ -240,12 +254,19 @@ const creationRuleRecipientProblems = async (
     ];
   }
   const [rule] = matches;
-  return recipientProblems(
-    rel,
-    ruleAgeRecipients(rule),
-    contract.expectedAgeRecipients,
-    `creation rule for ${contract.secretsRel}`,
-  );
+  return [
+    ...nonAgeSourceProblems(
+      rel,
+      sopsNonAgeSources(rule),
+      `creation rule for ${contract.secretsRel}`,
+    ),
+    ...recipientProblems(
+      rel,
+      ruleAgeRecipients(rule),
+      contract.expectedAgeRecipients,
+      `creation rule for ${contract.secretsRel}`,
+    ),
+  ];
 };
 
 const collectPairProblems = async (
@@ -277,12 +298,21 @@ const collectPairProblems = async (
           contract.expectedAgeRecipients,
           'SOPS metadata',
         );
+  const nonAgeMetadataProblems =
+    secretsFile.mapping === null || contract.expectedAgeRecipients === undefined
+      ? []
+      : nonAgeSourceProblems(
+          contract.secretsRel,
+          sopsNonAgeSources(secretsFile.mapping.sops),
+          'SOPS metadata',
+        );
   return [
     ...secretsFile.problems,
     ...exampleFile.problems,
     ...(secrets === null ? [] : secrets.problems),
     ...(example === null ? [] : example.problems),
     ...recipientMetadataProblems,
+    ...nonAgeMetadataProblems,
     ...(await creationRuleRecipientProblems(consumer, contract)),
     ...(secrets !== null && example !== null
       ? secretShapeProblems({

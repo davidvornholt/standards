@@ -12,11 +12,9 @@ import {
 import {
   type ApiResponse,
   apiError,
-  HTTP_FORBIDDEN,
   HTTP_OK,
   request,
   resolveGithubRepo,
-  resolveToken,
 } from './github-api';
 import { isRecord } from './github-settings-parse';
 import { sopsAgeRecipients } from './structure-sops-envelope';
@@ -32,6 +30,13 @@ type GithubRequest = (
 export type DeliveryRuns = Partial<
   Readonly<Record<'automation' | 'notifications', number>>
 >;
+export type VerifyAutomationOptions = {
+  readonly consumer: string;
+  readonly token: string;
+  readonly api?: GithubRequest;
+  readonly now?: number;
+  readonly deliveryRuns?: DeliveryRuns;
+};
 type VerifyPlaneOptions = {
   readonly api: GithubRequest;
   readonly token: string;
@@ -44,6 +49,8 @@ type VerifyPlaneOptions = {
 };
 
 const MILLISECONDS_PER_SECOND = 1000;
+const PRIVATE_USER_PLANS = new Set(['pro']);
+const PRIVATE_ORGANIZATION_PLANS = new Set(['team', 'business', 'enterprise']);
 
 const apiObject = async (
   call: Promise<ApiResponse>,
@@ -120,7 +127,6 @@ const verifyPlane = async ({
   ownerType,
   name,
   selected,
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This boundary deliberately checks every independent GitHub environment invariant before producing proof.
 }: VerifyPlaneOptions): Promise<EnvironmentPlaneProof> => {
   const encoded = encodeURIComponent(selected.environment);
   const environment = await apiObject(
@@ -214,11 +220,9 @@ const verifyPlane = async ({
         );
       }
       organizationSecret = 'absent';
-    } else if (response.status === HTTP_FORBIDDEN) {
-      organizationSecret = 'unobservable';
     } else {
       throw new Error(
-        apiError('reading organization Actions secrets', response),
+        `${apiError('reading organization Actions secrets', response)}; organization secret scope must be observable before isolation adoption`,
       );
     }
   }
@@ -235,18 +239,15 @@ const verifyPlane = async ({
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: Splitting this transaction would obscure which checks belong to the single recorded observation.
 export const verifyAutomationEnvironments = async (
-  consumer: string,
-  api: GithubRequest = request,
-  now = Date.now(),
-  deliveryRuns: DeliveryRuns = {},
+  {
+    consumer,
+    token,
+    api = request,
+    now = Date.now(),
+    deliveryRuns = {},
+  }: VerifyAutomationOptions,
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: One administrator snapshot must bind identity, capability, environment policy, secret scope, and prior delivery evidence atomically.
 ): Promise<AutomationProof> => {
-  const token = resolveToken();
-  if (token === null) {
-    throw new Error(
-      'automation verification needs an admin token; authenticate gh or set GH_TOKEN',
-    );
-  }
   const repo = resolveGithubRepo(consumer);
   if (repo === null) {
     throw new Error(
@@ -315,9 +316,13 @@ export const verifyAutomationEnvironments = async (
     ownerPlan = isRecord(ownerResponse.plan)
       ? String(ownerResponse.plan.name)
       : '';
-    if (ownerPlan === '' || ownerPlan === 'free') {
+    const allowedPlans =
+      owner.type === 'Organization'
+        ? PRIVATE_ORGANIZATION_PLANS
+        : PRIVATE_USER_PLANS;
+    if (!allowedPlans.has(ownerPlan)) {
       throw new Error(
-        'private repositories require GitHub Pro/Team/Enterprise environment-secret delivery; Free consumers must retain the legacy secret or adopt a separately reviewed OIDC/trusted-repository design',
+        `private ${owner.type === 'Organization' ? 'organization' : 'personal'} repositories require a recognized GitHub ${owner.type === 'Organization' ? 'Team/Enterprise' : 'Pro'} plan; observed unsupported plan "${ownerPlan || 'missing'}", so retain the legacy secret or adopt a separately reviewed OIDC/trusted-repository design`,
       );
     }
     capability = 'paid-private-owner';
@@ -356,6 +361,22 @@ export const verifyAutomationEnvironments = async (
     previous.repository.id === repository.id &&
     previous.repository.ownerId === owner.id &&
     previous.repository.capability === capability;
+  const legacyAgeRecipients = await readLegacyRecipients(
+    consumer,
+    policy,
+    previous,
+  );
+  for (const name of ['automation', 'notifications'] as const) {
+    const selected = policy[name];
+    if (
+      selected !== undefined &&
+      legacyAgeRecipients.includes(selected.ageRecipient)
+    ) {
+      throw new Error(
+        `${name} age recipient must be distinct from every legacy CI age recipient`,
+      );
+    }
+  }
   const proof: AutomationProof = {
     version: 1,
     repository: {
@@ -373,7 +394,7 @@ export const verifyAutomationEnvironments = async (
       ? previous.capabilityObservedAt
       : observedAt,
     observedAt,
-    legacyAgeRecipients: await readLegacyRecipients(consumer, policy, previous),
+    legacyAgeRecipients,
     planes,
   };
   const deliveries = await Promise.all(
