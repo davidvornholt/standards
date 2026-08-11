@@ -1,8 +1,15 @@
 import { isNonEmptyString, isRecord } from './github-settings-parse';
 
 export const SYNC_POLICY_FILE = 'sync-standards.local.json';
-const LINE_BREAK = /[\r\n]/u;
+const LAST_C0_CONTROL = 31;
+const DELETE_CONTROL = 127;
+export const hasControlCharacter = (value: string): boolean =>
+  [...value].some((character) => {
+    const codePoint = character.codePointAt(0) ?? DELETE_CONTROL;
+    return codePoint <= LAST_C0_CONTROL || codePoint === DELETE_CONTROL;
+  });
 const AGE_KEY_SECRET = /^(?!GITHUB_)[A-Z_][A-Z0-9_]*$/u;
+const AGE_RECIPIENT = /^age1[0-9a-z]{20,}$/u;
 const SECRET_TARGET = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const BROKER_APP_KEY = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/u;
 const TOPIC_KEY = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$/u;
@@ -12,6 +19,7 @@ export type SyncAutomationPolicy = {
   readonly ageKeySecret: string;
   readonly secretTarget: string;
   readonly brokerAppKey: string;
+  readonly ageRecipient: string;
 };
 
 export type NotificationPolicy = {
@@ -19,12 +27,22 @@ export type NotificationPolicy = {
   readonly ageKeySecret: string;
   readonly secretTarget: string;
   readonly topicKey: string;
+  readonly ageRecipient: string;
 };
 
 const parseEnvironment = (value: unknown, field: string): string => {
-  if (!isNonEmptyString(value) || LINE_BREAK.test(value)) {
+  if (!isNonEmptyString(value) || hasControlCharacter(value)) {
     throw new Error(
-      `${SYNC_POLICY_FILE} "${field}" must be a non-empty single-line string`,
+      `${SYNC_POLICY_FILE} "${field}" must be a non-empty string without control characters`,
+    );
+  }
+  return value;
+};
+
+const parseAgeRecipient = (value: unknown, field: string): string => {
+  if (typeof value !== 'string' || !AGE_RECIPIENT.test(value)) {
+    throw new Error(
+      `${SYNC_POLICY_FILE} "${field}" must be a public age recipient`,
     );
   }
   return value;
@@ -83,6 +101,7 @@ const parseAutomation = (parsed: unknown): SyncAutomationPolicy => {
     'ageKeySecret',
     'secretTarget',
     'brokerAppKey',
+    'ageRecipient',
   ]);
   if (
     typeof parsed.brokerAppKey !== 'string' ||
@@ -103,6 +122,10 @@ const parseAutomation = (parsed: unknown): SyncAutomationPolicy => {
       'automation.secretTarget',
     ),
     brokerAppKey: parsed.brokerAppKey,
+    ageRecipient: parseAgeRecipient(
+      parsed.ageRecipient,
+      'automation.ageRecipient',
+    ),
   };
 };
 
@@ -115,6 +138,7 @@ const parseNotifications = (parsed: unknown): NotificationPolicy => {
     'ageKeySecret',
     'secretTarget',
     'topicKey',
+    'ageRecipient',
   ]);
   if (typeof parsed.topicKey !== 'string' || !TOPIC_KEY.test(parsed.topicKey)) {
     throw new Error(
@@ -135,6 +159,10 @@ const parseNotifications = (parsed: unknown): NotificationPolicy => {
       'notifications.secretTarget',
     ),
     topicKey: parsed.topicKey,
+    ageRecipient: parseAgeRecipient(
+      parsed.ageRecipient,
+      'notifications.ageRecipient',
+    ),
   };
 };
 
@@ -143,6 +171,7 @@ export const parseIsolationFields = (
 ): {
   readonly automation?: SyncAutomationPolicy;
   readonly notifications?: NotificationPolicy;
+  readonly recoveryAgeRecipients?: ReadonlyArray<string>;
 } => {
   const automation =
     parsed.automation === undefined
@@ -152,17 +181,58 @@ export const parseIsolationFields = (
     parsed.notifications === undefined
       ? undefined
       : parseNotifications(parsed.notifications);
+  let recoveryAgeRecipients: ReadonlyArray<string> | undefined;
+  if (parsed.recoveryAgeRecipients !== undefined) {
+    if (
+      !(
+        Array.isArray(parsed.recoveryAgeRecipients) &&
+        parsed.recoveryAgeRecipients.every(
+          (recipient) =>
+            typeof recipient === 'string' && AGE_RECIPIENT.test(recipient),
+        )
+      ) ||
+      new Set(parsed.recoveryAgeRecipients).size !==
+        parsed.recoveryAgeRecipients.length
+    ) {
+      throw new Error(
+        `${SYNC_POLICY_FILE} "recoveryAgeRecipients" must be an array of unique public age recipients`,
+      );
+    }
+    ({ recoveryAgeRecipients } = parsed);
+  }
+  if (
+    (automation !== undefined || notifications !== undefined) &&
+    recoveryAgeRecipients === undefined
+  ) {
+    throw new Error(
+      `${SYNC_POLICY_FILE} "recoveryAgeRecipients" must be present when an isolated workflow plane is configured`,
+    );
+  }
   if (
     automation !== undefined &&
     notifications !== undefined &&
     (automation.environment.toLowerCase() ===
       notifications.environment.toLowerCase() ||
       automation.ageKeySecret === notifications.ageKeySecret ||
-      automation.secretTarget === notifications.secretTarget)
+      automation.secretTarget === notifications.secretTarget ||
+      automation.ageRecipient === notifications.ageRecipient)
   ) {
     throw new Error(
-      `${SYNC_POLICY_FILE} automation and notifications must use distinct environments, age key secrets, and secret targets`,
+      `${SYNC_POLICY_FILE} automation and notifications must use distinct environments, age key secrets, secret targets, and age recipients`,
     );
   }
-  return { automation, notifications };
+  const purposeRecipients = [
+    automation?.ageRecipient,
+    notifications?.ageRecipient,
+  ].filter((recipient): recipient is string => recipient !== undefined);
+  if (
+    recoveryAgeRecipients?.some((recipient) =>
+      purposeRecipients.includes(recipient),
+    )
+  ) {
+    throw new Error(
+      `${SYNC_POLICY_FILE} recovery age recipients must not be workflow-purpose recipients`,
+    );
+  }
+  return { automation, notifications, recoveryAgeRecipients };
 };

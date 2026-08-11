@@ -121,3 +121,26 @@ export const hasCompleteSopsMetadata = (value: unknown): boolean =>
   SOPS_VERSION.test(value.version) &&
   isSopsEncryptedScalar(value.mac) &&
   hasCompleteRecipients(value);
+
+const ageRecipientsFromSource = (value: unknown): ReadonlyArray<string> =>
+  Array.isArray(value)
+    ? value.flatMap((entry) =>
+        isRecord(entry) && typeof entry.recipient === 'string'
+          ? [entry.recipient]
+          : [],
+      )
+    : [];
+
+export const sopsAgeRecipients = (value: unknown): ReadonlyArray<string> => {
+  if (!isRecord(value)) {
+    return [];
+  }
+  return [
+    ...ageRecipientsFromSource(value.age),
+    ...(Array.isArray(value.key_groups)
+      ? value.key_groups.flatMap((group) =>
+          isRecord(group) ? ageRecipientsFromSource(group.age) : [],
+        )
+      : []),
+  ];
+};

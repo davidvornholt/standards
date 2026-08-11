@@ -309,6 +309,7 @@
         "packages/standards-cli/src/dev-env.test.ts",
         "packages/standards-cli/src/github-diff.test.ts",
         "packages/standards-cli/src/github-settings.test.ts",
+        "packages/standards-cli/src/automation-verify.test.ts",
         "packages/standards-cli/src/poller-tick.test.ts",
         "packages/standards-cli/src/poller-trust.test.ts",
         "packages/standards-cli/src/sops-secret-action-test-support.ts",
@@ -371,7 +372,13 @@
         "biome.base.jsonc",
         "biome.jsonc",
         "packages/standards-cli/src/cli.ts",
-        "packages/standards-cli/src/cli.test.ts"
+        "packages/standards-cli/src/cli.test.ts",
+        "packages/standards-cli/src/automation-delivery-verify.ts",
+        "packages/standards-cli/src/automation-proof.ts",
+        "packages/standards-cli/src/automation-verify.ts",
+        "packages/standards-cli/src/structure-policy.test.ts",
+        "packages/standards-cli/src/structure-secrets.ts",
+        "packages/standards-cli/src/sync-policy-isolation.ts"
       ],
       "linter": {
         "rules": {

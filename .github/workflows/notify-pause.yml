@@ -50,6 +50,7 @@ jobs:
         with:
           sparse-checkout: |
             sync-standards.local.json
+            sync-standards.environment-proof.json
             .github/actions/read-standards-policy/action.yml
           sparse-checkout-cone-mode: false
 

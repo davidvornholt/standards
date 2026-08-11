@@ -1,5 +1,8 @@
+import { existsSync } from 'node:fs';
 import { lstat, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { AUTOMATION_PROOF_FILE, readAutomationProof } from './automation-proof';
+import { automationProofProblems } from './automation-proof-validation';
 import { isContainedPath } from './contained-path';
 import { isRecord } from './github-settings-parse';
 import {
@@ -8,6 +11,7 @@ import {
   type RequiredSecretLeaf,
   secretShapeProblems,
 } from './structure-secret-document';
+import { sopsAgeRecipients } from './structure-sops-envelope';
 import { readSyncPolicy } from './sync-policy';
 import { parseYaml } from './yaml-parse';
 
@@ -30,6 +34,7 @@ type SecretPairContract = {
   readonly required: ReadonlyArray<RequiredSecretLeaf>;
   readonly missingSecrets: string;
   readonly missingExample: string;
+  readonly expectedAgeRecipients?: ReadonlyArray<string>;
 };
 
 type ParsedMapping = {
@@ -85,7 +90,15 @@ const requiredContracts = async (
       ...(legacyNotification ? [NTFY_REQUIREMENT] : []),
       ...(legacyBroker ? BROKER_REQUIREMENTS : []),
     ];
-    if (ciRequirements.length > 0) {
+    const [ciSecretsInfo, ciExampleInfo] = await Promise.all([
+      lstat(join(consumer, CI_SECRETS)).catch(() => null),
+      lstat(join(consumer, CI_EXAMPLE)).catch(() => null),
+    ]);
+    if (
+      ciRequirements.length > 0 ||
+      ciSecretsInfo !== null ||
+      ciExampleInfo !== null
+    ) {
       contracts.push({
         secretsRel: CI_SECRETS,
         exampleRel: CI_EXAMPLE,
@@ -110,6 +123,10 @@ const requiredContracts = async (
         ],
         missingSecrets: `${secretsRel}: must exist as a SOPS-encrypted file; sync-standards.local.json selects it for environment-scoped Standards sync automation`,
         missingExample: `${exampleRel}: must exist and mirror the key shape of ${secretsRel} with plaintext placeholders`,
+        expectedAgeRecipients: [
+          policy.automation.ageRecipient,
+          ...(policy.recoveryAgeRecipients ?? []),
+        ],
       });
     }
     if (policy.notifications !== undefined) {
@@ -127,6 +144,10 @@ const requiredContracts = async (
         ],
         missingSecrets: `${secretsRel}: must exist as a SOPS-encrypted file; sync-standards.local.json selects it for environment-scoped pause notifications`,
         missingExample: `${exampleRel}: must exist and mirror the key shape of ${secretsRel} with plaintext placeholders`,
+        expectedAgeRecipients: [
+          policy.notifications.ageRecipient,
+          ...(policy.recoveryAgeRecipients ?? []),
+        ],
       });
     }
     return { contracts, problems: [] };
@@ -144,6 +165,87 @@ const requiredContracts = async (
       problems: [error instanceof Error ? error.message : String(error)],
     };
   }
+};
+
+const sortedUnique = (values: ReadonlyArray<string>): ReadonlyArray<string> =>
+  [...new Set(values)].sort();
+
+const ruleAgeRecipients = (value: unknown): ReadonlyArray<string> => {
+  if (!isRecord(value)) {
+    return [];
+  }
+  const direct = Array.isArray(value.age)
+    ? value.age.filter(
+        (recipient): recipient is string => typeof recipient === 'string',
+      )
+    : [];
+  const grouped = Array.isArray(value.key_groups)
+    ? value.key_groups.flatMap((group) =>
+        isRecord(group) && Array.isArray(group.age)
+          ? group.age.filter(
+              (recipient): recipient is string => typeof recipient === 'string',
+            )
+          : [],
+      )
+    : [];
+  return [...direct, ...grouped];
+};
+
+const recipientProblems = (
+  rel: string,
+  actual: ReadonlyArray<string>,
+  expected: ReadonlyArray<string>,
+  source: string,
+): ReadonlyArray<string> =>
+  JSON.stringify(sortedUnique(actual)) ===
+  JSON.stringify(sortedUnique(expected))
+    ? []
+    : [
+        `${rel}: ${source} age recipients must be exactly the plane recipient plus declared recovery recipients`,
+      ];
+
+const creationRuleRecipientProblems = async (
+  consumer: string,
+  contract: SecretPairContract,
+): Promise<ReadonlyArray<string>> => {
+  if (contract.expectedAgeRecipients === undefined) {
+    return [];
+  }
+  const rel = '.sops.yaml';
+  const raw = await readFile(join(consumer, rel), 'utf8').catch(() => null);
+  if (raw === null) {
+    return [`${rel}: must exist to bind the isolated SOPS target recipient`];
+  }
+  const parsed = parseYaml(raw, rel);
+  if (parsed.problem !== null || !isRecord(parsed.value)) {
+    return [parsed.problem ?? `${rel}: must be a YAML mapping`];
+  }
+  const rules = parsed.value.creation_rules;
+  if (!Array.isArray(rules)) {
+    return [`${rel}: creation_rules must select ${contract.secretsRel}`];
+  }
+  const matches = rules.filter((candidate) => {
+    if (!isRecord(candidate) || typeof candidate.path_regex !== 'string') {
+      return false;
+    }
+    try {
+      return new RegExp(candidate.path_regex, 'u').test(contract.secretsRel);
+    } catch {
+      return false;
+    }
+  });
+  if (matches.length !== 1 || !isRecord(matches[0])) {
+    return [
+      `${rel}: exactly one creation rule must match ${contract.secretsRel}`,
+    ];
+  }
+  const [rule] = matches;
+  return recipientProblems(
+    rel,
+    ruleAgeRecipients(rule),
+    contract.expectedAgeRecipients,
+    `creation rule for ${contract.secretsRel}`,
+  );
 };
 
 const collectPairProblems = async (
@@ -166,11 +268,22 @@ const collectPairProblems = async (
     exampleFile.mapping === null
       ? null
       : inspectExampleDocument(contract.exampleRel, exampleFile.mapping);
+  const recipientMetadataProblems =
+    secretsFile.mapping === null || contract.expectedAgeRecipients === undefined
+      ? []
+      : recipientProblems(
+          contract.secretsRel,
+          sopsAgeRecipients(secretsFile.mapping.sops),
+          contract.expectedAgeRecipients,
+          'SOPS metadata',
+        );
   return [
     ...secretsFile.problems,
     ...exampleFile.problems,
     ...(secrets === null ? [] : secrets.problems),
     ...(example === null ? [] : example.problems),
+    ...recipientMetadataProblems,
+    ...(await creationRuleRecipientProblems(consumer, contract)),
     ...(secrets !== null && example !== null
       ? secretShapeProblems({
           secretsRel: contract.secretsRel,
@@ -187,10 +300,44 @@ export const collectCiSecretsProblems = async (
   consumer: string,
 ): Promise<ReadonlyArray<string>> => {
   const requirement = await requiredContracts(consumer);
+  const policy = await readSyncPolicy(consumer).catch(() => null);
+  const proofProblems = await readSyncPolicy(consumer)
+    .then((selectedPolicy) => automationProofProblems(consumer, selectedPolicy))
+    .catch(() => []);
   const contractProblems = await Promise.all(
     requirement.contracts.map((contract) =>
       collectPairProblems(consumer, contract),
     ),
   );
-  return [...requirement.problems, ...contractProblems.flat()];
+  const legacyRetirementProblems: Array<string> = [];
+  if (
+    policy !== null &&
+    policy.automation !== undefined &&
+    policy.notifications !== undefined &&
+    !(
+      existsSync(join(consumer, CI_SECRETS)) ||
+      existsSync(join(consumer, CI_EXAMPLE))
+    )
+  ) {
+    const proof = await readAutomationProof(consumer).catch(() => null);
+    if (proof?.planes.notifications?.delivery === undefined) {
+      legacyRetirementProblems.push(
+        `${AUTOMATION_PROOF_FILE}: notification delivery proof is required before retiring secrets/ci.yaml`,
+      );
+    }
+    if (
+      policy.autoSync !== false &&
+      proof?.planes.automation?.delivery === undefined
+    ) {
+      legacyRetirementProblems.push(
+        `${AUTOMATION_PROOF_FILE}: automation delivery proof is required before retiring secrets/ci.yaml`,
+      );
+    }
+  }
+  return [
+    ...requirement.problems,
+    ...proofProblems,
+    ...legacyRetirementProblems,
+    ...contractProblems.flat(),
+  ];
 };

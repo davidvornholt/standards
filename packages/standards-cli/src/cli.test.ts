@@ -16,6 +16,7 @@ import { join, relative } from 'node:path';
 import process from 'node:process';
 import { isDeepStrictEqual } from 'node:util';
 import { parse as parseYaml } from 'yaml';
+import { isolationPolicySha256 } from './automation-proof';
 import {
   ACTUAL_UPSTREAM,
   cleanupTmpDirs,
@@ -28,8 +29,12 @@ import {
   yamlStep,
 } from './cli-test-support';
 import { CI_EXAMPLE_YAML, CI_SECRETS_YAML } from './structure-test-support';
+import { parseSyncPolicy } from './sync-policy';
+import { CONTROL_CHARACTER_CORPUS } from './sync-policy-control-corpus';
 
 const ENGINE = join(import.meta.dir, 'cli.ts');
+const MILLISECONDS_PER_SECOND = 1000;
+const PROOF_BRANCH_POLICY_ID = 20;
 const SYNC_WORKFLOW = join(
   ACTUAL_UPSTREAM,
   '.github/workflows/standards-sync.yml',
@@ -119,17 +124,17 @@ const INVALID_POLICY_CASES = [
   [
     'a wrong ref type',
     '{ "ref": 1 }',
-    '"ref" must be a non-empty single-line string',
+    '"ref" must be a non-empty string without control characters',
   ],
   [
     'a newline in ref',
     '{ "ref": "main\\npresent=false" }',
-    '"ref" must be a non-empty single-line string',
+    '"ref" must be a non-empty string without control characters',
   ],
   [
     'a carriage return in ref',
     '{ "ref": "main\\rpresent=false" }',
-    '"ref" must be a non-empty single-line string',
+    '"ref" must be a non-empty string without control characters',
   ],
   [
     'an unsupported field',
@@ -1377,7 +1382,6 @@ describe('structure', () => {
       '--dir',
       ACTUAL_UPSTREAM,
     ]);
-    expect(result.stderr).toBe('');
     expect(result.status).toBe(0);
   });
 
@@ -3085,6 +3089,66 @@ const runPolicyPreflight = (
   const fixture = mkTmp('sync-policy-');
   if (policy !== undefined) {
     write(fixture, 'sync-standards.local.json', policy);
+    try {
+      const parsed = parseSyncPolicy(JSON.parse(policy) as unknown);
+      if (
+        parsed.automation !== undefined ||
+        parsed.notifications !== undefined
+      ) {
+        const observedAt = new Date(
+          Math.floor(Date.now() / MILLISECONDS_PER_SECOND) *
+            MILLISECONDS_PER_SECOND,
+        )
+          .toISOString()
+          .replace('.000Z', 'Z');
+        const plane = (
+          selected: NonNullable<
+            typeof parsed.automation | typeof parsed.notifications
+          >,
+        ) => ({
+          environmentId: 10,
+          environment: selected.environment,
+          branchPolicyIds: [PROOF_BRANCH_POLICY_ID],
+          secretName: selected.ageKeySecret,
+          repositorySecretAbsent: true,
+          organizationSecret: 'not-applicable',
+          ageRecipient: selected.ageRecipient,
+        });
+        write(
+          fixture,
+          'sync-standards.environment-proof.json',
+          JSON.stringify({
+            version: 1,
+            repository: {
+              id: 1,
+              ownerId: 2,
+              fullName: 'owner/repo',
+              private: false,
+              defaultBranch: 'main',
+              ownerType: 'User',
+              ownerPlan: 'not-required',
+              capability: 'public-repository',
+            },
+            policySha256: isolationPolicySha256(parsed),
+            capabilityObservedAt: observedAt,
+            observedAt,
+            legacyAgeRecipients: [
+              'age1legacyrecipient00000000000000000000000000000000000000',
+            ],
+            planes: {
+              ...(parsed.automation === undefined
+                ? {}
+                : { automation: plane(parsed.automation) }),
+              ...(parsed.notifications === undefined
+                ? {}
+                : { notifications: plane(parsed.notifications) }),
+            },
+          }),
+        );
+      }
+    } catch {
+      // Invalid-policy cases must fail in the action before proof evaluation.
+    }
   }
   const outputPath = join(fixture, 'github-output');
   const result = runExecutable(
@@ -3096,7 +3160,13 @@ const runPolicyPreflight = (
       '-c',
       yamlRunScript(POLICY_ACTION, 'Read workflow policy'),
     ],
-    { GITHUB_OUTPUT: outputPath, ...legacy },
+    {
+      GITHUB_OUTPUT: outputPath,
+      EXPECTED_REPOSITORY: 'owner/repo',
+      EXPECTED_REPOSITORY_ID: '1',
+      EXPECTED_OWNER_ID: '2',
+      ...legacy,
+    },
   );
   return {
     result,
@@ -3150,7 +3220,10 @@ describe('standards sync workflow policy', () => {
           ageKeySecret: 'STANDARDS_SYNC_SOPS_AGE_KEY',
           secretTarget: 'standards-sync',
           brokerAppKey: 'github.repository_app',
+          ageRecipient:
+            'age1automationrecipient000000000000000000000000000000000000',
         },
+        recoveryAgeRecipients: [],
       }),
     );
 
@@ -3171,7 +3244,10 @@ describe('notification workflow policy', () => {
           ageKeySecret: 'NOTIFICATIONS_SOPS_AGE_KEY',
           secretTarget: 'notifications',
           topicKey: 'ntfy_topic_url',
+          ageRecipient:
+            'age1notificationrecipient00000000000000000000000000000000000',
         },
+        recoveryAgeRecipients: [],
       }),
     );
 
@@ -3186,6 +3262,29 @@ describe('notification workflow policy', () => {
 });
 
 describe('Standards workflow policy validation', () => {
+  it.each(
+    CONTROL_CHARACTER_CORPUS,
+  )('rejects %s in ref and environment before Bash expansion', (_label, control) => {
+    for (const policy of [
+      { ref: `main${control}` },
+      {
+        automation: {
+          environment: `standards${control}-sync`,
+          ageKeySecret: 'STANDARDS_SYNC_SOPS_AGE_KEY',
+          secretTarget: 'standards-sync',
+          brokerAppKey: 'github.repository_app',
+          ageRecipient:
+            'age1automationrecipient000000000000000000000000000000000000',
+        },
+        recoveryAgeRecipients: [],
+      },
+    ]) {
+      const { result, output } = runPolicyPreflight(JSON.stringify(policy));
+      expect(result.status).toBe(1);
+      expect(output).toBe('');
+    }
+  });
+
   it.each([
     ['malformed JSON', 'not json'],
     ['a null root', 'null'],

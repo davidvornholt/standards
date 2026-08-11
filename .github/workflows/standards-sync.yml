@@ -30,7 +30,8 @@ concurrency:
   cancel-in-progress: false
 
 # Every job uses a fresh GitHub-hosted runner because sync eventually resolves
-# SOPS_AGE_KEY. CI_RUNNER is reserved for the unprivileged Standards quality job.
+# an age private key. CI_RUNNER is reserved for the unprivileged Standards
+# quality job.
 jobs:
   # Cheap preflight: job-level `if:` expressions cannot read repository files,
   # so this job surfaces the checked-in policy for the gate below. A missing
@@ -52,6 +53,7 @@ jobs:
         with:
           sparse-checkout: |
             sync-standards.local.json
+            sync-standards.environment-proof.json
             .github/actions/read-standards-policy/action.yml
           sparse-checkout-cone-mode: false
 

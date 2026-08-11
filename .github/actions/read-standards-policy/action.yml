@@ -42,6 +42,10 @@ runs:
     - name: Read workflow policy
       id: read
       shell: bash
+      env:
+        EXPECTED_REPOSITORY: ${{ github.repository }}
+        EXPECTED_REPOSITORY_ID: ${{ github.repository_id }}
+        EXPECTED_OWNER_ID: ${{ github.repository_owner_id }}
       run: |
         set -euo pipefail
         if [ -f sync-standards.local.json ]; then
@@ -49,8 +53,7 @@ runs:
             def environment:
               type == "string"
               and length > 0
-              and (contains("\n") | not)
-              and (contains("\r") | not);
+              and (test("[\u0000-\u001F\u007F]") | not);
             def age_key_secret:
               type == "string"
               and test("^[A-Z_][A-Z0-9_]*$")
@@ -62,46 +65,147 @@ runs:
             def dotted_key:
               type == "string"
               and test("^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$");
+            def age_recipient:
+              type == "string"
+              and test("^age1[0-9a-z]{20,}$");
             def automation:
               type == "object"
-              and (keys | sort) == ["ageKeySecret", "brokerAppKey", "environment", "secretTarget"]
+              and (keys | sort) == ["ageKeySecret", "ageRecipient", "brokerAppKey", "environment", "secretTarget"]
               and (.environment | environment)
               and (.ageKeySecret | age_key_secret)
               and (.secretTarget | secret_target)
               and (.brokerAppKey | dotted_key)
-              and (.brokerAppKey | contains("."));
+              and (.brokerAppKey | contains("."))
+              and (.ageRecipient | age_recipient);
             def notifications:
               type == "object"
-              and (keys | sort) == ["ageKeySecret", "environment", "secretTarget", "topicKey"]
+              and (keys | sort) == ["ageKeySecret", "ageRecipient", "environment", "secretTarget", "topicKey"]
               and (.environment | environment)
               and (.ageKeySecret | age_key_secret)
               and (.secretTarget | secret_target)
-              and (.topicKey | dotted_key);
+              and (.topicKey | dotted_key)
+              and (.ageRecipient | age_recipient);
             type == "object"
-            and ((keys - ["autoSync", "ref", "automation", "notifications"]) | length == 0)
+            and ((keys - ["autoSync", "ref", "automation", "notifications", "recoveryAgeRecipients"]) | length == 0)
             and ((has("autoSync") | not) or (.autoSync | type == "boolean"))
             and (
               (has("ref") | not)
               or (
                 (.ref | type == "string")
                 and (.ref | length > 0)
-                and (.ref | contains("\n") | not)
-                and (.ref | contains("\r") | not)
+                and (.ref | test("[\u0000-\u001F\u007F]") | not)
               )
             )
             and ((has("automation") | not) or (.automation | automation))
             and ((has("notifications") | not) or (.notifications | notifications))
+            and (
+              ((has("automation") or has("notifications")) | not)
+              or (
+                has("recoveryAgeRecipients")
+                and (.recoveryAgeRecipients | type == "array")
+                and ([.recoveryAgeRecipients[] | select(age_recipient | not)] | length == 0)
+                and ((.recoveryAgeRecipients | unique | length) == (.recoveryAgeRecipients | length))
+              )
+            )
             and (
               ((has("automation") and has("notifications")) | not)
               or (
                 (.automation.environment | ascii_downcase) != (.notifications.environment | ascii_downcase)
                 and .automation.ageKeySecret != .notifications.ageKeySecret
                 and .automation.secretTarget != .notifications.secretTarget
+                and .automation.ageRecipient != .notifications.ageRecipient
               )
+            )
+            and (
+              (has("recoveryAgeRecipients") | not)
+              or ([.recoveryAgeRecipients[] as $recipient | select(
+                ((.automation.ageRecipient? == $recipient) or (.notifications.ageRecipient? == $recipient))
+              )] | length == 0)
             )
           ' sync-standards.local.json > /dev/null; then
             echo "::error::sync-standards.local.json must contain valid autoSync/ref fields and complete, isolated automation/notifications objects when present"
             exit 1
+          fi
+          if jq -e 'has("automation") or has("notifications")' sync-standards.local.json > /dev/null; then
+            proof=sync-standards.environment-proof.json
+            if [ ! -f "$proof" ]; then
+              echo "::error::$proof is required for isolated workflow planes"
+              exit 1
+            fi
+            policy_sha=$(jq -cS '{automation: (.automation // null), notifications: (.notifications // null), recoveryAgeRecipients: (.recoveryAgeRecipients // null)}' sync-standards.local.json | tr -d '\n' | sha256sum | cut -d ' ' -f 1)
+            if ! jq -e \
+              --arg repo "$EXPECTED_REPOSITORY" \
+              --argjson repo_id "$EXPECTED_REPOSITORY_ID" \
+              --argjson owner_id "$EXPECTED_OWNER_ID" \
+              --arg policy_sha "$policy_sha" \
+              --argjson now "$(date -u +%s)" '
+              def timestamp:
+                type == "string"
+                and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$");
+              def age_recipient:
+                type == "string"
+                and test("^age1[0-9a-z]{20,}$");
+              def delivery($policy):
+                type == "object"
+                and (keys | sort) == ["completedAt", "conclusion", "deploymentId", "environment", "event", "headRef", "headSha", "runId", "workflowId", "workflowPath"]
+                and (.runId | type == "number" and . > 0)
+                and (.workflowId | type == "number" and . > 0)
+                and (.workflowPath | type == "string" and (test("[\u0000-\u001F\u007F]") | not))
+                and (.headSha | type == "string" and test("^[0-9a-f]{40}$"))
+                and .headRef == "main"
+                and (.event | type == "string" and (test("[\u0000-\u001F\u007F]") | not))
+                and .environment == $policy.environment
+                and (.deploymentId | type == "number" and . > 0)
+                and (.completedAt | timestamp)
+                and .conclusion == "success";
+              def plane($policy):
+                type == "object"
+                and ((keys - ["environmentId", "environment", "branchPolicyIds", "secretName", "repositorySecretAbsent", "organizationSecret", "ageRecipient", "delivery"]) | length == 0)
+                and ((keys | length) == (if has("delivery") then 8 else 7 end))
+                and (.environmentId | type == "number" and . > 0)
+                and (.environment == $policy.environment)
+                and (.branchPolicyIds | type == "array" and length == 1 and .[0] > 0)
+                and (.secretName == $policy.ageKeySecret)
+                and (.repositorySecretAbsent == true)
+                and (.organizationSecret | IN("absent", "not-applicable", "unobservable"))
+                and (.ageRecipient == $policy.ageRecipient)
+                and ((has("delivery") | not) or (.delivery | delivery($policy)));
+              type == "object"
+              and (keys | sort) == ["capabilityObservedAt", "legacyAgeRecipients", "observedAt", "planes", "policySha256", "repository", "version"]
+              and .version == 1
+              and .policySha256 == $policy_sha
+              and (.capabilityObservedAt | timestamp)
+              and (.observedAt | timestamp)
+              and ((.observedAt | fromdateiso8601) <= ($now + 300))
+              and (($now - (.observedAt | fromdateiso8601)) <= 2592000)
+              and ((.capabilityObservedAt | fromdateiso8601) <= (.observedAt | fromdateiso8601))
+              and (.legacyAgeRecipients | type == "array" and length > 0 and all(.[]; age_recipient) and (unique | length) == length)
+              and (.repository | type == "object")
+              and (.repository | keys | sort) == ["capability", "defaultBranch", "fullName", "id", "ownerId", "ownerPlan", "ownerType", "private"]
+              and .repository.id == $repo_id
+              and .repository.ownerId == $owner_id
+              and (.repository.fullName | ascii_downcase) == ($repo | ascii_downcase)
+              and .repository.defaultBranch == "main"
+              and (.repository.capability | IN("paid-private-owner", "public-repository"))
+              and (
+                if .repository.private
+                then .repository.capability == "paid-private-owner" and (.repository.ownerPlan | ascii_downcase) != "free" and .repository.ownerPlan != ""
+                else .repository.capability == "public-repository"
+                end
+              )
+              and (.planes | type == "object")
+              and ((.planes | has("automation")) == ($policy_automation != null))
+              and ((.planes | has("notifications")) == ($policy_notifications != null))
+              and ((.planes | keys | length) == (($policy_automation != null) | if . then 1 else 0 end) + (($policy_notifications != null) | if . then 1 else 0 end))
+              and (($policy_automation == null) or (.planes.automation | plane($policy_automation)))
+              and (($policy_notifications == null) or (.planes.notifications | plane($policy_notifications)))
+            ' \
+              --argjson policy_automation "$(jq -c '.automation // null' sync-standards.local.json)" \
+              --argjson policy_notifications "$(jq -c '.notifications // null' sync-standards.local.json)" \
+              "$proof" > /dev/null; then
+              echo "::error::$proof must be a fresh, exact admin verification of this repository and isolation policy"
+              exit 1
+            fi
           fi
           auto_sync=$(jq -r 'if has("autoSync") then .autoSync else true end' sync-standards.local.json)
           ref=$(jq -r '.ref // ""' sync-standards.local.json)

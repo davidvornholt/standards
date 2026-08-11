@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { isolationPolicySha256 } from './automation-proof';
 import { collectStructureProblems } from './structure-check';
 import {
   buildConsumer,
@@ -9,6 +11,7 @@ import {
   FAKE_ENC,
   writeInto as write,
 } from './structure-test-support';
+import { parseSyncPolicy } from './sync-policy';
 
 afterEach(cleanupStructureTmps);
 
@@ -30,6 +33,7 @@ const AUTOMATION = {
   ageKeySecret: 'STANDARDS_SYNC_SOPS_AGE_KEY',
   secretTarget: 'standards-sync',
   brokerAppKey: 'github.repository_app',
+  ageRecipient: 'age1automationrecipient000000000000000000000000000000000000',
 } as const;
 
 const NOTIFICATIONS = {
@@ -37,13 +41,143 @@ const NOTIFICATIONS = {
   ageKeySecret: 'NOTIFICATIONS_SOPS_AGE_KEY',
   secretTarget: 'notifications',
   topicKey: 'ntfy_topic_url',
+  ageRecipient: 'age1notificationrecipient00000000000000000000000000000000000',
 } as const;
+const MILLISECONDS_PER_SECOND = 1000;
+const COMMIT_SHA_LENGTH = 40;
+const LEGACY_RECIPIENT =
+  'age1legacyrecipient00000000000000000000000000000000000000';
+const RECOVERY_RECIPIENT =
+  'age1personalrecovery0000000000000000000000000000000000000';
+const PLANE_EVIDENCE = {
+  automation: {
+    environmentId: 10,
+    branchPolicyId: 20,
+    runId: 30,
+    workflowId: 40,
+    deploymentId: 50,
+    workflowPath: '.github/workflows/standards-sync.yml',
+    event: 'schedule',
+  },
+  notifications: {
+    environmentId: 11,
+    branchPolicyId: 21,
+    runId: 31,
+    workflowId: 41,
+    deploymentId: 51,
+    workflowPath: '.github/workflows/notify-pause.yml',
+    event: 'issues',
+  },
+} as const;
+
+const metadataFor = (...recipients: ReadonlyArray<string>): string =>
+  CI_SOPS_METADATA_YAML.replace(
+    '        - recipient: age1test\n          enc: test-recipient-envelope',
+    recipients
+      .map(
+        (recipient) =>
+          `        - recipient: ${recipient}\n          enc: test-recipient-envelope`,
+      )
+      .join('\n'),
+  );
+
+const writeIsolationRules = (consumer: string): void => {
+  write(
+    consumer,
+    '.sops.yaml',
+    `creation_rules:\n  - path_regex: secrets/standards-sync\\.yaml$\n    key_groups:\n      - age:\n          - ${AUTOMATION.ageRecipient}\n  - path_regex: secrets/notifications\\.yaml$\n    key_groups:\n      - age:\n          - ${NOTIFICATIONS.ageRecipient}\n`,
+  );
+};
+
+const writeIsolationProof = (
+  consumer: string,
+  value: Record<string, unknown>,
+  deliveries = false,
+): void => {
+  const policy = parseSyncPolicy(value);
+  const observedAt = new Date(
+    Math.floor(Date.now() / MILLISECONDS_PER_SECOND) * MILLISECONDS_PER_SECOND,
+  )
+    .toISOString()
+    .replace('.000Z', 'Z');
+  execFileSync('git', ['init', '--quiet', consumer]);
+  execFileSync('git', [
+    '-C',
+    consumer,
+    'remote',
+    'add',
+    'origin',
+    'git@github.com:owner/repo.git',
+  ]);
+  const plane = (
+    name: 'automation' | 'notifications',
+    selected: NonNullable<
+      typeof policy.automation | typeof policy.notifications
+    >,
+  ) => {
+    const evidence = PLANE_EVIDENCE[name];
+    return {
+      environmentId: evidence.environmentId,
+      environment: selected.environment,
+      branchPolicyIds: [evidence.branchPolicyId],
+      secretName: selected.ageKeySecret,
+      repositorySecretAbsent: true,
+      organizationSecret: 'not-applicable',
+      ageRecipient: selected.ageRecipient,
+      ...(deliveries
+        ? {
+            delivery: {
+              runId: evidence.runId,
+              workflowId: evidence.workflowId,
+              workflowPath: evidence.workflowPath,
+              headSha: 'a'.repeat(COMMIT_SHA_LENGTH),
+              headRef: 'main',
+              event: evidence.event,
+              environment: selected.environment,
+              deploymentId: evidence.deploymentId,
+              completedAt: observedAt,
+              conclusion: 'success',
+            },
+          }
+        : {}),
+    };
+  };
+  write(
+    consumer,
+    'sync-standards.environment-proof.json',
+    JSON.stringify({
+      version: 1,
+      repository: {
+        id: 1,
+        ownerId: 2,
+        fullName: 'owner/repo',
+        private: false,
+        defaultBranch: 'main',
+        ownerType: 'User',
+        ownerPlan: 'not-required',
+        capability: 'public-repository',
+      },
+      policySha256: isolationPolicySha256(policy),
+      capabilityObservedAt: observedAt,
+      observedAt,
+      legacyAgeRecipients: [LEGACY_RECIPIENT],
+      planes: {
+        ...(policy.automation === undefined
+          ? {}
+          : { automation: plane('automation', policy.automation) }),
+        ...(policy.notifications === undefined
+          ? {}
+          : { notifications: plane('notifications', policy.notifications) }),
+      },
+    }),
+  );
+};
 
 const writeAutomationCredentials = (consumer: string): void => {
   write(
     consumer,
     'secrets/standards-sync.yaml',
-    `ci:\n  github:\n    repository_app:\n      app_id: ${FAKE_ENC}\n      private_key: ${FAKE_ENC}\n${CI_SOPS_METADATA_YAML}`,
+    `ci:\n  github:\n    repository_app:\n      app_id: ${FAKE_ENC}\n      private_key: ${FAKE_ENC}\n${metadataFor(AUTOMATION.ageRecipient)}`,
   );
   write(
     consumer,
@@ -56,7 +190,7 @@ const writeNotificationCredentials = (consumer: string): void => {
   write(
     consumer,
     'secrets/notifications.yaml',
-    `ci:\n  ntfy_topic_url: ${FAKE_ENC}\n${CI_SOPS_METADATA_YAML}`,
+    `ci:\n  ntfy_topic_url: ${FAKE_ENC}\n${metadataFor(NOTIFICATIONS.ageRecipient)}`,
   );
   write(
     consumer,
@@ -65,6 +199,7 @@ const writeNotificationCredentials = (consumer: string): void => {
   );
 };
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: These cases share one complete structure fixture and collectively specify the migration state machine.
 describe('automatic sync credential policy', () => {
   it('requires broker credentials while automatic sync uses the workflow', async () => {
     const consumer = buildConsumer();
@@ -95,9 +230,14 @@ describe('automatic sync credential policy', () => {
     write(
       consumer,
       'sync-standards.local.json',
-      JSON.stringify({ automation: AUTOMATION }),
+      JSON.stringify({ automation: AUTOMATION, recoveryAgeRecipients: [] }),
     );
+    writeIsolationProof(consumer, {
+      automation: AUTOMATION,
+      recoveryAgeRecipients: [],
+    });
     writeAutomationCredentials(consumer);
+    writeIsolationRules(consumer);
 
     expect(await collectStructureProblems(consumer, 'consumer')).toEqual([]);
   });
@@ -108,8 +248,12 @@ describe('automatic sync credential policy', () => {
     write(
       consumer,
       'sync-standards.local.json',
-      JSON.stringify({ automation: AUTOMATION }),
+      JSON.stringify({ automation: AUTOMATION, recoveryAgeRecipients: [] }),
     );
+    writeIsolationProof(consumer, {
+      automation: AUTOMATION,
+      recoveryAgeRecipients: [],
+    });
 
     const problems = await collectStructureProblems(consumer, 'consumer');
     expect(problems).toContain(
@@ -126,13 +270,18 @@ describe('automatic sync credential policy', () => {
     write(
       consumer,
       'sync-standards.local.json',
-      JSON.stringify({ automation: AUTOMATION }),
+      JSON.stringify({ automation: AUTOMATION, recoveryAgeRecipients: [] }),
     );
+    writeIsolationProof(consumer, {
+      automation: AUTOMATION,
+      recoveryAgeRecipients: [],
+    });
     writeAutomationCredentials(consumer);
+    writeIsolationRules(consumer);
     write(
       consumer,
       'secrets/standards-sync.yaml',
-      `ci:\n  github:\n    repository_app:\n      app_id: ${FAKE_ENC}\n${CI_SOPS_METADATA_YAML}`,
+      `ci:\n  github:\n    repository_app:\n      app_id: ${FAKE_ENC}\n${metadataFor(AUTOMATION.ageRecipient)}`,
     );
 
     expect(await collectStructureProblems(consumer, 'consumer')).toContain(
@@ -150,10 +299,21 @@ describe('automatic sync credential policy', () => {
       JSON.stringify({
         automation: AUTOMATION,
         notifications: NOTIFICATIONS,
+        recoveryAgeRecipients: [],
       }),
     );
     writeAutomationCredentials(consumer);
     writeNotificationCredentials(consumer);
+    writeIsolationRules(consumer);
+    writeIsolationProof(
+      consumer,
+      {
+        automation: AUTOMATION,
+        notifications: NOTIFICATIONS,
+        recoveryAgeRecipients: [],
+      },
+      true,
+    );
 
     expect(await collectStructureProblems(consumer, 'consumer')).toEqual([]);
   });
@@ -163,8 +323,16 @@ describe('automatic sync credential policy', () => {
     write(
       consumer,
       'sync-standards.local.json',
-      JSON.stringify({ notifications: NOTIFICATIONS }),
+      JSON.stringify({
+        notifications: NOTIFICATIONS,
+        recoveryAgeRecipients: [],
+      }),
     );
+    writeIsolationProof(consumer, {
+      notifications: NOTIFICATIONS,
+      recoveryAgeRecipients: [],
+    });
+    writeIsolationRules(consumer);
 
     const problems = await collectStructureProblems(consumer, 'consumer');
     expect(problems).toContain(
@@ -172,6 +340,113 @@ describe('automatic sync credential policy', () => {
     );
     expect(problems).toContain(
       'secrets/notifications.example.yaml: must exist and mirror the key shape of secrets/notifications.yaml with plaintext placeholders',
+    );
+  });
+
+  it('rejects a retained plaintext legacy CI target after full isolation', async () => {
+    const consumer = buildConsumer();
+    write(
+      consumer,
+      'sync-standards.local.json',
+      JSON.stringify({
+        automation: AUTOMATION,
+        notifications: NOTIFICATIONS,
+        recoveryAgeRecipients: [],
+      }),
+    );
+    writeAutomationCredentials(consumer);
+    writeNotificationCredentials(consumer);
+    writeIsolationRules(consumer);
+    writeIsolationProof(consumer, {
+      automation: AUTOMATION,
+      notifications: NOTIFICATIONS,
+      recoveryAgeRecipients: [],
+    });
+    write(
+      consumer,
+      'secrets/ci.yaml',
+      `ci:\n  retired: plaintext\n${CI_SOPS_METADATA_YAML}`,
+    );
+    write(consumer, 'secrets/ci.example.yaml', 'ci:\n  retired: placeholder\n');
+
+    expect(await collectStructureProblems(consumer, 'consumer')).toContain(
+      'secrets/ci.yaml: value at "ci.retired" is not a complete SOPS-encrypted value; plaintext secret values must never be committed',
+    );
+  });
+
+  it('rejects a purpose target shared with the legacy recipient', async () => {
+    const consumer = buildConsumer();
+    write(
+      consumer,
+      'sync-standards.local.json',
+      JSON.stringify({ automation: AUTOMATION, recoveryAgeRecipients: [] }),
+    );
+    writeIsolationProof(consumer, {
+      automation: AUTOMATION,
+      recoveryAgeRecipients: [],
+    });
+    writeAutomationCredentials(consumer);
+    writeIsolationRules(consumer);
+    write(
+      consumer,
+      'secrets/standards-sync.yaml',
+      `ci:\n  github:\n    repository_app:\n      app_id: ${FAKE_ENC}\n      private_key: ${FAKE_ENC}\n${CI_SOPS_METADATA_YAML}`,
+    );
+
+    expect(await collectStructureProblems(consumer, 'consumer')).toContain(
+      'secrets/standards-sync.yaml: SOPS metadata age recipients must be exactly the plane recipient plus declared recovery recipients',
+    );
+  });
+
+  it('allows only explicitly declared personal recovery recipients beside a plane identity', async () => {
+    const consumer = buildConsumer();
+    const policy = {
+      automation: AUTOMATION,
+      recoveryAgeRecipients: [RECOVERY_RECIPIENT],
+    };
+    write(consumer, 'sync-standards.local.json', JSON.stringify(policy));
+    writeIsolationProof(consumer, policy);
+    write(
+      consumer,
+      'secrets/standards-sync.yaml',
+      `ci:\n  github:\n    repository_app:\n      app_id: ${FAKE_ENC}\n      private_key: ${FAKE_ENC}\n${metadataFor(AUTOMATION.ageRecipient, RECOVERY_RECIPIENT)}`,
+    );
+    write(
+      consumer,
+      'secrets/standards-sync.example.yaml',
+      'ci:\n  github:\n    repository_app:\n      app_id: placeholder\n      private_key: placeholder\n',
+    );
+    write(
+      consumer,
+      '.sops.yaml',
+      `creation_rules:\n  - path_regex: secrets/standards-sync\\.yaml$\n    key_groups:\n      - age:\n          - ${AUTOMATION.ageRecipient}\n          - ${RECOVERY_RECIPIENT}\n`,
+    );
+
+    expect(await collectStructureProblems(consumer, 'consumer')).toEqual([]);
+  });
+
+  it('rejects unknown persisted-proof fields instead of trusting self-asserted evidence', async () => {
+    const consumer = buildConsumer();
+    const policy = { automation: AUTOMATION, recoveryAgeRecipients: [] };
+    write(consumer, 'sync-standards.local.json', JSON.stringify(policy));
+    writeIsolationProof(consumer, policy);
+    writeAutomationCredentials(consumer);
+    writeIsolationRules(consumer);
+    const proof = JSON.parse(
+      readFileSync(
+        join(consumer, 'sync-standards.environment-proof.json'),
+        'utf8',
+      ),
+    ) as Record<string, unknown>;
+    proof.assertedByContributor = true;
+    write(
+      consumer,
+      'sync-standards.environment-proof.json',
+      JSON.stringify(proof),
+    );
+
+    expect(await collectStructureProblems(consumer, 'consumer')).toContain(
+      'sync-standards.environment-proof.json "root" has invalid fields',
     );
   });
 });

@@ -17,6 +17,7 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, posix, resolve } from 'node:path';
 import process from 'node:process';
+import { runAutomationCommand } from './automation-commands';
 import { runCredsCommand } from './creds-commands';
 import {
   composeDependabot,
@@ -972,6 +973,7 @@ Commands:
   dependabot  Verify (--check) or regenerate (--write) the composed .github/dependabot.yml
   dev-env     Compose each workspace's generated .env.local from its three dev layers and authorized broker-owned S3 pair references
   github      Compare (--check) or converge (--apply) live GitHub settings
+  automation  Admin-verify environment isolation and record exact-main delivery evidence
   creds       Mint, rotate, and revoke brokered credentials (see \`standards creds help\`)
   poller      Run one fix-poller tick over the configured repositories (host automation)
   help        Show this help
@@ -1317,14 +1319,30 @@ const runGateCommand = (
   return apply ? runGithubApply(consumer) : runGithubCheckGate(consumer);
 };
 
+const runCommandFamily = async (
+  rawArgs: ReadonlyArray<string>,
+): Promise<boolean> => {
+  const [command] = rawArgs;
+  let success: boolean | null = null;
+  if (command === 'automation') {
+    success = await runAutomationCommand(rawArgs.slice(1));
+  } else if (command === 'creds') {
+    success = await runCredsCommand(rawArgs.slice(1));
+  }
+  if (success === null) {
+    return false;
+  }
+  if (!success) {
+    process.exitCode = 1;
+  }
+  return true;
+};
+
 const main = async (): Promise<void> => {
   // The creds family owns its flag vocabulary; route it before the strict
   // global parser rejects those flags.
   const rawArgs = process.argv.slice(2);
-  if (rawArgs[0] === 'creds') {
-    if (!(await runCredsCommand(rawArgs.slice(1)))) {
-      process.exitCode = 1;
-    }
+  if (await runCommandFamily(rawArgs)) {
     return;
   }
   const {

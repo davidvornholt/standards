@@ -1,16 +1,16 @@
 import { existsSync } from 'node:fs';
 import { lstat, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { automationProofProblems } from './automation-proof-validation';
 import { isContainedPath } from './contained-path';
 import { isNonEmptyString, isRecord } from './github-settings-parse';
 import {
+  hasControlCharacter,
   type NotificationPolicy,
   SYNC_POLICY_FILE as POLICY_FILE,
   parseIsolationFields,
   type SyncAutomationPolicy,
 } from './sync-policy-isolation';
-
-const LINE_BREAK = /[\r\n]/u;
 
 export const SYNC_POLICY_FILE = POLICY_FILE;
 
@@ -19,9 +19,10 @@ export type SyncPolicy = {
   readonly ref?: string;
   readonly automation?: SyncAutomationPolicy;
   readonly notifications?: NotificationPolicy;
+  readonly recoveryAgeRecipients?: ReadonlyArray<string>;
 };
 
-const parseSyncPolicy = (parsed: unknown): SyncPolicy => {
+export const parseSyncPolicy = (parsed: unknown): SyncPolicy => {
   if (!isRecord(parsed)) {
     throw new Error(`${SYNC_POLICY_FILE} must be a JSON object`);
   }
@@ -30,7 +31,8 @@ const parseSyncPolicy = (parsed: unknown): SyncPolicy => {
       field !== 'autoSync' &&
       field !== 'ref' &&
       field !== 'automation' &&
-      field !== 'notifications',
+      field !== 'notifications' &&
+      field !== 'recoveryAgeRecipients',
   );
   if (unsupportedFields.length > 0) {
     throw new Error(
@@ -42,18 +44,20 @@ const parseSyncPolicy = (parsed: unknown): SyncPolicy => {
   }
   if (
     parsed.ref !== undefined &&
-    (!isNonEmptyString(parsed.ref) || LINE_BREAK.test(parsed.ref))
+    (!isNonEmptyString(parsed.ref) || hasControlCharacter(parsed.ref))
   ) {
     throw new Error(
-      `${SYNC_POLICY_FILE} "ref" must be a non-empty single-line string`,
+      `${SYNC_POLICY_FILE} "ref" must be a non-empty string without control characters`,
     );
   }
-  const { automation, notifications } = parseIsolationFields(parsed);
+  const { automation, notifications, recoveryAgeRecipients } =
+    parseIsolationFields(parsed);
   return {
     autoSync: parsed.autoSync,
     ref: parsed.ref,
     automation,
     notifications,
+    recoveryAgeRecipients,
   };
 };
 
@@ -89,8 +93,8 @@ export const inspectSyncPolicy = async (
   consumer: string,
 ): Promise<ReadonlyArray<string>> => {
   try {
-    await readSyncPolicy(consumer);
-    return [];
+    const policy = await readSyncPolicy(consumer);
+    return automationProofProblems(consumer, policy);
   } catch (error) {
     return [error instanceof Error ? error.message : String(error)];
   }
