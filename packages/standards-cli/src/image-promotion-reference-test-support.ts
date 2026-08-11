@@ -1,4 +1,5 @@
 import { yamlContract } from './image-promotion-reference-contract-test-support';
+import { isValidAppState } from './image-promotion-reference-state-test-support';
 
 export type Metadata = {
   readonly imageRepository: string;
@@ -127,6 +128,7 @@ export const announce = ({
 }): ModelResult => {
   if (
     !(
+      isValidAppState(state.app) &&
       exactProof(candidate, proof) &&
       metadataMatches(state.app, candidate) &&
       evidencePasses(evidence)

@@ -10,8 +10,10 @@ import {
   advance,
   deploy,
   openPromotion,
+  rollback,
 } from './image-promotion-reference-lifecycle-test-support';
 import {
+  type AppState,
   announce,
   canonicalIdentity,
   disabledApp,
@@ -132,4 +134,38 @@ it('executes same, descendant, ancestor, diverged, and unprovable outcomes', () 
   }
   const conflict = { ...a, digest: DIGEST_B, sourceRunId: '44' };
   expect(announceCandidate(state, conflict, 'same').kind).toBe('rejected');
+});
+
+it('makes every promotion operation reject an invalid desired-state object', () => {
+  const value = candidate(SHA_A, DIGEST_A, '41');
+  const invalidApp = {
+    ...disabledApp(),
+    credential: 'secret',
+  } as unknown as AppState;
+  const state: PromotionState = {
+    ...initialState(),
+    app: invalidApp,
+  };
+  expect(announceCandidate(state, value, 'descendant').kind).toBe('rejected');
+  expect(advance(state, canonicalIdentity(value), 'branch').kind).toBe(
+    'rejected',
+  );
+  expect(openPromotion(state, canonicalIdentity(value), {}).kind).toBe(
+    'rejected',
+  );
+  expect(deploy(state, canonicalIdentity(value), MERGE_A, true).kind).toBe(
+    'rejected',
+  );
+  expect(
+    rollback({
+      audit: Object.fromEntries(
+        writerContract.rollback.required.map((name) => [name, true]),
+      ),
+      compare: 'ancestor',
+      proof: value,
+      provenance: validEvidence(),
+      state,
+      target: value,
+    }).kind,
+  ).toBe('rejected');
 });

@@ -2,6 +2,7 @@ import { expect, it } from 'bun:test';
 import process from 'node:process';
 import { ACTUAL_UPSTREAM, runProcess } from './cli-test-support';
 import {
+  DIGEST_A,
   environment,
   SHA_A,
   SHA_B,
@@ -40,7 +41,11 @@ const guardIndex = deploy.steps.findIndex(
 const mutationIndex = deploy.steps.findIndex(
   (step) => step.name === 'Mutate and read back',
 );
+const accessIndex = deploy.steps.findIndex(
+  (step) => step.name === 'Revalidate exact registry access',
+);
 const guard = deploy.steps[guardIndex]?.run ?? 'exit 2';
+const access = deploy.steps[accessIndex]?.run ?? 'exit 2';
 const mutation = deploy.steps[mutationIndex]?.run ?? 'exit 2';
 const prelude = `
 git() {
@@ -51,6 +56,7 @@ git() {
   esac
 }
 deploy-and-read-back() { printf 'MUTATION\\n'; }
+verify-registry-access() { test "$REGISTRY_PROOF" = pass; }
 `;
 
 const runGuard = ({
@@ -58,21 +64,27 @@ const runGuard = ({
   event = SHA_A,
   gated = SHA_A,
   remote = SHA_A,
+  registryProof = 'pass',
 }: {
   readonly checkout?: string;
   readonly event?: string;
   readonly gated?: string;
   readonly remote?: string;
+  readonly registryProof?: string;
 }) =>
   runProcess(
     'bash',
     ACTUAL_UPSTREAM,
-    ['-c', `${prelude}\n${guard}\n${mutation}`],
+    ['-c', `${prelude}\n${guard}\n${access}\n${mutation}`],
     environment([
       ['CHECKOUT_SHA', checkout],
       ['GATED_SHA', gated],
       ['GITHUB_SHA', event],
+      ['DIGEST', DIGEST_A],
+      ['IMAGE_REPOSITORY', 'ghcr.io/example/app/web'],
       ['PATH', process.env.PATH],
+      ['REGISTRY_ACCESS', 'private'],
+      ['REGISTRY_PROOF', registryProof],
       ['REMOTE_MAIN_SHA', remote],
     ]),
   );
@@ -92,12 +104,14 @@ it('parses an exact-SHA gate dependency and production serialization', () => {
 
 it('places all four equality checks immediately before first mutation', () => {
   expect(guardIndex).toBeGreaterThan(0);
-  expect(mutationIndex).toBe(guardIndex + 1);
+  expect(accessIndex).toBe(guardIndex + 1);
+  expect(mutationIndex).toBe(accessIndex + 1);
   expect(guard).toContain('git rev-parse HEAD');
   expect(guard).toContain('git ls-remote origin refs/heads/main');
   expect(guard).toContain('"$checkout_sha" = "$GATED_SHA"');
   expect(guard).toContain('"$GATED_SHA" = "$GITHUB_SHA"');
   expect(guard).toContain('"$GITHUB_SHA" = "$remote_main_sha"');
+  expect(access).toContain('verify-registry-access');
 });
 
 it('mutates current main and gives every stale queued permutation zero writes', () => {
@@ -107,6 +121,7 @@ it('mutates current main and gives every stale queued permutation zero writes', 
     { gated: SHA_B },
     { event: SHA_B },
     { remote: SHA_B },
+    { registryProof: 'fail' },
   ]) {
     const result = runGuard(fixture);
     expect(result.status).not.toBe(0);

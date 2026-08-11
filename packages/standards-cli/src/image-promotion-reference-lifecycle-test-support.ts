@@ -1,3 +1,4 @@
+import { isValidAppState } from './image-promotion-reference-state-test-support';
 import {
   type Compare,
   canonicalIdentity,
@@ -31,6 +32,9 @@ export const advance = (
   phase: Operation['phase'],
   mergeSha: string | null = null,
 ): ModelResult => {
+  if (!isValidAppState(state.app)) {
+    return { kind: 'rejected', state };
+  }
   const operation = state.operations[identity];
   if (operation === undefined) {
     return { kind: 'rejected', state };
@@ -73,6 +77,9 @@ export const openPromotion = (
   identity: string,
   comparisons: Readonly<Record<string, Compare>>,
 ): ModelResult => {
+  if (!isValidAppState(state.app)) {
+    return { kind: 'rejected', state };
+  }
   const existing = state.operations[identity];
   const opened =
     existing?.phase === 'open'
@@ -119,6 +126,9 @@ export const deploy = (
   mergeSha: string,
   success: boolean,
 ): ModelResult => {
+  if (!isValidAppState(state.app)) {
+    return { kind: 'rejected', state };
+  }
   const operation = state.operations[identity];
   if (
     operation === undefined ||
@@ -145,6 +155,9 @@ export const rollback = ({
   readonly state: PromotionState;
   readonly target: Promotion;
 }): ModelResult => {
+  if (!isValidAppState(state.app)) {
+    return { kind: 'rejected', state };
+  }
   const current = `${state.app.sourceRepository}@${state.app.promotedSourceSha} digest=${state.app.digest}`;
   const identity = `rollback:${current}->${canonicalIdentity(target)}`;
   const auditEvidence = Object.fromEntries(

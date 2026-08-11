@@ -46,6 +46,7 @@ const transition = ({
   readonly changedFiles?: ReadonlyArray<string>;
   readonly operation:
     | 'bootstrap'
+    | 'accessMigration'
     | 'disable'
     | 'metadata'
     | 'remove'

@@ -46,6 +46,7 @@ requiredProvenance:
   - canonicalMarker
   - exactPayload
   - exactRunProof
+  - exactRegistryAccessProof
   - exactResultingObject
   - currentMainAncestry
   - mergeGroupRevalidation
@@ -69,6 +70,7 @@ pinFields: [promotionEnabled, digest, promotedSourceSha]
 disabledPin: { promotionEnabled: false, digest: null, promotedSourceSha: null }
 operations:
   bootstrap: absent-to-disabled
+  accessMigration: legacy-to-explicit-access-only
   disable: live-to-disabled-with-metadata-unchanged
   metadata: disabled-to-disabled
   remove: disabled-to-absent
@@ -81,13 +83,18 @@ public:
   detectorCredential: none
   detectorProof: anonymously-readable
   hostCredential: none
+  hostAuthFile: /run/containers/auth/anonymous.json
 private:
   detectorCredential: github-actions-token
   detectorPermissions: { contents: read, packages: read }
-  detectorProof: anonymous-denied-then-authenticated-readable
+  detectorProof: exact-private-visibility-then-anonymous-denied-then-authenticated-readable
   hostCredential: sops-classic-pat
-  hostCredentialScope: read:packages
-  hostAuthFile: root-only
+  hostCredentialScopes: [read:packages]
+  hostCredentialAuthority: all-packages-readable-by-token-owner
+  hostIdentityPolicy: dedicated-package-reader-or-explicit-account-wide-acceptance
+  hostAuthFile: /run/containers/auth/ghcr-private.json
+  secretRestartUnits: [podman-ghcr-login.service]
+  rotationChecks: [intended-package-readable, unrelated-package-authority-reviewed]
   rotation: replace-verify-revoke
 forbiddenDesiredStateFields: [credential, secretPath, username, authFile]
 ```
@@ -100,6 +107,7 @@ case "$REGISTRY_ACCESS" in
     resolve-anonymous-tag
     ;;
   private)
+    require-exact-private-visibility
     reject-anonymous-readable
     resolve-authenticated-tag
     ;;
@@ -108,6 +116,78 @@ case "$REGISTRY_ACCESS" in
     exit 1
     ;;
 esac
+```
+
+<!-- contract:registry-access-proof -->
+```sh
+set -euo pipefail
+image_repository=${1:?image repository is required}
+digest=${2:?digest is required}
+registry_access=${3:?registry access mode is required}
+[[ "$image_repository" =~ ^ghcr\.io/[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*(/[a-z0-9][a-z0-9._-]*)*$ ]]
+[[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+case "$registry_access" in
+  public)
+    anonymous_digest=$(resolve-anonymous-digest "$image_repository")
+    test "$anonymous_digest" = "$digest"
+    ;;
+  private)
+    package=$(read-provider-package-metadata "$image_repository")
+    jq -er --arg image "$image_repository" 'select(.imageRepository == $image and .visibility == "private") | true' <<<"$package" >/dev/null
+    if resolve-anonymous-digest "$image_repository" >/dev/null 2>&1; then
+      printf 'private image unexpectedly allows anonymous access: %s\n' "$image_repository" >&2
+      exit 1
+    fi
+    authenticated_digest=$(resolve-job-token-digest "$image_repository")
+    test "$authenticated_digest" = "$digest"
+    ;;
+  *)
+    printf 'unsupported registry access mode: %s\n' "$registry_access" >&2
+    exit 1
+    ;;
+esac
+```
+
+<!-- contract:host-registry-login -->
+```sh
+set -euo pipefail
+install -d -m 0700 "$(dirname "$PRIVATE_AUTH_FILE")"
+temporary_auth=$(mktemp "${PRIVATE_AUTH_FILE}.tmp.XXXXXX")
+trap 'rm -f "$temporary_auth"' EXIT
+printf '{"auths":{}}\n' >"$temporary_auth"
+chmod 0600 "$temporary_auth"
+podman login ghcr.io --authfile "$temporary_auth" --username "$REGISTRY_USERNAME" --password-stdin <"$REGISTRY_TOKEN_FILE"
+mv -f "$temporary_auth" "$PRIVATE_AUTH_FILE"
+trap - EXIT
+```
+
+<!-- contract:host-registry-pull -->
+```sh
+set -euo pipefail
+case "$REGISTRY_ACCESS" in
+  public) auth_file=$PUBLIC_AUTH_FILE ;;
+  private) auth_file=$PRIVATE_AUTH_FILE ;;
+  *) printf 'unsupported registry access mode: %s\n' "$REGISTRY_ACCESS" >&2; exit 1 ;;
+esac
+test -r "$auth_file"
+REGISTRY_AUTH_FILE="$auth_file" podman pull --authfile "$auth_file" "$IMAGE_REFERENCE"
+```
+
+<!-- contract:private-host-migration -->
+```yaml
+authFiles:
+  public: /run/containers/auth/anonymous.json
+  private: /run/containers/auth/ghcr-private.json
+stages:
+  plumbing:
+    allowedAppState: disabled-or-public
+    privatePrePull: forbidden
+    requiredReadback: [sops-secret, login-unit-success, private-auth-file]
+  privatePromotion:
+    requires: plumbing-readback
+    allowedAppState: private
+    privatePrePull: required
+appliesTo: [new-private-adoption, public-to-private-migration]
 ```
 
 <!-- contract:deploy-guard -->
@@ -137,6 +217,8 @@ jobs:
           test "$checkout_sha" = "$GATED_SHA"
           test "$GATED_SHA" = "$GITHUB_SHA"
           test "$GITHUB_SHA" = "$remote_main_sha"
+      - name: Revalidate exact registry access
+        run: verify-registry-access "$IMAGE_REPOSITORY" "$DIGEST" "$REGISTRY_ACCESS"
       - name: Mutate and read back
         run: deploy-and-read-back
 ```
