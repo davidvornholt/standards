@@ -21,6 +21,7 @@ export type SopsActionOptions = {
   readonly curlStatus?: number;
   readonly envName?: string;
   readonly secretKey?: string;
+  readonly secretRoot?: string;
   readonly sha256Status?: number;
   readonly sopsOutput?: string;
   readonly sopsStatus?: number;
@@ -47,6 +48,7 @@ const DEFAULT_OPTIONS = {
   curlStatus: 0,
   envName: 'GH_TOKEN',
   secretKey: 'example_token',
+  secretRoot: 'ci',
   sha256Status: 0,
   sopsOutput: JSON.stringify({
     ci: { example_token: 'resolved-token' },
@@ -134,6 +136,7 @@ export const createSopsActionRunner =
         SOPS_MARKER: sopsMarker,
         SOPS_SECRET_FILE: 'secrets/ci.yaml',
         SOPS_SECRET_KEY: resolved.secretKey,
+        SOPS_SECRET_ROOT: resolved.secretRoot,
       },
     );
     return {
