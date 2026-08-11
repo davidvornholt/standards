@@ -3,13 +3,22 @@ import { lstat, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isContainedPath } from './contained-path';
 import { isNonEmptyString, isRecord } from './github-settings-parse';
+import {
+  type NotificationPolicy,
+  SYNC_POLICY_FILE as POLICY_FILE,
+  parseIsolationFields,
+  type SyncAutomationPolicy,
+} from './sync-policy-isolation';
 
-export const SYNC_POLICY_FILE = 'sync-standards.local.json';
 const LINE_BREAK = /[\r\n]/u;
+
+export const SYNC_POLICY_FILE = POLICY_FILE;
 
 export type SyncPolicy = {
   readonly autoSync?: boolean;
   readonly ref?: string;
+  readonly automation?: SyncAutomationPolicy;
+  readonly notifications?: NotificationPolicy;
 };
 
 const parseSyncPolicy = (parsed: unknown): SyncPolicy => {
@@ -17,7 +26,11 @@ const parseSyncPolicy = (parsed: unknown): SyncPolicy => {
     throw new Error(`${SYNC_POLICY_FILE} must be a JSON object`);
   }
   const unsupportedFields = Object.keys(parsed).filter(
-    (field) => field !== 'autoSync' && field !== 'ref',
+    (field) =>
+      field !== 'autoSync' &&
+      field !== 'ref' &&
+      field !== 'automation' &&
+      field !== 'notifications',
   );
   if (unsupportedFields.length > 0) {
     throw new Error(
@@ -35,7 +48,13 @@ const parseSyncPolicy = (parsed: unknown): SyncPolicy => {
       `${SYNC_POLICY_FILE} "ref" must be a non-empty single-line string`,
     );
   }
-  return { autoSync: parsed.autoSync, ref: parsed.ref };
+  const { automation, notifications } = parseIsolationFields(parsed);
+  return {
+    autoSync: parsed.autoSync,
+    ref: parsed.ref,
+    automation,
+    notifications,
+  };
 };
 
 export const readSyncPolicy = async (consumer: string): Promise<SyncPolicy> => {

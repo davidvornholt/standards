@@ -14,6 +14,9 @@ name: Standards sync
 #   { "ref": "v0.7.0" }    tag, branch, or full commit sha to sync from
 #                          instead of main. The CLI reads the same file, so a
 #                          local `bun standards sync` obeys the same pin.
+#   { "automation": { ... } }  bind the secret-bearing job to a protected
+#                          environment and purpose-specific SOPS credential;
+#                          see the Standards sync skill for the full contract.
 
 on:
   schedule:
@@ -39,52 +42,28 @@ jobs:
       auto-sync: ${{ steps.read.outputs.auto-sync }}
       present: ${{ steps.read.outputs.present }}
       ref: ${{ steps.read.outputs.ref }}
+      sync-environment: ${{ steps.read.outputs.sync-environment }}
+      sync-age-key-secret: ${{ steps.read.outputs.sync-age-key-secret }}
+      sync-secret-target: ${{ steps.read.outputs.sync-secret-target }}
+      sync-broker-app-key: ${{ steps.read.outputs.sync-broker-app-key }}
     steps:
       - name: Checkout policy file
         uses: actions/checkout@v7
         with:
-          sparse-checkout: sync-standards.local.json
+          sparse-checkout: |
+            sync-standards.local.json
+            .github/actions/read-standards-policy/action.yml
           sparse-checkout-cone-mode: false
 
-      - name: Read sync policy
+      - name: Read workflow policy
         id: read
-        run: |
-          if [ -f sync-standards.local.json ]; then
-            if ! jq -e '
-              type == "object"
-              and ((keys - ["autoSync", "ref"]) | length == 0)
-              and ((has("autoSync") | not) or (.autoSync | type == "boolean"))
-              and (
-                (has("ref") | not)
-                or (
-                  (.ref | type == "string")
-                  and (.ref | length > 0)
-                  and (.ref | contains("\n") | not)
-                  and (.ref | contains("\r") | not)
-                )
-              )
-            ' sync-standards.local.json > /dev/null; then
-              echo "::error::sync-standards.local.json must be an object with only an optional boolean autoSync and optional non-empty single-line string ref"
-              exit 1
-            fi
-            auto_sync=$(jq -r 'if has("autoSync") then .autoSync else true end' sync-standards.local.json)
-            ref=$(jq -r 'if has("ref") then .ref else "" end' sync-standards.local.json)
-            present=true
-          else
-            auto_sync=true
-            ref=
-            present=false
-          fi
-          {
-            echo "auto-sync=$auto_sync"
-            echo "present=$present"
-            echo "ref=$ref"
-          } >> "$GITHUB_OUTPUT"
+        uses: ./.github/actions/read-standards-policy
 
   sync:
     needs: policy
     if: needs.policy.outputs.auto-sync != 'false'
     runs-on: ubuntu-latest
+    environment: ${{ needs.policy.outputs.sync-environment || fromJSON('null') }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -125,17 +104,17 @@ jobs:
       - name: Resolve broker App ID
         uses: ./.github/actions/sops-secret
         with:
-          age-key: ${{ secrets.SOPS_AGE_KEY }}
-          secret-file: secrets/ci.yaml
-          secret-key: broker_app.app_id
+          age-key: ${{ secrets[needs.policy.outputs.sync-age-key-secret] }}
+          secret-file: secrets/${{ needs.policy.outputs.sync-secret-target }}.yaml
+          secret-key: ${{ needs.policy.outputs.sync-broker-app-key }}.app_id
           env-name: BROKER_APP_ID
 
       - name: Resolve broker App private key
         uses: ./.github/actions/sops-secret
         with:
-          age-key: ${{ secrets.SOPS_AGE_KEY }}
-          secret-file: secrets/ci.yaml
-          secret-key: broker_app.private_key
+          age-key: ${{ secrets[needs.policy.outputs.sync-age-key-secret] }}
+          secret-file: secrets/${{ needs.policy.outputs.sync-secret-target }}.yaml
+          secret-key: ${{ needs.policy.outputs.sync-broker-app-key }}.private_key
           env-name: BROKER_APP_PRIVATE_KEY
 
       # Mint both tokens before sync as a cheap, fail-closed permission check,
@@ -199,9 +178,10 @@ jobs:
 
       # The branch-writer and PR-opening tokens are short-lived installation
       # tokens for only this repository. Their App credentials come from
-      # ci.broker_app in the SOPS-encrypted secrets/ci.yaml, resolved through
-      # the trusted pre-sync action. Missing credentials, an unapproved App
-      # permission update, or failed token minting stops the job.
+      # The policy-selected broker App values are resolved through the trusted
+      # pre-sync action. Without automation the outputs retain the legacy
+      # ci.broker_app in secrets/ci.yaml contract. Missing credentials, an
+      # unapproved App permission update, or failed token minting stops the job.
 
       # This workflow deliberately runs no inline `bun run check`: the synced
       # result is validated by the required Standards gate on the PR it opens,

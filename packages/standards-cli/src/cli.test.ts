@@ -34,6 +34,10 @@ const SYNC_WORKFLOW = join(
   ACTUAL_UPSTREAM,
   '.github/workflows/standards-sync.yml',
 );
+const POLICY_ACTION = join(
+  ACTUAL_UPSTREAM,
+  '.github/actions/read-standards-policy/action.yml',
+);
 const STANDARDS_WORKFLOW = join(
   ACTUAL_UPSTREAM,
   '.github/workflows/standards.yml',
@@ -2908,6 +2912,7 @@ describe('canonical workflow runner boundaries', () => {
     expect(qualityRunner).toContain('vars.CI_RUNNER');
     expect(qualityRunner).toContain('ubuntu-latest');
     expect(fixedRunnerJobs).toEqual({
+      '.github/workflows/notify-pause.yml:policy': 'ubuntu-latest',
       '.github/workflows/notify-pause.yml:notify': 'ubuntu-latest',
       '.github/workflows/standards-sync.yml:policy': 'ubuntu-latest',
       '.github/workflows/standards-sync.yml:sync': 'ubuntu-latest',
@@ -3073,28 +3078,33 @@ describe('standards sync workflow ordering', () => {
   });
 });
 
-describe('standards sync workflow policy', () => {
-  const runPolicyPreflight = (
-    policy: string | undefined,
-    legacy: Readonly<Record<string, string>> = {},
-  ): { result: RunResult; output: string } => {
-    const fixture = mkTmp('sync-policy-');
-    if (policy !== undefined) {
-      write(fixture, 'sync-standards.local.json', policy);
-    }
-    const outputPath = join(fixture, 'github-output');
-    const result = runExecutable(
-      'bash',
-      fixture,
-      ['-euo', 'pipefail', '-c', workflowRunScript('Read sync policy')],
-      { GITHUB_OUTPUT: outputPath, ...legacy },
-    );
-    return {
-      result,
-      output: existsSync(outputPath) ? readFileSync(outputPath, 'utf8') : '',
-    };
+const runPolicyPreflight = (
+  policy: string | undefined,
+  legacy: Readonly<Record<string, string>> = {},
+): { result: RunResult; output: string } => {
+  const fixture = mkTmp('sync-policy-');
+  if (policy !== undefined) {
+    write(fixture, 'sync-standards.local.json', policy);
+  }
+  const outputPath = join(fixture, 'github-output');
+  const result = runExecutable(
+    'bash',
+    fixture,
+    [
+      '-euo',
+      'pipefail',
+      '-c',
+      yamlRunScript(POLICY_ACTION, 'Read workflow policy'),
+    ],
+    { GITHUB_OUTPUT: outputPath, ...legacy },
+  );
+  return {
+    result,
+    output: existsSync(outputPath) ? readFileSync(outputPath, 'utf8') : '',
   };
+};
 
+describe('standards sync workflow policy', () => {
   it('uses defaults when the policy is absent and ignores legacy variables', () => {
     const { result, output } = runPolicyPreflight(undefined, {
       STANDARDS_AUTO_SYNC: 'false',
@@ -3105,6 +3115,14 @@ describe('standards sync workflow policy', () => {
     expect(output).toContain('auto-sync=true');
     expect(output).toContain('present=false');
     expect(output).toContain('ref=\n');
+    expect(output).toContain('sync-environment=\n');
+    expect(output).toContain('sync-age-key-secret=SOPS_AGE_KEY');
+    expect(output).toContain('sync-secret-target=ci');
+    expect(output).toContain('sync-broker-app-key=broker_app');
+    expect(output).toContain('notification-environment=\n');
+    expect(output).toContain('notification-age-key-secret=SOPS_AGE_KEY');
+    expect(output).toContain('notification-secret-target=ci');
+    expect(output).toContain('notification-topic-key=ntfy_topic_url');
     expect(readFileSync(SYNC_WORKFLOW, 'utf8')).not.toContain(
       'STANDARDS_AUTO_SYNC',
     );
@@ -3124,6 +3142,50 @@ describe('standards sync workflow policy', () => {
     expect(output).toContain('ref=v0.7.0');
   });
 
+  it('emits one complete environment-scoped automation contract', () => {
+    const { result, output } = runPolicyPreflight(
+      JSON.stringify({
+        automation: {
+          environment: 'standards-sync',
+          ageKeySecret: 'STANDARDS_SYNC_SOPS_AGE_KEY',
+          secretTarget: 'standards-sync',
+          brokerAppKey: 'github.repository_app',
+        },
+      }),
+    );
+
+    expect(result.status).toBe(0);
+    expect(output).toContain('sync-environment=standards-sync');
+    expect(output).toContain('sync-age-key-secret=STANDARDS_SYNC_SOPS_AGE_KEY');
+    expect(output).toContain('sync-secret-target=standards-sync');
+    expect(output).toContain('sync-broker-app-key=github.repository_app');
+  });
+});
+
+describe('notification workflow policy', () => {
+  it('emits one complete environment-scoped notification contract', () => {
+    const { result, output } = runPolicyPreflight(
+      JSON.stringify({
+        notifications: {
+          environment: 'notifications',
+          ageKeySecret: 'NOTIFICATIONS_SOPS_AGE_KEY',
+          secretTarget: 'notifications',
+          topicKey: 'ntfy_topic_url',
+        },
+      }),
+    );
+
+    expect(result.status).toBe(0);
+    expect(output).toContain('notification-environment=notifications');
+    expect(output).toContain(
+      'notification-age-key-secret=NOTIFICATIONS_SOPS_AGE_KEY',
+    );
+    expect(output).toContain('notification-secret-target=notifications');
+    expect(output).toContain('notification-topic-key=ntfy_topic_url');
+  });
+});
+
+describe('Standards workflow policy validation', () => {
   it.each([
     ['malformed JSON', 'not json'],
     ['a null root', 'null'],
@@ -3134,16 +3196,42 @@ describe('standards sync workflow policy', () => {
     ['an empty ref', '{ "ref": "" }'],
     ['a newline in ref', '{ "ref": "main\\npresent=false" }'],
     ['a carriage return in ref', '{ "ref": "main\\rpresent=false" }'],
+    [
+      'a partial automation object',
+      '{ "automation": { "environment": "standards-sync" } }',
+    ],
+    [
+      'a traversal target',
+      '{ "automation": { "environment": "standards-sync", "ageKeySecret": "STANDARDS_SYNC_SOPS_AGE_KEY", "secretTarget": "../ci", "brokerAppKey": "github.repository_app" } }',
+    ],
+    [
+      'a traversal-like broker key',
+      '{ "automation": { "environment": "standards-sync", "ageKeySecret": "STANDARDS_SYNC_SOPS_AGE_KEY", "secretTarget": "standards-sync", "brokerAppKey": "github...repository_app" } }',
+    ],
+    [
+      'a partial notifications object',
+      '{ "notifications": { "environment": "notifications" } }',
+    ],
+    [
+      'a traversal-like topic key',
+      '{ "notifications": { "environment": "notifications", "ageKeySecret": "NOTIFICATIONS_SOPS_AGE_KEY", "secretTarget": "notifications", "topicKey": "../ntfy_topic_url" } }',
+    ],
+    [
+      'a shared credential plane',
+      '{ "automation": { "environment": "standards-sync", "ageKeySecret": "STANDARDS_SYNC_SOPS_AGE_KEY", "secretTarget": "standards-sync", "brokerAppKey": "github.repository_app" }, "notifications": { "environment": "Standards-Sync", "ageKeySecret": "NOTIFICATIONS_SOPS_AGE_KEY", "secretTarget": "notifications", "topicKey": "ntfy_topic_url" } }',
+    ],
     ['an unsupported field', '{ "branch": "stable" }'],
   ])('fails closed for %s', (_label, policy) => {
     const { result, output } = runPolicyPreflight(policy);
     expect(result.status).toBe(1);
     expect(`${result.stdout}${result.stderr}`).toContain(
-      'sync-standards.local.json must be an object',
+      'sync-standards.local.json must contain valid autoSync/ref fields and complete, isolated automation/notifications objects when present',
     );
     expect(output).toBe('');
   });
+});
 
+describe('Standards sync workflow version policy', () => {
   it.each([
     '0.9.0',
     '0.10.0',

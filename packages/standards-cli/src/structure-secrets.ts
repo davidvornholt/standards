@@ -24,6 +24,14 @@ const BROKER_REQUIREMENTS: ReadonlyArray<RequiredSecretLeaf> = [
   { path: ['ci', 'broker_app', 'private_key'], reason: BROKER_REASON },
 ];
 
+type SecretPairContract = {
+  readonly secretsRel: string;
+  readonly exampleRel: string;
+  readonly required: ReadonlyArray<RequiredSecretLeaf>;
+  readonly missingSecrets: string;
+  readonly missingExample: string;
+};
+
 type ParsedMapping = {
   readonly mapping: Record<string, unknown> | null;
   readonly problems: ReadonlyArray<string>;
@@ -61,71 +69,128 @@ const parseMapping = async (
   return { mapping: parsed.value, problems: [] };
 };
 
-const requiredLeaves = async (
+const requiredContracts = async (
   consumer: string,
 ): Promise<{
-  readonly required: ReadonlyArray<RequiredSecretLeaf>;
+  readonly contracts: ReadonlyArray<SecretPairContract>;
   readonly problems: ReadonlyArray<string>;
 }> => {
   try {
     const policy = await readSyncPolicy(consumer);
-    return {
-      required:
-        policy.autoSync === false
-          ? [NTFY_REQUIREMENT]
-          : [NTFY_REQUIREMENT, ...BROKER_REQUIREMENTS],
-      problems: [],
-    };
+    const automatic = policy.autoSync !== false;
+    const legacyBroker = automatic && policy.automation === undefined;
+    const legacyNotification = policy.notifications === undefined;
+    const contracts: Array<SecretPairContract> = [];
+    const ciRequirements = [
+      ...(legacyNotification ? [NTFY_REQUIREMENT] : []),
+      ...(legacyBroker ? BROKER_REQUIREMENTS : []),
+    ];
+    if (ciRequirements.length > 0) {
+      contracts.push({
+        secretsRel: CI_SECRETS,
+        exampleRel: CI_EXAMPLE,
+        required: ciRequirements,
+        missingSecrets: `${CI_SECRETS}: must exist as a SOPS-encrypted file; the synced CI workflows read ci.ntfy_topic_url and, when automatic sync is enabled, ci.broker_app from it`,
+        missingExample: `${CI_EXAMPLE}: must exist and mirror the key shape of ${CI_SECRETS} with plaintext placeholders`,
+      });
+    }
+    if (automatic && policy.automation !== undefined) {
+      const { brokerAppKey, secretTarget } = policy.automation;
+      const secretsRel = `secrets/${secretTarget}.yaml`;
+      const exampleRel = `secrets/${secretTarget}.example.yaml`;
+      const basePath = ['ci', ...brokerAppKey.split('.')];
+      const destination = `${secretTarget}:ci.${brokerAppKey}`;
+      const reason = `the environment-scoped Standards sync workflow mints its current-repository tokens from ci.${brokerAppKey}; provision it with "bun standards creds add github --dest ${destination}"`;
+      contracts.push({
+        secretsRel,
+        exampleRel,
+        required: [
+          { path: [...basePath, 'app_id'], reason },
+          { path: [...basePath, 'private_key'], reason },
+        ],
+        missingSecrets: `${secretsRel}: must exist as a SOPS-encrypted file; sync-standards.local.json selects it for environment-scoped Standards sync automation`,
+        missingExample: `${exampleRel}: must exist and mirror the key shape of ${secretsRel} with plaintext placeholders`,
+      });
+    }
+    if (policy.notifications !== undefined) {
+      const { secretTarget, topicKey } = policy.notifications;
+      const secretsRel = `secrets/${secretTarget}.yaml`;
+      const exampleRel = `secrets/${secretTarget}.example.yaml`;
+      contracts.push({
+        secretsRel,
+        exampleRel,
+        required: [
+          {
+            path: ['ci', ...topicKey.split('.')],
+            reason: 'the environment-scoped Notify pause workflow pushes to it',
+          },
+        ],
+        missingSecrets: `${secretsRel}: must exist as a SOPS-encrypted file; sync-standards.local.json selects it for environment-scoped pause notifications`,
+        missingExample: `${exampleRel}: must exist and mirror the key shape of ${secretsRel} with plaintext placeholders`,
+      });
+    }
+    return { contracts, problems: [] };
   } catch (error) {
     return {
-      required: [NTFY_REQUIREMENT, ...BROKER_REQUIREMENTS],
+      contracts: [
+        {
+          secretsRel: CI_SECRETS,
+          exampleRel: CI_EXAMPLE,
+          required: [NTFY_REQUIREMENT, ...BROKER_REQUIREMENTS],
+          missingSecrets: `${CI_SECRETS}: must exist as a SOPS-encrypted file; the synced CI workflows read ci.ntfy_topic_url and, when automatic sync is enabled, ci.broker_app from it`,
+          missingExample: `${CI_EXAMPLE}: must exist and mirror the key shape of ${CI_SECRETS} with plaintext placeholders`,
+        },
+      ],
       problems: [error instanceof Error ? error.message : String(error)],
     };
   }
 };
 
-export const collectCiSecretsProblems = async (
+const collectPairProblems = async (
   consumer: string,
+  contract: SecretPairContract,
 ): Promise<ReadonlyArray<string>> => {
-  const [requirement, secretsFile, exampleFile] = await Promise.all([
-    requiredLeaves(consumer),
-    parseMapping(
-      consumer,
-      CI_SECRETS,
-      `${CI_SECRETS}: must exist as a SOPS-encrypted file; the synced CI workflows read ci.ntfy_topic_url and, when automatic sync is enabled, ci.broker_app from it`,
-    ),
-    parseMapping(
-      consumer,
-      CI_EXAMPLE,
-      `${CI_EXAMPLE}: must exist and mirror the key shape of ${CI_SECRETS} with plaintext placeholders`,
-    ),
+  const [secretsFile, exampleFile] = await Promise.all([
+    parseMapping(consumer, contract.secretsRel, contract.missingSecrets),
+    parseMapping(consumer, contract.exampleRel, contract.missingExample),
   ]);
   const secrets =
     secretsFile.mapping === null
       ? null
       : inspectSecretDocument(
-          CI_SECRETS,
+          contract.secretsRel,
           secretsFile.mapping,
-          requirement.required,
+          contract.required,
         );
   const example =
     exampleFile.mapping === null
       ? null
-      : inspectExampleDocument(CI_EXAMPLE, exampleFile.mapping);
+      : inspectExampleDocument(contract.exampleRel, exampleFile.mapping);
   return [
-    ...requirement.problems,
     ...secretsFile.problems,
     ...exampleFile.problems,
     ...(secrets === null ? [] : secrets.problems),
     ...(example === null ? [] : example.problems),
     ...(secrets !== null && example !== null
       ? secretShapeProblems({
-          secretsRel: CI_SECRETS,
-          exampleRel: CI_EXAMPLE,
+          secretsRel: contract.secretsRel,
+          exampleRel: contract.exampleRel,
           secrets: secrets.leaves,
           example: example.leaves,
-          required: requirement.required,
+          required: contract.required,
         })
       : []),
   ];
+};
+
+export const collectCiSecretsProblems = async (
+  consumer: string,
+): Promise<ReadonlyArray<string>> => {
+  const requirement = await requiredContracts(consumer);
+  const contractProblems = await Promise.all(
+    requirement.contracts.map((contract) =>
+      collectPairProblems(consumer, contract),
+    ),
+  );
+  return [...requirement.problems, ...contractProblems.flat()];
 };

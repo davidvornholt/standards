@@ -37,11 +37,28 @@ Because bucket-1 files are byte-identical everywhere, every legitimate per-repo 
 | `.github/settings.json` | `.github/settings.local.json` extends it (additive only: it may add repository settings, rulesets, and labels but never override canonical ones — GitHub layers rulesets strictest-wins, and canonical label names are read-only; the one subtractive declaration is `"rulesetEnforcement": "unavailable-on-plan"` for repos whose GitHub plan cannot enforce rulesets) |
 | `.github/dependabot.base.yml` | `.github/dependabot.local.yml` extends it through a deliberately lean additive seam: new update blocks for repo-specific ecosystems such as nix or opentofu, top-level private registry definitions, and `ignore` or `registries` entries appended by repeating a canonical normalized target. Matching blocks cannot add labels, groups, cooldowns, pull-request limits, or other policy. The pair is composed into the generated `.github/dependabot.yml`; canonical version holds — with reason and lift condition in comments — live in the base and reach every consumer on sync |
 | `.claude/skills` (a link to `.agents/skills`) | your own skills go in `.agents/skills/<name>/`, beside the canonical ones: an unmanaged sibling under a managed directory is never in the lock, so `sync` leaves it alone and it surfaces through the link (`ls .claude/skills` lists it with the canonical skills). Never create `.claude/skills/<name>/` — that turns the managed link's destination into a directory of unmanaged work, and `init`/`sync` refuse to touch the repository until it moves |
-| `.github/workflows/standards-sync.yml` | `sync-standards.local.json` configures it (the only policy source since CLI 0.7.0; optional `autoSync` opt-out for the weekly run, optional `ref` pin honored by the workflow and by CLI `init`/`sync`) |
+| `.github/workflows/standards-sync.yml` | `sync-standards.local.json` configures it (the only policy source since CLI 0.7.0; optional `autoSync` opt-out, optional `ref` pin, and optional all-or-nothing `automation` isolation contract) |
 
 If a task seems to require editing a canonical file for one repo's needs, stop — the change either belongs upstream (it's a real standard) or in the seam (it's repo-specific).
 
 The weekly workflow's writer identity is not a per-repo policy seam. It requires `ci.broker_app.app_id` and `ci.broker_app.private_key` in the SOPS-encrypted `secrets/ci.yaml`, provisioned with `bun standards creds add github --dest ci:ci.broker_app` after installing that repository owner's private broker App only on the selected repository. The command selects by repository owner and verifies the installation before writing. The workflow resolves those nested values before sync and mints two short-lived current-repository tokens: a branch writer with Contents write and Workflows write, because the canonical payload owns `.github/workflows/**`, and a PR opener with Contents read and Pull requests write. Both mint before sync as fail-closed permission preconditions, but neither token enters the sync process; each is exposed only to its post-sync operation. There is no durable-token or workflow-token fallback. The fixed GitHub-hosted `check` aggregator holds no credential at all, so `ci.broker_app` is the only durable GitHub credential a consumer stores.
+
+Consumers that need Standards sync credentials isolated from other CI opt in through one complete policy object; omitting it preserves the legacy contract above:
+
+```json
+{
+  "automation": {
+    "environment": "standards-sync",
+    "ageKeySecret": "STANDARDS_SYNC_SOPS_AGE_KEY",
+    "secretTarget": "standards-sync",
+    "brokerAppKey": "github.repository_app"
+  }
+}
+```
+
+The four fields are one fail-closed contract. `environment` names a GitHub environment configured to allow deployments only from the exact `main` branch; do not use a broad branch pattern. `ageKeySecret` names an environment secret containing a purpose-specific age private key, never the repository-wide `SOPS_AGE_KEY`. `secretTarget` is a contained kebab-case basename other than `ci`, resolved only as `secrets/<target>.yaml`; its matching plaintext shape is `secrets/<target>.example.yaml`. `brokerAppKey` is a purpose-scoped lowercase dotted path with at least two segments below the file's `ci` mapping. For the example, add the age recipient only to the `secrets/standards-sync.yaml` creation rule, put `ci.github.repository_app.{app_id,private_key}` in that encrypted target and its example, and provision it with `bun standards creds add github --dest standards-sync:ci.github.repository_app`. The structure gate validates the selected target, example, encrypted scalar leaves, and exact path without decrypting them. GitHub environment branch restrictions cannot be proven from repository content, so verify the exact-main policy in GitHub before enabling `automation`; a missing environment, secret, target, or leaf stops the scheduled job.
+
+`Notify pause` has an independent optional isolation object in the same policy file: `{ "notifications": { "environment": "notifications", "ageKeySecret": "NOTIFICATIONS_SOPS_AGE_KEY", "secretTarget": "notifications", "topicKey": "ntfy_topic_url" } }`. The selected environment is exact-`main`, the age identity is purpose-specific and environment-scoped, the target resolves only to `secrets/notifications.yaml`, and `topicKey` is a validated lowercase dotted path below its `ci` mapping. Add only that recipient to the selected target's `.sops.yaml` rule and mirror `ci.ntfy_topic_url` in `secrets/notifications.example.yaml`. Omitting `notifications` preserves the default `SOPS_AGE_KEY` + `secrets/ci.yaml` contract. When both isolation objects are configured, their environment names, age-secret names, and targets must all differ; only after both workflows succeed with their isolated identities can a consumer remove the repository-wide bootstrap and CI target if no other workflow uses them.
 
 ## Commands
 

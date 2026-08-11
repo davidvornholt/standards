@@ -1,0 +1,142 @@
+name: Read Standards policy
+description: Validate and expose the consumer-owned Standards workflow policy
+
+outputs:
+  auto-sync:
+    description: Whether scheduled Standards sync is enabled
+    value: ${{ steps.read.outputs.auto-sync }}
+  present:
+    description: Whether the consumer policy file exists
+    value: ${{ steps.read.outputs.present }}
+  ref:
+    description: Optional upstream Standards ref
+    value: ${{ steps.read.outputs.ref }}
+  sync-environment:
+    description: Optional protected environment for Standards sync
+    value: ${{ steps.read.outputs.sync-environment }}
+  sync-age-key-secret:
+    description: Actions secret name for the Standards sync age identity
+    value: ${{ steps.read.outputs.sync-age-key-secret }}
+  sync-secret-target:
+    description: SOPS target basename for Standards sync
+    value: ${{ steps.read.outputs.sync-secret-target }}
+  sync-broker-app-key:
+    description: Broker App dotted key path below the SOPS ci mapping
+    value: ${{ steps.read.outputs.sync-broker-app-key }}
+  notification-environment:
+    description: Optional protected environment for pause notifications
+    value: ${{ steps.read.outputs.notification-environment }}
+  notification-age-key-secret:
+    description: Actions secret name for the notification age identity
+    value: ${{ steps.read.outputs.notification-age-key-secret }}
+  notification-secret-target:
+    description: SOPS target basename for notifications
+    value: ${{ steps.read.outputs.notification-secret-target }}
+  notification-topic-key:
+    description: Notification topic dotted key path below the SOPS ci mapping
+    value: ${{ steps.read.outputs.notification-topic-key }}
+
+runs:
+  using: composite
+  steps:
+    - name: Read workflow policy
+      id: read
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ -f sync-standards.local.json ]; then
+          if ! jq -e '
+            def environment:
+              type == "string"
+              and length > 0
+              and (contains("\n") | not)
+              and (contains("\r") | not);
+            def age_key_secret:
+              type == "string"
+              and test("^[A-Z_][A-Z0-9_]*$")
+              and (startswith("GITHUB_") | not);
+            def secret_target:
+              type == "string"
+              and test("^[a-z0-9]+(-[a-z0-9]+)*$")
+              and . != "ci";
+            def dotted_key:
+              type == "string"
+              and test("^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$");
+            def automation:
+              type == "object"
+              and (keys | sort) == ["ageKeySecret", "brokerAppKey", "environment", "secretTarget"]
+              and (.environment | environment)
+              and (.ageKeySecret | age_key_secret)
+              and (.secretTarget | secret_target)
+              and (.brokerAppKey | dotted_key)
+              and (.brokerAppKey | contains("."));
+            def notifications:
+              type == "object"
+              and (keys | sort) == ["ageKeySecret", "environment", "secretTarget", "topicKey"]
+              and (.environment | environment)
+              and (.ageKeySecret | age_key_secret)
+              and (.secretTarget | secret_target)
+              and (.topicKey | dotted_key);
+            type == "object"
+            and ((keys - ["autoSync", "ref", "automation", "notifications"]) | length == 0)
+            and ((has("autoSync") | not) or (.autoSync | type == "boolean"))
+            and (
+              (has("ref") | not)
+              or (
+                (.ref | type == "string")
+                and (.ref | length > 0)
+                and (.ref | contains("\n") | not)
+                and (.ref | contains("\r") | not)
+              )
+            )
+            and ((has("automation") | not) or (.automation | automation))
+            and ((has("notifications") | not) or (.notifications | notifications))
+            and (
+              ((has("automation") and has("notifications")) | not)
+              or (
+                (.automation.environment | ascii_downcase) != (.notifications.environment | ascii_downcase)
+                and .automation.ageKeySecret != .notifications.ageKeySecret
+                and .automation.secretTarget != .notifications.secretTarget
+              )
+            )
+          ' sync-standards.local.json > /dev/null; then
+            echo "::error::sync-standards.local.json must contain valid autoSync/ref fields and complete, isolated automation/notifications objects when present"
+            exit 1
+          fi
+          auto_sync=$(jq -r 'if has("autoSync") then .autoSync else true end' sync-standards.local.json)
+          ref=$(jq -r '.ref // ""' sync-standards.local.json)
+          sync_environment=$(jq -r '.automation.environment // ""' sync-standards.local.json)
+          sync_age_key_secret=$(jq -r '.automation.ageKeySecret // "SOPS_AGE_KEY"' sync-standards.local.json)
+          sync_secret_target=$(jq -r '.automation.secretTarget // "ci"' sync-standards.local.json)
+          sync_broker_app_key=$(jq -r '.automation.brokerAppKey // "broker_app"' sync-standards.local.json)
+          notification_environment=$(jq -r '.notifications.environment // ""' sync-standards.local.json)
+          notification_age_key_secret=$(jq -r '.notifications.ageKeySecret // "SOPS_AGE_KEY"' sync-standards.local.json)
+          notification_secret_target=$(jq -r '.notifications.secretTarget // "ci"' sync-standards.local.json)
+          notification_topic_key=$(jq -r '.notifications.topicKey // "ntfy_topic_url"' sync-standards.local.json)
+          present=true
+        else
+          auto_sync=true
+          ref=
+          sync_environment=
+          sync_age_key_secret=SOPS_AGE_KEY
+          sync_secret_target=ci
+          sync_broker_app_key=broker_app
+          notification_environment=
+          notification_age_key_secret=SOPS_AGE_KEY
+          notification_secret_target=ci
+          notification_topic_key=ntfy_topic_url
+          present=false
+        fi
+        {
+          echo "auto-sync=$auto_sync"
+          echo "present=$present"
+          echo "ref=$ref"
+          echo "sync-environment=$sync_environment"
+          echo "sync-age-key-secret=$sync_age_key_secret"
+          echo "sync-secret-target=$sync_secret_target"
+          echo "sync-broker-app-key=$sync_broker_app_key"
+          echo "notification-environment=$notification_environment"
+          echo "notification-age-key-secret=$notification_age_key_secret"
+          echo "notification-secret-target=$notification_secret_target"
+          echo "notification-topic-key=$notification_topic_key"
+        } >> "$GITHUB_OUTPUT"

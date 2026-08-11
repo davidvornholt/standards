@@ -167,6 +167,7 @@
     "src/structure-sops-envelope.ts",
     "src/structure-workspace.ts",
     "src/sync-policy.ts",
+    "src/sync-policy-isolation.ts",
     "src/yaml-emit.ts",
     "src/yaml-parse.ts"
   ],

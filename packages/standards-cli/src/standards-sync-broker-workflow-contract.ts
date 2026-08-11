@@ -16,7 +16,10 @@ type WorkflowStep = {
 type ParsedWorkflow = {
   readonly permissions: Readonly<Record<string, string>>;
   readonly jobs: {
-    readonly sync: { readonly steps: ReadonlyArray<WorkflowStep> };
+    readonly sync: {
+      readonly environment?: string;
+      readonly steps: ReadonlyArray<WorkflowStep>;
+    };
   };
 };
 export type TokenConsumerContracts = {
@@ -25,7 +28,7 @@ export type TokenConsumerContracts = {
 };
 export type MutableWorkflow = {
   permissions: Record<string, string>;
-  jobs: { sync: { steps: Array<WorkflowStep> } };
+  jobs: { sync: { environment?: string; steps: Array<WorkflowStep> } };
 };
 
 const workflowPath = join(
@@ -89,9 +92,13 @@ const resolvedSecretStep = (
   name,
   uses: './.github/actions/sops-secret',
   with: {
-    'age-key': expression('secrets.SOPS_AGE_KEY'),
-    'secret-file': 'secrets/ci.yaml',
-    'secret-key': secretKey,
+    'age-key': expression('secrets[needs.policy.outputs.sync-age-key-secret]'),
+    'secret-file': `secrets/${expression(
+      'needs.policy.outputs.sync-secret-target',
+    )}.yaml`,
+    'secret-key': `${expression(
+      'needs.policy.outputs.sync-broker-app-key',
+    )}.${secretKey}`,
     'env-name': envName,
   },
 });
@@ -137,16 +144,12 @@ export const assertSecuritySensitiveSteps = (
   assertExactStep(
     workflow,
     resolveIdName,
-    resolvedSecretStep(resolveIdName, 'broker_app.app_id', 'BROKER_APP_ID'),
+    resolvedSecretStep(resolveIdName, 'app_id', 'BROKER_APP_ID'),
   );
   assertExactStep(
     workflow,
     resolveKeyName,
-    resolvedSecretStep(
-      resolveKeyName,
-      'broker_app.private_key',
-      'BROKER_APP_PRIVATE_KEY',
-    ),
+    resolvedSecretStep(resolveKeyName, 'private_key', 'BROKER_APP_PRIVATE_KEY'),
   );
   assertExactStep(
     workflow,

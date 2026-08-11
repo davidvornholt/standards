@@ -9,11 +9,11 @@ name: Notify pause
 # trigger on purpose: the ping fires off the durable state transition, not off
 # anything harness-specific the agent has to remember.
 #
-# The topic URL is a secret (the topic name is its only access control) and
-# therefore lives where all work-plane secrets live: as `ci.ntfy_topic_url` in
-# the repo-owned, SOPS-encrypted secrets/ci.yaml, decrypted here with the
-# single SOPS_AGE_KEY bootstrap Actions secret. Rotate by editing the
-# encrypted file like any other secret change.
+# The topic URL is a secret (the topic name is its only access control). The
+# default contract resolves `ci.ntfy_topic_url` from secrets/ci.yaml with the
+# repository SOPS_AGE_KEY. A consumer can opt into a protected environment,
+# purpose-specific age secret, and SOPS target through the repo-owned policy.
+# Missing selected credentials fail without falling back to the default.
 #
 # `pull_request_target` instead of `pull_request` so the run has secrets even
 # when the labeled PR comes from a fork. That event is safe here because the
@@ -36,17 +36,41 @@ permissions:
   contents: read
 
 jobs:
-  notify:
+  policy:
     if: github.event.label.name == 'needs-clarification'
-    # SOPS_AGE_KEY is available here, so this job must never share the
-    # configurable runner pool used by unprivileged quality code.
     runs-on: ubuntu-latest
+    outputs:
+      notification-environment: ${{ steps.read.outputs.notification-environment }}
+      notification-age-key-secret: ${{ steps.read.outputs.notification-age-key-secret }}
+      notification-secret-target: ${{ steps.read.outputs.notification-secret-target }}
+      notification-topic-key: ${{ steps.read.outputs.notification-topic-key }}
     steps:
-      - name: Checkout encrypted CI secrets
+      - name: Checkout policy file
         uses: actions/checkout@v7
         with:
           sparse-checkout: |
-            secrets/ci.yaml
+            sync-standards.local.json
+            .github/actions/read-standards-policy/action.yml
+          sparse-checkout-cone-mode: false
+
+      - name: Read workflow policy
+        id: read
+        uses: ./.github/actions/read-standards-policy
+
+  notify:
+    needs: policy
+    if: github.event.label.name == 'needs-clarification'
+    # A SOPS age key is available here, so this job must never share the
+    # configurable runner pool used by unprivileged quality code. A configured
+    # environment must restrict deployments to the exact main branch.
+    runs-on: ubuntu-latest
+    environment: ${{ needs.policy.outputs.notification-environment || fromJSON('null') }}
+    steps:
+      - name: Checkout encrypted notification secrets
+        uses: actions/checkout@v7
+        with:
+          sparse-checkout: |
+            secrets/${{ needs.policy.outputs.notification-secret-target }}.yaml
             .sops.yaml
             .github/actions/sops-secret/action.yml
           sparse-checkout-cone-mode: false
@@ -54,9 +78,9 @@ jobs:
       - name: Resolve notification topic URL
         uses: ./.github/actions/sops-secret
         with:
-          age-key: ${{ secrets.SOPS_AGE_KEY }}
-          secret-file: secrets/ci.yaml
-          secret-key: ntfy_topic_url
+          age-key: ${{ secrets[needs.policy.outputs.notification-age-key-secret] }}
+          secret-file: secrets/${{ needs.policy.outputs.notification-secret-target }}.yaml
+          secret-key: ${{ needs.policy.outputs.notification-topic-key }}
           env-name: NTFY_TOPIC_URL
 
       - name: Push a notification

@@ -21,13 +21,16 @@ const manifestPaths = (): ReadonlyArray<string> => {
   return manifest.paths;
 };
 
-// Three manifest directories are deliberately declared as a set of narrower
+// Manifest directories are deliberately declared as a set of narrower
 // inputs, so installed dependencies and build output under them stay out of the
 // cache key. Each set is pinned exactly: an input root deeper than the manifest
 // path covers only part of it, so accepting one on its own would let any of
 // these be narrowed further — or an unrelated directory be reduced to a single
 // subdirectory — without failing anything.
 const NARROWED: Readonly<Record<string, ReadonlyArray<string>>> = {
+  '.github/actions/read-standards-policy': [
+    '.github/actions/read-standards-policy/action.yml',
+  ],
   '.github/actions/sops-secret': ['.github/actions/sops-secret/action.yml'],
   'packages/typescript-config': [
     'packages/typescript-config/README.md',

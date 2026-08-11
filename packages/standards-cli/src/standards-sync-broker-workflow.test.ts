@@ -97,6 +97,9 @@ describe('Standards sync broker credential contract', () => {
   it('pins exact fail-closed mappings, token isolation, and ordering', () => {
     assertSecuritySensitiveSteps(parsedWorkflow, consumerContracts);
     expect(parsedWorkflow.permissions).toEqual({ contents: 'read' });
+    expect(parsedWorkflow.jobs.sync.environment).toBe(
+      expression("needs.policy.outputs.sync-environment || fromJSON('null')"),
+    );
     expect(
       namedStep(parsedWorkflow, 'Checkout').with?.['persist-credentials'],
     ).toBe(false);
