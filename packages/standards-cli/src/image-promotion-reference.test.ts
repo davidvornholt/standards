@@ -103,6 +103,7 @@ it('uses disjoint least-privilege source and writer tokens', () => {
   });
   const images = JSON.parse(contract('images-json', 'json')) as {
     readonly web: {
+      readonly registryAccess: string;
       readonly sourceWorkflow: { readonly id: number; readonly path: string };
     };
   };
@@ -110,6 +111,7 @@ it('uses disjoint least-privilege source and writer tokens', () => {
     id: 123_456,
     path: '.github/workflows/build.yml',
   });
+  expect(images.web.registryAccess).toBe('private');
 });
 
 it('validates the announcement identity before dispatch', () => {

@@ -1,6 +1,6 @@
 # Image promotion (source repo to infra home)
 
-When an app's infrastructure home is a dedicated infra repo, deployment freshness is automation-owned: the source repo announces every successful public-image build, and the home repo's trusted writer proposes the desired-state change. Never edit a live pin by hand or treat either PR merge as deployment completion.
+When an app's infrastructure home is a dedicated infra repo, deployment freshness is automation-owned: the source repo announces every successful image build, and the home repo's trusted writer proposes the desired-state change. Never edit a live pin by hand or treat either PR merge as deployment completion.
 
 **Completion invariant:** a source change is done only when the exact infra merge SHA has passed its fail-closed gate and every required target has returned a healthy readback of the expected digest. A failed or partial activation is incomplete; report it instead of attempting automatic cross-system rollback.
 
@@ -21,6 +21,7 @@ The home repo owns one `images.json` (`infra/images.json`, or root `images.json`
       "id": 123456
     },
     "imageRepository": "ghcr.io/example/app/web",
+    "registryAccess": "private",
     "trackedTag": "main",
     "promotionLatencyMinutes": 30,
     "promotionEnabled": true,
@@ -30,7 +31,7 @@ The home repo owns one `images.json` (`infra/images.json`, or root `images.json`
 }
 ```
 
-`sourceWorkflow.path` and `sourceWorkflow.id` bind the immutable authorized Actions workflow; a different successful workflow with a job named `build` is not evidence. Derive production references only as `imageRepository@digest`. `images.json` is the single declarative state owner being converged, not a third credential ledger of the kind rejected by `CREDS-CLOUDFLARE-001`.
+`sourceWorkflow.path` and `sourceWorkflow.id` bind the immutable authorized Actions workflow; a different successful workflow with a job named `build` is not evidence. `registryAccess` is required metadata with exactly two values: `public` requires anonymous manifest access, while `private` requires anonymous denial plus authenticated workflow and host access. Derive production references only as `imageRepository@digest`. `images.json` is the single declarative state owner being converged, not a third credential ledger of the kind rejected by `CREDS-CLOUDFLARE-001`; it never contains a credential, secret path, username, or authentication-file path.
 
 ## Source side: bind and announce the build
 
@@ -119,8 +120,16 @@ The deploy workflow serializes production without cancellation. Its deploy job d
 
 Completion filters merged PRs before uniqueness, then authenticates the App bot, canonical same-repository branch, `images.json`-only file set, successful trusted provenance check, and exact resulting pin at the merge SHA. Open and closed marker copies are ignored; forged or multiple merged candidates fail closed. The exact merge-SHA deploy and its one successful deploy job are required.
 
-The scheduled detector has only Contents read and anonymous public-GHCR access. It records initial desired and observed tag digests. Only an unchanged mismatch after a complete latency window fails; movement of either value starts a new window. It never writes.
+The scheduled detector has Contents read and Packages read through its per-job `GITHUB_TOKEN`. It records initial desired and observed tag digests. A public entry resolves anonymously and fails when anonymous access stops working. A private entry must first prove the anonymous token request is denied, then resolves with the workflow token; grant the infrastructure repository read access in that package's Actions access settings. Missing package access, a package that became public, an invalid access mode, or any registry error fails closed. Only an unchanged mismatch after a complete latency window fails; movement of either value starts a new window. The detector never writes and never decrypts a durable registry credential.
+
+## Private GHCR host access
+
+GitHub-hosted workflows authenticate private GHCR reads with their job-scoped `GITHUB_TOKEN`; a standalone host cannot. A host with any `private` entry keeps one classic GitHub PAT with only `read:packages` in its SOPS-encrypted host target at `registry.github_token`. The corresponding GitHub username is non-secret configuration. Do not store the PAT in `images.json`, a Nix expression, the Nix store, a workflow secret, or a GitHub App private key on the host.
+
+A `podman-ghcr-login` oneshot reads the SOPS path through stdin and writes Podman's root-only authentication file. Every private-image migration and container unit orders after and requires that login unit, so an implicit pull has authenticated state. The deploy pre-pull uses the same state. Public-image units carry no login dependency, so a private credential failure cannot take down an unrelated public app.
+
+Rotation is replace, verify, revoke: create a replacement classic PAT with only `read:packages`, atomically replace `registry.github_token` in the SOPS host target, deploy, and force an authenticated digest lookup or pull before revoking the old PAT. GitHub provides no broker API for classic package PAT creation or rotation, so this credential is a documented manual exception to `bun standards creds`; `creds plan` and `creds apply` never claim to manage it.
 
 ## Adoption boundary
 
-This contract supports public GHCR images only. Prove the tracked manifest anonymously readable and record that adoption publishes layers even for a private source repository. If that is unacceptable, document the opt-out. Private-image promotion with least-privilege pull credentials and rotation is a designed follow-up, not an undocumented variant.
+This contract supports public and private GHCR images. Choose `registryAccess` explicitly during disabled adoption and prove that access mode before the first trusted promotion. Source-repository API access remains a separate plane: a private source repository uses the existing broker App's short-lived Actions-read token for provenance and drift timing, never the registry PAT. Registries other than GHCR and private-image credentials other than the host `read:packages` PAT are out of scope and require a new reviewed contract.

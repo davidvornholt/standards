@@ -64,7 +64,7 @@ lifecycle: [announced, branch, open, merged, deploy-failed, completed, supersede
 <!-- contract:metadata-transition -->
 ```yaml
 imagesPath: infra/images.json
-metadataFields: [sourceRepository, sourceRef, sourceWorkflow, imageRepository, trackedTag, promotionLatencyMinutes]
+metadataFields: [sourceRepository, sourceRef, sourceWorkflow, imageRepository, registryAccess, trackedTag, promotionLatencyMinutes]
 pinFields: [promotionEnabled, digest, promotedSourceSha]
 disabledPin: { promotionEnabled: false, digest: null, promotedSourceSha: null }
 operations:
@@ -73,6 +73,41 @@ operations:
   metadata: disabled-to-disabled
   remove: disabled-to-absent
   trustedPromotion: disabled-to-enabled-with-exact-proof
+```
+
+<!-- contract:registry-access -->
+```yaml
+public:
+  detectorCredential: none
+  detectorProof: anonymously-readable
+  hostCredential: none
+private:
+  detectorCredential: github-actions-token
+  detectorPermissions: { contents: read, packages: read }
+  detectorProof: anonymous-denied-then-authenticated-readable
+  hostCredential: sops-classic-pat
+  hostCredentialScope: read:packages
+  hostAuthFile: root-only
+  rotation: replace-verify-revoke
+forbiddenDesiredStateFields: [credential, secretPath, username, authFile]
+```
+
+<!-- contract:registry-resolution -->
+```sh
+set -euo pipefail
+case "$REGISTRY_ACCESS" in
+  public)
+    resolve-anonymous-tag
+    ;;
+  private)
+    reject-anonymous-readable
+    resolve-authenticated-tag
+    ;;
+  *)
+    printf 'unsupported registry access mode: %s\n' "$REGISTRY_ACCESS" >&2
+    exit 1
+    ;;
+esac
 ```
 
 <!-- contract:deploy-guard -->
