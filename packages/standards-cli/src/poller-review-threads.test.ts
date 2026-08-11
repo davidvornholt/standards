@@ -138,16 +138,19 @@ it.each([
       creationBody: `Finding.\n\n<!-- standards-poller:review-thread approval=${plan.approvalId} operation=prefix-${'a'.repeat(SHA_LENGTH)} -->`,
     },
   ],
-] as const)('rejects a %s same-PR thread before writing', async (_, options) => {
-  const calls = installApi([threadResponse(options)]);
+] as const)(
+  'rejects a %s same-PR thread before writing',
+  async (_, options) => {
+    const calls = installApi([threadResponse(options)]);
 
-  await expect(
-    publishReviewThreadResolutions({ deps, pr, claim, plan }),
-  ).rejects.toThrow(
-    'publication blocked: review thread PRRT_thread was not created by this approval generation',
-  );
-  expect(calls).toHaveLength(1);
-});
+    await expect(
+      publishReviewThreadResolutions({ deps, pr, claim, plan }),
+    ).rejects.toThrow(
+      'publication blocked: review thread PRRT_thread was not created by this approval generation',
+    );
+    expect(calls).toHaveLength(1);
+  },
+);
 
 it('blocks publication when resolution readback remains unresolved', async () => {
   const reply = `${resolution.verificationReply}\n\n${threadResolutionMarker(plan, resolution)}`;

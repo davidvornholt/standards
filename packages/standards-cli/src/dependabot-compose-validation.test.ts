@@ -20,20 +20,23 @@ describe('Dependabot update target validation', () => {
       '    directories: ["/", "/packages/a"]',
       '    directories: ["/packages/a", "/"]',
     ],
-  ])('normalizes %s targets before merging', (_label, baseTarget, localTarget) => {
-    const base = baseWith(BUN.replace('    directory: /', baseTarget));
-    const local = [
-      'updates:',
-      '  - package-ecosystem: bun',
-      localTarget,
-      '    ignore:',
-      '      - dependency-name: left-pad',
-      '',
-    ].join('\n');
-    const result = composeDependabot(base, local);
-    expect(result.problems).toEqual([]);
-    expect(result.composed).toContain('dependency-name: "left-pad"');
-  });
+  ])(
+    'normalizes %s targets before merging',
+    (_label, baseTarget, localTarget) => {
+      const base = baseWith(BUN.replace('    directory: /', baseTarget));
+      const local = [
+        'updates:',
+        '  - package-ecosystem: bun',
+        localTarget,
+        '    ignore:',
+        '      - dependency-name: left-pad',
+        '',
+      ].join('\n');
+      const result = composeDependabot(base, local);
+      expect(result.problems).toEqual([]);
+      expect(result.composed).toContain('dependency-name: "left-pad"');
+    },
+  );
 
   it('rejects partially overlapping targets', () => {
     const base = baseWith(
@@ -160,17 +163,15 @@ describe('Dependabot private registry seam', () => {
     );
   });
 
-  it.each([
-    'labels',
-    'groups',
-    'cooldown',
-    'open-pull-requests-limit',
-  ])('keeps rejecting %s on matching canonical blocks', (key) => {
-    const local = `updates:\n  - package-ecosystem: bun\n    directory: /\n    ${key}: {}\n`;
-    expect(
-      composeDependabot(baseWith(BUN), local).problems.join('\n'),
-    ).toContain(`remove: ${key}`);
-  });
+  it.each(['labels', 'groups', 'cooldown', 'open-pull-requests-limit'])(
+    'keeps rejecting %s on matching canonical blocks',
+    (key) => {
+      const local = `updates:\n  - package-ecosystem: bun\n    directory: /\n    ${key}: {}\n`;
+      expect(
+        composeDependabot(baseWith(BUN), local).problems.join('\n'),
+      ).toContain(`remove: ${key}`);
+    },
+  );
 });
 
 describe('strict Dependabot YAML parsing', () => {

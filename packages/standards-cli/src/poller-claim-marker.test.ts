@@ -71,28 +71,29 @@ afterEach(() => {
 });
 
 describe('claim marker approval parsing', () => {
-  it.each(
-    malformedApprovals,
-  )('ignores a malformed %s approval and elects the valid marker', async (_description, malformedApproval) => {
-    const calls: ReadonlyArray<ApiCall> = installApi([
-      { body: [labeled] },
-      { status: HTTP_CREATED, body: { id: validMarkerId } },
-      {
-        body: [
-          comment(10, markerBody(malformedApproval), 'untrusted-user'),
-          comment(validMarkerId, markerBody(approval), 'maintainer'),
-        ],
-      },
-      {
-        body: Object.fromEntries([['role_name', 'maintain']]),
-      },
-    ]);
+  it.each(malformedApprovals)(
+    'ignores a malformed %s approval and elects the valid marker',
+    async (_description, malformedApproval) => {
+      const calls: ReadonlyArray<ApiCall> = installApi([
+        { body: [labeled] },
+        { status: HTTP_CREATED, body: { id: validMarkerId } },
+        {
+          body: [
+            comment(10, markerBody(malformedApproval), 'untrusted-user'),
+            comment(validMarkerId, markerBody(approval), 'maintainer'),
+          ],
+        },
+        {
+          body: Object.fromEntries([['role_name', 'maintain']]),
+        },
+      ]);
 
-    await expect(
-      acquireClaim(context, approval, 'fix-in-progress'),
-    ).resolves.toMatchObject({ markerId: validMarkerId });
-    expect(
-      calls.filter((call) => call.path.includes('/collaborators/')),
-    ).toHaveLength(1);
-  });
+      await expect(
+        acquireClaim(context, approval, 'fix-in-progress'),
+      ).resolves.toMatchObject({ markerId: validMarkerId });
+      expect(
+        calls.filter((call) => call.path.includes('/collaborators/')),
+      ).toHaveLength(1);
+    },
+  );
 });

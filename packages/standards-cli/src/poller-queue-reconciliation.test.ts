@@ -120,75 +120,79 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-it.each([
-  'fix',
-  'review',
-] as const)('reconciles current duplicate %s acknowledgements through the full tick', async (kind) => {
-  const issue = rawIssue(kind);
-  const duplicates = [
-    marker(kind, EARLIEST_MARKER_ID),
-    marker(kind, DUPLICATE_MARKER_ID),
-  ];
-  const calls = installApi([
-    ...listResponses(kind),
-    ...(kind === 'review' ? [{ body: pullRequest }] : []),
-    { body: duplicates },
-    role('maintain'),
-    { body: timeline(kind) },
-    ...(kind === 'review' ? [{ body: [] }] : []),
-    { body: issue },
-    { body: timeline(kind) },
-    role('maintain'),
-    { body: issue },
-    { body: duplicates },
-    { status: HTTP_NO_CONTENT, body: null },
-  ]);
+it.each(['fix', 'review'] as const)(
+  'reconciles current duplicate %s acknowledgements through the full tick',
+  async (kind) => {
+    const issue = rawIssue(kind);
+    const duplicates = [
+      marker(kind, EARLIEST_MARKER_ID),
+      marker(kind, DUPLICATE_MARKER_ID),
+    ];
+    const calls = installApi([
+      ...listResponses(kind),
+      ...(kind === 'review' ? [{ body: pullRequest }] : []),
+      { body: duplicates },
+      role('maintain'),
+      { body: timeline(kind) },
+      ...(kind === 'review' ? [{ body: [] }] : []),
+      { body: issue },
+      { body: timeline(kind) },
+      role('maintain'),
+      { body: issue },
+      { body: duplicates },
+      { status: HTTP_NO_CONTENT, body: null },
+    ]);
 
-  await expect(runPollerAcknowledgementTick(config, 'token')).resolves.toEqual({
-    lines: [],
-    problems: [],
-  });
-  expect(deletedIds(calls)).toEqual([DUPLICATE_MARKER_ID]);
+    await expect(
+      runPollerAcknowledgementTick(config, 'token'),
+    ).resolves.toEqual({
+      lines: [],
+      problems: [],
+    });
+    expect(deletedIds(calls)).toEqual([DUPLICATE_MARKER_ID]);
 
-  const secondPass = installApi([
-    ...listResponses(kind),
-    ...(kind === 'review' ? [{ body: pullRequest }] : []),
-    { body: [marker(kind, EARLIEST_MARKER_ID)] },
-    role('maintain'),
-    { body: timeline(kind) },
-  ]);
-  await expect(runPollerAcknowledgementTick(config, 'token')).resolves.toEqual({
-    lines: [],
-    problems: [],
-  });
-  expect(secondPass.every(({ method }) => method === 'GET')).toBe(true);
-});
+    const secondPass = installApi([
+      ...listResponses(kind),
+      ...(kind === 'review' ? [{ body: pullRequest }] : []),
+      { body: [marker(kind, EARLIEST_MARKER_ID)] },
+      role('maintain'),
+      { body: timeline(kind) },
+    ]);
+    await expect(
+      runPollerAcknowledgementTick(config, 'token'),
+    ).resolves.toEqual({
+      lines: [],
+      problems: [],
+    });
+    expect(secondPass.every(({ method }) => method === 'GET')).toBe(true);
+  },
+);
 
-it.each([
-  'fix',
-  'review',
-] as const)('deletes a newly posted %s marker omitted from its election listing', async (kind) => {
-  const binding = approval(kind);
-  const calls = installApi([
-    { body: rawIssue(kind) },
-    { body: [] },
-    { status: HTTP_CREATED, body: { id: NEW_MARKER_ID } },
-    { body: [marker(kind, EARLIEST_MARKER_ID)] },
-    role('maintain'),
-    { status: HTTP_NO_CONTENT, body: null },
-  ]);
-  await expect(
-    acknowledgeQueuedJob(
-      {
-        config,
-        token: 'token',
-        repo: REPO,
-        roleCache: new Map(),
-      },
-      ISSUE_NUMBER,
-      binding,
-      kind,
-    ),
-  ).resolves.toBe(false);
-  expect(deletedIds(calls)).toEqual([NEW_MARKER_ID]);
-});
+it.each(['fix', 'review'] as const)(
+  'deletes a newly posted %s marker omitted from its election listing',
+  async (kind) => {
+    const binding = approval(kind);
+    const calls = installApi([
+      { body: rawIssue(kind) },
+      { body: [] },
+      { status: HTTP_CREATED, body: { id: NEW_MARKER_ID } },
+      { body: [marker(kind, EARLIEST_MARKER_ID)] },
+      role('maintain'),
+      { status: HTTP_NO_CONTENT, body: null },
+    ]);
+    await expect(
+      acknowledgeQueuedJob(
+        {
+          config,
+          token: 'token',
+          repo: REPO,
+          roleCache: new Map(),
+        },
+        ISSUE_NUMBER,
+        binding,
+        kind,
+      ),
+    ).resolves.toBe(false);
+    expect(deletedIds(calls)).toEqual([NEW_MARKER_ID]);
+  },
+);

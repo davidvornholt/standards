@@ -54,21 +54,21 @@ describe('brokered S3 pair references in dev env documents', () => {
     );
   });
 
-  it.each([
-    'config/dev.yaml',
-    'config/dev.local.yaml',
-  ])('rejects the reserved allowlist key in plain layer %s', (source) => {
-    const document = parseDevEnvDocument(
-      { brokeredReferences: ['r2-dev:r2.dev_rw'] },
-      source,
-      'configuration',
-    );
+  it.each(['config/dev.yaml', 'config/dev.local.yaml'])(
+    'rejects the reserved allowlist key in plain layer %s',
+    (source) => {
+      const document = parseDevEnvDocument(
+        { brokeredReferences: ['r2-dev:r2.dev_rw'] },
+        source,
+        'configuration',
+      );
 
-    expect(document.problems).toEqual([
-      `${source} reserved top-level key "brokeredReferences" belongs only in the SOPS-encrypted secrets/dev.yaml layer`,
-    ]);
-    expect(document.brokeredReferences).toEqual(new Set());
-  });
+      expect(document.problems).toEqual([
+        `${source} reserved top-level key "brokeredReferences" belongs only in the SOPS-encrypted secrets/dev.yaml layer`,
+      ]);
+      expect(document.brokeredReferences).toEqual(new Set());
+    },
+  );
 
   it('gathers malformed allowlist entries without accepting them', () => {
     const document = parseDevEnvDocument(

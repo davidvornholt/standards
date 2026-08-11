@@ -38,25 +38,25 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-it.each([
-  'fix',
-  'review',
-] as const)('keeps repeated stale %s acknowledgements write-free', async (kind) => {
-  const calls = installApi([{ body: staleIssue }, { body: staleIssue }]);
-  const deps = {
-    config: {} as PollerConfig,
-    token: 'token',
-    repo: REPO,
-    roleCache: new Map(),
-  };
+it.each(['fix', 'review'] as const)(
+  'keeps repeated stale %s acknowledgements write-free',
+  async (kind) => {
+    const calls = installApi([{ body: staleIssue }, { body: staleIssue }]);
+    const deps = {
+      config: {} as PollerConfig,
+      token: 'token',
+      repo: REPO,
+      roleCache: new Map(),
+    };
 
-  await expect(
-    acknowledgeQueuedJob(deps, ISSUE_NUMBER, approval(kind), kind),
-  ).resolves.toBe(false);
-  await expect(
-    acknowledgeQueuedJob(deps, ISSUE_NUMBER, approval(kind), kind),
-  ).resolves.toBe(false);
+    await expect(
+      acknowledgeQueuedJob(deps, ISSUE_NUMBER, approval(kind), kind),
+    ).resolves.toBe(false);
+    await expect(
+      acknowledgeQueuedJob(deps, ISSUE_NUMBER, approval(kind), kind),
+    ).resolves.toBe(false);
 
-  expect(calls).toHaveLength(2);
-  expect(calls.every(({ method }) => method === 'GET')).toBe(true);
-});
+    expect(calls).toHaveLength(2);
+    expect(calls.every(({ method }) => method === 'GET')).toBe(true);
+  },
+);

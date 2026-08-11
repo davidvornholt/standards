@@ -53,44 +53,46 @@ describe('runGithubCheck fail-closed visibility', () => {
       message: 'Resource not accessible by integration',
       status: HTTP_FORBIDDEN,
     },
-  ])('names the label-read permission and where it lives after $status $message', async ({
-    message,
-    status,
-  }) => {
-    const calls = installApi([
-      {
-        status,
-        body: { message },
-      },
-    ]);
+  ])(
+    'names the label-read permission and where it lives after $status $message',
+    async ({ message, status }) => {
+      const calls = installApi([
+        {
+          status,
+          body: { message },
+        },
+      ]);
 
-    expect(
-      await runGithubCheck(
-        consumer({
-          labels: [
-            {
-              color: '0e8a16',
-              description: 'Approved for automated work',
-              name: 'approved-for-fix',
-            },
-          ],
-          optOut: false,
-        }),
-      ),
-    ).toBe(false);
-    expect(calls.map(({ path }) => path)).toEqual(['/repos/owner/repo/labels']);
-    const errors = output.errors.join('\n');
-    expect(errors).toContain('declared labels not visible to this token');
-    expect(errors).toContain('issues: read');
-    expect(errors).toContain('pull-requests: read');
-    // The canonical workflow already grants it, so CI readers must be sent at
-    // the real causes rather than at a synced file they must not edit.
-    expect(errors).toContain(
-      'the canonical check aggregator job already grants',
-    );
-    expect(errors).not.toContain('secrets/ci.yaml');
-    expect(errors).not.toContain('GitHub API unreachable');
-  });
+      expect(
+        await runGithubCheck(
+          consumer({
+            labels: [
+              {
+                color: '0e8a16',
+                description: 'Approved for automated work',
+                name: 'approved-for-fix',
+              },
+            ],
+            optOut: false,
+          }),
+        ),
+      ).toBe(false);
+      expect(calls.map(({ path }) => path)).toEqual([
+        '/repos/owner/repo/labels',
+      ]);
+      const errors = output.errors.join('\n');
+      expect(errors).toContain('declared labels not visible to this token');
+      expect(errors).toContain('issues: read');
+      expect(errors).toContain('pull-requests: read');
+      // The canonical workflow already grants it, so CI readers must be sent at
+      // the real causes rather than at a synced file they must not edit.
+      expect(errors).toContain(
+        'the canonical check aggregator job already grants',
+      );
+      expect(errors).not.toContain('secrets/ci.yaml');
+      expect(errors).not.toContain('GitHub API unreachable');
+    },
+  );
 
   it.each([
     'API rate limit exceeded for test-token',

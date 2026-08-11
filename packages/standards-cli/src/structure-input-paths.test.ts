@@ -20,23 +20,23 @@ const buildReadmeRepo = (): string => {
 };
 
 describe('contained structure inputs', () => {
-  it.each([
-    'ci.yaml',
-    'ci.example.yaml',
-  ])('rejects a symlinked secrets/%s leaf even when its target is valid', async (file) => {
-    const external = newStructureTmp('structure-paths-external-');
-    const consumer = newStructureTmp('structure-paths-consumer-');
-    writeCiSecretsPair(external);
-    writeCiSecretsPair(consumer);
-    rmSync(join(consumer, 'secrets', file));
-    symlinkSync(
-      join(external, 'secrets', file),
-      join(consumer, 'secrets', file),
-    );
-    expect(await collectCiSecretsProblems(consumer)).toContain(
-      `secrets/${file}: must be a contained regular file; symlinked paths are not allowed`,
-    );
-  });
+  it.each(['ci.yaml', 'ci.example.yaml'])(
+    'rejects a symlinked secrets/%s leaf even when its target is valid',
+    async (file) => {
+      const external = newStructureTmp('structure-paths-external-');
+      const consumer = newStructureTmp('structure-paths-consumer-');
+      writeCiSecretsPair(external);
+      writeCiSecretsPair(consumer);
+      rmSync(join(consumer, 'secrets', file));
+      symlinkSync(
+        join(external, 'secrets', file),
+        join(consumer, 'secrets', file),
+      );
+      expect(await collectCiSecretsProblems(consumer)).toContain(
+        `secrets/${file}: must be a contained regular file; symlinked paths are not allowed`,
+      );
+    },
+  );
 
   it('rejects a symlinked secrets ancestor with valid external files', async () => {
     const external = newStructureTmp('structure-paths-external-');

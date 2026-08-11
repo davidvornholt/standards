@@ -124,22 +124,23 @@ describe('source profile', () => {
     ]);
   });
 
-  it.each(
-    INVALID_SOURCE_GATES,
-  )('rejects a non-exact source gate: %s', async (_label, name, script) => {
-    const root = sourceRootManifest();
-    const scripts = {
-      ...(root.scripts as Record<string, string>),
-      [name]: script,
-    };
-    const problems = await collectStructureProblems(
-      buildSource({ ...root, scripts }),
-      'source',
-    );
-    expect(problems).toContain(
-      `package.json: root script "${name}" must run exactly ${SOURCE_GATE_COMMANDS[name].join(' && ')}`,
-    );
-  });
+  it.each(INVALID_SOURCE_GATES)(
+    'rejects a non-exact source gate: %s',
+    async (_label, name, script) => {
+      const root = sourceRootManifest();
+      const scripts = {
+        ...(root.scripts as Record<string, string>),
+        [name]: script,
+      };
+      const problems = await collectStructureProblems(
+        buildSource({ ...root, scripts }),
+        'source',
+      );
+      expect(problems).toContain(
+        `package.json: root script "${name}" must run exactly ${SOURCE_GATE_COMMANDS[name].join(' && ')}`,
+      );
+    },
+  );
 
   it('requires the published CLI workspace to exist', async () => {
     const problems = await collectStructureProblems(

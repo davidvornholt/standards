@@ -62,13 +62,12 @@ describe('published CLI source-profile metadata', () => {
     ]);
   });
 
-  it.each([
-    '1.0.0-rc.1',
-    '01.2.3',
-    1,
-  ])('rejects a non-release published CLI version %#', (version) => {
-    expect(inspect(baseManifest({ version }))).toEqual([
-      'packages/standards-cli: published CLI version must be a stable release SemVer, not "0.0.0"',
-    ]);
-  });
+  it.each(['1.0.0-rc.1', '01.2.3', 1])(
+    'rejects a non-release published CLI version %#',
+    (version) => {
+      expect(inspect(baseManifest({ version }))).toEqual([
+        'packages/standards-cli: published CLI version must be a stable release SemVer, not "0.0.0"',
+      ]);
+    },
+  );
 });

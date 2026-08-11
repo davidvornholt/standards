@@ -59,13 +59,16 @@ describe('collectWorkspaceReadmeProblems', () => {
   it.each([
     ['missing manifest', null],
     ['non-string paths entry', [true]],
-  ])('fails closed on a %s instead of guessing ownership', async (_label, paths) => {
-    const dir = buildRepo(paths as ReadonlyArray<unknown> | null);
-    const problems = await collectWorkspaceReadmeProblems(dir, 'consumer', [
-      'apps/web',
-    ]);
-    expect(problems).toEqual([MANIFEST_REQUIREMENT]);
-  });
+  ])(
+    'fails closed on a %s instead of guessing ownership',
+    async (_label, paths) => {
+      const dir = buildRepo(paths as ReadonlyArray<unknown> | null);
+      const problems = await collectWorkspaceReadmeProblems(dir, 'consumer', [
+        'apps/web',
+      ]);
+      expect(problems).toEqual([MANIFEST_REQUIREMENT]);
+    },
+  );
 
   it('fails closed when the manifest has no paths array', async () => {
     const dir = buildRepo(null);

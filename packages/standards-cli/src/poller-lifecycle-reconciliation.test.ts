@@ -48,51 +48,51 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-it.each([
-  'fix',
-  'review',
-] as const)('reconciles trusted duplicate %s queue markers left by a failed delete', async (kind) => {
-  const binding = approval(kind);
-  const markerBody = hiddenCommentMetadata(QUEUE_METADATA_MARKER, {
-    approvalId: binding.id,
-    kind,
-  });
-  const calls = installApi([
-    {
-      body: {
-        number: ISSUE_NUMBER,
-        title: 'Title',
-        body: 'Body',
-        labels: [{ name: binding.label }],
-        user: { login: 'reporter' },
-      },
-    },
-    {
-      body: [
-        comment(DUPLICATE_MARKER_ID, markerBody),
-        comment(EARLIEST_MARKER_ID, markerBody),
-      ],
-    },
-    trustedRole,
-    { status: HTTP_NO_CONTENT, body: null },
-  ]);
-
-  await expect(
-    acknowledgeQueuedJob(
-      {
-        config: {} as PollerConfig,
-        token: 'token',
-        repo: REPO,
-        roleCache: new Map(),
-      },
-      ISSUE_NUMBER,
-      binding,
+it.each(['fix', 'review'] as const)(
+  'reconciles trusted duplicate %s queue markers left by a failed delete',
+  async (kind) => {
+    const binding = approval(kind);
+    const markerBody = hiddenCommentMetadata(QUEUE_METADATA_MARKER, {
+      approvalId: binding.id,
       kind,
-    ),
-  ).resolves.toBe(false);
-  expect(deletedCommentIds(calls)).toEqual([DUPLICATE_MARKER_ID]);
-  expect(calls.some(({ method }) => method === 'POST')).toBe(false);
-});
+    });
+    const calls = installApi([
+      {
+        body: {
+          number: ISSUE_NUMBER,
+          title: 'Title',
+          body: 'Body',
+          labels: [{ name: binding.label }],
+          user: { login: 'reporter' },
+        },
+      },
+      {
+        body: [
+          comment(DUPLICATE_MARKER_ID, markerBody),
+          comment(EARLIEST_MARKER_ID, markerBody),
+        ],
+      },
+      trustedRole,
+      { status: HTTP_NO_CONTENT, body: null },
+    ]);
+
+    await expect(
+      acknowledgeQueuedJob(
+        {
+          config: {} as PollerConfig,
+          token: 'token',
+          repo: REPO,
+          roleCache: new Map(),
+        },
+        ISSUE_NUMBER,
+        binding,
+        kind,
+      ),
+    ).resolves.toBe(false);
+    expect(deletedCommentIds(calls)).toEqual([DUPLICATE_MARKER_ID]);
+    expect(calls.some(({ method }) => method === 'POST')).toBe(false);
+  },
+);
 
 it('reconciles every trusted duplicate claim marker left by a failed delete', async () => {
   const binding = approval('fix');

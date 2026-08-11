@@ -70,15 +70,18 @@ describe('dependency-free release dispatcher', () => {
       label: 'release declaration planning',
       runtime: 'node',
     },
-  ] as const)('runs $label under $runtime from a detached source-only tree', (fixture) => {
-    const result = runInSourceOnlyTree(fixture.runtime, fixture.command);
-    expect(result.stderr).toBe('');
-    expect(result.stdout).toBe(fixture.expected);
-    expect(result.status).toBe(0);
-  });
+  ] as const)(
+    'runs $label under $runtime from a detached source-only tree',
+    (fixture) => {
+      const result = runInSourceOnlyTree(fixture.runtime, fixture.command);
+      expect(result.stderr).toBe('');
+      expect(result.stdout).toBe(fixture.expected);
+      expect(result.status).toBe(0);
+    },
+  );
 
   it('plans the publish job under the runtime that job has available', () => {
-    const publishJob = publishWorkflowJobs().publish ?? {};
+    const publishJob = publishWorkflowJobs().publish;
     for (const [step, command] of [
       ['Determine release declaration', 'declaration'],
       ['Determine release state', 'npm-state'],

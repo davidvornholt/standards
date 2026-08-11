@@ -171,20 +171,23 @@ describe('dev env validation', () => {
     ['non-string secret', 'configured', INVALID_ENV_VALUE, 1],
     ['both non-string', INVALID_ENV_VALUE, false, 2],
     ['both unrenderable', '\\\r', '\\\r', 2],
-  ] as const)('reports tracked ownership with %s values', (_label, configValue, secretValue, valueProblemCount) => {
-    const composed = composeDevEnv(
-      layer('config/dev.yaml', {
-        apps: { web: { DATABASE_URL: configValue } },
-      }),
-      layer('secrets/dev.yaml', {
-        apps: { web: { DATABASE_URL: secretValue } },
-      }),
-      null,
-    );
+  ] as const)(
+    'reports tracked ownership with %s values',
+    (_label, configValue, secretValue, valueProblemCount) => {
+      const composed = composeDevEnv(
+        layer('config/dev.yaml', {
+          apps: { web: { DATABASE_URL: configValue } },
+        }),
+        layer('secrets/dev.yaml', {
+          apps: { web: { DATABASE_URL: secretValue } },
+        }),
+        null,
+      );
 
-    expect(composed.problems).toHaveLength(valueProblemCount + 1);
-    expect(composed.problems.at(-1)).toBe(
-      'apps.web.DATABASE_URL is declared in both config/dev.yaml and secrets/dev.yaml; a value is either configuration or a secret, so keep it in exactly one',
-    );
-  });
+      expect(composed.problems).toHaveLength(valueProblemCount + 1);
+      expect(composed.problems.at(-1)).toBe(
+        'apps.web.DATABASE_URL is declared in both config/dev.yaml and secrets/dev.yaml; a value is either configuration or a secret, so keep it in exactly one',
+      );
+    },
+  );
 });

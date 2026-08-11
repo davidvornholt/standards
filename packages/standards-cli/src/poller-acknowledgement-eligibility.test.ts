@@ -130,14 +130,17 @@ it.each([
     pullRequest({ draft: true, headRepo: 'contributor/repo' }),
     [{ body: [] }],
   ],
-] as const)('does not promise a review for a %s', async (_description, pr, eligibilityResponses) => {
-  const calls = installApi([
-    { body: [rawIssue] },
-    { body: [] },
-    { body: pr },
-    ...eligibilityResponses,
-  ]);
-  const report = await runPollerAcknowledgementTick(config(), 'test-token');
-  expect(report).toEqual({ lines: [], problems: [] });
-  expect(calls.every((call) => call.method === 'GET')).toBe(true);
-});
+] as const)(
+  'does not promise a review for a %s',
+  async (_description, pr, eligibilityResponses) => {
+    const calls = installApi([
+      { body: [rawIssue] },
+      { body: [] },
+      { body: pr },
+      ...eligibilityResponses,
+    ]);
+    const report = await runPollerAcknowledgementTick(config(), 'test-token');
+    expect(report).toEqual({ lines: [], problems: [] });
+    expect(calls.every((call) => call.method === 'GET')).toBe(true);
+  },
+);

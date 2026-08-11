@@ -16,25 +16,24 @@ const unescapeRunnerCommandData = (value: string): string =>
   value.replaceAll('%0D', '\r').replaceAll('%0A', '\n').replaceAll('%25', '%');
 
 describe('SOPS secret action masks', () => {
-  it.each([
-    'token%0Atail',
-    'token%0Dtail',
-    'token%25tail',
-  ])('registers the complete literal percent sequence in %s', (secret) => {
-    const actionRun = runSopsAction({ sopsOutput: ciValue(secret) });
-    const commandData = actionRun.result.stdout
-      .trimEnd()
-      .slice(MASK_COMMAND_PREFIX.length);
-    const registeredMask = unescapeRunnerCommandData(commandData);
-    const exportedValue = actionRun.environment
-      .trimEnd()
-      .slice('GH_TOKEN='.length);
+  it.each(['token%0Atail', 'token%0Dtail', 'token%25tail'])(
+    'registers the complete literal percent sequence in %s',
+    (secret) => {
+      const actionRun = runSopsAction({ sopsOutput: ciValue(secret) });
+      const commandData = actionRun.result.stdout
+        .trimEnd()
+        .slice(MASK_COMMAND_PREFIX.length);
+      const registeredMask = unescapeRunnerCommandData(commandData);
+      const exportedValue = actionRun.environment
+        .trimEnd()
+        .slice('GH_TOKEN='.length);
 
-    expect(actionRun.result.status).toBe(0);
-    expect(actionRun.result.stdout).toBe(
-      `${MASK_COMMAND_PREFIX}${secret.replaceAll('%', '%25')}\n`,
-    );
-    expect(exportedValue).toBe(secret);
-    expect(exportedValue.replaceAll(registeredMask, '***')).toBe('***');
-  });
+      expect(actionRun.result.status).toBe(0);
+      expect(actionRun.result.stdout).toBe(
+        `${MASK_COMMAND_PREFIX}${secret.replaceAll('%', '%25')}\n`,
+      );
+      expect(exportedValue).toBe(secret);
+      expect(exportedValue.replaceAll(registeredMask, '***')).toBe('***');
+    },
+  );
 });

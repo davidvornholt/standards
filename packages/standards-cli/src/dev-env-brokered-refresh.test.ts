@@ -23,7 +23,6 @@ const R2_WRITE = {
   key: 'r2.dev_rw',
   safety: 'verified',
 } as const;
-
 const fixture = () => {
   const root = mkdtempSync(join(tmpdir(), 'dev-env-refresh-'));
   roots.push(root);
@@ -78,7 +77,6 @@ const fixture = () => {
   };
 };
 type Fixture = ReturnType<typeof fixture>;
-
 const refreshWithExistingEnv = async (
   setup: Fixture,
   expectedProblem: string,
@@ -166,21 +164,24 @@ describe('dev env refresh after brokered SOPS writes', () => {
   it.each([
     ['invalid YAML', 'apps: [unterminated\n', EXECUTABLE_MODE],
     ['an unreadable file', 'apps: {}\n', UNREADABLE_MODE],
-  ] as const)('rejects %s before decrypting or accepting an existing env', async (_, content, mode) => {
-    const setup = fixture();
-    const local = join(setup.consumer, 'config/dev.local.yaml');
-    writeFileSync(local, content);
-    chmodSync(local, mode);
+  ] as const)(
+    'rejects %s before decrypting or accepting an existing env',
+    async (_, content, mode) => {
+      const setup = fixture();
+      const local = join(setup.consumer, 'config/dev.local.yaml');
+      writeFileSync(local, content);
+      chmodSync(local, mode);
 
-    expect(
-      await refreshWithExistingEnv(
-        setup,
-        mode === UNREADABLE_MODE
-          ? 'could not read config/dev.local.yaml'
-          : 'config/dev.local.yaml must contain valid YAML',
-      ),
-    ).toEqual(FAILED_REFRESH);
-  });
+      expect(
+        await refreshWithExistingEnv(
+          setup,
+          mode === UNREADABLE_MODE
+            ? 'could not read config/dev.local.yaml'
+            : 'config/dev.local.yaml must contain valid YAML',
+        ),
+      ).toEqual(FAILED_REFRESH);
+    },
+  );
 
   it('rejects the encrypted allowlist key in a plain layer during discovery', async () => {
     const setup = fixture();

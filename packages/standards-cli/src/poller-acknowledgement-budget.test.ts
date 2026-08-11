@@ -41,11 +41,14 @@ it.each([
     { fixes: 0, reviews: 5, persistedPlans: true },
     MAX_FIVE_PLAN_REQUESTS_PER_HOUR,
   ],
-] as const)('retains API headroom for a %s', async (_description, scenario: BudgetScenario, maximumHourlyRequests) => {
-  const { hourlyRequests, problems } = await runBudgetScenario(scenario);
-  expect(problems).toEqual([]);
-  expect(hourlyRequests).toBeLessThanOrEqual(maximumHourlyRequests);
-  expect(API_REQUESTS_PER_HOUR - hourlyRequests).toBeGreaterThanOrEqual(
-    MINIMUM_REQUEST_HEADROOM,
-  );
-});
+] as const)(
+  'retains API headroom for a %s',
+  async (_description, scenario: BudgetScenario, maximumHourlyRequests) => {
+    const { hourlyRequests, problems } = await runBudgetScenario(scenario);
+    expect(problems).toEqual([]);
+    expect(hourlyRequests).toBeLessThanOrEqual(maximumHourlyRequests);
+    expect(API_REQUESTS_PER_HOUR - hourlyRequests).toBeGreaterThanOrEqual(
+      MINIMUM_REQUEST_HEADROOM,
+    );
+  },
+);

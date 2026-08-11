@@ -26,23 +26,24 @@ const fieldCases = [
 
 for (const [source, fileLabel] of sources) {
   describe(`${fileLabel} field shapes`, () => {
-    it.each(
-      fieldCases,
-    )('%s handles the %s shape', (field, _shape, value, expectedType) => {
-      const declaration =
-        value === undefined ? {} : { [field]: value as unknown };
-      const serialized = JSON.stringify(declaration);
-      const loaded = loadGithubSettings(
-        source === 'canonical' ? serialized : '{}',
-        source === 'local' ? serialized : '{}',
-      );
+    it.each(fieldCases)(
+      '%s handles the %s shape',
+      (field, _shape, value, expectedType) => {
+        const declaration =
+          value === undefined ? {} : { [field]: value as unknown };
+        const serialized = JSON.stringify(declaration);
+        const loaded = loadGithubSettings(
+          source === 'canonical' ? serialized : '{}',
+          source === 'local' ? serialized : '{}',
+        );
 
-      const expectedProblems =
-        expectedType === null
-          ? []
-          : [`${fileLabel} "${field}" must be an ${expectedType}`];
-      expect(loaded.problems).toEqual(expectedProblems);
-      expect(loaded.merged === null).toBe(expectedType !== null);
-    });
+        const expectedProblems =
+          expectedType === null
+            ? []
+            : [`${fileLabel} "${field}" must be an ${expectedType}`];
+        expect(loaded.problems).toEqual(expectedProblems);
+        expect(loaded.merged === null).toBe(expectedType !== null);
+      },
+    );
   });
 }

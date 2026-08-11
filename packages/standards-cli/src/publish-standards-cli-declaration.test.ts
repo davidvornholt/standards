@@ -7,7 +7,7 @@ import {
   workflowStepNames,
 } from './publish-workflow-test-support';
 
-const publishJob = () => publishWorkflowJobs().publish ?? {};
+const publishJob = () => publishWorkflowJobs().publish;
 
 describe('standards CLI release declaration gating', () => {
   it('releases only the commit that declares the version', () => {
@@ -59,7 +59,7 @@ describe('standards CLI release declaration gating', () => {
     for (const dead of ['version', 'publish']) {
       expect(publishJob().outputs).not.toHaveProperty(dead);
     }
-    expect(publishWorkflowJobs().release?.if).toBe(
+    expect(publishWorkflowJobs().release.if).toBe(
       "needs.publish.result == 'success' && needs.publish.outputs.declared == 'true'",
     );
   });

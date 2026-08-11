@@ -100,10 +100,13 @@ describe('collectStructureProblems workspace declarations', () => {
       ['../outside'],
       'package.json: unsafe workspaces pattern "../outside"; use a relative path without "." or ".." segments',
     ],
-  ])('rejects malformed workspace declarations %#', async (workspaces, expected) => {
-    const consumer = buildConsumer(rootManifest({ workspaces }));
-    expect(await collect(consumer)).toContain(expected);
-  });
+  ])(
+    'rejects malformed workspace declarations %#',
+    async (workspaces, expected) => {
+      const consumer = buildConsumer(rootManifest({ workspaces }));
+      expect(await collect(consumer)).toContain(expected);
+    },
+  );
 
   it('treats a missing glob root as an empty match', async () => {
     const consumer = buildConsumer(rootManifest({ workspaces: ['empty/*'] }));

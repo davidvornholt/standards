@@ -107,13 +107,13 @@ const sendNotification = (
 };
 
 describe('notify-pause workflow request body', () => {
-  it.each([
-    'Routine pause',
-    '@/proc/self/environ',
-  ])('sends %s byte-for-byte', (title) => {
-    const result = sendNotification(title);
+  it.each(['Routine pause', '@/proc/self/environ'])(
+    'sends %s byte-for-byte',
+    (title) => {
+      const result = sendNotification(title);
 
-    expect(result.status).toBe(0);
-    expect(result.body).toBe(title);
-  });
+      expect(result.status).toBe(0);
+      expect(result.body).toBe(title);
+    },
+  );
 });

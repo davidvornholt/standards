@@ -86,7 +86,7 @@ export const executeReviewJob = async (options: {
       };
     }
     if (outcome.status === 'question') {
-      await askQuestion(deps, labels, pr.number, outcome.question ?? '');
+      await askQuestion(deps, labels, pr.number, outcome.question);
       return { lines: [`PR #${pr.number}: asked a question`], ranCodex: true };
     }
     if (outcome.status === 'cannot-review') {

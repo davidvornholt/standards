@@ -143,6 +143,7 @@ export const applySopsEditorChanges = (
     }
     document.setIn(path, change.value);
   }
+  // biome-ignore lint/nursery/noBaseToString: YAML Document implements toString as its comment-preserving serializer.
   return document.toString();
 };
 const runEditor = (): void => {

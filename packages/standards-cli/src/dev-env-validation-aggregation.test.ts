@@ -124,22 +124,23 @@ afterEach(() => {
 });
 
 describe('dev env acquisition and schema validation aggregation', () => {
-  it.each(
-    matrix,
-  )('reports every acquired layer schema when %s acquisition fails', async (acquisitionFailure, expectedProblems) => {
-    const setup = fixture(acquisitionFailure);
-    const error = spyOn(console, 'error').mockImplementation(() => undefined);
-    const log = spyOn(console, 'log').mockImplementation(() => undefined);
+  it.each(matrix)(
+    'reports every acquired layer schema when %s acquisition fails',
+    async (acquisitionFailure, expectedProblems) => {
+      const setup = fixture(acquisitionFailure);
+      const error = spyOn(console, 'error').mockImplementation(() => undefined);
+      const log = spyOn(console, 'log').mockImplementation(() => undefined);
 
-    expect(await runDevEnv(setup.consumer)).toBe(false);
+      expect(await runDevEnv(setup.consumer)).toBe(false);
 
-    const reported = error.mock.calls.flat().join('\n');
-    expect(reported).toContain('standards dev-env: 6 problem(s):');
-    expect(
-      expectedProblems.filter((problem) => !reported.includes(problem)),
-    ).toEqual([]);
-    expect(reported).not.toContain('apps/ghost/package.json');
-    expect(readFileSync(setup.destination, 'utf8')).toBe('existing-value\n');
-    expect(log).not.toHaveBeenCalled();
-  });
+      const reported = error.mock.calls.flat().join('\n');
+      expect(reported).toContain('standards dev-env: 6 problem(s):');
+      expect(
+        expectedProblems.filter((problem) => !reported.includes(problem)),
+      ).toEqual([]);
+      expect(reported).not.toContain('apps/ghost/package.json');
+      expect(readFileSync(setup.destination, 'utf8')).toBe('existing-value\n');
+      expect(log).not.toHaveBeenCalled();
+    },
+  );
 });

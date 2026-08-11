@@ -104,25 +104,28 @@ describe('resolveHiddenBypassActors feeding diffRulesets', () => {
     [1, 0],
     [1, 2],
     [BYPASS_COUNT, 1],
-  ])('reports drift for %p declared actors against a count of %p', (declaredCount, count) => {
-    const declared = [
-      declaredWith(
-        Array.from({ length: declaredCount }, (_u, i) => actorWithId(i)),
-      ),
-    ];
-    const diff = diffRulesets(
-      declared,
-      resolveHiddenBypassActors(
+  ])(
+    'reports drift for %p declared actors against a count of %p',
+    (declaredCount, count) => {
+      const declared = [
+        declaredWith(
+          Array.from({ length: declaredCount }, (_u, i) => actorWithId(i)),
+        ),
+      ];
+      const diff = diffRulesets(
         declared,
-        [hidden],
-        new Map([[RULESET_ID, count]]),
-      ),
-    );
-    expect(diff.unverifiable).toEqual([]);
-    expect(diff.drifted).toEqual([
-      `ruleset "Protect main": ${BYPASS_ACTORS_KEY} differs from the declared configuration (GitHub reports ${String(count)} bypass actor(s); ${String(declaredCount)} declared)`,
-    ]);
-  });
+        resolveHiddenBypassActors(
+          declared,
+          [hidden],
+          new Map([[RULESET_ID, count]]),
+        ),
+      );
+      expect(diff.unverifiable).toEqual([]);
+      expect(diff.drifted).toEqual([
+        `ruleset "Protect main": ${BYPASS_ACTORS_KEY} differs from the declared configuration (GitHub reports ${String(count)} bypass actor(s); ${String(declaredCount)} declared)`,
+      ]);
+    },
+  );
 
   // The counted-and-matched case is the one state that stays unverifiable
   // rather than passing: the count proves how many actors bypass, never which.
