@@ -12,24 +12,23 @@ const PACKAGE_PATH = join(import.meta.dir, '../package.json');
 describe('standards CLI publish recovery workflow', () => {
   it('publishes a new version and reconciles its exact tested commit', () => {
     const workflowJobs = publishWorkflowJobs();
-    expect(workflowStep(workflowJobs.publish ?? {}, 'Publish package').if).toBe(
+    expect(workflowStep(workflowJobs.publish, 'Publish package').if).toBe(
       "steps.release.outputs.publish == 'true'",
     );
-    expect(workflowJobs.release?.needs).toBe('publish');
+    expect(workflowJobs.release.needs).toBe('publish');
     expect(
-      workflowStep(workflowJobs.release ?? {}, 'Checkout released commit'),
+      workflowStep(workflowJobs.release, 'Checkout released commit'),
     ).toMatchObject({
       with: { ref: githubExpression('needs.publish.outputs.sha') },
     });
     expect(
-      workflowStep(workflowJobs.publish ?? {}, 'Install release dependencies')
-        .run,
+      workflowStep(workflowJobs.publish, 'Install release dependencies').run,
     ).toBe('bun install --frozen-lockfile --ignore-scripts');
   });
 
   it('uses the exact-version-aware release state model', () => {
     const releaseState = workflowStep(
-      publishWorkflowJobs().publish ?? {},
+      publishWorkflowJobs().publish,
       'Determine release state',
     );
     expect(releaseState.run).toContain('.versions[$version] != null');
@@ -38,7 +37,7 @@ describe('standards CLI publish recovery workflow', () => {
 
   it('verifies one fetched bundle and binds it to the installed package before recovery', () => {
     const verification = workflowStep(
-      publishWorkflowJobs().publish ?? {},
+      publishWorkflowJobs().publish,
       'Verify existing package provenance',
     );
     expect(verification.if).toBe("steps.release.outputs.publish == 'false'");
@@ -70,7 +69,7 @@ describe('standards CLI publish recovery workflow', () => {
   });
 
   it('routes existing tag and release states through the tested SHA model', () => {
-    const releaseJob = publishWorkflowJobs().release ?? {};
+    const releaseJob = publishWorkflowJobs().release;
     expect(workflowStep(releaseJob, 'Setup Bun')).toMatchObject({
       uses: 'oven-sh/setup-bun@v2',
       with: { 'bun-version': githubExpression('env.BUN_VERSION') },

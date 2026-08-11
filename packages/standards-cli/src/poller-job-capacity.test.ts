@@ -60,45 +60,47 @@ afterEach(() => {
 });
 
 describe('poller entrypoints without Codex capacity', () => {
-  it.each([
-    'fix',
-    'review',
-  ] as const)('acknowledges a fresh %s job once without claiming it', async (kind) => {
-    const fixture = createLocalPollerRepo();
-    roots.push(fixture.root);
-    const isReview = kind === 'review';
-    const calls = installPollerApi({
-      baseSha: fixture.baseSha,
-      headSha: fixture.headSha,
-      isPullRequest: isReview,
-    });
-    const result = isReview
-      ? await runReviewJob(deps(fixture.cacheDir), issue(true), false)
-      : await runFixJob(
-          deps(fixture.cacheDir),
-          issue(false),
-          defaultBranch,
-          false,
-        );
-    const second = isReview
-      ? await runReviewJob(deps(fixture.cacheDir), issue(true), false)
-      : await runFixJob(
-          deps(fixture.cacheDir),
-          issue(false),
-          defaultBranch,
-          false,
-        );
-    expect(result.ranCodex).toBe(false);
-    expect(second.ranCodex).toBe(false);
-    expect(result.lines[0]).toContain('waiting for run capacity');
-    const mutations = calls.filter((call) => call.method !== 'GET');
-    expect(mutations).toHaveLength(1);
-    const [comment] = mutations;
-    expect(comment?.method).toBe('POST');
-    const body = (comment?.body as { readonly body?: unknown } | null)?.body;
-    expect(body).toStartWith(isReview ? '**Review queued**' : '**Fix queued**');
-    expect(body).toContain('<!-- standards-poller:queue\n');
-  });
+  it.each(['fix', 'review'] as const)(
+    'acknowledges a fresh %s job once without claiming it',
+    async (kind) => {
+      const fixture = createLocalPollerRepo();
+      roots.push(fixture.root);
+      const isReview = kind === 'review';
+      const calls = installPollerApi({
+        baseSha: fixture.baseSha,
+        headSha: fixture.headSha,
+        isPullRequest: isReview,
+      });
+      const result = isReview
+        ? await runReviewJob(deps(fixture.cacheDir), issue(true), false)
+        : await runFixJob(
+            deps(fixture.cacheDir),
+            issue(false),
+            defaultBranch,
+            false,
+          );
+      const second = isReview
+        ? await runReviewJob(deps(fixture.cacheDir), issue(true), false)
+        : await runFixJob(
+            deps(fixture.cacheDir),
+            issue(false),
+            defaultBranch,
+            false,
+          );
+      expect(result.ranCodex).toBe(false);
+      expect(second.ranCodex).toBe(false);
+      expect(result.lines[0]).toContain('waiting for run capacity');
+      const mutations = calls.filter((call) => call.method !== 'GET');
+      expect(mutations).toHaveLength(1);
+      const [comment] = mutations;
+      expect(comment?.method).toBe('POST');
+      const body = (comment?.body as { readonly body?: unknown } | null)?.body;
+      expect(body).toStartWith(
+        isReview ? '**Review queued**' : '**Fix queued**',
+      );
+      expect(body).toContain('<!-- standards-poller:queue\n');
+    },
+  );
 
   it('continues a sealed fix publication', async () => {
     const fixture = createLocalPollerRepo();

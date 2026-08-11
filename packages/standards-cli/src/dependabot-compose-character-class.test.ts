@@ -32,13 +32,16 @@ describe('Dependabot Ruby character-class compatibility', () => {
     ['/packages/[c-a]', '/packages/b', false],
     ['/packages/[!]', '/packages/x', true],
     ['/packages/[^]', '/packages/x', true],
-  ])('matches %s against %s like Dir.glob', (glob, concrete, expectedOverlap) => {
-    const result = composeTargets(glob, concrete);
-    expect(
-      result.problems
-        .join('\n')
-        .includes('overlaps .github/dependabot.base.yml updates[0]'),
-    ).toBe(expectedOverlap);
-    expect(result.composed === null).toBe(expectedOverlap);
-  });
+  ])(
+    'matches %s against %s like Dir.glob',
+    (glob, concrete, expectedOverlap) => {
+      const result = composeTargets(glob, concrete);
+      expect(
+        result.problems
+          .join('\n')
+          .includes('overlaps .github/dependabot.base.yml updates[0]'),
+      ).toBe(expectedOverlap);
+      expect(result.composed === null).toBe(expectedOverlap);
+    },
+  );
 });

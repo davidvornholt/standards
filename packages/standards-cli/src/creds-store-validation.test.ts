@@ -68,27 +68,30 @@ describe('broker store Cloudflare account validation', () => {
   it.each([
     ['duplicate', [account(VALID_ACCOUNT), account(VALID_ACCOUNT)]],
     ['malformed', [account('not-an-account-id')]],
-  ] as const)('rejects a %s post-update account list without replacing the store', async (_, accounts) => {
-    const path = storePath();
-    const initial = {
-      ...EMPTY_BROKER_STORE,
-      cloudflare: [account(VALID_ACCOUNT, 'original')],
-    };
-    await updateBrokerStore(path, () => initial);
-    chmodSync(path, BROADER_FILE_MODE);
-    const bytes = readFileSync(path);
-    const { mode } = statSync(path);
+  ] as const)(
+    'rejects a %s post-update account list without replacing the store',
+    async (_, accounts) => {
+      const path = storePath();
+      const initial = {
+        ...EMPTY_BROKER_STORE,
+        cloudflare: [account(VALID_ACCOUNT, 'original')],
+      };
+      await updateBrokerStore(path, () => initial);
+      chmodSync(path, BROADER_FILE_MODE);
+      const bytes = readFileSync(path);
+      const { mode } = statSync(path);
 
-    await expect(
-      updateBrokerStore(path, (store) => ({
-        ...store,
-        cloudflare: accounts,
-      })),
-    ).rejects.toThrow();
-    expect(readFileSync(path)).toEqual(bytes);
-    const { mode: currentMode } = statSync(path);
-    expect(currentMode).toBe(mode);
-  });
+      await expect(
+        updateBrokerStore(path, (store) => ({
+          ...store,
+          cloudflare: accounts,
+        })),
+      ).rejects.toThrow();
+      expect(readFileSync(path)).toEqual(bytes);
+      const { mode: currentMode } = statSync(path);
+      expect(currentMode).toBe(mode);
+    },
+  );
 });
 
 describe('broker store GitHub App validation', () => {

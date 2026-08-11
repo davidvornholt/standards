@@ -150,16 +150,21 @@ afterEach(() => {
 it.each([
   ['fix', false, '**Fix queued**'],
   ['review', true, '**Review queued**'],
-] as const)('acknowledges a queued %s without starting it', async (_kind, isPullRequest, heading) => {
-  const calls: ReadonlyArray<ApiCall> = installApi(apiResponses(isPullRequest));
-  const report = await runPollerAcknowledgementTick(config(), 'test-token');
-  expect(report.problems).toEqual([]);
-  expect(report.lines).toHaveLength(1);
-  const comment = calls.find(
-    (call) => call.method === 'POST' && call.path.endsWith('/comments'),
-  );
-  const body = (comment?.body as { readonly body?: unknown } | null)?.body;
-  expect(body).toStartWith(heading);
-  expect(body).toContain('You don’t need to do anything else.');
-  expect(body).toContain(`"eventId":${APPROVAL_EVENT_ID}`);
-});
+] as const)(
+  'acknowledges a queued %s without starting it',
+  async (_kind, isPullRequest, heading) => {
+    const calls: ReadonlyArray<ApiCall> = installApi(
+      apiResponses(isPullRequest),
+    );
+    const report = await runPollerAcknowledgementTick(config(), 'test-token');
+    expect(report.problems).toEqual([]);
+    expect(report.lines).toHaveLength(1);
+    const comment = calls.find(
+      (call) => call.method === 'POST' && call.path.endsWith('/comments'),
+    );
+    const body = (comment?.body as { readonly body?: unknown } | null)?.body;
+    expect(body).toStartWith(heading);
+    expect(body).toContain('You don’t need to do anything else.');
+    expect(body).toContain(`"eventId":${APPROVAL_EVENT_ID}`);
+  },
+);

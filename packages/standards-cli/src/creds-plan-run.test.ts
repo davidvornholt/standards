@@ -56,26 +56,29 @@ describe('creds plan/apply safety', () => {
   it.each([
     ['flat', 'ci', 'secrets/ci.yaml'],
     ['host', 'prod', 'infra/hosts/prod/secrets.yaml'],
-  ] as const)('aborts on an unsafe %s target without provider deletion', async (kind, target, rel) => {
-    const { consumer, events } = initialize(ENCRYPTED_SECRETS);
-    const outside = join(planRunRoot(), `outside-${kind}`);
-    if (kind === 'flat') {
-      writeFileSync(outside, 'outside\n');
-      rmSync(join(consumer, rel));
-      symlinkSync(outside, join(consumer, rel));
-    } else {
-      mkdirSync(outside);
-      mkdirSync(join(consumer, 'infra', 'hosts'), { recursive: true });
-      symlinkSync(outside, join(consumer, 'infra', 'hosts', target), 'dir');
-    }
-    stubCloudflare(target);
-    const error = spyOn(console, 'error').mockImplementation(() => undefined);
-    expect(await runCredsPlan(consumer, true)).toBe(false);
-    expect(readFileSync(events, 'utf8')).toBe('');
-    expect(error).toHaveBeenCalledWith(
-      expect.stringContaining(`unsafe encrypted secrets target ${rel}`),
-    );
-  });
+  ] as const)(
+    'aborts on an unsafe %s target without provider deletion',
+    async (kind, target, rel) => {
+      const { consumer, events } = initialize(ENCRYPTED_SECRETS);
+      const outside = join(planRunRoot(), `outside-${kind}`);
+      if (kind === 'flat') {
+        writeFileSync(outside, 'outside\n');
+        rmSync(join(consumer, rel));
+        symlinkSync(outside, join(consumer, rel));
+      } else {
+        mkdirSync(outside);
+        mkdirSync(join(consumer, 'infra', 'hosts'), { recursive: true });
+        symlinkSync(outside, join(consumer, 'infra', 'hosts', target), 'dir');
+      }
+      stubCloudflare(target);
+      const error = spyOn(console, 'error').mockImplementation(() => undefined);
+      expect(await runCredsPlan(consumer, true)).toBe(false);
+      expect(readFileSync(events, 'utf8')).toBe('');
+      expect(error).toHaveBeenCalledWith(
+        expect.stringContaining(`unsafe encrypted secrets target ${rel}`),
+      );
+    },
+  );
 });
 
 describe('creds plan duplicate account safety', () => {

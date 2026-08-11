@@ -60,15 +60,18 @@ describe('Dependabot directory glob overlap', () => {
       '    directories: ["/packages/[!ab]"]',
       '    directory: /packages/c',
     ],
-  ])('rejects %s overlapping a concrete target', (_label, baseTarget, localTarget) => {
-    const result = composeDependabot(
-      baseWithTarget(baseTarget),
-      localWithTarget(localTarget),
-    );
-    expect(result.problems.join('\n')).toContain(
-      'overlaps .github/dependabot.base.yml updates[0]',
-    );
-  });
+  ])(
+    'rejects %s overlapping a concrete target',
+    (_label, baseTarget, localTarget) => {
+      const result = composeDependabot(
+        baseWithTarget(baseTarget),
+        localWithTarget(localTarget),
+      );
+      expect(result.problems.join('\n')).toContain(
+        'overlaps .github/dependabot.base.yml updates[0]',
+      );
+    },
+  );
 
   it('rejects intersecting glob targets', () => {
     const result = composeDependabot(
@@ -164,13 +167,16 @@ describe('Dependabot Ruby glob compatibility', () => {
       '    directory: packages/a/',
       'overlaps .github/dependabot.base.yml updates[0]',
     ],
-  ])('compares normalized target spellings', (baseTarget, localTarget, expectedProblem) => {
-    const result = composeDependabot(
-      baseWithTarget(baseTarget),
-      localWithTarget(localTarget),
-    );
-    expect(result.problems.join('\n')).toContain(expectedProblem);
-  });
+  ])(
+    'compares normalized target spellings',
+    (baseTarget, localTarget, expectedProblem) => {
+      const result = composeDependabot(
+        baseWithTarget(baseTarget),
+        localWithTarget(localTarget),
+      );
+      expect(result.problems.join('\n')).toContain(expectedProblem);
+    },
+  );
 
   it('does not treat wildcard characters under directory as globs', () => {
     const result = composeDependabot(

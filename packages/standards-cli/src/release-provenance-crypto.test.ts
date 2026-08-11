@@ -155,9 +155,12 @@ describe('npm provenance cryptographic verification', () => {
         );
       },
     ],
-  ] as const)('rejects a signed %s mutation retaining the original signature', (name, change) => {
-    const result = runProvenance(mutatedFixture(name, change));
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain('[cryptographic-verification-failure]');
-  });
+  ] as const)(
+    'rejects a signed %s mutation retaining the original signature',
+    (name, change) => {
+      const result = runProvenance(mutatedFixture(name, change));
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('[cryptographic-verification-failure]');
+    },
+  );
 });

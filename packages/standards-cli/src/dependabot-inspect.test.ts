@@ -42,15 +42,15 @@ describe('multi-ecosystem Dependabot inspection', () => {
     );
   });
 
-  it.each([
-    '',
-    '    patterns: []',
-  ])('requires non-empty patterns on grouped updates', (patterns) => {
-    const problems = inspectDependabot(
-      grouped(`    multi-ecosystem-group: infrastructure\n${patterns}`),
-    );
-    expect(problems.join('\n')).toContain(
-      'must define non-empty patterns when using a multi-ecosystem group',
-    );
-  });
+  it.each(['', '    patterns: []'])(
+    'requires non-empty patterns on grouped updates',
+    (patterns) => {
+      const problems = inspectDependabot(
+        grouped(`    multi-ecosystem-group: infrastructure\n${patterns}`),
+      );
+      expect(problems.join('\n')).toContain(
+        'must define non-empty patterns when using a multi-ecosystem group',
+      );
+    },
+  );
 });

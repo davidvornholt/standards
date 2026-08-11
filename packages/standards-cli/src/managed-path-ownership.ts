@@ -38,7 +38,9 @@ export const unlockedPathsUnder = async (
 ): Promise<ReadonlyArray<string>> => {
   const found: Array<string> = [];
   await collectPaths(root, rel, found);
-  return found.filter((path) => !locked.has(path)).sort();
+  return found
+    .filter((path) => !locked.has(path))
+    .sort((left, right) => left.localeCompare(right));
 };
 
 // An ancestor that is not a directory, so nothing can sit below it under the

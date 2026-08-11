@@ -167,20 +167,23 @@ describe('brokered S3 pair failures', () => {
       'secret_access_key',
       { access_key_id: MALFORMED_PAIR_PART, secret_access_key: 'SECRET' },
     ],
-  ] as const)('rejects a broker destination with a %s', (_label, part, pair) => {
-    const consumer = fixture({
-      'secrets/r2-dev.yaml': { r2: { dev_rw: pair } },
-    });
+  ] as const)(
+    'rejects a broker destination with a %s',
+    (_label, part, pair) => {
+      const consumer = fixture({
+        'secrets/r2-dev.yaml': { r2: { dev_rw: pair } },
+      });
 
-    const resolved = resolveBrokeredReferences(
-      consumer,
-      [target({ VALUE: pairReference(part) })],
-      ALLOWED_PAIR,
-    );
+      const resolved = resolveBrokeredReferences(
+        consumer,
+        [target({ VALUE: pairReference(part) })],
+        ALLOWED_PAIR,
+      );
 
-    expect(resolved.problems).toEqual([
-      'apps.web.VALUE reference to secrets target "r2-dev": key "r2.dev_rw" does not hold a complete brokered S3 pair; both "access_key_id" and "secret_access_key" must be strings',
-    ]);
-    expect(resolved.targets[0]?.env).toEqual({});
-  });
+      expect(resolved.problems).toEqual([
+        'apps.web.VALUE reference to secrets target "r2-dev": key "r2.dev_rw" does not hold a complete brokered S3 pair; both "access_key_id" and "secret_access_key" must be strings',
+      ]);
+      expect(resolved.targets[0]?.env).toEqual({});
+    },
+  );
 });

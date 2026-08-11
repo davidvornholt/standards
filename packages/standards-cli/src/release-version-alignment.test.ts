@@ -41,7 +41,7 @@ describe('standards CLI release version', () => {
     expect(templateManifest.devDependencies['@davidvornholt/standards']).toBe(
       packageManifest.version,
     );
-    expect(lock.workspaces['packages/standards-cli']?.version).toBe(
+    expect(lock.workspaces['packages/standards-cli'].version).toBe(
       packageManifest.version,
     );
     expect(readmeReleaseTag).toBe(packageManifest.version);

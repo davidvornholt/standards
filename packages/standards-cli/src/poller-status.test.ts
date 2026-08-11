@@ -2,11 +2,8 @@ import { afterEach, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { HTTP_CREATED, HTTP_NO_CONTENT } from './github-api';
 import { installApi } from './github-commands-test-support';
-import {
-  type ApprovalBinding,
-  issueRevision,
-  prRevision,
-} from './poller-approval';
+import type { ApprovalBinding } from './poller-approval';
+import { issueRevision, prRevision } from './poller-approval';
 import { hiddenCommentMetadata } from './poller-comment-metadata';
 import type { PollerConfig } from './poller-config';
 import type { IssueItem } from './poller-github';
@@ -140,61 +137,64 @@ const runRace = async (
     calls.at(-1)?.path === `/repos/${REPO}/issues/comments/${COMMENT_ID}`
   );
 };
-it.each(
-  JOB_KINDS,
-)('deletes a race-late %s marker when completion removes approval', async (kind) => {
-  expect(await runRace(kind, [{ body: rawIssue(kind, []) }])).toBe(true);
-});
-it.each(
-  JOB_KINDS,
-)('deletes a race-late %s marker when clarification starts', async (kind) => {
-  expect(
-    await runRace(kind, [
-      {
-        body: rawIssue(kind, [approvalLabel(kind), NEEDS_CLARIFICATION]),
-      },
-    ]),
-  ).toBe(true);
-});
-
-it.each(
-  JOB_KINDS,
-)('deletes a race-late %s marker when the approval generation changes', async (kind) => {
-  expect(
-    await runRace(kind, [
-      { body: rawIssue(kind, [approvalLabel(kind)]) },
-      ...(kind === 'review' ? [{ body: pullRequest() }] : []),
-      { body: rawIssue(kind, [approvalLabel(kind)]) },
-      { body: [labelEvent(kind, APPROVAL_EVENT_ID + 1)] },
-      { body: Object.fromEntries([['role_name', 'admin']]) },
-    ]),
-  ).toBe(true);
-});
-
-it.each(
-  JOB_KINDS,
-)('deletes a race-late %s marker when the approved target changes', async (kind) => {
-  expect(
-    await runRace(
-      kind,
-      kind === 'fix'
-        ? [{ body: rawIssue(kind, [approvalLabel(kind)], 'Changed body') }]
-        : [
-            { body: rawIssue(kind, [approvalLabel(kind)]) },
-            { body: pullRequest('changed-head') },
-          ],
-    ),
-  ).toBe(true);
-});
-
+it.each(JOB_KINDS)(
+  'deletes a race-late %s marker when completion removes approval',
+  async (kind) =>
+    expect(await runRace(kind, [{ body: rawIssue(kind, []) }])).toBe(true),
+);
+it.each(JOB_KINDS)(
+  'deletes a race-late %s marker when clarification starts',
+  async (kind) => {
+    expect(
+      await runRace(kind, [
+        {
+          body: rawIssue(kind, [approvalLabel(kind), NEEDS_CLARIFICATION]),
+        },
+      ]),
+    ).toBe(true);
+  },
+);
+it.each(JOB_KINDS)(
+  'deletes a race-late %s marker when the approval generation changes',
+  async (kind) => {
+    expect(
+      await runRace(kind, [
+        { body: rawIssue(kind, [approvalLabel(kind)]) },
+        ...(kind === 'review' ? [{ body: pullRequest() }] : []),
+        { body: rawIssue(kind, [approvalLabel(kind)]) },
+        { body: [labelEvent(kind, APPROVAL_EVENT_ID + 1)] },
+        { body: Object.fromEntries([['role_name', 'admin']]) },
+      ]),
+    ).toBe(true);
+  },
+);
+it.each(JOB_KINDS)(
+  'deletes a race-late %s marker when the approved target changes',
+  async (kind) => {
+    expect(
+      await runRace(
+        kind,
+        kind === 'fix'
+          ? [{ body: rawIssue(kind, [approvalLabel(kind)], 'Changed body') }]
+          : [
+              { body: rawIssue(kind, [approvalLabel(kind)]) },
+              { body: pullRequest('changed-head') },
+            ],
+      ),
+    ).toBe(true);
+  },
+);
 it.each([
   ['ready', pullRequest(SHAS.head, false)],
   ['fork', pullRequest(SHAS.head, true, 'contributor/repo')],
-] as const)('deletes a race-late review marker when the PR becomes %s', async (_description, pr) => {
-  expect(
-    await runRace('review', [
-      { body: rawIssue('review', [APPROVED_FOR_REVIEW]) },
-      { body: pr },
-    ]),
-  ).toBe(true);
-});
+] as const)(
+  'deletes a race-late review marker when the PR becomes %s',
+  async (_description, pr) => {
+    expect(
+      await runRace('review', [
+        { body: rawIssue('review', [APPROVED_FOR_REVIEW]) },
+        { body: pr },
+      ]),
+    ).toBe(true);
+  },
+);

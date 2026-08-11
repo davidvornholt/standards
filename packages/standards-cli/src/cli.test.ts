@@ -1744,51 +1744,53 @@ describe('sync policy file', () => {
 });
 
 describe('sync policy validation', () => {
-  it.each(
-    INVALID_POLICY_CASES,
-  )('validates %s before explicit refs and local sources', (_label, policy, expectedError) => {
-    const { up, url } = buildGitUpstream();
-    const { consumer } = initConsumer(up);
-    write(consumer, 'sync-standards.local.json', policy);
+  it.each(INVALID_POLICY_CASES)(
+    'validates %s before explicit refs and local sources',
+    (_label, policy, expectedError) => {
+      const { up, url } = buildGitUpstream();
+      const { consumer } = initConsumer(up);
+      write(consumer, 'sync-standards.local.json', policy);
 
-    for (const extra of [
-      ['--ref', 'main'],
-      ['--ref', 'main', '--dry-run'],
-    ]) {
-      const result = sync(url, consumer, extra);
-      expect(result.status).toBe(1);
-      expect(result.stderr).toContain(expectedError);
-    }
+      for (const extra of [
+        ['--ref', 'main'],
+        ['--ref', 'main', '--dry-run'],
+      ]) {
+        const result = sync(url, consumer, extra);
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain(expectedError);
+      }
 
-    const localSync = sync(up, consumer);
-    expect(localSync.status).toBe(1);
-    expect(localSync.stderr).toContain(expectedError);
+      const localSync = sync(up, consumer);
+      expect(localSync.status).toBe(1);
+      expect(localSync.stderr).toContain(expectedError);
 
-    for (const source of [url, up]) {
-      const initTarget = mkTmp('sync-cons-');
-      write(initTarget, 'sync-standards.local.json', policy);
-      const args =
-        source === url
-          ? ['init', '--from', source, '--ref', 'main', '--dir', initTarget]
-          : ['init', '--from', source, '--dir', initTarget];
-      const result = run(initTarget, args);
-      expect(result.status).toBe(1);
-      expect(result.stderr).toContain(expectedError);
-    }
-  });
+      for (const source of [url, up]) {
+        const initTarget = mkTmp('sync-cons-');
+        write(initTarget, 'sync-standards.local.json', policy);
+        const args =
+          source === url
+            ? ['init', '--from', source, '--ref', 'main', '--dir', initTarget]
+            : ['init', '--from', source, '--dir', initTarget];
+        const result = run(initTarget, args);
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain(expectedError);
+      }
+    },
+  );
 
-  it.each(
-    INVALID_POLICY_CASES,
-  )('doctor and check reject %s', (_label, policy, expectedError) => {
-    const { consumer } = initConsumer(buildUpstream());
-    write(consumer, 'sync-standards.local.json', policy);
+  it.each(INVALID_POLICY_CASES)(
+    'doctor and check reject %s',
+    (_label, policy, expectedError) => {
+      const { consumer } = initConsumer(buildUpstream());
+      write(consumer, 'sync-standards.local.json', policy);
 
-    for (const command of ['doctor', 'check']) {
-      const result = run(consumer, [command, '--dir', consumer]);
-      expect(result.status).toBe(1);
-      expect(result.stderr).toContain(expectedError);
-    }
-  });
+      for (const command of ['doctor', 'check']) {
+        const result = run(consumer, [command, '--dir', consumer]);
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain(expectedError);
+      }
+    },
+  );
 
   it('doctor and check accept a valid policy', () => {
     const { consumer } = initConsumer(buildUpstream());
@@ -1873,20 +1875,23 @@ describe('packed artifact prerequisite staging', () => {
   it.each([
     ['pack', 1],
     ['install', 2],
-  ] as const)('does not execute later stages after %s fails', (_stage, failureCall) => {
-    let calls = 0;
-    const execute: ExecutableRunner = () => {
-      calls += 1;
-      return {
-        stdout: calls === 1 ? '/tmp/standards.tgz\n' : '',
-        stderr: '',
-        status: calls === failureCall ? 1 : 0,
+  ] as const)(
+    'does not execute later stages after %s fails',
+    (_stage, failureCall) => {
+      let calls = 0;
+      const execute: ExecutableRunner = () => {
+        calls += 1;
+        return {
+          stdout: calls === 1 ? '/tmp/standards.tgz\n' : '',
+          stderr: '',
+          status: calls === failureCall ? 1 : 0,
+        };
       };
-    };
 
-    expect(() => installPackedCli(execute)).toThrow();
-    expect(calls).toBe(failureCall);
-  });
+      expect(() => installPackedCli(execute)).toThrow();
+      expect(calls).toBe(failureCall);
+    },
+  );
 });
 
 describe('packed artifact content ref cutover', () => {
@@ -3178,13 +3183,12 @@ describe('standards sync workflow policy', () => {
     );
   });
 
-  it.each([
-    '0.21.0',
-    '0.21.1',
-    '1.0.0',
-  ])('accepts installed CLI version %s without a policy file', (version) => {
-    expect(runWorkflowVersionGuard(version).status).toBe(0);
-  });
+  it.each(['0.21.0', '0.21.1', '1.0.0'])(
+    'accepts installed CLI version %s without a policy file',
+    (version) => {
+      expect(runWorkflowVersionGuard(version).status).toBe(0);
+    },
+  );
 });
 
 describe('standards sync workflow trigger policy', () => {

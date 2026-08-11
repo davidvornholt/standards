@@ -104,14 +104,15 @@ describe('unresolvable secrets', () => {
   it.each([
     ['the download fails', { curlStatus: 22 }],
     ['checksum verification fails', { sha256Status: 1 }],
-  ] as ReadonlyArray<
-    readonly [string, SopsActionOptions]
-  >)('never keeps or executes an unverified binary when %s', (_label, options) => {
-    const actionRun = runSopsAction(options);
+  ] as ReadonlyArray<readonly [string, SopsActionOptions]>)(
+    'never keeps or executes an unverified binary when %s',
+    (_label, options) => {
+      const actionRun = runSopsAction(options);
 
-    expect(actionRun.sopsExecuted).toBe(false);
-    expect(actionRun.sopsBinaryPresent).toBe(false);
-  });
+      expect(actionRun.sopsExecuted).toBe(false);
+      expect(actionRun.sopsBinaryPresent).toBe(false);
+    },
+  );
 });
 
 describe('canonical SOPS secret action script behavior', () => {
@@ -166,22 +167,20 @@ describe('caller configuration errors', () => {
     expect(actionRun.sopsExecuted).toBe(false);
   });
 
-  it.each([
-    '',
-    'root',
-    '.ci',
-    'production\n',
-  ])('rejects invalid secret-root %j before network or decrypt work', (secretRoot) => {
-    const actionRun = runSopsAction({ secretRoot });
+  it.each(['', 'root', '.ci', 'production\n'])(
+    'rejects invalid secret-root %j before network or decrypt work',
+    (secretRoot) => {
+      const actionRun = runSopsAction({ secretRoot });
 
-    expect(actionRun.result.status).toBe(1);
-    expect(actionRun.environment).toBe('');
-    expect(actionRun.output).toBe('');
-    expect(actionRun.result.stdout).toBe(
-      '::error::secret-root must be ci or document\n',
-    );
-    expect(actionRun.result.stderr).toBe('');
-    expect(actionRun.curlCalled).toBe(false);
-    expect(actionRun.sopsExecuted).toBe(false);
-  });
+      expect(actionRun.result.status).toBe(1);
+      expect(actionRun.environment).toBe('');
+      expect(actionRun.output).toBe('');
+      expect(actionRun.result.stdout).toBe(
+        '::error::secret-root must be ci or document\n',
+      );
+      expect(actionRun.result.stderr).toBe('');
+      expect(actionRun.curlCalled).toBe(false);
+      expect(actionRun.sopsExecuted).toBe(false);
+    },
+  );
 });

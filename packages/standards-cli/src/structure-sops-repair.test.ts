@@ -71,29 +71,31 @@ const withMetadata = (yaml: string, recipients: string): string =>
   );
 
 describe('required SOPS scalar types', () => {
-  it.each(
-    REQUIRED_TYPE_CASES,
-  )('rejects complete type:%s envelope at %s when its type is %s', async (key, path, type) => {
-    const dir = buildSecrets();
-    const typed = CI_SECRETS_YAML.replace(
-      new RegExp(`^(\\s+${key}: ENC\\[[^\\n]+)type:str\\]$`, 'mu'),
-      `$1type:${type}]`,
-    );
-    write(dir, 'secrets/ci.yaml', typed);
-    expect(await collectCiSecretsProblems(dir)).toContain(
-      `secrets/ci.yaml: required key "${path}" must be one SOPS-encrypted string scalar because its workflow resolves it as a string`,
-    );
-  });
+  it.each(REQUIRED_TYPE_CASES)(
+    'rejects complete type:%s envelope at %s when its type is %s',
+    async (key, path, type) => {
+      const dir = buildSecrets();
+      const typed = CI_SECRETS_YAML.replace(
+        new RegExp(`^(\\s+${key}: ENC\\[[^\\n]+)type:str\\]$`, 'mu'),
+        `$1type:${type}]`,
+      );
+      write(dir, 'secrets/ci.yaml', typed);
+      expect(await collectCiSecretsProblems(dir)).toContain(
+        `secrets/ci.yaml: required key "${path}" must be one SOPS-encrypted string scalar because its workflow resolves it as a string`,
+      );
+    },
+  );
 });
 
 describe('SOPS recipient metadata structure', () => {
-  it.each(
-    directSources,
-  )('accepts a complete %s recipient entry', async (_source, block) => {
-    const dir = buildSecrets();
-    write(dir, 'secrets/ci.yaml', withMetadata(CI_SECRETS_YAML, block));
-    expect(await collectCiSecretsProblems(dir)).toEqual([]);
-  });
+  it.each(directSources)(
+    'accepts a complete %s recipient entry',
+    async (_source, block) => {
+      const dir = buildSecrets();
+      write(dir, 'secrets/ci.yaml', withMetadata(CI_SECRETS_YAML, block));
+      expect(await collectCiSecretsProblems(dir)).toEqual([]);
+    },
+  );
 
   it.each(MALFORMED_DIRECT_SOURCES)('rejects %s', async (_label, block) => {
     const dir = buildSecrets();

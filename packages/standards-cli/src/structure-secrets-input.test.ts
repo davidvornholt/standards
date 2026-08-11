@@ -100,17 +100,20 @@ describe('CI secret ciphertext and metadata shape', () => {
       'trailing plaintext',
       'ENC[AES256_GCM,data:eA==,iv:aWl2,tag:dGFn,type:str]trailing',
     ],
-  ])('rejects %s instead of treating it as ciphertext', async (_label, value) => {
-    const dir = buildSecrets();
-    write(
-      dir,
-      'secrets/ci.yaml',
-      CI_SECRETS_YAML.replace(NTFY_LINE, `    ntfy_topic_url: ${value}`),
-    );
-    expect(await collectCiSecretsProblems(dir)).toContain(
-      'secrets/ci.yaml: value at "ci.ntfy_topic_url" is not a complete SOPS-encrypted value; plaintext secret values must never be committed',
-    );
-  });
+  ])(
+    'rejects %s instead of treating it as ciphertext',
+    async (_label, value) => {
+      const dir = buildSecrets();
+      write(
+        dir,
+        'secrets/ci.yaml',
+        CI_SECRETS_YAML.replace(NTFY_LINE, `    ntfy_topic_url: ${value}`),
+      );
+      expect(await collectCiSecretsProblems(dir)).toContain(
+        'secrets/ci.yaml: value at "ci.ntfy_topic_url" is not a complete SOPS-encrypted value; plaintext secret values must never be committed',
+      );
+    },
+  );
 
   it('rejects an array containing a malformed ciphertext element', async () => {
     const dir = buildSecrets();
@@ -147,19 +150,24 @@ describe('CI secret ciphertext and metadata shape', () => {
     );
   });
 
-  it.each([
-    'ntfy_topic_url',
-    'app_id',
-    'private_key',
-  ])('requires workflow key %s to be an encrypted string scalar', async (key) => {
-    const dir = buildSecrets();
-    write(dir, 'secrets/ci.yaml', replaceScalarWithArray(CI_SECRETS_YAML, key));
-    expect(await collectCiSecretsProblems(dir)).toContain(
-      `secrets/ci.yaml: required key "${
-        key === 'ntfy_topic_url' ? 'ci.ntfy_topic_url' : `ci.broker_app.${key}`
-      }" must be one SOPS-encrypted string scalar because its workflow resolves it as a string`,
-    );
-  });
+  it.each(['ntfy_topic_url', 'app_id', 'private_key'])(
+    'requires workflow key %s to be an encrypted string scalar',
+    async (key) => {
+      const dir = buildSecrets();
+      write(
+        dir,
+        'secrets/ci.yaml',
+        replaceScalarWithArray(CI_SECRETS_YAML, key),
+      );
+      expect(await collectCiSecretsProblems(dir)).toContain(
+        `secrets/ci.yaml: required key "${
+          key === 'ntfy_topic_url'
+            ? 'ci.ntfy_topic_url'
+            : `ci.broker_app.${key}`
+        }" must be one SOPS-encrypted string scalar because its workflow resolves it as a string`,
+      );
+    },
+  );
 
   it('rejects ciphertext-looking example leaves even without metadata', async () => {
     const dir = buildSecrets();

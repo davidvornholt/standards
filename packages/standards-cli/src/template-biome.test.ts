@@ -75,7 +75,7 @@ describe('template biome wrapper', () => {
     expect(result.status).toBe(0);
   });
 
-  it('keeps ordinary worktree exclusion compatible with Biome 2.5.2', () => {
+  it('keeps ordinary worktree exclusion compatible with Biome 2.5.8', () => {
     const ordinaryExclude = WRAPPER.replace(
       WORKTREE_ENTRY,
       ', "!.claude/worktrees"',

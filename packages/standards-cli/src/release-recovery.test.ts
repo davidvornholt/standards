@@ -41,15 +41,14 @@ describe('release declaration', () => {
     ).toEqual({ action: fixture.action, problem: null });
   });
 
-  it.each([
-    'not-a-version',
-    '1.0.0-rc.1',
-    '',
-  ])('rejects the unstable previous version %p', (previousVersion) => {
-    const plan = releaseDeclarationPlan('0.18.0', previousVersion);
-    expect(plan.action).toBeNull();
-    expect(plan.problem).toContain('stable SemVer');
-  });
+  it.each(['not-a-version', '1.0.0-rc.1', ''])(
+    'rejects the unstable previous version %p',
+    (previousVersion) => {
+      const plan = releaseDeclarationPlan('0.18.0', previousVersion);
+      expect(plan.action).toBeNull();
+      expect(plan.problem).toContain('stable SemVer');
+    },
+  );
 });
 
 describe('npm release state', () => {
@@ -107,21 +106,24 @@ describe('GitHub release reconciliation', () => {
     ['missing', null, 'create'],
     ['tag-only', SHA, 'create'],
     ['published', SHA, 'none'],
-  ] as const)('plans %s state with the expected tag SHA', (state, tagSha, action) => {
-    expect(githubReconciliationPlan(state, tagSha, SHA)).toEqual({
-      action,
-      problem: null,
-    });
-  });
+  ] as const)(
+    'plans %s state with the expected tag SHA',
+    (state, tagSha, action) => {
+      expect(githubReconciliationPlan(state, tagSha, SHA)).toEqual({
+        action,
+        problem: null,
+      });
+    },
+  );
 
-  it.each([
-    'tag-only',
-    'published',
-  ] as const)('rejects an existing %s SHA mismatch', (state: GithubReleaseState) => {
-    const plan = githubReconciliationPlan(state, MISMATCHED_SHA, SHA);
-    expect(plan.action).toBeNull();
-    expect(plan.problem).toContain(`expected ${SHA}`);
-  });
+  it.each(['tag-only', 'published'] as const)(
+    'rejects an existing %s SHA mismatch',
+    (state: GithubReleaseState) => {
+      const plan = githubReconciliationPlan(state, MISMATCHED_SHA, SHA);
+      expect(plan.action).toBeNull();
+      expect(plan.problem).toContain(`expected ${SHA}`);
+    },
+  );
 
   it('rejects an existing draft release', () => {
     expect(githubReconciliationPlan('draft', SHA, SHA).problem).toContain(

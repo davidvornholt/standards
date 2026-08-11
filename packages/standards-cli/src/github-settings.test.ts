@@ -5,9 +5,7 @@ const canonical = JSON.stringify({
   repository: { allow_auto_merge: true },
   rulesets: [{ name: 'Protect main', target: 'branch' }],
 });
-
 const emptySeam = JSON.stringify({ repository: {}, rulesets: [] });
-
 describe('loadGithubSettings', () => {
   it('merges an additive seam', () => {
     const local = JSON.stringify({
@@ -47,7 +45,6 @@ describe('loadGithubSettings', () => {
     ]);
   });
 });
-
 describe('loadGithubSettings validation aggregation', () => {
   it('gathers structural problems from both files', () => {
     const badCanonical = JSON.stringify({
@@ -172,18 +169,21 @@ describe('loadGithubSettings rulesetEnforcement', () => {
     ['number', 1],
     ['object', {}],
     ['array', []],
-  ] as const)('rejects canonical %s without validating its value', (_, value) => {
-    const badCanonical = JSON.stringify({
-      repository: {},
-      rulesets: [],
-      rulesetEnforcement: value,
-    });
-    const loaded = loadGithubSettings(badCanonical, emptySeam);
-    expect(loaded.merged).toBeNull();
-    expect(loaded.problems).toEqual([
-      '.github/settings.json has unknown key "rulesetEnforcement"',
-    ]);
-  });
+  ] as const)(
+    'rejects canonical %s without validating its value',
+    (_, value) => {
+      const badCanonical = JSON.stringify({
+        repository: {},
+        rulesets: [],
+        rulesetEnforcement: value,
+      });
+      const loaded = loadGithubSettings(badCanonical, emptySeam);
+      expect(loaded.merged).toBeNull();
+      expect(loaded.problems).toEqual([
+        '.github/settings.json has unknown key "rulesetEnforcement"',
+      ]);
+    },
+  );
 
   it('rejects local rulesets combined with the opt-out', () => {
     const local = JSON.stringify({
