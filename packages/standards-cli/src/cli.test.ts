@@ -2381,6 +2381,9 @@ describe('canonical standards workflow settings credential', () => {
     expect(lintStep).toContain(
       'bash .github/workflows/actionlint-queue-compat.bash "$RUNNER_TEMP/actionlint"',
     );
+    expect(lintStep).toContain(
+      'bash .github/workflows/actionlint-queue-compat.test.bash "$RUNNER_TEMP/actionlint"',
+    );
     expect(lintStep).not.toContain('download-actionlint.bash');
     expect(lintStep).not.toContain(' latest ');
   });

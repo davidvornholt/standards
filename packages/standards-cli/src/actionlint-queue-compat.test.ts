@@ -20,16 +20,16 @@ const WORKFLOW_PATH = '.github/workflows/test.yml';
 const EXECUTABLE_MODE = 0o755;
 const FAKE_JSON_ENV = 'FAKE_ACTIONLINT_JSON';
 const FAKE_NATIVE_OUTPUT_ENV = 'FAKE_ACTIONLINT_NATIVE_OUTPUT';
-const FAKE_PROBE_STATUS_ENV = 'FAKE_ACTIONLINT_PROBE_STATUS';
 const GITHUB_WORKSPACE_ENV = 'GITHUB_WORKSPACE';
 const FAKE_ACTIONLINT = `#!/usr/bin/env bash
 set -u
+if [[ " $* " == *"actionlint-queue-compat."* ]]; then
+  printf '[]\n'
+  exit 0
+fi
 if [[ " $* " == *" -format "* ]]; then
   printf '%s\n' "$FAKE_ACTIONLINT_JSON"
   exit "\${FAKE_ACTIONLINT_STATUS:-1}"
-fi
-if [[ " $* " == *"actionlint-queue-compat."* ]]; then
-  exit "\${FAKE_ACTIONLINT_PROBE_STATUS:-0}"
 fi
 printf '%s\n' "\${FAKE_ACTIONLINT_NATIVE_OUTPUT:-native Actionlint diagnostic}" >&2
 exit "\${FAKE_ACTIONLINT_NATIVE_STATUS:-1}"
@@ -64,7 +64,6 @@ const queueDiagnostic = (
 const runCompatibility = (
   concurrencyLines: ReadonlyArray<string>,
   diagnostics?: ReadonlyArray<Diagnostic>,
-  probeStatus = 0,
 ) => {
   const fixture = mkTmp('actionlint-queue-compat-');
   const workflowLines = [
@@ -89,7 +88,6 @@ const runCompatibility = (
       diagnostics ?? [queueDiagnostic(workflowLines)],
     ),
     [FAKE_NATIVE_OUTPUT_ENV]: 'ordinary diagnostic retained',
-    [FAKE_PROBE_STATUS_ENV]: String(probeStatus),
     [GITHUB_WORKSPACE_ENV]: fixture,
   });
 };
@@ -117,59 +115,11 @@ describe('Actionlint concurrency queue compatibility', () => {
     ],
     ['queue: single', ['concurrency:', '  group: test', '  queue: single']],
     [
-      'conflicting cancellation',
-      [
-        'concurrency:',
-        '  group: test',
-        '  cancel-in-progress: true',
-        '  queue: max',
-      ],
-    ],
-    [
-      'expression cancellation',
-      [
-        'concurrency:',
-        '  group: test',
-        `  cancel-in-progress: \${{ github.event_name == 'pull_request' }}`,
-        '  queue: max',
-      ],
-    ],
-    [
-      'quoted conflicting cancellation',
-      [
-        'concurrency:',
-        '  group: test',
-        '  "cancel-in-progress": true',
-        '  queue: max',
-      ],
-    ],
-    [
       'a structural mismatch',
       ['not-concurrency:', '  group: test', '  queue: max'],
     ],
-    [
-      'an escaped semantic cancellation key',
-      [
-        'concurrency:',
-        '  group: test',
-        '  "cancel\\u002din\\u002dprogress": true',
-        '  queue: max',
-      ],
-    ],
-    [
-      'an explicit semantic cancellation key',
-      [
-        'concurrency:',
-        '  group: test',
-        '  ? cancel-in-progress',
-        '  : true',
-        '  queue: max',
-      ],
-    ],
-  ])('rejects %s', (name, lines) => {
-    const semanticConflict =
-      name.includes('cancellation') || name.includes('semantic');
-    const result = runCompatibility(lines, undefined, semanticConflict ? 1 : 0);
+  ])('rejects %s', (_name, lines) => {
+    const result = runCompatibility(lines);
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('ordinary diagnostic retained');

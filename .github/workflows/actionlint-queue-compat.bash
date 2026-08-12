@@ -51,7 +51,8 @@ validate_queue_diagnostic() {
   local diagnostic=$1
   local filepath line column kind resolved source_line queue_indent
   local ancestor_index=-1 ancestor_indent=-1 candidate candidate_indent
-  local index sibling sibling_indent has_literal_false=0 probe probe_status
+  local index probe probe_diagnostics probe_status current_count duplicate_count
+  local duplicate_message previous_line previous_source explicit_indent
   local -a lines
 
   filepath=$(jq -er '.filepath' <<<"$diagnostic")
@@ -102,33 +103,75 @@ validate_queue_diagnostic() {
     return 1
   fi
 
-  for (( index = ancestor_index + 1; index < ${#lines[@]}; index++ )); do
-    sibling=${lines[index]%$'\r'}
-    [[ "$sibling" =~ ^\ *($|#) ]] && continue
-    [[ "$sibling" =~ ^(\ *) ]] || continue
-    sibling_indent=${#BASH_REMATCH[1]}
-    (( sibling_indent <= ancestor_indent )) && break
-    if (( sibling_indent == queue_indent )) && [[ "$sibling" == "${sibling%%[! ]*}cancel-in-progress: false" ]]; then
-      has_literal_false=1
-    fi
-  done
-
   probe=$(mktemp "${RUNNER_TEMP:-/tmp}/actionlint-queue-compat.XXXXXX.yml")
-  temp_files+=("$probe")
-  if (( has_literal_false == 1 )); then
-    lines[line - 1]=''
-  else
-    lines[line - 1]="${source_line%%queue: max}cancel-in-progress: false"
-  fi
+  probe_diagnostics=$(mktemp)
+  temp_files+=("$probe" "$probe_diagnostics")
+  lines[line - 1]="${source_line%%queue: max}cancel-in-progress: false"
   printf '%s\n' "${lines[@]}" >"$probe"
   set +e
-  "$actionlint" -color "$probe"
+  "$actionlint" -format '{{json .}}' "$probe" >"$probe_diagnostics"
   probe_status=$?
   set -e
-  if (( probe_status != 0 )); then
-    echo "::error file=$filepath,line=$line,col=$column::queue: max requires cancel-in-progress to be absent or the direct literal false" >&2
+
+  if (( probe_status > 1 )) || ! jq -e '
+    type == "array" and
+    all(.[];
+      type == "object" and
+      (.message | type == "string") and
+      (.line | type == "number") and
+      (.column | type == "number") and
+      (.kind | type == "string")
+    )
+  ' "$probe_diagnostics" >/dev/null; then
+    echo "::error file=$filepath,line=$line,col=$column::Actionlint could not validate concurrency cancellation semantics" >&2
     return 1
   fi
+
+  current_count=$(jq -er --argjson line "$line" --argjson column "$column" '[.[] | select(.line == $line and .column == $column)] | length' "$probe_diagnostics")
+  duplicate_count=$(jq -er --argjson line "$line" --argjson column "$column" '[.[] | select(
+    .line == $line and
+    .column == $column and
+    .kind == "syntax-check" and
+    (.message | test("^key \"cancel-in-progress\" is duplicated in \"concurrency\" section\\. previously defined at line:[0-9]+,col:[0-9]+$"))
+  )] | length' "$probe_diagnostics")
+
+  if (( current_count == 0 )); then
+    return 0
+  fi
+  if (( current_count != 1 || duplicate_count != 1 )); then
+    echo "::error file=$filepath,line=$line,col=$column::Actionlint returned an unexpected diagnostic for the concurrency cancellation probe" >&2
+    return 1
+  fi
+
+  duplicate_message=$(jq -er --argjson line "$line" --argjson column "$column" '.[] | select(.line == $line and .column == $column) | .message' "$probe_diagnostics")
+  if [[ ! "$duplicate_message" =~ previously\ defined\ at\ line:([0-9]+),col:[0-9]+$ ]]; then
+    echo "::error file=$filepath,line=$line,col=$column::Actionlint did not locate the existing concurrency cancellation key" >&2
+    return 1
+  fi
+  previous_line=${BASH_REMATCH[1]}
+  if (( previous_line < 1 || previous_line > ${#lines[@]} )); then
+    echo "::error file=$filepath,line=$line,col=$column::Actionlint located concurrency cancellation outside the workflow" >&2
+    return 1
+  fi
+
+  previous_source=${lines[previous_line - 1]%$'\r'}
+  if [[ "$previous_source" =~ :[[:space:]]+false([[:space:]]*(#.*)?)?$ ]]; then
+    return 0
+  fi
+  if [[ "$previous_source" =~ ^(\ *)\? ]]; then
+    explicit_indent=${BASH_REMATCH[1]}
+    for (( index = previous_line; index < ${#lines[@]}; index++ )); do
+      candidate=${lines[index]%$'\r'}
+      [[ "$candidate" =~ ^\ *($|#) ]] && continue
+      if [[ "$candidate" =~ ^${explicit_indent}:[[:space:]]+false([[:space:]]*(#.*)?)?$ ]]; then
+        return 0
+      fi
+      break
+    done
+  fi
+
+  echo "::error file=$filepath,line=$line,col=$column::queue: max requires cancel-in-progress to be absent or literal false" >&2
+  return 1
 }
 
 queue_count=0
