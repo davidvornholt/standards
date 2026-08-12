@@ -20,6 +20,7 @@ const WORKFLOW_PATH = '.github/workflows/test.yml';
 const EXECUTABLE_MODE = 0o755;
 const FAKE_JSON_ENV = 'FAKE_ACTIONLINT_JSON';
 const FAKE_NATIVE_OUTPUT_ENV = 'FAKE_ACTIONLINT_NATIVE_OUTPUT';
+const GITHUB_WORKSPACE_ENV = 'GITHUB_WORKSPACE';
 const FAKE_ACTIONLINT = `#!/usr/bin/env bash
 set -u
 if [[ " $* " == *" -format "* ]]; then
@@ -83,6 +84,7 @@ const runCompatibility = (
       diagnostics ?? [queueDiagnostic(workflowLines)],
     ),
     [FAKE_NATIVE_OUTPUT_ENV]: 'ordinary diagnostic retained',
+    [GITHUB_WORKSPACE_ENV]: fixture,
   });
 };
 
