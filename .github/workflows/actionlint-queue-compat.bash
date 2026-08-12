@@ -128,27 +128,30 @@ validate_queue_diagnostic() {
   fi
 
   current_count=$(jq -er --argjson line "$line" --argjson column "$column" '[.[] | select(.line == $line and .column == $column)] | length' "$probe_diagnostics")
-  duplicate_count=$(jq -er --argjson line "$line" --argjson column "$column" '[.[] | select(
-    .line == $line and
-    .column == $column and
-    .kind == "syntax-check" and
-    (.message | test("^key \"cancel-in-progress\" is duplicated in \"concurrency\" section\\. previously defined at line:[0-9]+,col:[0-9]+$"))
-  )] | length' "$probe_diagnostics")
+  duplicate_matches=$(jq -cer --argjson line "$line" --argjson column "$column" '[.[] | select(.kind == "syntax-check") |
+    . as $diagnostic |
+    (.message | capture("^key \"cancel-in-progress\" is duplicated in \"concurrency\" section\\. previously defined at line:(?<line>[0-9]+),col:(?<column>[0-9]+)$")) as $previous |
+    select(
+      ($diagnostic.line == $line and $diagnostic.column == $column) or
+      (($previous.line | tonumber) == $line and ($previous.column | tonumber) == $column)
+    ) |
+    {
+      atInjectedKey: ($diagnostic.line == $line and $diagnostic.column == $column),
+      originalLine: (if $diagnostic.line == $line and $diagnostic.column == $column then ($previous.line | tonumber) else $diagnostic.line end)
+    }
+  ]' "$probe_diagnostics")
+  duplicate_count=$(jq -er 'length' <<<"$duplicate_matches")
+  expected_current_count=$(jq -er 'if length == 1 and .[0].atInjectedKey then 1 else 0 end' <<<"$duplicate_matches")
 
-  if (( current_count == 0 )); then
+  if (( duplicate_count == 0 && current_count == 0 )); then
     return 0
   fi
-  if (( current_count != 1 || duplicate_count != 1 )); then
+  if (( duplicate_count != 1 || current_count != expected_current_count )); then
     echo "::error file=$filepath,line=$line,col=$column::Actionlint returned an unexpected diagnostic for the concurrency cancellation probe" >&2
     return 1
   fi
 
-  duplicate_message=$(jq -er --argjson line "$line" --argjson column "$column" '.[] | select(.line == $line and .column == $column) | .message' "$probe_diagnostics")
-  if [[ ! "$duplicate_message" =~ previously\ defined\ at\ line:([0-9]+),col:[0-9]+$ ]]; then
-    echo "::error file=$filepath,line=$line,col=$column::Actionlint did not locate the existing concurrency cancellation key" >&2
-    return 1
-  fi
-  previous_line=${BASH_REMATCH[1]}
+  previous_line=$(jq -er '.[0].originalLine' <<<"$duplicate_matches")
   if (( previous_line < 1 || previous_line > ${#lines[@]} )); then
     echo "::error file=$filepath,line=$line,col=$column::Actionlint located concurrency cancellation outside the workflow" >&2
     return 1
