@@ -12,9 +12,7 @@ Do not build backwards compatibility by default: migrate every call site and del
 
 ## Research first
 
-- Ask before broad product, UX, architectural, naming, workflow, scope, or business-logic decisions.
-- Settle a feature's product decisions before writing its code. List what the feature leaves undefined — what a term means, what a count counts, which of two plausible behaviors is wanted — then answer what has an obvious answer and ask about the rest. The same question after the code exists costs a rewrite and is biased towards whatever got built.
-- Record a settled product decision in `.agents/review/decisions.md` as soon as it is made, whichever agent made it. The registry is not owned by review: reviewers read it to avoid re-opening settled ground, so a decision that never reaches it comes back later as a review question.
+- Ask before broad product, UX, architectural, naming, workflow, scope, or business-logic decisions, and ask before writing the code rather than after: the same question later costs a rewrite and skews towards whatever got built. Record each settled decision in `.agents/review/decisions.md` when it is made, whichever agent made it, or it comes back as a review question.
 - Propose before changing CI workflows, quality gates, or canonical synced files, even to unblock a failure. The file class is the trigger, not whether the change feels architectural.
 - Prefer cleaner architecture when justified. Do not preserve messy code only to avoid churn.
 
@@ -23,11 +21,9 @@ Do not build backwards compatibility by default: migrate every call site and del
 Questions, issue descriptions, and pull request descriptions are read by someone who directs product intent and has read none of the code. They decide from what you wrote whether work is worth doing, continuing, or fixing. Every agent writes them to this standard, whatever tool, skill, or workflow it is running under.
 
 - Lead with what is at stake, as product behavior, cost, risk, or effort. For an issue: what goes wrong in practice, who it affects, and what it costs to leave alone. For a pull request: what changes about the product's behavior and why it was worth doing. For a question: where each option leads, with one recommended and the reason given. Restating what the code does is none of these.
-- Keep the opening under 150 words, and keep a whole question under 150 words. The reader decides from the opening alone. When it does not fit, cut what they do not need in order to decide — never push the decision further down a longer read.
-- Length is a cost the reader pays, not proof of care. An opening that gets skipped has failed, however complete it was.
-- Carry the background the reader needs. Where following it depends on how some other part of the system already works, explain that part from scratch in the same plain terms. Never assume prior knowledge of any part of the codebase.
+- Carry the background the reader needs to decide, and no more. Where following it depends on how some other part of the system already works, explain that part from scratch in the same plain terms. Never assume prior knowledge of any part of the codebase.
 - Keep sentences short and give each one a single idea. Use the common word over the precise-sounding one. Technical terms are allowed and often clearer than the alternative: name the thing, then say in plain words what it is the first time it appears. Replacing a name with a long description is not plain language; it makes the sentence harder to follow, not easier.
-- Keep the technical evidence, file references, and verification below that opening, where the reader who needs them will look.
+- Keep the opening under 150 words, and a whole question under 150 words, with the technical evidence, file references, and verification below that opening where the reader who needs them will look. Length is a cost the reader pays, not proof of care: an opening that gets skipped has failed, however complete it was.
 
 ## Skill routing
 
