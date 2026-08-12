@@ -25,7 +25,9 @@ infra/
 .sops.yaml
 ```
 
-Host directories are named `<env>-<index>` (`prod-1`), even when the repo has a single server — never after the repo or product, which distinguishes nothing inside its own repo and is ambiguous in a dedicated infra repo. The index makes host replacement routine: build `prod-2` alongside, migrate, retire `prod-1`, with no mid-migration rename. The name is a repo-internal identifier that must line up across `nixosConfigurations.<name>`, `deploy.nodes.<name>`, and `hosts/<name>/`, and it doubles as the `just secrets` target for the host's `secrets.yaml`, so it must be a safe path segment (an ASCII letter or digit first; only letters, digits, dots, underscores, hyphens). The machine's real hostname and domain are set separately in `configuration.nix`.
+Host directories are named `<env>-<index>` (`prod-1`), even when the repo has a single server — never after the repo or product, which distinguishes nothing inside its own repo and is ambiguous in a dedicated infra repo. The index makes host replacement routine: build `prod-2` alongside, migrate, retire `prod-1`, with no mid-migration rename. The name is an identifier that must line up across `nixosConfigurations.<name>`, `deploy.nodes.<name>`, and `hosts/<name>/`, and it doubles as the `just secrets` target for the host's `secrets.yaml`, so it must be a safe path segment (an ASCII letter or digit first; only letters, digits, dots, underscores, hyphens).
+
+The machine carries the same identifier: `networking.hostName = "prod-1"`, with `networking.domain` set to the primary domain the host serves, a DNS record `prod-1.<domain>` pointing at the machine (managed in the tofu stack like any other record), and `deploy.nodes.<name>.hostname` set to that same `prod-1.<domain>`. Do not introduce a stable machine alias such as `server.<domain>`: the durable names are the product domains themselves, which repoint at cutover, while every per-machine name is created and retired with the machine — so during a migration the two live hosts stay unambiguous in shell prompts, logs, and SSH targets.
 
 ## Flake skeleton
 
@@ -66,7 +68,7 @@ Host directories are named `<env>-<index>` (`prod-1`), even when the repo has a 
       };
 
       deploy.nodes.prod-1 = {
-        hostname = "server.example.com";
+        hostname = "prod-1.example.com";
         profiles.system = {
           user = "root";
           path = deploy-rs.lib.${system}.activate.nixos
@@ -200,7 +202,7 @@ in {
 
 ## Host essentials
 
-In `hosts/<name>/configuration.nix`: `networking.hostName`, `networking.domain`, `time.timeZone`, profile parameters (SSH keys, ACME email, databases), app options, SOPS wiring — and `system.stateVersion`, set once at install and never changed afterward.
+In `hosts/<name>/configuration.nix`: `networking.hostName` (the host identifier, per the naming rule above) and `networking.domain` (the primary domain the host serves), `time.timeZone`, profile parameters (SSH keys, ACME email, databases), app options, SOPS wiring — and `system.stateVersion`, set once at install and never changed afterward.
 
 ## App modules
 
