@@ -86,7 +86,7 @@ jobs:
           curl -sfLo "$archive" "https://github.com/rhysd/actionlint/releases/download/v${version}/actionlint_${version}_linux_${arch}.tar.gz"
           echo "$sha  $archive" | sha256sum --check --quiet
           tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
-          "$RUNNER_TEMP/actionlint" -color
+          bash .github/workflows/actionlint-queue-compat.bash "$RUNNER_TEMP/actionlint"
 
       # The canonical justfile and secrets.just are gate-tested: the source
       # repository's CLI suite spawns `just` against them, and one uniform file

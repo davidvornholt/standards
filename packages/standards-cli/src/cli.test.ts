@@ -2378,6 +2378,9 @@ describe('canonical standards workflow settings credential', () => {
     expect(lintStep.match(/sha=[a-f0-9]{64}/gu)).toHaveLength(2);
     expect(lintStep).toMatch(ACTIONLINT_ASSET_PATTERN);
     expect(lintStep).toContain('sha256sum --check --quiet');
+    expect(lintStep).toContain(
+      'bash .github/workflows/actionlint-queue-compat.bash "$RUNNER_TEMP/actionlint"',
+    );
     expect(lintStep).not.toContain('download-actionlint.bash');
     expect(lintStep).not.toContain(' latest ');
   });
