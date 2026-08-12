@@ -12,7 +12,8 @@ queue_message='unexpected key "queue" for "concurrency" section. expected one of
 queue_ignore='^unexpected key "queue" for "concurrency" section\. expected one of "cancel-in-progress", "group"$'
 workspace=$(realpath -e -- "${GITHUB_WORKSPACE:-$PWD}")
 diagnostics=$(mktemp)
-trap 'rm -f -- "$diagnostics"' EXIT
+temp_files=("$diagnostics")
+trap 'rm -f -- "${temp_files[@]}"' EXIT
 
 set +e
 "$actionlint" -format '{{json .}}' >"$diagnostics"
@@ -50,7 +51,7 @@ validate_queue_diagnostic() {
   local diagnostic=$1
   local filepath line column kind resolved source_line queue_indent
   local ancestor_index=-1 ancestor_indent=-1 candidate candidate_indent
-  local index sibling sibling_indent sibling_key
+  local index sibling sibling_indent has_literal_false=0 probe probe_status
   local -a lines
 
   filepath=$(jq -er '.filepath' <<<"$diagnostic")
@@ -107,14 +108,27 @@ validate_queue_diagnostic() {
     [[ "$sibling" =~ ^(\ *) ]] || continue
     sibling_indent=${#BASH_REMATCH[1]}
     (( sibling_indent <= ancestor_indent )) && break
-    sibling_key=${sibling#"${sibling%%[! ]*}"}
-    if [[ "$sibling_key" == cancel-in-progress:* || "$sibling_key" == '"cancel-in-progress":'* || "$sibling_key" == "'cancel-in-progress':"* ]]; then
-      if (( sibling_indent != queue_indent )) || [[ "$sibling" != "${sibling%%[! ]*}cancel-in-progress: false" ]]; then
-        echo "::error file=$filepath,line=$((index + 1))::queue: max cannot be combined with cancel-in-progress unless it is literal false" >&2
-        return 1
-      fi
+    if (( sibling_indent == queue_indent )) && [[ "$sibling" == "${sibling%%[! ]*}cancel-in-progress: false" ]]; then
+      has_literal_false=1
     fi
   done
+
+  probe=$(mktemp "${RUNNER_TEMP:-/tmp}/actionlint-queue-compat.XXXXXX.yml")
+  temp_files+=("$probe")
+  if (( has_literal_false == 1 )); then
+    lines[line - 1]=''
+  else
+    lines[line - 1]="${source_line%%queue: max}cancel-in-progress: false"
+  fi
+  printf '%s\n' "${lines[@]}" >"$probe"
+  set +e
+  "$actionlint" -color "$probe"
+  probe_status=$?
+  set -e
+  if (( probe_status != 0 )); then
+    echo "::error file=$filepath,line=$line,col=$column::queue: max requires cancel-in-progress to be absent or the direct literal false" >&2
+    return 1
+  fi
 }
 
 queue_count=0
