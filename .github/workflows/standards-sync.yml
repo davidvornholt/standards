@@ -26,15 +26,17 @@ concurrency:
   group: standards-sync
   cancel-in-progress: false
 
-# Every job uses a fresh GitHub-hosted runner because sync eventually resolves
-# SOPS_AGE_KEY. CI_RUNNER is reserved for the unprivileged Standards quality job.
+# A sole-maintainer personal repository may route every compatible canonical
+# job through its permissionless CodeBuild project. GitHub supplies this trusted
+# workflow's existing secrets and token permissions to that ephemeral runner.
 jobs:
   # Cheap preflight: job-level `if:` expressions cannot read repository files,
   # so this job surfaces the checked-in policy for the gate below. A missing
   # file means the defaults (auto-sync on); an unparseable one fails this job
   # loudly — and with it the gated sync — rather than guessing a default.
   policy:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || 'ubuntu-latest' }}
+    timeout-minutes: 30
     outputs:
       auto-sync: ${{ steps.read.outputs.auto-sync }}
       present: ${{ steps.read.outputs.present }}
@@ -84,7 +86,8 @@ jobs:
   sync:
     needs: policy
     if: needs.policy.outputs.auto-sync != 'false'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || 'ubuntu-latest' }}
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v7

@@ -34,14 +34,16 @@ jobs:
   # Per-repo DB coordinates come from repository Actions VARIABLES (Settings →
   # Secrets and variables → Actions → Variables), not edits to this synced file:
   #   CI_POSTGRES_USER, CI_POSTGRES_PASSWORD, CI_POSTGRES_DB  (defaults below)
-  #   CI_RUNNER  — override only the unprivileged quality runner label
+  #   CI_RUNNER  — override only the unprivileged quality runner label when
+  #                CI_CODEBUILD_PROJECT is absent
   #   CI_CODEBUILD_PROJECT — in a sole-maintainer personal repository that
   #                trusts workflow edits before merge, select an ephemeral AWS
-  #                CodeBuild runner for this job; this takes precedence over
-  #                CI_RUNNER and adds the unique run identity CodeBuild requires
+  #                CodeBuild runner for every compatible canonical consumer job;
+  #                this takes precedence over CI_RUNNER and adds the unique run
+  #                identity CodeBuild requires
   # The canonical contract test is a merge-time ratchet against accidental
   # routing changes, not runtime authorization for requests to CodeBuild.
-  # Every other canonical workflow job always uses a fresh GitHub-hosted runner.
+  # The Standards-only architecture matrix keeps its native runner mapping.
   # These are non-secret configuration; leaking them enables nothing.
   #
   # Playwright's Chromium, unlike the Postgres service, is installed only when the
@@ -193,7 +195,7 @@ jobs:
 
       - name: Check
         env:
-          # The fixed GitHub-hosted `check` aggregator job owns this live check
+          # The isolated `check` aggregator job owns this live check
           # in CI. This workflow-only seam keeps local `bun run check`
           # fail-closed.
           STANDARDS_SKIP_GITHUB_CHECK: "true"
@@ -237,7 +239,8 @@ jobs:
 
   nix-discovery:
     if: github.repository == 'davidvornholt/standards'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || 'ubuntu-latest' }}
+    timeout-minutes: 30
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
@@ -295,7 +298,7 @@ jobs:
   # RUNNER_TEMP from direct, checksum-pinned release URLs, so a pull request
   # cannot substitute the code that performs the comparison. The comparison
   # shares this aggregator job instead of owning one because both run on the
-  # fixed GitHub-hosted runner with only the workflow token and no repository
+  # same permissionless runner with only the workflow token and no repository
   # executable code, and a per-run job below sixty seconds of work still bills
   # a full runner minute in every consumer.
   check:
@@ -304,7 +307,8 @@ jobs:
       - quality
       - nix-discovery
       - nix
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || 'ubuntu-latest' }}
+    timeout-minutes: 30
     permissions:
       contents: read
       issues: read
