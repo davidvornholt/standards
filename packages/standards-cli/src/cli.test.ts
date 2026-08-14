@@ -586,6 +586,7 @@ const canonicalWorkflowPaths = (
 const CONFIGURABLE_RUNNER_WORKFLOW = '.github/workflows/standards.yml';
 const CONFIGURABLE_RUNNER_JOB_NAME = 'quality';
 const CONFIGURABLE_RUNNER_JOB = `${CONFIGURABLE_RUNNER_WORKFLOW}:${CONFIGURABLE_RUNNER_JOB_NAME}`;
+const CONFIGURABLE_RUNNER_VARIABLE_OCCURRENCES = 3;
 
 const inspectCanonicalWorkflowRunnerBoundaries = (
   upstream: string,
@@ -613,7 +614,7 @@ const inspectCanonicalWorkflowRunnerBoundaries = (
     const absolutePath = join(upstream, workflowPath);
     const workflow = readFileSync(absolutePath, 'utf8');
     configurableRunnerOccurrences +=
-      workflow.match(/vars\.CI_RUNNER/gu)?.length ?? 0;
+      workflow.match(/vars\.(?:CI_CODEBUILD_PROJECT|CI_RUNNER)/gu)?.length ?? 0;
     for (const [jobName, job] of Object.entries(yamlJobs(absolutePath))) {
       const isConfigurableQuality =
         workflowPath === CONFIGURABLE_RUNNER_WORKFLOW &&
@@ -646,11 +647,15 @@ const assertFixedRunnerJobsDoNotUseConfigurableRunner = (
   }>,
 ): void => {
   const violations = jobDefinitions
-    .filter(({ definition }) => definition.includes('vars.CI_RUNNER'))
+    .filter(
+      ({ definition }) =>
+        definition.includes('vars.CI_RUNNER') ||
+        definition.includes('vars.CI_CODEBUILD_PROJECT'),
+    )
     .map(({ id }) => id);
   if (violations.length > 0) {
     throw new Error(
-      `Jobs must use a fixed runner, but these select vars.CI_RUNNER: ${violations.join(', ')}. Only ${CONFIGURABLE_RUNNER_JOB} may select vars.CI_RUNNER.`,
+      `Jobs must use a fixed runner, but these select a configurable runner: ${violations.join(', ')}. Only ${CONFIGURABLE_RUNNER_JOB} may select CI runner variables.`,
     );
   }
 };
@@ -2911,6 +2916,9 @@ describe('canonical workflow runner boundaries', () => {
     ]);
 
     expect(qualityRunner).toContain('vars.CI_RUNNER');
+    expect(qualityRunner).toContain('vars.CI_CODEBUILD_PROJECT');
+    expect(qualityRunner).toContain('github.run_id');
+    expect(qualityRunner).toContain('github.run_attempt');
     expect(qualityRunner).toContain('ubuntu-latest');
     expect(fixedRunnerJobs).toEqual({
       '.github/workflows/notify-pause.yml:notify': 'ubuntu-latest',
@@ -2925,7 +2933,9 @@ describe('canonical workflow runner boundaries', () => {
         fixedRunnerJobDefinitions,
       ),
     ).not.toThrow();
-    expect(configurableRunnerOccurrences).toBe(1);
+    expect(configurableRunnerOccurrences).toBe(
+      CONFIGURABLE_RUNNER_VARIABLE_OCCURRENCES,
+    );
   });
 
   it('rejects configurable runners in manifest-owned .yaml workflows', () => {
@@ -2949,7 +2959,7 @@ describe('canonical workflow runner boundaries', () => {
         '  push:',
         'jobs:',
         '  additional-check:',
-        `    runs-on: ${githubExpression("vars.CI_RUNNER || 'ubuntu-latest'")}`,
+        `    runs-on: ${githubExpression("vars.CI_CODEBUILD_PROJECT || 'ubuntu-latest'")}`,
         '    steps:',
         '      - run: echo additional-check',
         '  additional-verify:',
@@ -2970,7 +2980,7 @@ describe('canonical workflow runner boundaries', () => {
         inspection.fixedRunnerJobDefinitions,
       ),
     ).toThrow(
-      'Jobs must use a fixed runner, but these select vars.CI_RUNNER: .github/workflows/additional-check.yaml:additional-check, .github/workflows/additional-check.yaml:additional-verify. Only .github/workflows/standards.yml:quality may select vars.CI_RUNNER.',
+      'Jobs must use a fixed runner, but these select a configurable runner: .github/workflows/additional-check.yaml:additional-check, .github/workflows/additional-check.yaml:additional-verify. Only .github/workflows/standards.yml:quality may select CI runner variables.',
     );
   });
 });

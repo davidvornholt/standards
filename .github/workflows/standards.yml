@@ -35,8 +35,10 @@ jobs:
   # Secrets and variables → Actions → Variables), not edits to this synced file:
   #   CI_POSTGRES_USER, CI_POSTGRES_PASSWORD, CI_POSTGRES_DB  (defaults below)
   #   CI_RUNNER  — override only the unprivileged quality runner label
-  #                (default ubuntu-latest); every other canonical workflow job
-  #                always uses a fresh GitHub-hosted runner
+  #   CI_CODEBUILD_PROJECT — select an ephemeral AWS CodeBuild runner for this
+  #                job; this takes precedence over CI_RUNNER and the workflow
+  #                adds the unique run identity CodeBuild requires
+  # Every other canonical workflow job always uses a fresh GitHub-hosted runner.
   # These are non-secret configuration; leaking them enables nothing.
   #
   # Playwright's Chromium, unlike the Postgres service, is installed only when the
@@ -46,7 +48,7 @@ jobs:
   # an `if:` whereas a service cannot. So gating it keeps one uniform file while
   # skipping a pointless download in repos with nothing to render.
   quality:
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || vars.CI_RUNNER || 'ubuntu-latest' }}
     services:
       postgres:
         image: postgres:18-alpine
