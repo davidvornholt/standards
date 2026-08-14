@@ -53,7 +53,7 @@ jobs:
   # an `if:` whereas a service cannot. So gating it keeps one uniform file while
   # skipping a pointless download in repos with nothing to render.
   quality:
-    runs-on: ${{ vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-medium', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 30
     services:
       postgres:

@@ -592,7 +592,7 @@ const CODEBUILD_RUNNER = githubExpression(
   "vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || 'ubuntu-latest'",
 );
 const QUALITY_RUNNER = githubExpression(
-  "vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || vars.CI_RUNNER || 'ubuntu-latest'",
+  "vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-medium', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || vars.CI_RUNNER || 'ubuntu-latest'",
 );
 const QUALITY_TIMEOUT_MINUTES = 30;
 const CONFIGURABLE_RUNNER_CONTRACTS = {
