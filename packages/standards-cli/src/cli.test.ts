@@ -580,9 +580,9 @@ const canonicalWorkflowPaths = (
   );
 };
 
-// The single job allowed to select the configurable runner. Named once so the
-// inspection that exempts it and the failure message that explains it cannot
-// drift apart.
+// This merge-time ratchet keeps configurable routing on one unprivileged job.
+// It catches accidental workflow drift after review; it does not authorize a
+// request before CodeBuild starts a runner for the queued job.
 const CONFIGURABLE_RUNNER_WORKFLOW = '.github/workflows/standards.yml';
 const CONFIGURABLE_RUNNER_JOB_NAME = 'quality';
 const CONFIGURABLE_RUNNER_JOB = `${CONFIGURABLE_RUNNER_WORKFLOW}:${CONFIGURABLE_RUNNER_JOB_NAME}`;
@@ -2925,7 +2925,7 @@ describe('canonical standards workflow Nix aggregation', () => {
   });
 });
 
-describe('canonical workflow runner boundaries', () => {
+describe('canonical workflow runner merge-time ratchets', () => {
   it('reserves the configurable runner for Standards quality only', () => {
     const {
       configurableRunnerOccurrences,

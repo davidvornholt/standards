@@ -35,9 +35,12 @@ jobs:
   # Secrets and variables → Actions → Variables), not edits to this synced file:
   #   CI_POSTGRES_USER, CI_POSTGRES_PASSWORD, CI_POSTGRES_DB  (defaults below)
   #   CI_RUNNER  — override only the unprivileged quality runner label
-  #   CI_CODEBUILD_PROJECT — select an ephemeral AWS CodeBuild runner for this
-  #                job; this takes precedence over CI_RUNNER and the workflow
-  #                adds the unique run identity CodeBuild requires
+  #   CI_CODEBUILD_PROJECT — in a sole-maintainer personal repository that
+  #                trusts workflow edits before merge, select an ephemeral AWS
+  #                CodeBuild runner for this job; this takes precedence over
+  #                CI_RUNNER and adds the unique run identity CodeBuild requires
+  # The canonical contract test is a merge-time ratchet against accidental
+  # routing changes, not runtime authorization for requests to CodeBuild.
   # Every other canonical workflow job always uses a fresh GitHub-hosted runner.
   # These are non-secret configuration; leaking them enables nothing.
   #
