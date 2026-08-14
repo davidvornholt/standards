@@ -35,7 +35,7 @@ jobs:
   # file means the defaults (auto-sync on); an unparseable one fails this job
   # loudly — and with it the gated sync — rather than guessing a default.
   policy:
-    runs-on: ${{ vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || 'ubuntu-latest' }}
+    runs-on: ${{ vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-small', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || 'ubuntu-latest' }}
     timeout-minutes: 30
     outputs:
       auto-sync: ${{ steps.read.outputs.auto-sync }}
@@ -86,7 +86,7 @@ jobs:
   sync:
     needs: policy
     if: needs.policy.outputs.auto-sync != 'false'
-    runs-on: ${{ vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || 'ubuntu-latest' }}
+    runs-on: ${{ vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-small', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || 'ubuntu-latest' }}
     timeout-minutes: 30
     steps:
       - name: Checkout
