@@ -38,9 +38,10 @@ permissions:
 jobs:
   notify:
     if: github.event.label.name == 'needs-clarification'
-    # SOPS_AGE_KEY is available here, so this job must never share the
-    # configurable runner pool used by unprivileged quality code.
-    runs-on: ubuntu-latest
+    # Sole-maintainer personal repositories may trust the same permissionless,
+    # ephemeral CodeBuild project with this workflow's injected notification secret.
+    runs-on: ${{ vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-small', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || 'ubuntu-latest' }}
+    timeout-minutes: 5
     steps:
       - name: Checkout encrypted CI secrets
         uses: actions/checkout@v7

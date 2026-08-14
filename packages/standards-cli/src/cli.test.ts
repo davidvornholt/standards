@@ -580,30 +580,86 @@ const canonicalWorkflowPaths = (
   );
 };
 
-// The single job allowed to select the configurable runner. Named once so the
-// inspection that exempts it and the failure message that explains it cannot
-// drift apart.
-const CONFIGURABLE_RUNNER_WORKFLOW = '.github/workflows/standards.yml';
-const CONFIGURABLE_RUNNER_JOB_NAME = 'quality';
-const CONFIGURABLE_RUNNER_JOB = `${CONFIGURABLE_RUNNER_WORKFLOW}:${CONFIGURABLE_RUNNER_JOB_NAME}`;
+// This merge-time ratchet keeps configurable routing on the exact compatible
+// canonical jobs. It catches accidental workflow drift after review; it does
+// not authorize a request before CodeBuild starts a runner for the queued job.
+const CONFIGURABLE_RUNNER_VARIABLE_OCCURRENCES = 13;
+const QUALITY_JOB_NAME = 'quality';
+const CODEBUILD_JOB_TIMEOUT_MINUTES = 30;
+const NOTIFY_JOB_TIMEOUT_MINUTES = 5;
+const WORKFLOW_JOB_HEADER_PATTERN = /^ {2}[a-z0-9-]+:\s*$/mu;
+const CODEBUILD_RUNNER = githubExpression(
+  "vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-small', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || 'ubuntu-latest'",
+);
+const QUALITY_RUNNER = githubExpression(
+  "vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-medium', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || vars.CI_RUNNER || 'ubuntu-latest'",
+);
+const QUALITY_TIMEOUT_MINUTES = 30;
+const CONFIGURABLE_RUNNER_CONTRACTS = {
+  '.github/workflows/notify-pause.yml:notify': {
+    runner: CODEBUILD_RUNNER,
+    timeoutMinutes: NOTIFY_JOB_TIMEOUT_MINUTES,
+  },
+  '.github/workflows/standards-sync.yml:policy': {
+    runner: CODEBUILD_RUNNER,
+    timeoutMinutes: CODEBUILD_JOB_TIMEOUT_MINUTES,
+  },
+  '.github/workflows/standards-sync.yml:sync': {
+    runner: CODEBUILD_RUNNER,
+    timeoutMinutes: CODEBUILD_JOB_TIMEOUT_MINUTES,
+  },
+  '.github/workflows/standards.yml:check': {
+    runner: CODEBUILD_RUNNER,
+    timeoutMinutes: CODEBUILD_JOB_TIMEOUT_MINUTES,
+  },
+  '.github/workflows/standards.yml:nix-discovery': {
+    runner: CODEBUILD_RUNNER,
+    timeoutMinutes: CODEBUILD_JOB_TIMEOUT_MINUTES,
+  },
+  '.github/workflows/standards.yml:quality': {
+    runner: QUALITY_RUNNER,
+    timeoutMinutes: QUALITY_TIMEOUT_MINUTES,
+  },
+} as const;
+const GITHUB_DEFAULT_JOB_TIMEOUT_MINUTES = 360;
+
+const assertQualityRunnerContract = (workflow: ParsedWorkflow): void => {
+  const qualityJob = workflow.jobs[QUALITY_JOB_NAME];
+  if (
+    !isDeepStrictEqual(
+      {
+        runner: qualityJob?.['runs-on'],
+        timeoutMinutes: qualityJob?.['timeout-minutes'],
+      },
+      {
+        runner: QUALITY_RUNNER,
+        timeoutMinutes: QUALITY_TIMEOUT_MINUTES,
+      },
+    )
+  ) {
+    throw new Error(
+      'The quality job must use the approved runner precedence, CodeBuild label, and timeout',
+    );
+  }
+};
 
 const inspectCanonicalWorkflowRunnerBoundaries = (
   upstream: string,
 ): {
+  readonly configurableRunnerJobs: Readonly<Record<string, unknown>>;
   readonly configurableRunnerOccurrences: number;
   readonly fixedRunnerJobDefinitions: ReadonlyArray<{
     readonly definition: string;
     readonly id: string;
   }>;
   readonly fixedRunnerJobs: Readonly<Record<string, unknown>>;
-  readonly qualityRunner: unknown;
   readonly workflowPaths: ReadonlyArray<string>;
 } => {
   const workflowPaths = canonicalWorkflowPaths(
     join(upstream, 'sync-standards.json'),
   );
   let configurableRunnerOccurrences = 0;
-  let qualityRunner: unknown;
+  const configurableRunnerJobs: Record<string, unknown> = {};
   const fixedRunnerJobs: Record<string, unknown> = {};
   const fixedRunnerJobDefinitions: Array<{
     readonly definition: string;
@@ -613,15 +669,15 @@ const inspectCanonicalWorkflowRunnerBoundaries = (
     const absolutePath = join(upstream, workflowPath);
     const workflow = readFileSync(absolutePath, 'utf8');
     configurableRunnerOccurrences +=
-      workflow.match(/vars\.CI_RUNNER/gu)?.length ?? 0;
+      workflow.match(/vars\.(?:CI_CODEBUILD_PROJECT|CI_RUNNER)/gu)?.length ?? 0;
     for (const [jobName, job] of Object.entries(yamlJobs(absolutePath))) {
-      const isConfigurableQuality =
-        workflowPath === CONFIGURABLE_RUNNER_WORKFLOW &&
-        jobName === CONFIGURABLE_RUNNER_JOB_NAME;
-      if (isConfigurableQuality) {
-        qualityRunner = job['runs-on'];
+      const id = `${workflowPath}:${jobName}`;
+      if (id in CONFIGURABLE_RUNNER_CONTRACTS) {
+        configurableRunnerJobs[id] = {
+          runner: job['runs-on'],
+          timeoutMinutes: job['timeout-minutes'],
+        };
       } else {
-        const id = `${workflowPath}:${jobName}`;
         fixedRunnerJobs[id] = job['runs-on'];
         fixedRunnerJobDefinitions.push({
           definition: JSON.stringify(job),
@@ -631,10 +687,10 @@ const inspectCanonicalWorkflowRunnerBoundaries = (
     }
   }
   return {
+    configurableRunnerJobs,
     configurableRunnerOccurrences,
     fixedRunnerJobDefinitions,
     fixedRunnerJobs,
-    qualityRunner,
     workflowPaths,
   };
 };
@@ -646,13 +702,72 @@ const assertFixedRunnerJobsDoNotUseConfigurableRunner = (
   }>,
 ): void => {
   const violations = jobDefinitions
-    .filter(({ definition }) => definition.includes('vars.CI_RUNNER'))
+    .filter(
+      ({ definition }) =>
+        definition.includes('vars.CI_RUNNER') ||
+        definition.includes('vars.CI_CODEBUILD_PROJECT'),
+    )
     .map(({ id }) => id);
   if (violations.length > 0) {
     throw new Error(
-      `Jobs must use a fixed runner, but these select vars.CI_RUNNER: ${violations.join(', ')}. Only ${CONFIGURABLE_RUNNER_JOB} may select vars.CI_RUNNER.`,
+      `Jobs outside the approved compatible set select a configurable runner: ${violations.join(', ')}.`,
     );
   }
+};
+
+const replaceJobRunner = (
+  source: string,
+  jobName: string,
+  currentRunner: string,
+): string => {
+  const jobHeader = `\n  ${jobName}:\n`;
+  const jobStart = source.indexOf(jobHeader);
+  if (jobStart === -1) {
+    throw new Error(`Workflow has no ${jobName} job`);
+  }
+  const remainingJobs = source.slice(jobStart + jobHeader.length);
+  const nextJobOffset = remainingJobs.search(WORKFLOW_JOB_HEADER_PATTERN);
+  const jobEnd =
+    nextJobOffset === -1
+      ? source.length
+      : jobStart + jobHeader.length + nextJobOffset;
+  const job = source.slice(jobStart, jobEnd);
+  const mutatedJob = job.replace(
+    `runs-on: ${currentRunner}`,
+    'runs-on: ubuntu-latest',
+  );
+  if (mutatedJob === job) {
+    throw new Error(`${jobName} does not use the expected runner`);
+  }
+  return `${source.slice(0, jobStart)}${mutatedJob}${source.slice(jobEnd)}`;
+};
+
+const canonicalFixtureWithRunnerMutation = (
+  id: string,
+  currentRunner: string,
+): string => {
+  const separator = id.lastIndexOf(':');
+  const workflowPath = id.slice(0, separator);
+  const jobName = id.slice(separator + 1);
+  const fixture = mkTmp('canonical-codebuild-runner-mutation-');
+  for (const path of canonicalWorkflowPaths(
+    join(ACTUAL_UPSTREAM, 'sync-standards.json'),
+  )) {
+    const source = readFileSync(join(ACTUAL_UPSTREAM, path), 'utf8');
+    write(
+      fixture,
+      path,
+      path === workflowPath
+        ? replaceJobRunner(source, jobName, currentRunner)
+        : source,
+    );
+  }
+  write(
+    fixture,
+    'sync-standards.json',
+    readFileSync(join(ACTUAL_UPSTREAM, 'sync-standards.json'), 'utf8'),
+  );
+  return fixture;
 };
 
 const productionWorkflowPaths = (
@@ -2718,7 +2833,8 @@ describe('canonical standards workflow Nix gate', () => {
         IS_SOURCE_REPOSITORY: githubExpression(SOURCE_REPOSITORY_CONDITION),
       }),
     );
-    expect(discoveryJob['runs-on']).toBe('ubuntu-latest');
+    expect(discoveryJob['runs-on']).toBe(CODEBUILD_RUNNER);
+    expect(discoveryJob['timeout-minutes']).toBe(CODEBUILD_JOB_TIMEOUT_MINUTES);
     expect(discoveryJob.outputs).toEqual({
       matrix: githubExpression('steps.matrix.outputs.matrix'),
     });
@@ -2895,13 +3011,13 @@ describe('canonical standards workflow Nix aggregation', () => {
   });
 });
 
-describe('canonical workflow runner boundaries', () => {
-  it('reserves the configurable runner for Standards quality only', () => {
+describe('canonical workflow runner merge-time ratchets', () => {
+  it('routes exactly the compatible canonical jobs through the configured project', () => {
     const {
+      configurableRunnerJobs,
       configurableRunnerOccurrences,
       fixedRunnerJobDefinitions,
       fixedRunnerJobs,
-      qualityRunner,
       workflowPaths,
     } = inspectCanonicalWorkflowRunnerBoundaries(ACTUAL_UPSTREAM);
     expect(workflowPaths.toSorted()).toEqual([
@@ -2910,14 +3026,11 @@ describe('canonical workflow runner boundaries', () => {
       '.github/workflows/standards.yml',
     ]);
 
-    expect(qualityRunner).toContain('vars.CI_RUNNER');
-    expect(qualityRunner).toContain('ubuntu-latest');
+    expect(configurableRunnerJobs).toEqual(CONFIGURABLE_RUNNER_CONTRACTS);
+    expect(() =>
+      assertQualityRunnerContract(parseWorkflow(STANDARDS_WORKFLOW)),
+    ).not.toThrow();
     expect(fixedRunnerJobs).toEqual({
-      '.github/workflows/notify-pause.yml:notify': 'ubuntu-latest',
-      '.github/workflows/standards-sync.yml:policy': 'ubuntu-latest',
-      '.github/workflows/standards-sync.yml:sync': 'ubuntu-latest',
-      '.github/workflows/standards.yml:check': 'ubuntu-latest',
-      '.github/workflows/standards.yml:nix-discovery': 'ubuntu-latest',
       '.github/workflows/standards.yml:nix': githubMatrixExpression('runner'),
     });
     expect(() =>
@@ -2925,7 +3038,53 @@ describe('canonical workflow runner boundaries', () => {
         fixedRunnerJobDefinitions,
       ),
     ).not.toThrow();
-    expect(configurableRunnerOccurrences).toBe(1);
+    expect(configurableRunnerOccurrences).toBe(
+      CONFIGURABLE_RUNNER_VARIABLE_OCCURRENCES,
+    );
+  });
+});
+
+describe('canonical quality runner merge-time ratchet', () => {
+  it('rejects runner precedence, CodeBuild label, and timeout mutations', () => {
+    const runnerMutations = [
+      githubExpression(
+        "vars.CI_RUNNER || vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || 'ubuntu-latest'",
+      ),
+      githubExpression(
+        "vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{1}-{0}-{2}', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || vars.CI_RUNNER || 'ubuntu-latest'",
+      ),
+    ];
+    const mutations: ReadonlyArray<(workflow: ParsedWorkflow) => void> = [
+      ...runnerMutations.map((runner) => (workflow: ParsedWorkflow): void => {
+        workflow.jobs.quality['runs-on'] = runner;
+      }),
+      (workflow) => {
+        workflow.jobs.quality['timeout-minutes'] =
+          GITHUB_DEFAULT_JOB_TIMEOUT_MINUTES;
+      },
+    ];
+
+    for (const mutate of mutations) {
+      const workflow = structuredClone(parseWorkflow(STANDARDS_WORKFLOW));
+      mutate(workflow);
+      expect(() => assertQualityRunnerContract(workflow)).toThrow(
+        'The quality job must use the approved runner precedence, CodeBuild label, and timeout',
+      );
+    }
+  });
+});
+
+describe('canonical configurable runner merge-time ratchet', () => {
+  it('rejects moving any compatible canonical job off CodeBuild', () => {
+    for (const [id, contract] of Object.entries(
+      CONFIGURABLE_RUNNER_CONTRACTS,
+    )) {
+      const fixture = canonicalFixtureWithRunnerMutation(id, contract.runner);
+      expect(
+        inspectCanonicalWorkflowRunnerBoundaries(fixture)
+          .configurableRunnerJobs,
+      ).not.toEqual(CONFIGURABLE_RUNNER_CONTRACTS);
+    }
   });
 
   it('rejects configurable runners in manifest-owned .yaml workflows', () => {
@@ -2949,7 +3108,7 @@ describe('canonical workflow runner boundaries', () => {
         '  push:',
         'jobs:',
         '  additional-check:',
-        `    runs-on: ${githubExpression("vars.CI_RUNNER || 'ubuntu-latest'")}`,
+        `    runs-on: ${githubExpression("vars.CI_CODEBUILD_PROJECT || 'ubuntu-latest'")}`,
         '    steps:',
         '      - run: echo additional-check',
         '  additional-verify:',
@@ -2970,7 +3129,7 @@ describe('canonical workflow runner boundaries', () => {
         inspection.fixedRunnerJobDefinitions,
       ),
     ).toThrow(
-      'Jobs must use a fixed runner, but these select vars.CI_RUNNER: .github/workflows/additional-check.yaml:additional-check, .github/workflows/additional-check.yaml:additional-verify. Only .github/workflows/standards.yml:quality may select vars.CI_RUNNER.',
+      'Jobs outside the approved compatible set select a configurable runner: .github/workflows/additional-check.yaml:additional-check, .github/workflows/additional-check.yaml:additional-verify.',
     );
   });
 });
