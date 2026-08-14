@@ -587,6 +587,31 @@ const CONFIGURABLE_RUNNER_WORKFLOW = '.github/workflows/standards.yml';
 const CONFIGURABLE_RUNNER_JOB_NAME = 'quality';
 const CONFIGURABLE_RUNNER_JOB = `${CONFIGURABLE_RUNNER_WORKFLOW}:${CONFIGURABLE_RUNNER_JOB_NAME}`;
 const CONFIGURABLE_RUNNER_VARIABLE_OCCURRENCES = 3;
+const QUALITY_RUNNER = githubExpression(
+  "vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || vars.CI_RUNNER || 'ubuntu-latest'",
+);
+const QUALITY_TIMEOUT_MINUTES = 30;
+const GITHUB_DEFAULT_JOB_TIMEOUT_MINUTES = 360;
+
+const assertQualityRunnerContract = (workflow: ParsedWorkflow): void => {
+  const qualityJob = workflow.jobs[CONFIGURABLE_RUNNER_JOB_NAME];
+  if (
+    !isDeepStrictEqual(
+      {
+        runner: qualityJob?.['runs-on'],
+        timeoutMinutes: qualityJob?.['timeout-minutes'],
+      },
+      {
+        runner: QUALITY_RUNNER,
+        timeoutMinutes: QUALITY_TIMEOUT_MINUTES,
+      },
+    )
+  ) {
+    throw new Error(
+      'The quality job must use the approved runner precedence, CodeBuild label, and timeout',
+    );
+  }
+};
 
 const inspectCanonicalWorkflowRunnerBoundaries = (
   upstream: string,
@@ -2915,11 +2940,10 @@ describe('canonical workflow runner boundaries', () => {
       '.github/workflows/standards.yml',
     ]);
 
-    expect(qualityRunner).toContain('vars.CI_RUNNER');
-    expect(qualityRunner).toContain('vars.CI_CODEBUILD_PROJECT');
-    expect(qualityRunner).toContain('github.run_id');
-    expect(qualityRunner).toContain('github.run_attempt');
-    expect(qualityRunner).toContain('ubuntu-latest');
+    expect(qualityRunner).toBe(QUALITY_RUNNER);
+    expect(() =>
+      assertQualityRunnerContract(parseWorkflow(STANDARDS_WORKFLOW)),
+    ).not.toThrow();
     expect(fixedRunnerJobs).toEqual({
       '.github/workflows/notify-pause.yml:notify': 'ubuntu-latest',
       '.github/workflows/standards-sync.yml:policy': 'ubuntu-latest',
@@ -2936,6 +2960,34 @@ describe('canonical workflow runner boundaries', () => {
     expect(configurableRunnerOccurrences).toBe(
       CONFIGURABLE_RUNNER_VARIABLE_OCCURRENCES,
     );
+  });
+
+  it('rejects runner precedence, CodeBuild label, and timeout mutations', () => {
+    const runnerMutations = [
+      githubExpression(
+        "vars.CI_RUNNER || vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || 'ubuntu-latest'",
+      ),
+      githubExpression(
+        "vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{1}-{0}-{2}', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || vars.CI_RUNNER || 'ubuntu-latest'",
+      ),
+    ];
+    const mutations: ReadonlyArray<(workflow: ParsedWorkflow) => void> = [
+      ...runnerMutations.map((runner) => (workflow: ParsedWorkflow): void => {
+        workflow.jobs.quality['runs-on'] = runner;
+      }),
+      (workflow) => {
+        workflow.jobs.quality['timeout-minutes'] =
+          GITHUB_DEFAULT_JOB_TIMEOUT_MINUTES;
+      },
+    ];
+
+    for (const mutate of mutations) {
+      const workflow = structuredClone(parseWorkflow(STANDARDS_WORKFLOW));
+      mutate(workflow);
+      expect(() => assertQualityRunnerContract(workflow)).toThrow(
+        'The quality job must use the approved runner precedence, CodeBuild label, and timeout',
+      );
+    }
   });
 
   it('rejects configurable runners in manifest-owned .yaml workflows', () => {
