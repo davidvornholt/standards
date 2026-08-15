@@ -39,6 +39,7 @@ describe('GitHub App manifest flow', () => {
       contents: 'write',
       issues: 'write',
       metadata: 'read',
+      packages: 'read',
       pull_requests: 'write',
       workflows: 'write',
     });

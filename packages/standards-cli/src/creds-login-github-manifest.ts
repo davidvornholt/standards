@@ -46,6 +46,7 @@ const DEFAULT_PERMISSIONS = {
   contents: 'write',
   issues: 'write',
   metadata: 'read',
+  packages: 'read',
   pull_requests: 'write',
   workflows: 'write',
 } as const;
