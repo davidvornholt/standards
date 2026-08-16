@@ -318,10 +318,18 @@ const qualityEnvironment = (
   workflow: ParsedWorkflow,
 ): Record<string, unknown> => {
   const environment = workflow.jobs.quality.env;
-  if (typeof environment !== 'object' || environment === null) {
-    throw new Error('Quality job must contain an environment mapping');
+  if (typeof environment === 'object' && environment !== null) {
+    return environment as Record<string, unknown>;
   }
-  return environment as Record<string, unknown>;
+  if (environment !== undefined) {
+    throw new Error('Quality job environment must be a mapping when present');
+  }
+  // The canonical quality job carries no job-level environment (DATABASE_URL
+  // is resolved at runtime); attach one so mutation cases can still inject
+  // rejected variables into the parsed workflow.
+  const created: Record<string, unknown> = {};
+  workflow.jobs.quality.env = created;
+  return created;
 };
 
 const assertQualityCacheConsumers = (
