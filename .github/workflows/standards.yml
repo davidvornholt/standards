@@ -41,6 +41,9 @@ jobs:
   #                CodeBuild runner for every compatible canonical consumer job;
   #                this takes precedence over CI_RUNNER and adds the unique run
   #                identity CodeBuild requires
+  #   CI_CODEBUILD_QUALITY_SIZE — override the CodeBuild quality job's instance
+  #                size when a measured gate cannot run reliably on `medium`;
+  #                compatible values are CodeBuild's runner size labels
   # The canonical contract test is a merge-time ratchet against accidental
   # routing changes, not runtime authorization for requests to CodeBuild.
   # The Standards-only architecture matrix keeps its native runner mapping.
@@ -53,7 +56,7 @@ jobs:
   # an `if:` whereas a service cannot. So gating it keeps one uniform file while
   # skipping a pointless download in repos with nothing to render.
   quality:
-    runs-on: ${{ vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-medium', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-{3}', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt, vars.CI_CODEBUILD_QUALITY_SIZE || 'medium') || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 30
     services:
       postgres:
