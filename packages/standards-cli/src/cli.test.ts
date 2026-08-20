@@ -583,7 +583,7 @@ const canonicalWorkflowPaths = (
 // This merge-time ratchet keeps configurable routing on the exact compatible
 // canonical jobs. It catches accidental workflow drift after review; it does
 // not authorize a request before CodeBuild starts a runner for the queued job.
-const CONFIGURABLE_RUNNER_VARIABLE_OCCURRENCES = 13;
+const CONFIGURABLE_RUNNER_VARIABLE_OCCURRENCES = 14;
 const QUALITY_JOB_NAME = 'quality';
 const CODEBUILD_JOB_TIMEOUT_MINUTES = 30;
 const NOTIFY_JOB_TIMEOUT_MINUTES = 5;
@@ -592,7 +592,7 @@ const CODEBUILD_RUNNER = githubExpression(
   "vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-small', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || 'ubuntu-latest'",
 );
 const QUALITY_RUNNER = githubExpression(
-  "vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-medium', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || vars.CI_RUNNER || 'ubuntu-latest'",
+  "vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-{3}', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt, vars.CI_CODEBUILD_QUALITY_SIZE || 'medium') || vars.CI_RUNNER || 'ubuntu-latest'",
 );
 const QUALITY_TIMEOUT_MINUTES = 30;
 const CONFIGURABLE_RUNNER_CONTRACTS = {
@@ -669,7 +669,9 @@ const inspectCanonicalWorkflowRunnerBoundaries = (
     const absolutePath = join(upstream, workflowPath);
     const workflow = readFileSync(absolutePath, 'utf8');
     configurableRunnerOccurrences +=
-      workflow.match(/vars\.(?:CI_CODEBUILD_PROJECT|CI_RUNNER)/gu)?.length ?? 0;
+      workflow.match(
+        /vars\.(?:CI_CODEBUILD_PROJECT|CI_CODEBUILD_QUALITY_SIZE|CI_RUNNER)/gu,
+      )?.length ?? 0;
     for (const [jobName, job] of Object.entries(yamlJobs(absolutePath))) {
       const id = `${workflowPath}:${jobName}`;
       if (id in CONFIGURABLE_RUNNER_CONTRACTS) {
@@ -705,7 +707,8 @@ const assertFixedRunnerJobsDoNotUseConfigurableRunner = (
     .filter(
       ({ definition }) =>
         definition.includes('vars.CI_RUNNER') ||
-        definition.includes('vars.CI_CODEBUILD_PROJECT'),
+        definition.includes('vars.CI_CODEBUILD_PROJECT') ||
+        definition.includes('vars.CI_CODEBUILD_QUALITY_SIZE'),
     )
     .map(({ id }) => id);
   if (violations.length > 0) {
@@ -3052,6 +3055,9 @@ describe('canonical quality runner merge-time ratchet', () => {
       ),
       githubExpression(
         "vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{1}-{0}-{2}', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || vars.CI_RUNNER || 'ubuntu-latest'",
+      ),
+      githubExpression(
+        "vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-{3}', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt, vars.CI_CODEBUILD_QUALITY_SIZE) || vars.CI_RUNNER || 'ubuntu-latest'",
       ),
     ];
     const mutations: ReadonlyArray<(workflow: ParsedWorkflow) => void> = [
