@@ -60,7 +60,9 @@ jobs:
     timeout-minutes: 30
     services:
       postgres:
-        image: postgres:18-alpine
+        # CodeBuild runners share an outbound address, so anonymous Docker Hub
+        # pulls can exhaust the shared limit before the job reaches checkout.
+        image: public.ecr.aws/docker/library/postgres:18-alpine
         env:
           POSTGRES_USER: ${{ vars.CI_POSTGRES_USER || 'app' }}
           POSTGRES_PASSWORD: ${{ vars.CI_POSTGRES_PASSWORD || 'app' }}
