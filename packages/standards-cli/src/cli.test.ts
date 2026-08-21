@@ -38,6 +38,8 @@ const STANDARDS_WORKFLOW = join(
   ACTUAL_UPSTREAM,
   '.github/workflows/standards.yml',
 );
+const QUALITY_POSTGRES_IMAGE =
+  'public.ecr.aws/docker/library/postgres:18-alpine';
 const NOTIFY_WORKFLOW = join(
   ACTUAL_UPSTREAM,
   '.github/workflows/notify-pause.yml',
@@ -302,6 +304,22 @@ const parseWorkflow = (path: string): ParsedWorkflow => {
     throw new Error(`${path} must contain a jobs mapping`);
   }
   return workflow as ParsedWorkflow;
+};
+
+const assertQualityPostgresImage = (workflow: ParsedWorkflow): void => {
+  const { services } = workflow.jobs.quality;
+  if (typeof services !== 'object' || services === null) {
+    throw new Error('Quality job must contain a services mapping');
+  }
+  const { postgres } = services as Record<string, unknown>;
+  if (typeof postgres !== 'object' || postgres === null) {
+    throw new Error('Quality job must contain a Postgres service mapping');
+  }
+  if ((postgres as Record<string, unknown>).image !== QUALITY_POSTGRES_IMAGE) {
+    throw new Error(
+      `Quality Postgres service must use ${QUALITY_POSTGRES_IMAGE}`,
+    );
+  }
 };
 
 const qualityStep = (workflow: ParsedWorkflow, name: string): WorkflowStep => {
@@ -2282,6 +2300,26 @@ describe('canonical standards workflow security boundaries', () => {
     const uses = productionWorkflowPaths(fixture).flatMap(externalActionUses);
     expect(uses).toEqual(['owner/action@main']);
     expect(uses[0]).not.toMatch(MAJOR_ACTION_REF);
+  });
+});
+
+describe('canonical standards workflow Postgres service', () => {
+  it('requires the public ECR Docker Library image', () => {
+    expect(() =>
+      assertQualityPostgresImage(parseWorkflow(STANDARDS_WORKFLOW)),
+    ).not.toThrow();
+
+    const dockerHubWorkflow = structuredClone(
+      parseWorkflow(STANDARDS_WORKFLOW),
+    );
+    const { services } = dockerHubWorkflow.jobs.quality as {
+      readonly services: Record<string, Record<string, unknown>>;
+    };
+    services.postgres = { ...services.postgres, image: 'postgres:18-alpine' };
+
+    expect(() => assertQualityPostgresImage(dockerHubWorkflow)).toThrow(
+      `Quality Postgres service must use ${QUALITY_POSTGRES_IMAGE}`,
+    );
   });
 });
 
