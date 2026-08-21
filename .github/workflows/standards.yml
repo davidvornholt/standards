@@ -130,7 +130,7 @@ jobs:
       # revisions cannot consume repository cache quota.
       - name: Restore the Turbo cache
         id: turbo-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: .turbo/cache
           key: turbo-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
@@ -163,7 +163,7 @@ jobs:
       # fallbacks because they consume trusted snapshots but never publish.
       - name: Restore the Bun package cache
         id: bun-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ~/.bun/install/cache
           key: bun-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
@@ -181,7 +181,7 @@ jobs:
       - name: Restore the Playwright browser cache
         if: steps.a11y.outputs.present == 'true'
         id: playwright-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
@@ -208,14 +208,14 @@ jobs:
 
       - name: Save the Bun package cache
         if: success() && github.ref == 'refs/heads/main' && steps.bun-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ~/.bun/install/cache
           key: bun-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
 
       - name: Save the Playwright browser cache
         if: success() && github.ref == 'refs/heads/main' && steps.a11y.outputs.present == 'true' && steps.playwright-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
@@ -237,7 +237,7 @@ jobs:
 
       - name: Save the Turbo cache
         if: success() && github.ref == 'refs/heads/main' && steps.turbo-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: .turbo/cache
           key: turbo-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
