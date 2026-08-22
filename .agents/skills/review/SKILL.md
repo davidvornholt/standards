@@ -29,7 +29,7 @@ If no lens is given, review across all concerns as usual.
 
 ## Decisions registry
 
-If `.agents/review/decisions.md` exists, read it before reviewing. Its entries are deliberate, already-litigated decisions:
+If `.agents/review/decisions.md` exists, read it before reviewing. Its entries are deliberate, already-litigated decisions, appended by whichever agent settled each one — review is not their only source:
 
 - Do not re-report an accepted decision while its recorded premise still holds.
 - Challenge an entry only when its premise no longer holds or with evidence that did not exist when it was decided, as an explicit finding that names the decision id.
