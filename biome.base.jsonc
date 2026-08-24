@@ -401,12 +401,32 @@
     {
       // TanStack Router's file-routing DSL mandates names outside the
       // kebab-case convention: `__root.tsx`, `$param.tsx`, `route.tsx`
-      // segments, and `-` collocation prefixes.
+      // segments, and `-` collocation prefixes. Route files are framework
+      // wiring: components stay unexported (only `Route` is consumed), and
+      // server handler maps use HTTP-method keys (`GET`, `POST`).
       "includes": ["**/src/routes/**"],
       "linter": {
         "rules": {
           "style": {
-            "useFilenamingConvention": "off"
+            "useComponentExportOnlyModules": "off",
+            "useFilenamingConvention": "off",
+            "useNamingConvention": "off"
+          }
+        }
+      }
+    },
+    {
+      // The TanStack Start root document renders the real HTML shell (so the
+      // <head> element is mandatory) and imports the app stylesheet through
+      // Vite's `?url` suffix, which Biome's resolver cannot follow.
+      "includes": ["**/src/routes/__root.tsx"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noUnresolvedImports": "off"
+          },
+          "style": {
+            "noHeadElement": "off"
           }
         }
       }
