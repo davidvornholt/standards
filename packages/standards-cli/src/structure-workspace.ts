@@ -24,7 +24,7 @@ const DEPENDENCY_FIELDS =
   );
 const SHARED_TSCONFIG_PACKAGE = '@davidvornholt/typescript-config';
 const SHARED_TSCONFIG_PATH =
-  /^@davidvornholt\/typescript-config\/(?:base|next|react-library)$/u;
+  /^@davidvornholt\/typescript-config\/(?:base|next|react-library|tanstack-start)$/u;
 const NON_EXECUTING_A11Y_OPTION =
   /^(?:-h|-V|--(?:debug|help|last-failed|list|only-changed|ui|version))(?:=|$)/u;
 const IGNORED_DIRS = new Set('.git,.next,.turbo,dist,node_modules'.split(','));
