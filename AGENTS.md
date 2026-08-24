@@ -80,8 +80,8 @@ Before generating code, inspect the `description` frontmatter for every local sk
 ## TypeScript standards
 
 - Type untrusted input as `unknown` and validate with Schema decoding.
-- Prefer inline exports, such as `export const value = ...`. Default exports are allowed only where framework conventions require them (Next.js `page.tsx`, `layout.tsx`, `loading.tsx`, `error.tsx`, `route.ts`), via a scoped lint override.
-- Use `kebab-case` file and folder names.
+- Prefer inline exports, such as `export const value = ...`. Default exports are allowed only where framework conventions require them (Next.js `page.tsx`, `layout.tsx`, `loading.tsx`, `error.tsx`, `route.ts`; Vite `vite.config.ts`), via a scoped lint override.
+- Use `kebab-case` file and folder names. Framework-mandated route file names (TanStack Router `__root.tsx`, `$param.tsx`, `-` collocation prefixes) are exempt inside `src/routes/`.
 - Prefer `readonly`, `ReadonlyArray<T>`, and arrow functions assigned to `const`. `function*` is allowed for Effect generators.
 - Mark a property or parameter optional (`?`) only when a real call site omits it or its default is actually exercised; never defensively.
 
