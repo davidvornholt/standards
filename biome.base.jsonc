@@ -381,6 +381,20 @@
       }
     },
     {
+      // Drizzle Kit loads its config through a default export, and the config
+      // is a CLI-invoked environment boundary (`bun --env-file=.env.local
+      // drizzle-kit ...`), so it reads process.env directly.
+      "includes": ["**/drizzle.config.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noDefaultExport": "off",
+            "noProcessEnv": "off"
+          }
+        }
+      }
+    },
+    {
       // TanStack Router's file-routing DSL mandates names outside the
       // kebab-case convention: `__root.tsx`, `$param.tsx`, `route.tsx`
       // segments, and `-` collocation prefixes.
