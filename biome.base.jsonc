@@ -383,10 +383,14 @@
     {
       // Drizzle Kit loads its config through a default export, and the config
       // is a CLI-invoked environment boundary (`bun --env-file=.env.local
-      // drizzle-kit ...`), so it reads process.env directly.
+      // drizzle-kit ...`), so it reads process.env directly — which requires
+      // importing the node:process module the global-process fix mandates.
       "includes": ["**/drizzle.config.ts"],
       "linter": {
         "rules": {
+          "correctness": {
+            "noNodejsModules": "off"
+          },
           "style": {
             "noDefaultExport": "off",
             "noProcessEnv": "off"
