@@ -35,7 +35,6 @@ _dev-db-action action:
     #!/usr/bin/env bun
     const action = {{ quote(action) }};
     const envFile = 'packages/db/.env.local';
-    const image = 'docker.io/library/postgres:17';
     const ownershipLabel = 'io.davidvornholt.standards.dev-db';
     const fail = (message) => { console.error(message); process.exit(1); };
     const detail = (result) => result.stderr.toString().trim() || result.stdout.toString().trim() || `exit ${result.exitCode}`;
@@ -54,6 +53,11 @@ _dev-db-action action:
     if (!safeName.test(repo) || (scopedName !== null && !safeName.test(scopedName[2] ?? ''))) fail(`The root package name ${JSON.stringify(manifest.name)} cannot produce a safe Podman container name.`);
     const name = `${repo}-dev-postgres`;
     const volume = `${name}-data`;
+    const postgresVersion = manifest?.devDatabase?.postgresVersion;
+    if (typeof postgresVersion !== 'string' || !/^[1-9]\d*$/u.test(postgresVersion)) fail('The root package.json must declare a PostgreSQL major version as a string, such as "devDatabase": { "postgresVersion": "18" }. Declare the major version your production database runs, so dev and production cannot drift apart.');
+    const image = `docker.io/library/postgres:${postgresVersion}`;
+    const parentDataLayoutVersion = 18;
+    const dataDestination = Number(postgresVersion) >= parentDataLayoutVersion ? '/var/lib/postgresql' : '/var/lib/postgresql/data';
     const decode = (value, field) => {
       try {
         const decoded = decodeURIComponent(value);
@@ -110,13 +114,15 @@ _dev-db-action action:
       const bindings = container?.HostConfig?.PortBindings?.['5432/tcp'];
       const binding = Array.isArray(bindings) && bindings.length === 1 ? bindings[0] : undefined;
       if (container?.Config?.Labels?.[ownershipLabel] !== 'true') mismatches.push(`missing ${ownershipLabel}=true ownership label`);
-      if ((container?.ImageName ?? container?.Config?.Image) !== image) mismatches.push(`image is not ${image}`);
+      const currentImage = container?.ImageName ?? container?.Config?.Image;
+      if (currentImage !== image) mismatches.push(`image is ${currentImage ?? 'unreadable'} rather than ${image}`);
       if (binding?.HostIp !== '127.0.0.1') mismatches.push('PostgreSQL is not bound exactly once to 127.0.0.1');
       if (!/^\d+$/u.test(binding?.HostPort ?? '') || Number(binding?.HostPort) < 1 || Number(binding?.HostPort) > 65535) mismatches.push('published PostgreSQL port is unusable');
       if (expectedPort !== undefined && binding?.HostPort !== expectedPort) mismatches.push(`published port ${binding?.HostPort || 'none'} does not match DATABASE_URL port ${expectedPort}`);
-      const dataMount = Array.isArray(container?.Mounts) ? container.Mounts.find((mount) => mount?.Destination === '/var/lib/postgresql/data') : undefined;
+      const dataMount = Array.isArray(container?.Mounts) ? container.Mounts.find((mount) => mount?.Destination === dataDestination) : undefined;
       if (dataMount?.Type !== 'volume' || dataMount?.Name !== volume) mismatches.push(`data mount is not the ${volume} named volume`);
-      if (mismatches.length > 0) fail(`Container ${name} does not match the canonical dev-db shape: ${mismatches.join('; ')}. Refusing to ${action} it.`);
+      const versionAdvice = currentImage === image ? '' : ` A PostgreSQL major version cannot read another major version's data directory, so changing devDatabase.postgresVersion discards the local database: podman rm -f ${name} && podman volume rm ${volume}.`;
+      if (mismatches.length > 0) fail(`Container ${name} does not match the canonical dev-db shape: ${mismatches.join('; ')}. Refusing to ${action} it.${versionAdvice}`);
       return container;
     };
     if (!['start', 'stop', 'status'].includes(action)) fail(`Unsupported internal dev-db action: ${action}`);
@@ -126,7 +132,7 @@ _dev-db-action action:
     if (!present && action === 'status') { console.log(`${name}: not created. Run \`just dev-db-start\`.`); process.exit(0); }
     if (action === 'start') {
       if (!present) {
-        const created = podman(['run', '-d', '--name', name, '--label', `${ownershipLabel}=true`, '-e', `POSTGRES_USER=${connection.user}`, '-e', `POSTGRES_PASSWORD=${connection.password}`, '-e', `POSTGRES_DB=${connection.database}`, '-p', `127.0.0.1:${connection.port}:5432`, '-v', `${volume}:/var/lib/postgresql/data`, image]);
+        const created = podman(['run', '-d', '--name', name, '--label', `${ownershipLabel}=true`, '-e', `POSTGRES_USER=${connection.user}`, '-e', `POSTGRES_PASSWORD=${connection.password}`, '-e', `POSTGRES_DB=${connection.database}`, '-p', `127.0.0.1:${connection.port}:5432`, '-v', `${volume}:${dataDestination}`, image]);
         if (created.exitCode !== 0) podmanFailed(`Unable to create container ${name}`, created);
       }
       const container = inspectManaged(connection.port);

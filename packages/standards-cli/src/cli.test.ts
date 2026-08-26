@@ -1566,6 +1566,10 @@ describe('structure', () => {
       'extends array',
       '{"extends":["./generated.json","@davidvornholt/typescript-config/next"]}',
     ],
+    [
+      'tanstack-start preset',
+      '{"extends":"@davidvornholt/typescript-config/tanstack-start"}',
+    ],
   ])('accepts canonical inheritance through a %s', (_label, tsconfig) => {
     const { consumer } = initConsumer(buildUpstream());
     write(consumer, 'apps/web/tsconfig.json', tsconfig);
