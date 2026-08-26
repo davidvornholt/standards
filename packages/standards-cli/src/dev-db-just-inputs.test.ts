@@ -71,9 +71,17 @@ describe('canonical dev database inputs', () => {
     }
   });
 
-  it('runs the image for the declared major version', () => {
-    const value = fixture('@standards/root', undefined, '18');
-    expect(run(value, 'dev-db-start').status).toBe(0);
-    expect(calls(value)).toContain('"docker.io/library/postgres:18"');
+  it('runs the declared major with its official data mount layout', () => {
+    for (const [version, destination] of [
+      ['17', '/var/lib/postgresql/data'],
+      ['18', '/var/lib/postgresql'],
+    ] as const) {
+      const value = fixture('@standards/root', undefined, version);
+      expect(run(value, 'dev-db-start').status).toBe(0);
+      expect(calls(value)).toContain(`"docker.io/library/postgres:${version}"`);
+      expect(calls(value)).toContain(
+        `"standards-dev-postgres-data:${destination}"`,
+      );
+    }
   });
 });

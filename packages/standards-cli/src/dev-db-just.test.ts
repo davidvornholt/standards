@@ -52,7 +52,7 @@ describe('canonical dev database managed lifecycle', () => {
 
   it('refuses every managed-shape mismatch through every public action', () => {
     const mismatches =
-      '"Labels":{"io.davidvornholt.standards.dev-db":"true"}~"Labels":{}|"ImageName":"docker.io/library/postgres:17"~"ImageName":"docker.io/library/postgres:16"|"HostIp":"127.0.0.1"~"HostIp":"0.0.0.0"|"HostPort":"5440"~"HostPort":"0"|"Name":"standards-dev-postgres-data"~"Name":"other-data"'.split(
+      '"Labels":{"io.davidvornholt.standards.dev-db":"true"}~"Labels":{}|"ImageName":"docker.io/library/postgres:17"~"ImageName":"docker.io/library/postgres:16"|"HostIp":"127.0.0.1"~"HostIp":"0.0.0.0"|"HostPort":"5440"~"HostPort":"0"|"Name":"standards-dev-postgres-data"~"Name":"other-data"|"Destination":"/var/lib/postgresql/data"~"Destination":"/wrong"'.split(
         '|',
       );
     for (const mismatch of mismatches) {
