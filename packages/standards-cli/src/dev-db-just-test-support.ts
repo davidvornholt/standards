@@ -12,11 +12,19 @@ const canonicalSleep = 'await Bun.sleep(1000);';
 
 export const readinessAttempts = 30;
 export const transientAttempts = 3;
+export const defaultPostgresVersion = '17';
 
-export const managed = (name: string, running = true): string =>
-  `{"Config":{"Image":"docker.io/library/postgres:17","Labels":{"io.davidvornholt.standards.dev-db":"true"}},"HostConfig":{"PortBindings":{"5432/tcp":[{"HostIp":"127.0.0.1","HostPort":"5440"}]}},"ImageName":"docker.io/library/postgres:17","Mounts":[{"Destination":"/var/lib/postgresql/data","Name":"${name}-data","Type":"volume"}],"State":{"Running":${running},"Status":"running"}}`;
+export const managed = (
+  name: string,
+  running = true,
+  postgresVersion = defaultPostgresVersion,
+): string =>
+  `{"Config":{"Image":"docker.io/library/postgres:${postgresVersion}","Labels":{"io.davidvornholt.standards.dev-db":"true"}},"HostConfig":{"PortBindings":{"5432/tcp":[{"HostIp":"127.0.0.1","HostPort":"5440"}]}},"ImageName":"docker.io/library/postgres:${postgresVersion}","Mounts":[{"Destination":"/var/lib/postgresql/data","Name":"${name}-data","Type":"volume"}],"State":{"Running":${running},"Status":"running"}}`;
 
-export const expectedRunArguments = (name: string): ReadonlyArray<string> => [
+export const expectedRunArguments = (
+  name: string,
+  postgresVersion = defaultPostgresVersion,
+): ReadonlyArray<string> => [
   'run',
   '-d',
   '--name',
@@ -33,7 +41,7 @@ export const expectedRunArguments = (name: string): ReadonlyArray<string> => [
   '127.0.0.1:5440:5432',
   '-v',
   `${name}-data:/var/lib/postgresql/data`,
-  'docker.io/library/postgres:17',
+  `docker.io/library/postgres:${postgresVersion}`,
 ];
 
 export const expectedReadinessArguments = (
@@ -60,7 +68,10 @@ export const expectedReadinessArguments = (
   'SELECT 1',
 ];
 
-const fakePodman = (name: string): string => `#!/usr/bin/env bun
+const fakePodman = (
+  name: string,
+  postgresVersion: string,
+): string => `#!/usr/bin/env bun
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 const root = process.env.FAKE_PODMAN_ROOT ?? '';
@@ -79,7 +90,7 @@ if (same(['container', 'inspect', ${JSON.stringify(name)}])) {
   process.stdout.write(readFileSync(path('inspect.json'), 'utf8'));
   process.exit(0);
 }
-if (same(${JSON.stringify(expectedRunArguments(name))})) {
+if (same(${JSON.stringify(expectedRunArguments(name, postgresVersion))})) {
   if (present('run-error')) fail('create failed', 125);
   writeFileSync(path('present'), '');
   process.exit(0);
@@ -110,6 +121,7 @@ export const createFixture = (
   packageName: string,
   databaseUrl: string,
   baseEnvironment: Readonly<Record<string, string | undefined>>,
+  postgresVersion = defaultPostgresVersion,
 ) => {
   const root = mkTmp('dev-db-just-');
   const bin = join(root, 'bin');
@@ -130,15 +142,23 @@ export const createFixture = (
     'secrets.just',
     readFileSync(join(ACTUAL_UPSTREAM, 'secrets.just'), 'utf8'),
   );
-  write(root, 'package.json', `${JSON.stringify({ name: packageName })}\n`);
+  write(
+    root,
+    'package.json',
+    `${JSON.stringify({ devDatabase: { postgresVersion }, name: packageName })}\n`,
+  );
   write(
     root,
     'packages/db/.env.local',
     `DATABASE_URL=${JSON.stringify(databaseUrl)}\n`,
   );
-  write(root, 'control/inspect.json', `[${managed(name)}]`);
+  write(
+    root,
+    'control/inspect.json',
+    `[${managed(name, true, postgresVersion)}]`,
+  );
   write(root, 'control/name', name);
-  write(root, 'bin/podman', fakePodman(name));
+  write(root, 'bin/podman', fakePodman(name, postgresVersion));
   chmodSync(join(bin, 'podman'), executableMode);
   return {
     environment: {
@@ -148,6 +168,7 @@ export const createFixture = (
       [pathVariable]: `${bin}:${baseEnvironment.PATH ?? ''}`,
     },
     name,
+    postgresVersion,
     root,
   };
 };
@@ -165,7 +186,10 @@ export const calls = (value: Fixture): string =>
 export const control = (value: Fixture, name: string, content = ''): void =>
   write(value.root, `control/${name}`, content);
 
-export const present = (value: Fixture, shape = managed(value.name)): void => {
+export const present = (
+  value: Fixture,
+  shape = managed(value.name, true, value.postgresVersion),
+): void => {
   control(value, 'present');
   control(value, 'inspect.json', `[${shape}]`);
 };
