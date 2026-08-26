@@ -398,7 +398,7 @@ const assertQualityCacheContract = (workflow: ParsedWorkflow): void => {
     {
       name: 'Restore the Turbo cache',
       id: 'turbo-cache',
-      uses: 'actions/cache/restore@v4',
+      uses: 'actions/cache/restore@v6',
       with: {
         path: '.turbo/cache',
         key: TURBO_CACHE_KEY,
@@ -408,7 +408,7 @@ const assertQualityCacheContract = (workflow: ParsedWorkflow): void => {
     {
       name: 'Restore the Bun package cache',
       id: 'bun-cache',
-      uses: 'actions/cache/restore@v4',
+      uses: 'actions/cache/restore@v6',
       with: {
         path: BUN_CACHE_PATH,
         key: BUN_CACHE_KEY,
@@ -419,7 +419,7 @@ const assertQualityCacheContract = (workflow: ParsedWorkflow): void => {
       name: 'Restore the Playwright browser cache',
       if: "steps.a11y.outputs.present == 'true'",
       id: 'playwright-cache',
-      uses: 'actions/cache/restore@v4',
+      uses: 'actions/cache/restore@v6',
       with: {
         path: PLAYWRIGHT_CACHE_PATH,
         key: PLAYWRIGHT_CACHE_KEY,
@@ -429,19 +429,19 @@ const assertQualityCacheContract = (workflow: ParsedWorkflow): void => {
     {
       name: 'Save the Bun package cache',
       if: BUN_CACHE_SAVE_CONDITION,
-      uses: 'actions/cache/save@v4',
+      uses: 'actions/cache/save@v6',
       with: { path: BUN_CACHE_PATH, key: BUN_CACHE_KEY },
     },
     {
       name: 'Save the Playwright browser cache',
       if: PLAYWRIGHT_CACHE_SAVE_CONDITION,
-      uses: 'actions/cache/save@v4',
+      uses: 'actions/cache/save@v6',
       with: { path: PLAYWRIGHT_CACHE_PATH, key: PLAYWRIGHT_CACHE_KEY },
     },
     {
       name: 'Save the Turbo cache',
       if: TURBO_CACHE_SAVE_CONDITION,
-      uses: 'actions/cache/save@v4',
+      uses: 'actions/cache/save@v6',
       with: { path: '.turbo/cache', key: TURBO_CACHE_KEY },
     },
   ];
@@ -2632,6 +2632,10 @@ it('rejects stale and untrusted cache action mutations', () => {
           "github.ref == 'refs/heads/main' && '' || format('playwright-{0}-{1}-', runner.os, runner.arch)",
         ),
       };
+    },
+    (workflow) => {
+      qualityStep(workflow, 'Restore the Turbo cache').uses =
+        'actions/cache/restore@v4';
     },
     (workflow) => {
       qualityStep(workflow, 'Restore the Turbo cache').uses =
