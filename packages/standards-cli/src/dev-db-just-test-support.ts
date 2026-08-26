@@ -13,13 +13,19 @@ const canonicalSleep = 'await Bun.sleep(1000);';
 export const readinessAttempts = 30;
 export const transientAttempts = 3;
 export const defaultPostgresVersion = '17';
+const parentDataLayoutVersion = 18;
+
+export const dataDestination = (postgresVersion: string) =>
+  Number(postgresVersion) >= parentDataLayoutVersion
+    ? '/var/lib/postgresql'
+    : '/var/lib/postgresql/data';
 
 export const managed = (
   name: string,
   running = true,
   postgresVersion = defaultPostgresVersion,
 ): string =>
-  `{"Config":{"Image":"docker.io/library/postgres:${postgresVersion}","Labels":{"io.davidvornholt.standards.dev-db":"true"}},"HostConfig":{"PortBindings":{"5432/tcp":[{"HostIp":"127.0.0.1","HostPort":"5440"}]}},"ImageName":"docker.io/library/postgres:${postgresVersion}","Mounts":[{"Destination":"/var/lib/postgresql/data","Name":"${name}-data","Type":"volume"}],"State":{"Running":${running},"Status":"running"}}`;
+  `{"Config":{"Image":"docker.io/library/postgres:${postgresVersion}","Labels":{"io.davidvornholt.standards.dev-db":"true"}},"HostConfig":{"PortBindings":{"5432/tcp":[{"HostIp":"127.0.0.1","HostPort":"5440"}]}},"ImageName":"docker.io/library/postgres:${postgresVersion}","Mounts":[{"Destination":"${dataDestination(postgresVersion)}","Name":"${name}-data","Type":"volume"}],"State":{"Running":${running},"Status":"running"}}`;
 
 export const expectedRunArguments = (
   name: string,
@@ -40,7 +46,7 @@ export const expectedRunArguments = (
   '-p',
   '127.0.0.1:5440:5432',
   '-v',
-  `${name}-data:/var/lib/postgresql/data`,
+  `${name}-data:${dataDestination(postgresVersion)}`,
   `docker.io/library/postgres:${postgresVersion}`,
 ];
 
