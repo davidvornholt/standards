@@ -1,20 +1,23 @@
 export const meta = {
   name: 'review-pass',
   description:
-    'One bounded review pass: lens reviewers over the diff, one merged structured finding set',
+    'One bounded review pass: a single Luna Max reviewer covers every concern and returns one actionable decision per finding',
   whenToUse:
-    'Invoked by the review-fix skill for its review and verification passes. Args: { baseRef, gateStatus, decisions, lenses: [{ key, charter, notes? }] }. Returns { findings, skippedLenses, coverage }.',
+    'Invoked by the review-fix skill for full review, fix verification, and high-risk repair verification. Args: { passKind, baseRef, gateStatus, decisions, intent, threatModel, concerns: [{ key, charter, notes? }] }. Returns { findings, skipped, coverage }.',
   phases: [
-    { title: 'Review', detail: 'one read-only lens reviewer per lens, full-diff scope' },
+    { title: 'Review', detail: 'one read-only Luna Max reviewer, full-diff scope' },
   ],
 };
 
-// The harness may deliver args as an object or as a JSON-encoded string;
-// normalize once so every dereference below is safe.
 const input = typeof args === 'string' ? JSON.parse(args) : args;
 
-// The severity enum and the evidence/unverified contract mirror the review
-// skill — renaming either side breaks the contract.
+const nullableString = {
+  anyOf: [{ type: 'string' }, { type: 'null' }],
+};
+const nullableInteger = {
+  anyOf: [{ type: 'integer', minimum: 1 }, { type: 'null' }],
+};
+
 const findingsSchema = {
   type: 'object',
   additionalProperties: false,
@@ -25,162 +28,172 @@ const findingsSchema = {
       items: {
         type: 'object',
         additionalProperties: false,
-        // file/line are recorded when the finding has a natural location, but
-        // are not required — some findings (a missing test, a deleted file, a
-        // whole-file concern) have no single line, and forcing an anchor would
-        // fabricate one that then poisons dedup.
-        required: ['severity', 'summary', 'evidence'],
+        required: [
+          'decision',
+          'impact',
+          'evidenceStatus',
+          'concerns',
+          'file',
+          'line',
+          'summary',
+          'evidence',
+          'failureScenario',
+          'suggestedVerification',
+          'question',
+          'recommendation',
+        ],
         properties: {
-          severity: { type: 'string', enum: ['blocking', 'non-blocking', 'nit'] },
-          file: { type: 'string', description: 'Repo-relative path, when the finding has one' },
-          line: { type: 'integer', minimum: 1, description: 'Anchor line, when the finding has one' },
-          summary: { type: 'string', description: 'One-sentence statement of the defect' },
-          evidence: { type: 'string', description: 'What was executed or observed that demonstrates the failure' },
-          unverified: {
+          decision: {
             type: 'string',
-            description:
-              'The one missing out-of-checkout observation (external system behavior, production state, or human intent question), when the review skill permits it',
+            enum: ['block', 'defer', 'discard', 'ask'],
+          },
+          impact: {
+            type: 'string',
+            enum: ['breakage', 'weakening', 'polish'],
+          },
+          evidenceStatus: {
+            type: 'string',
+            enum: ['reproduced', 'demonstrated', 'unverified'],
+          },
+          concerns: {
+            type: 'array',
+            items: { type: 'string' },
+            minItems: 1,
+          },
+          file: nullableString,
+          line: nullableInteger,
+          summary: {
+            type: 'string',
+            description: 'One-sentence statement of the defect or durable decision',
+          },
+          evidence: {
+            type: 'string',
+            description: 'What was executed or observed',
+          },
+          failureScenario: {
+            type: 'string',
+            description: 'Concrete practical consequence through a reachable path',
+          },
+          suggestedVerification: {
+            type: 'string',
+            description: 'Smallest focused verification that protects the failure class',
+          },
+          question: {
+            ...nullableString,
+            description: 'Required only for ask: the one unavoidable maintainer decision',
+          },
+          recommendation: {
+            ...nullableString,
+            description: 'Required only for ask: recommended option and why',
           },
         },
       },
     },
     coverage: {
       type: 'string',
-      description: 'What was inspected, surfaces enumerated, and focused checks run',
+      description:
+        'Surfaces enumerated for every concern, assumptions made, and focused checks run',
     },
   },
 };
 
-const severityRank = (severity) => {
-  if (severity === 'blocking') {
+const decisionRank = (decision) => {
+  if (decision === 'block') {
     return 0;
   }
-  if (severity === 'non-blocking') {
+  if (decision === 'ask') {
     return 1;
   }
-  return 2;
+  if (decision === 'defer') {
+    return 2;
+  }
+  return 3;
 };
 
-const reviewPrompt = (lens) =>
-  [
-    'You are a read-only review subagent running one concern lens of a bounded review pass. The review skill in your context is your operating contract — its scope, lens, registry, evidence, and output rules apply; this prompt only parameterizes them.',
-    '',
-    `Review scope: the full current diff against ${input.baseRef}, per the review skill's scope contract. In a verification pass that base is the pre-fix head, so the diff under review is exactly the fix commits.`,
-    '',
-    `Concern lens "${lens.key}": ${lens.charter}`,
-    ...(lens.notes ? [`Since this lens last ran: ${lens.notes}`] : []),
-    '',
-    `Deterministic gate status: ${input.gateStatus}. Do not re-run the full repo gate; run only focused checks relevant to this lens.`,
-    '',
-    'Decisions registry content:',
-    input.decisions,
-    '',
-    'Schema output only; no prose report.',
-  ].join('\n');
+const concernText = input.concerns
+  .map((concern) =>
+    [
+      `- ${concern.key}: ${concern.charter}`,
+      ...(concern.notes ? [`  Since the previous pass: ${concern.notes}`] : []),
+    ].join('\n'),
+  )
+  .join('\n');
 
-const nearDuplicateLineDistance = 3;
+const reviewPrompt = [
+  'You are the single read-only reviewer in a bounded review-fix pass. The review skill in your context is the operating contract. Cover every concern below in one traversal of the whole diff; do not spawn or request another reviewer.',
+  '',
+  `Pass kind: ${input.passKind}.`,
+  `Review scope: the full current diff against ${input.baseRef}. For verification passes this base is the pre-fix or pre-repair head, so the diff is exactly the delta being verified.`,
+  '',
+  'Frozen intent:',
+  input.intent,
+  '',
+  'Frozen threat model:',
+  input.threatModel,
+  '',
+  'Concern checklist:',
+  concernText,
+  '',
+  `Deterministic and focused-check status: ${input.gateStatus}. Do not repeat the full repository gate; run only probes needed to demonstrate a concern.`,
+  '',
+  'Decisions registry content:',
+  input.decisions,
+  '',
+  'Return one final decision per finding. There is no separate severity:',
+  '- block only for a demonstrated, in-intent, materially merge-blocking defect;',
+  '- defer for real actionable work outside this PR or below the merge bar;',
+  '- discard only for durable refutations, accepted risks, or concerns too low-value to schedule; do not emit every thought;',
+  '- ask only when materially different product or architecture outcomes remain unresolved and choosing wrongly would be costly to reverse through a durable contract, data model, ownership/lifecycle boundary, external behavior, or foundational architecture.',
+  '',
+  'Do not ask about inferable implementation details, reversible choices, local refactors, test shape inside existing infrastructure, or machinery that can be deferred. Prefer the simplest local correction. Recommend at most one minimal regression test per failure class, extend existing tests first, and never propose a new fixture or test harness for one finding.',
+  '',
+  'For fix-verification and repair-verification, report a block only when the delta failed to close an existing blocker or introduced a new material regression. A defect that reproduces on the base predates this delta and is defer or discard.',
+  '',
+  'Use question and recommendation only for ask; set them to null otherwise. Use file and line when a natural anchor exists; otherwise set them to null. Schema output only.',
+].join('\n');
 
-// Stable content key: co-located findings with different summaries are distinct
-// defects and must not be merged; the same summary from two lenses is one
-// finding seen twice. Keying on file+line alone would silently drop a second
-// defect.
-const findingKey = (finding) =>
-  `${finding.file ?? ''} ${finding.line ?? ''} ${finding.summary}`;
+const result = await agent(reviewPrompt, {
+  agentType: 'reviewer',
+  model: 'gpt-5.6-luna',
+  effort: 'max',
+  label: `review:${input.passKind}`,
+  phase: 'Review',
+  sandbox: 'read-only',
+  schema: findingsSchema,
+});
 
-const lensResults = await pipeline(
-  input.lenses,
-  (lens) =>
-    agent(reviewPrompt(lens), {
-      agentType: 'reviewer',
-      label: `review:${lens.key}`,
-      phase: 'Review',
-      schema: findingsSchema,
-    }),
-  (result, lens) => {
-    // A dead/skipped lens agent returns null. Surface it as an explicit skip so
-    // the orchestrator sees a partial fan-out rather than a silently short set.
-    if (!result) {
-      return { lens: lens.key, skipped: true, coverage: null, findings: [] };
-    }
-    const findings = result.findings.map((finding) => ({ ...finding, lens: lens.key }));
-    log(`lens ${lens.key}: ${findings.length} findings`);
-    return {
-      lens: lens.key,
-      skipped: false,
-      coverage: result.coverage,
-      findings,
-    };
-  },
+if (!result) {
+  log('reviewer interrupted');
+  return {
+    findings: [],
+    skipped: true,
+    coverage: 'The single reviewer was interrupted before returning coverage.',
+  };
+}
+
+for (const finding of result.findings) {
+  if (
+    finding.decision === 'ask' &&
+    (!(finding.question && finding.recommendation))
+  ) {
+    throw new Error('An ask finding must include a question and recommendation.');
+  }
+  if (
+    finding.decision !== 'ask' &&
+    (finding.question !== null || finding.recommendation !== null)
+  ) {
+    throw new Error('Only ask findings may include a question or recommendation.');
+  }
+}
+
+result.findings.sort(
+  (left, right) => decisionRank(left.decision) - decisionRank(right.decision),
 );
 
-const results = lensResults.filter(Boolean);
-const completed = results.filter((result) => !result.skipped);
-const skippedLenses = results
-  .filter((result) => result.skipped)
-  .map((result) => result.lens);
-
-const merged = [];
-const mergedByKey = new Map();
-for (const result of completed) {
-  for (const finding of result.findings) {
-    const key = findingKey(finding);
-    const existing = mergedByKey.get(key);
-    if (existing) {
-      if (!existing.lenses.includes(finding.lens)) {
-        existing.lenses.push(finding.lens);
-      }
-      if (severityRank(finding.severity) < severityRank(existing.severity)) {
-        existing.severity = finding.severity;
-      }
-    } else {
-      // Drop the singular `lens` in favor of the merged `lenses` array so the
-      // returned finding carries one, consistent attribution.
-      const { lens, ...rest } = finding;
-      const entry = { ...rest, lenses: [lens] };
-      mergedByKey.set(key, entry);
-      merged.push(entry);
-    }
-  }
-}
-
-for (const finding of merged) {
-  if (typeof finding.line !== 'number') {
-    continue;
-  }
-  let nearestLine = null;
-  let nearestDistance = Number.POSITIVE_INFINITY;
-  for (const other of merged) {
-    if (
-      other === finding ||
-      other.file !== finding.file ||
-      typeof other.line !== 'number'
-    ) {
-      continue;
-    }
-    const distance = Math.abs(other.line - finding.line);
-    if (distance <= nearDuplicateLineDistance && distance < nearestDistance) {
-      nearestDistance = distance;
-      nearestLine = other.line;
-    }
-  }
-  if (nearestLine !== null) {
-    finding.nearDuplicateAtLine = nearestLine;
-  }
-}
-
-merged.sort((a, b) => severityRank(a.severity) - severityRank(b.severity));
-
-if (skippedLenses.length > 0) {
-  log(`${skippedLenses.length} lens(es) skipped: ${skippedLenses.join(', ')}`);
-}
-log(`merged: ${merged.length} findings`);
+log(`review: ${result.findings.length} findings`);
 
 return {
-  findings: merged,
-  skippedLenses,
-  coverage: results.map((result) => ({
-    lens: result.lens,
-    skipped: result.skipped,
-    coverage: result.coverage,
-  })),
+  findings: result.findings,
+  skipped: false,
+  coverage: result.coverage,
 };
