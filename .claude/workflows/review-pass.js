@@ -218,7 +218,6 @@ const lensResults = await pipeline(
       effort: 'max',
       label: `review:${input.passKind}:${lens.key}`,
       phase: 'Review',
-      sandbox: 'read-only',
       schema: findingsSchema,
     }),
   (result, lens) => {
