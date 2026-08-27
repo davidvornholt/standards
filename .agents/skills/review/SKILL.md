@@ -1,6 +1,6 @@
 ---
 name: review
-description: Evidence-based workspace review. Use by default for code, documentation, configuration, and workflow reviews; returns one actionable decision per finding without a second severity taxonomy.
+description: Evidence-based workspace review. Use by default for code, documentation, configuration, and workflow reviews; supports one narrowly chartered lens per reviewer and returns one actionable decision per finding.
 ---
 
 # Evidence-based workspace review
@@ -17,15 +17,19 @@ Review the requested workspace change without editing it. Be strict about demons
 
 ## Review scope
 
-Unless the invoker narrows it, review the full working-tree change against the base ref: staged and unstaged changes plus untracked files. Inspect the whole relationship even when a concern points to one file; cross-file ownership, authorization, persistence, and lifecycle defects are often the actual failure.
+Unless the invoker narrows it, review the full working-tree change against the base ref: staged and unstaged changes plus untracked files. Inspect the whole relationship even when a lens points to one surface; cross-file ownership, authorization, persistence, and lifecycle defects are often the actual failure.
 
-## Concern checklist
+## Lens contract
 
-The invoker may supply several concern charters. One reviewer covers all of them in one pass over the full diff.
+A bounded fan-out deliberately gives separate reviewers separate attention budgets. When the invoker supplies a lens:
 
-- Enumerate the surfaces owned by each concern instead of sampling them. A security concern accounts for every changed route, loader, action, credential path, and protection layer; data integrity accounts for every changed read, mutation, transaction, retry, and migration; other concerns enumerate analogously.
-- Include premise and catch-all concerns when supplied. Premise tests whether the change solves the right problem; catch-all reports material defects not owned by another concern.
-- Attribute each finding to every concern that actually exposed it. Concern attribution is analysis metadata, not a reason to spawn another reviewer.
+- Read the whole diff, but report only findings whose primary failure class belongs to that lens. Do not duplicate another lens's charter merely because you notice its surface.
+- Honor explicit exclusions. They are there to keep adjacent lenses from spending separate contexts on the same question.
+- Enumerate the lens's surfaces instead of sampling them. A security lens accounts for every changed route, loader, action, credential path, and protection layer; data integrity accounts for every changed read, mutation, transaction, retry, and migration; other lenses enumerate analogously.
+- Use cross-file evidence freely when it proves a finding inside your lens.
+- Premise asks whether the change solves the right problem. Catch-all owns material defects not assigned elsewhere. They may be combined into one integration lens when separate slots would overlap.
+
+Without a supplied lens, review as one generalist across all concerns. Lens attribution is added by the orchestrator when several reviewer results are merged.
 
 ## Decisions registry
 
@@ -36,7 +40,7 @@ If `.agents/review/decisions.md` exists, read it before reviewing. Its entries a
 
 ## Checks
 
-- Prefer the repository's established gate for an ordinary standalone review. When an orchestrator already supplied an exact-head gate result, do not repeat the full gate; run only focused probes needed to demonstrate a concern.
+- Prefer the repository's established gate for an ordinary standalone review. When an orchestrator already supplied an exact-head gate result, do not repeat the full gate; run only focused probes needed to demonstrate your lens.
 - A probe that needs instrumentation runs in a disposable worktree. Never mutate the shared checkout.
 - Reuse production paths and real inputs where practical. A mock that bypasses the invariant under review is not evidence that the invariant holds.
 
@@ -55,7 +59,6 @@ Record these orthogonal fields without turning them into another decision system
 
 - **impact**: `breakage`, `weakening`, or `polish`.
 - **evidenceStatus**: `reproduced`, `demonstrated`, or `unverified`.
-- **concerns**: the concern keys that exposed the finding.
 
 An `unverified` finding is allowed only for an observation outside the checkout, such as production state or an external service. It normally becomes `defer`; it becomes `ask` only when the strict decision bar above is met.
 
