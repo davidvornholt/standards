@@ -1,198 +1,110 @@
 ---
 name: review-fix
-description: Use when the user asks for a review with fixes or a review loop. Runs one autonomous, bounded review → fix → verify cycle on a pull request, using a small adaptive Luna Max lens fan-out and stopping unconditionally.
+description: Use for a review with fixes or a review loop. Runs one autonomous, bounded review → fix → verify cycle on a pull request with a small lens fan-out.
 ---
 
 # Review and fix
 
-Run one autonomous, bounded cycle over a pull request in a repository you control: establish scope, reuse or run one deterministic baseline gate, perform one bounded lens fan-out, fix only merge blockers, verify the fix delta proportionally, optionally verify a high-risk repair, run one final gate, report, and stop.
+Run one bounded cycle: freeze scope, establish a deterministic baseline, review, fix merge blockers, verify the fix delta, run the final gate, report, and stop. Never add passes until “clean,” start a second cycle for findings created by this cycle, amend published commits, or fresh-review the final repair.
 
-There is deliberately no convergence condition. A reviewer instructed to keep searching can always enlarge the diff and review its own output forever. Never add passes beyond this contract, never start a new cycle for a finding produced by this cycle, and never run a fresh-eyes review after the final repair.
+## Reviewer model
 
-## Fixed model, adaptive attention
+An explicit user choice of model or effort overrides every default.
 
-Every Codex review, fix-verification, and repair-verification agent uses the `reviewer` profile pinned to `gpt-5.6-luna` with `max` reasoning. Do not ask the user to choose a model, route a difficult lens to Sol, or mix models inside a cycle.
+Otherwise use:
 
-The number of reviewers is adaptive. Separate lens agents are deliberate: independent attention budgets find defects that one broad reviewer can miss. The fan-out is still bounded because overlapping lenses reread the same context without owning a distinct failure class.
+| Harness | Default reviewer |
+| --- | --- |
+| Claude Code | Claude Opus 5, high |
+| Codex or another GPT-capable harness | GPT-5.6 Luna, max |
+| Neither family available | the current/inherited model |
 
-Do not estimate or report token usage from the agent. Backend usage accounting is not observable reliably from the cycle. Duration comes from the timestamps of durable PR artifacts.
+If an explicitly requested model cannot run, report an execution blocker instead of silently substituting another model. A missing default may fall back to the current model without asking. Use the same resolved model for every lens in the cycle; model selection is not a reason to pause.
 
-## Roles
+Do not estimate token usage. Measure wall-clock duration from PR artifact timestamps.
 
-- **Orchestrator**: owns PR setup, scope, lens selection, final decisions, GitHub artifacts, gate scheduling, and the report. It does not independently re-review the diff.
-- **Reviewers**: one read-only `reviewer` agent per selected lens. Every reviewer reads the full diff but reports only its lens.
-- **Workers**: consume self-contained block threads and implement the smallest fixes. Batch compatible findings by owning surface; parallelize only disjoint file sets.
+## Setup and scope
 
-Independent reviewers are required for every fan-out this contract calls for. If worker subagents are unavailable, the orchestrator may implement already-decided fixes, but it must not replace a required independent review with self-review.
+- Work on a draft PR in a dedicated worktree; use new commits only.
+- Read `.agents/review/decisions.md` when present.
+- Post a scope comment containing **intent**, **threat model**, **out of scope**, and the selected lenses. Its timestamp starts the cycle.
+- Ask about splitting only when the PR contains independent product outcomes, not merely a large coherent diff.
 
-## Setup
+## Lens fan-out
 
-1. Check whether the PR contains independent product themes. Do not pause merely because the diff is large or has several technical concerns. Ask about splitting only when the split changes the intended product outcome or merge plan; otherwise continue with one cycle and make the lenses explicit.
-2. Run on a PR in a repository you control, in a dedicated worktree. Create a draft PR for uncommitted work. Never amend or force-push published review history.
-3. Keep the PR draft while the cycle owns it. The final report marks it ready; an unavoidable `ask` keeps it draft.
-4. Read `.agents/review/decisions.md` when present.
-5. Post the scope contract before the baseline gate. Its GitHub timestamp is the cycle start.
+Independent reviewers preserve attention, but every lens must own a distinct material failure class. Every reviewer reads the full diff and reports only its charter.
 
-## Scope contract and lens economy
-
-The scope comment freezes:
-
-- **Intent**: the concrete outcome this diff is meant to deliver.
-- **Threat model**: who runs it, whose inputs or data it handles, and what breakage, leakage, corruption, delay, or cost matters.
-- **Lenses**: non-overlapping reviewer charters selected by the policy below, including explicit exclusions.
-- **Out of scope**: adjacent improvements that must not be pulled into the fix round.
-
-A lens earns a reviewer slot only when removing it would leave a named material failure class without a primary owner. Merge lenses that would inspect the same surfaces for the same kind of failure. Tests, documentation, naming, style, architecture, and maintainability are not automatic standalone lenses; fold them into the behavioral or risk lens whose invariant they support. Premise and catch-all normally share one integration lens rather than consuming two slots.
-
-Use this bounded scale for the full review:
-
-| Diff shape | Lenses |
+| Diff | Full-review lenses |
 | --- | ---: |
-| Markdown, comments, or static copy only | 1 |
-| Ordinary behavioral code or configuration | 2 |
-| One independently high-risk family or a large cross-subsystem change | 3 |
-| Several genuinely independent high-risk families | 4 maximum |
+| Prose, comments, or static copy only | 1 |
+| Ordinary behavior or configuration | 2 |
+| One high-risk family or a large cross-subsystem change | 3 |
+| Several independent high-risk families | 4 maximum |
 
-For ordinary behavioral changes, the default pair is:
+The ordinary pair is:
 
-1. **Behavior and invariants** — correctness, error paths, edge cases, state transitions, and whether tests protect the claimed behavior.
-2. **Premise and integration** — whether the change solves the right problem and preserves cross-file, architecture, compatibility, operational, and otherwise unowned material contracts; this lens carries catch-all responsibility.
+1. **Behavior and invariants** — correctness, error paths, state transitions, edge cases, and meaningful test coverage.
+2. **Premise and integration** — whether the change solves the right problem and preserves cross-file, architecture, compatibility, and operational contracts; it also owns catch-all coverage.
 
-Add a specialized lens only for an independently high-risk family such as authorization, data integrity/concurrency, deployment provenance, untrusted external or AI output, or interaction/accessibility when that family is central to the diff. A specialized lens may replace part of a default charter instead of always adding another agent.
+Add a specialized lens only when a central family such as authorization, data integrity/concurrency, deployment provenance, untrusted output, or complex interaction/accessibility would otherwise lack an owner. Give lenses explicit exclusions. Every lens after the second needs a one-line justification.
 
-Every lens after the second needs a one-line justification in the scope comment naming the failure class that would otherwise lack a primary owner. Four is a hard cap. If five lenses appear necessary, merge overlapping charters or revisit whether the PR contains independent product themes.
+## Baseline and review
 
-## Deterministic baseline
+Reuse a successful equivalent exact-head CI gate; otherwise run the repository gate once. Fix only PR-introduced mechanical failures before review and record base-preexisting failures.
 
-Use an already-successful exact-head required CI gate when it is equivalent to the repository's deterministic gate. Otherwise run the local deterministic gate once before review. Do not repeat an equivalent baseline locally and remotely.
+Run `review-pass` over the PR base → initial head with the scope, gate result, decisions registry, lenses, and any explicit model override. Retry skipped lenses once; if coverage is still incomplete, stop with the execution blocker.
 
-Fix purely mechanical failures before the review only when they were introduced by the PR. Record a clearly base-preexisting failure instead of expanding scope to repair it.
+Each finding has one final decision:
 
-## Review pass
+- **block** — demonstrated, in scope, material under the threat model, and worth stopping this merge.
+- **defer** — real but outside this PR or below the merge bar.
+- **discard** — refuted, speculative, already accepted, or too low-value to schedule.
+- **ask** — a durable product or architecture choice remains genuinely unresolved and choosing wrongly would be expensive to reverse.
 
-Invoke the saved workflow over the full PR diff:
+Merge duplicate findings while preserving every reporting lens.
 
-```text
-Workflow({ name: 'review-pass', args: {
-  passKind: 'review',
-  baseRef: '<PR base branch>',
-  gateStatus,
-  decisions,
-  intent,
-  threatModel,
-  lenses: [{ key, charter, exclusions, notes }]
-} })
-```
+## Autonomy
 
-Without the Workflow tool, spawn one `reviewer` subagent per lens in parallel with the same contracts. A non-empty `skippedLenses` result is a partial fan-out: retry only those lenses once. If any still cannot run, stop with the execution blocker rather than silently accepting reduced coverage.
+Continue without asking about inferable implementation details, reversible product choices, naming or copy, local refactors, test shape inside existing infrastructure, or optional machinery that can be deferred. Choose the simplest in-scope option and record any durable assumption.
 
-Each merged finding has one final `decision`: `block`, `defer`, `discard`, or `ask`, plus impact, evidence status, lens attribution, failure scenario, and suggested verification. There is no reviewer severity followed by a second disposition taxonomy. When several lenses independently report the same finding, preserve every lens attribution and merge the duplicate before creating work.
+Use `ask` only when the request, code, tests, and decisions registry do not choose between materially different durable outcomes involving product semantics, data or wire contracts, broad ownership/lifecycle boundaries, or foundational architecture. Collect all unavoidable questions into one decision brief and one pause.
 
-## Autonomous decision policy
+## Fixes and tests
 
-Continue without user input for implementation choices, reversible product details, naming or copy within established intent, test strategy inside existing infrastructure, local refactors, and adjacent machinery that can be deferred.
+Create one self-contained review thread per `block`, then dispatch the smallest sensible worker batches. A worker reproduces the failure first; if it cannot, leave the thread unresolved so the orchestrator can change the decision.
 
-Use `ask` only when all of these hold:
+- Prefer a local fix, deletion, or narrower claim over new machinery.
+- Run focused checks per worker batch, not the full gate.
+- Add at most one minimal regression test per failure class, preferably by extending an existing or table-driven test.
+- The test should fail on the pre-fix behavior when practical.
+- Do not add a dependency, fixture framework, parser, generic harness, or shared guard for one finding.
+- Use browser tests only for browser-specific behavior.
+- Mechanization is optional; `none` is normal.
 
-1. At least two materially different product or architecture outcomes remain plausible.
-2. The request, PR, decisions registry, tests, and existing architecture do not choose between them.
-3. Choosing wrongly would be expensive to reverse because it changes a durable data or wire contract, broad ownership or lifecycle boundary, externally visible product semantics, or foundational architecture.
+Keep block threads unresolved until required verification and the final gate pass.
 
-A new dependency or subsystem is not automatically a question. Prefer a smaller fix or `defer`. Ask only when the current PR cannot be made safe without choosing that architecture.
+## Verification and stop
 
-Collect every unavoidable question discovered across the fan-out into one decision brief and one pause. State the current behavior, options and consequences, and one recommendation. Post it as a PR comment, apply `needs-clarification`, and keep the PR draft. Do not ask one question at a time.
+Review only the fix commits:
 
-For a reversible ambiguity below this bar, choose the simplest in-scope behavior, record the assumption in `.agents/review/decisions.md` when it has durable value, and list it under autonomous decisions in the report.
+- Skip fresh review for prose/static-copy deltas and isolated tests that do not change shared fixtures, schemas, workflows, seeded data, global mocks, or test infrastructure.
+- Otherwise use one targeted lens; use two only for two independent invariant families.
 
-## Decision handling
+Only an unresolved original block or a defect introduced by the fix can trigger one repair round. Base-preexisting defects are deferred or discarded.
 
-- **block**: create one self-contained review thread. It must include evidence, the concrete failure scenario, and the minimal suggested verification. Only block threads enter the current fix round.
-- **defer**: keep it out of this PR. File a `deferred-finding` issue only when the work is concrete and plausible to schedule; otherwise use `discard` rather than creating backlog noise.
-- **discard**: summarize only durable reasoning or accepted risk. Append a registry entry when it prevents the concern from recurring.
-- **ask**: follow the single-pause policy above.
+Fresh-review the repair only when it touches auth/secrets, persistence/migrations/recovery, concurrency/retries/transactions, cache identity, artifact provenance, or untrusted output crossing an authoritative or persisted boundary. Use one lens normally, two maximum. If that review finds a material defect, make one final repair and verify it mechanically only.
 
-Treat repeated instances as one failure class. The thread names the invariant and every known sibling site so one fix and one test close the class.
-
-## Fix round
-
-Post one PR review containing the block threads, then dispatch the smallest sensible worker batches. A worker first reproduces the failure against the pre-fix head. If it cannot, it leaves the thread unresolved with its evidence for the orchestrator to change to `defer` or `discard`.
-
-The fix contract is deliberately parsimonious:
-
-- Prefer deletion, narrowing, and established repository mechanisms over new abstraction or enforcement machinery.
-- Run focused checks for the touched surface after each worker batch. Do not run the full repository gate per thread or worker.
-- Add at most one minimal regression test per failure class, preferably by extending an existing test or using one table-driven case set.
-- A new test must protect behavior that would have failed on the pre-fix head; demonstrate that with the old commit, a temporary worktree, or a direct mutation/probe when practical.
-- Do not add a new dependency, fixture framework, parser, generic harness, guard subsystem, or shared test mechanism for one finding. Use the existing mechanism, make the local fix, or defer the broader machinery.
-- Do not add tests for trivial copy, static literals, type-impossible states, or examples already covered by a stronger behavioral test.
-- Browser tests are reserved for browser-specific behavior. Keep pure mappings, parsing, filenames, and payloads in fast tests.
-
-Mechanization is optional, not a tax on every finding. Add a native rule or small class-wide ratchet only when it is cheaper to maintain than repeating the review. `none` is normal.
-
-Do not resolve block threads yet. The final gate and required verification must succeed first.
-
-## Fix verification
-
-Review only the fix commits, with `baseRef` equal to the pre-fix head, and ask two questions: did each block close, and did the fix introduce a material regression?
-
-Skip fresh-eyes fix verification and use focused mechanical checks only when the delta changes exclusively:
-
-- Markdown prose, comments, or static copy; or
-- isolated tests that do not change global mocks, shared fixtures, schemas, workflows, seeded data, or test infrastructure.
-
-For every other delta, use one targeted Luna Max lens by default. Use two lenses only when the fix delta spans two independent invariant families that cannot be covered responsibly by one charter; two is the hard cap. Do not add a generic catch-all verification lens merely because the delta contains code.
-
-Invoke `review-pass` with `passKind: 'fix-verification'`, the pre-fix head as `baseRef`, and one or two delta-specific lenses. A defect reproducible on the pass base predates the fix and becomes `defer` or `discard`; only a defect introduced by the fix or an unresolved original block can trigger repair.
-
-## Repair round
-
-One worker batch repairs unresolved blocks or fix-introduced regressions. Use focused checks, not another full gate.
-
-Run fresh repair verification only when the repair touches a high-risk invariant:
-
-- authentication, authorization, tenant isolation, credentials, or secrets;
-- persistence, migrations, destructive data paths, or recovery;
-- concurrency, revisions, idempotency, retries, or transaction boundaries;
-- cache identity or reuse across requests, users, jobs, or persisted resumes;
-- deployment artifact identity, provenance, or promotion;
-- untrusted external, AI, or tool output crossing an authoritative or persisted boundary.
-
-Use one targeted Luna Max lens for the usual repair delta. A second lens is allowed only when the repair independently spans two high-risk families; two is the hard cap. For any other repair delta, the reproducer and focused checks are the verification.
-
-If repair verification finds a material defect, make one final repair and verify it mechanically. Do not run another reviewer and do not start another cycle.
-
-## Final deterministic gate
-
-After the last code change, run the full deterministic gate exactly once. If no code changed and the exact reviewed head already had a successful equivalent gate, reuse it.
-
-A gate failure caused by the cycle receives a mechanical fix and a rerun. This does not authorize another review pass. A base-preexisting failure remains explicit residual risk.
-
-After the required review and final gate succeed, post verification replies and resolve the block threads.
+After the last change, run the full deterministic gate once. Fix cycle-introduced gate failures mechanically; do not add another review pass. Resolve block threads after required verification and the final gate succeed.
 
 ## Report
 
-Post the report, then mark the PR ready for human review. Its GitHub timestamp is the cycle end. Do not claim token counts.
+Post the report and mark the PR ready, unless an `ask` remains. Include:
 
-Open with a phase table:
+- the baseline, review, fix-verification, repair-verification, and final-gate scopes and outcomes, including skipped phases;
+- actual model/effort and lens count per review pass;
+- every finding with decision, impact, lenses, and artifact link;
+- lens yield: unique and corroborated findings;
+- autonomous assumptions, tests added or extended, deferred work, residual risk, and any final repair left without fresh-eyes review;
+- total wall-clock duration from the scope comment to the report.
 
-| Phase | Scope | Reviewers | Decisions | Outcome | Artifact |
-| --- | --- | --- | --- | --- | --- |
-| Baseline gate | exact initial head | deterministic | — | reused or run | check/run |
-| Review | base → initial head | Luna Max × lens count | block/defer/discard/ask counts | fix round or clean | reviews |
-| Fix verification | pre-fix → fixed head | Luna Max × 0–2 lenses | counts | repaired, clean, or mechanically skipped | reviews/check |
-| Repair verification | pre-repair → repaired head | Luna Max × 0–2 lenses | counts | final repair, clean, or risk-skipped | reviews/check |
-| Final gate | exact final head | deterministic | — | pass/fail | check/run |
-
-Every defined phase appears, including skipped phases with the reason. Artifact timestamps define the phase windows; calculate total wall-clock time from the scope comment to this report and distinguish waiting from active work when the record shows it.
-
-Below the table include:
-
-- one-line finding index entries with decision, impact, every reporting lens, and artifact link;
-- lens yield: findings unique to each lens and findings corroborated across lenses;
-- autonomous decisions and the assumptions behind them;
-- tests added or extended, which failure class each protects, and whether any new test mechanism was introduced;
-- deferred work and residual risk;
-- whether a final repair was mechanically verified without fresh eyes;
-- the honest cycle shape: full-review lens count, fix-verification lens count, and repair-verification lens count.
-
-Then hand the merge decision to the human. Stop unconditionally.
+Then hand the merge decision to the human and stop unconditionally.
