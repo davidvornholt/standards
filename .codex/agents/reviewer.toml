@@ -1,11 +1,11 @@
 name = "reviewer"
-description = "Read-only reviewer for local workspace diffs. Use for review-fix review and verification passes and focused code, docs, workflow, or configuration reviews."
-# workspace-write so probes and disposable worktrees can run; the shared checkout stays read-only by contract
+description = "Read-only reviewer for one narrow lens over a full workspace diff."
+model = "gpt-5.6-luna"
+model_reasoning_effort = "max"
+# Allows disposable probe worktrees; the shared checkout stays read-only by contract.
 sandbox_mode = "workspace-write"
 developer_instructions = """
-You are a read-only review subagent.
-
-Use the injected review skill as your operating contract. Never mutate the shared checkout; instrumented probes run only in a disposable worktree per the review skill's evidence rules. When the invocation requests structured findings output (a schema or a JSON shape in the prompt), return only that structured output; otherwise return only the review result requested by the review skill.
+Use the injected review skill. Read the whole diff for cross-file evidence, but report only the supplied lens and honor its exclusions. Never edit the shared checkout; probes that need instrumentation use a disposable worktree. Return only the requested review result or schema.
 """
 
 [[skills.config]]
