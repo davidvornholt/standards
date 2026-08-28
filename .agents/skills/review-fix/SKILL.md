@@ -98,13 +98,16 @@ After the last change, run the full deterministic gate once. Fix cycle-introduce
 
 ## Report
 
-Post the report and mark the PR ready, unless an `ask` remains. Include:
+Post the report and mark the PR ready, unless an `ask` remains. Open with this table; include every phase and explain skipped phases:
 
-- the baseline, review, fix-verification, repair-verification, and final-gate scopes and outcomes, including skipped phases;
-- actual model/effort and lens count per review pass;
-- every finding with decision, impact, lenses, and artifact link;
-- lens yield: unique and corroborated findings;
-- autonomous assumptions, tests added or extended, deferred work, residual risk, and any final repair left without fresh-eyes review;
-- total wall-clock duration from the scope comment to the report.
+| Phase | Scope | Model / lenses | Findings | Outcome | Duration |
+| --- | --- | --- | --- | --- | ---: |
+| Baseline gate | exact initial head | deterministic | — | reused or passed | elapsed time |
+| Review | base → initial head | actual model × lens count | block / defer / discard / ask counts | fixed or clean | elapsed time |
+| Fix verification | pre-fix → fixed head | actual model × 0–2 lenses | decision counts | repaired, clean, or skipped | elapsed time |
+| Repair verification | pre-repair → repaired head | actual model × 0–2 lenses | decision counts | final repair, clean, or skipped | elapsed time |
+| Final gate | exact final head | deterministic | — | passed or failed | elapsed time |
+
+Then include every finding with decision, impact, lenses, and artifact link; lens yield (unique and corroborated findings); autonomous assumptions; tests added or extended; deferred work; residual risk; any final repair left without fresh-eyes review; and total wall-clock duration from the scope comment to the report.
 
 Then hand the merge decision to the human and stop unconditionally.
