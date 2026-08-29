@@ -112,7 +112,7 @@ Pin a released tag and, when the consumer already owns nixpkgs, make the standar
 
 ```nix
 inputs.standards = {
-  url = "github:davidvornholt/standards/v0.24.3";
+  url = "github:davidvornholt/standards/v0.24.4";
   inputs.nixpkgs.follows = "nixpkgs";
 };
 
@@ -136,6 +136,10 @@ in
   systemd.user.services.standards-poller-acknowledgements.path = pollerPath;
 }
 ```
+
+### Breaking migration to 0.24.4
+
+Version 0.24.4 replaces the Bun-only `dev-env` value encoding with syntax that Bun and Node parse identically. Generated `.env.local` files no longer wrap ordinary values in `${:-}` and a trailing `#`, so Node-based framework loaders such as Nitro receive the declared value instead of the wrapper text. Values containing `$`, carriage returns, null bytes, or delimiter combinations that have no lossless shared representation now fail validation before any generated file changes. Replace such values with parser-portable credentials or configuration before upgrading. Regenerate every workspace's `.env.local` after installing 0.24.4.
 
 ### Breaking migration to workflow-writing Standards sync
 

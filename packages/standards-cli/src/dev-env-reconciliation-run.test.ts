@@ -66,7 +66,7 @@ describe('dev env reconciliation command', () => {
 
     expect(
       readFileSync(join(consumer, 'apps/web/.env.local'), 'utf8'),
-    ).toContain('3000#');
+    ).toContain('PORT=3000');
     expect(existsSync(join(consumer, 'packages/db/.env.local'))).toBe(false);
     const output = log.mock.calls.flat().join('\n');
     expect(output).toContain('wrote apps/web/.env.local');

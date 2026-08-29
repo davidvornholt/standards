@@ -11,7 +11,6 @@ const secretsOnly = (raw: unknown): DevEnvInputs => ({
   local: null,
 });
 
-const EMPTY_EXPANSION = ['$', '{:-}'].join('');
 const INVALID_WORKSPACE_COUNT = 4;
 
 const buildConsumer = (options?: {
@@ -46,9 +45,7 @@ describe('dev env plan', () => {
       expect(plan.writes.map((write) => write.rel)).toEqual([
         'apps/web/.env.local',
       ]);
-      expect(plan.writes[0]?.content).toContain(
-        `AUTH_SECRET=${EMPTY_EXPANSION}dev-secret#`,
-      );
+      expect(plan.writes[0]?.content).toContain('AUTH_SECRET=dev-secret');
     } finally {
       cleanup(consumer);
     }

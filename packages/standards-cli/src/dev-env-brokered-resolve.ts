@@ -6,7 +6,7 @@
 import { resolveTargetRelResult } from './creds-target';
 import type { BrokeredS3Reference } from './dev-env-brokered';
 import type { ComposedDevEnvTarget } from './dev-env-compose';
-import { encodeBunDotenvValue } from './dev-env-dotenv-value';
+import { encodePortableDotenvValue } from './dev-env-dotenv-value';
 import { isRecord } from './github-settings-parse';
 import { runSops } from './sops-exec';
 
@@ -124,10 +124,10 @@ export const resolveBrokeredReferences = (
     if (lookup.value === null) {
       return { value: null, problem: `${label}: ${lookup.problem}` };
     }
-    if (encodeBunDotenvValue(lookup.value) === null) {
+    if (encodePortableDotenvValue(lookup.value) === null) {
       return {
         value: null,
-        problem: `${label}: resolved value cannot be represented losslessly in Bun dotenv syntax`,
+        problem: `${label}: resolved value cannot be represented losslessly in portable dotenv syntax`,
       };
     }
     return { value: lookup.value, problem: null };

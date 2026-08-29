@@ -16,7 +16,7 @@ import {
   BROKERED_REFERENCES_KEY,
   parseBrokeredAllowlist,
 } from './dev-env-brokered-allowlist';
-import { encodeBunDotenvValue } from './dev-env-dotenv-value';
+import { encodePortableDotenvValue } from './dev-env-dotenv-value';
 import { isRecord } from './github-settings-parse';
 
 export type DevEnvValue = string | BrokeredS3Reference;
@@ -57,11 +57,11 @@ const parseWorkspaceValue = (
   readonly problems: ReadonlyArray<string>;
 } => {
   if (typeof value === 'string') {
-    return encodeBunDotenvValue(value) === null
+    return encodePortableDotenvValue(value) === null
       ? {
           value: null,
           problems: [
-            `${label}.${key} cannot be represented losslessly in Bun dotenv syntax`,
+            `${label}.${key} cannot be represented losslessly in portable dotenv syntax`,
           ],
         }
       : { value, problems: [] };

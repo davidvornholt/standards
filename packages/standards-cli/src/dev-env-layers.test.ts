@@ -5,8 +5,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { planDevEnvChanges } from './dev-env';
 
-const EMPTY_EXPANSION = ['$', '{:-}'].join('');
-
 const buildConsumer = (): string => {
   const consumer = mkdtempSync(join(tmpdir(), 'dev-env-layers-'));
   spawnSync('git', ['init', '--quiet', consumer]);
@@ -34,8 +32,8 @@ describe('dev env layered plan', () => {
       expect(content).toContain(
         '# Sources: config/dev.yaml + secrets/dev.yaml + config/dev.local.yaml (apps.web)',
       );
-      expect(content).toContain(`PORT=${EMPTY_EXPANSION}3100#`);
-      expect(content).toContain(`AUTH_SECRET=${EMPTY_EXPANSION}shared#`);
+      expect(content).toContain('PORT=3100');
+      expect(content).toContain('AUTH_SECRET=shared');
     } finally {
       cleanup(consumer);
     }
