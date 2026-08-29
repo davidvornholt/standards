@@ -71,6 +71,17 @@ describe('canonical dev database inputs', () => {
     }
   });
 
+  it('reports an absent container without requiring a database version', () => {
+    const value = fixture('acme');
+    write(value.root, 'package.json', '{"name":"acme"}');
+    const result = run(value, 'dev-db-status');
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('acme-dev-postgres: not created');
+    expect(calls(value)).toBe(
+      `${JSON.stringify(['container', 'exists', value.name])}\n`,
+    );
+  });
+
   it('runs the declared major with its official data mount layout', () => {
     for (const [version, destination] of [
       ['17', '/var/lib/postgresql/data'],

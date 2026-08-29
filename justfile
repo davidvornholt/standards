@@ -53,11 +53,11 @@ _dev-db-action action:
     if (!safeName.test(repo) || (scopedName !== null && !safeName.test(scopedName[2] ?? ''))) fail(`The root package name ${JSON.stringify(manifest.name)} cannot produce a safe Podman container name.`);
     const name = `${repo}-dev-postgres`;
     const volume = `${name}-data`;
-    const postgresVersion = manifest?.devDatabase?.postgresVersion;
-    if (typeof postgresVersion !== 'string' || !/^[1-9]\d*$/u.test(postgresVersion)) fail('The root package.json must declare a PostgreSQL major version as a string, such as "devDatabase": { "postgresVersion": "18" }. Declare the major version your production database runs, so dev and production cannot drift apart.');
-    const image = `docker.io/library/postgres:${postgresVersion}`;
-    const parentDataLayoutVersion = 18;
-    const dataDestination = Number(postgresVersion) >= parentDataLayoutVersion ? '/var/lib/postgresql' : '/var/lib/postgresql/data';
+    const readPostgresVersion = () => {
+      const postgresVersion = manifest?.devDatabase?.postgresVersion;
+      if (typeof postgresVersion !== 'string' || !/^[1-9]\d*$/u.test(postgresVersion)) fail('The root package.json must declare a PostgreSQL major version as a string, such as "devDatabase": { "postgresVersion": "18" }. Declare the major version your production database runs, so dev and production cannot drift apart.');
+      return postgresVersion;
+    };
     const decode = (value, field) => {
       try {
         const decoded = decodeURIComponent(value);
@@ -127,9 +127,14 @@ _dev-db-action action:
     };
     if (!['start', 'stop', 'status'].includes(action)) fail(`Unsupported internal dev-db action: ${action}`);
     const connection = action === 'start' ? await readConnection() : undefined;
+    const declaredPostgresVersion = action === 'start' ? readPostgresVersion() : undefined;
     const present = exists();
     if (!present && action === 'stop') { console.log(`No managed container named ${name} exists.`); process.exit(0); }
     if (!present && action === 'status') { console.log(`${name}: not created. Run \`just dev-db-start\`.`); process.exit(0); }
+    const postgresVersion = declaredPostgresVersion ?? readPostgresVersion();
+    const image = `docker.io/library/postgres:${postgresVersion}`;
+    const parentDataLayoutVersion = 18;
+    const dataDestination = Number(postgresVersion) >= parentDataLayoutVersion ? '/var/lib/postgresql' : '/var/lib/postgresql/data';
     if (action === 'start') {
       if (!present) {
         const created = podman(['run', '-d', '--name', name, '--label', `${ownershipLabel}=true`, '-e', `POSTGRES_USER=${connection.user}`, '-e', `POSTGRES_PASSWORD=${connection.password}`, '-e', `POSTGRES_DB=${connection.database}`, '-p', `127.0.0.1:${connection.port}:5432`, '-v', `${volume}:${dataDestination}`, image]);
