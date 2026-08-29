@@ -102,7 +102,7 @@ describe('dev env document', () => {
     ]);
   });
 
-  it('rejects values Bun dotenv cannot represent without changing bytes', () => {
+  it('rejects values portable dotenv cannot represent without changing bytes', () => {
     const document = parseDevEnvDocument(
       { apps: { web: { VALID: '\\\n', INVALID: '\\\r' } } },
       'secrets/dev.yaml',
@@ -110,7 +110,7 @@ describe('dev env document', () => {
     );
 
     expect(document.problems).toEqual([
-      'secrets/dev.yaml "apps.web".INVALID cannot be represented losslessly in Bun dotenv syntax',
+      'secrets/dev.yaml "apps.web".INVALID cannot be represented losslessly in portable dotenv syntax',
     ]);
     expect(document.targets).toEqual([
       {

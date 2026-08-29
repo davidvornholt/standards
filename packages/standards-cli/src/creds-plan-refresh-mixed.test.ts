@@ -10,8 +10,6 @@ import {
 } from './creds-plan-refresh-mixed-test-support';
 import { runCredsPlan } from './creds-plan-run';
 
-const EMPTY_EXPANSION = ['$', '{:-}'].join('');
-
 afterEach(cleanupRefreshMixedFixture);
 
 describe('creds apply destination-granular dev env refresh', () => {
@@ -39,10 +37,8 @@ describe('creds apply destination-granular dev env refresh', () => {
 
     expect(await runCredsPlan(setup.consumer, true)).toBe(false);
     const generated = readFileSync(setup.destination, 'utf8');
-    expect(generated).toContain(`BAD_ACCESS_KEY_ID=${EMPTY_EXPANSION}old-bad#`);
-    expect(generated).toContain(
-      `GOOD_ACCESS_KEY_ID=${EMPTY_EXPANSION}new-good#`,
-    );
+    expect(generated).toContain('BAD_ACCESS_KEY_ID=old-bad');
+    expect(generated).toContain('GOOD_ACCESS_KEY_ID=new-good');
     expect(generated).not.toContain('concurrent-bad');
     expect(refreshMixedCloudflareCalls()).toContain('delete-new-bad');
     expect(refreshMixedCloudflareCalls()).toContain('delete-old-good');
@@ -57,10 +53,8 @@ describe('creds apply destination-granular dev env refresh', () => {
 
     expect(await runCredsPlan(setup.consumer, true)).toBe(false);
     const generated = readFileSync(setup.destination, 'utf8');
-    expect(generated).toContain(`BAD_ACCESS_KEY_ID=${EMPTY_EXPANSION}old-bad#`);
-    expect(generated).toContain(
-      `GOOD_ACCESS_KEY_ID=${EMPTY_EXPANSION}new-good#`,
-    );
+    expect(generated).toContain('BAD_ACCESS_KEY_ID=old-bad');
+    expect(generated).toContain('GOOD_ACCESS_KEY_ID=new-good');
     expect(refreshMixedCloudflareCalls()).not.toContain('create-bad');
     expect(refreshMixedCloudflareCalls()).toContain('delete-old-good');
   });
