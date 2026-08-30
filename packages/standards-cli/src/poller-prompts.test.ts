@@ -37,6 +37,7 @@ describe('poller GitHub access contract', () => {
     expect(prompt).toContain(
       'Search the complete target for that marker before creating',
     );
+    expect(prompt).toContain('You may post block review threads');
     expect(prompt).toContain('do not reply to or resolve them');
     expect(prompt).toContain('"threadsToResolve"');
     expect(prompt).toContain(
@@ -44,6 +45,7 @@ describe('poller GitHub access contract', () => {
     );
     expect(prompt).toContain('Keep the PR draft');
     expect(prompt).not.toContain('There is no GitHub access.');
+    expect(prompt).not.toContain('fix-now review threads');
   });
 
   it('keeps an approved fix issue immutable while allowing GitHub collaboration', () => {
@@ -70,7 +72,7 @@ describe('poller GitHub access contract', () => {
     );
   });
 
-  it('hands clarifications back to the poller without GitHub writes or waiting', () => {
+  it('hands only unavoidable decisions back to the poller without GitHub writes or waiting', () => {
     const prompt = reviewPrompt({
       repo: 'owner/repo',
       prNumber: 143,
@@ -82,9 +84,13 @@ describe('poller GitHub access contract', () => {
     });
 
     expect(prompt).toContain(
-      'Override every review-fix skill instruction to publish or wait on a clarification',
+      'Override every review-fix skill instruction to publish or wait on an ask decision',
     );
+    expect(prompt).toContain('strict ask bar is met');
     expect(prompt).toContain('do not comment, label, wait, or poll GitHub');
     expect(prompt).toContain('Write status "question"');
+    expect(prompt).toContain(
+      'Do not hand reversible or inferable choices back to the maintainer.',
+    );
   });
 });

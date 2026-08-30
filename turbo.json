@@ -30,6 +30,7 @@
         "$TURBO_ROOT$/.agents/skills/review/**",
         "$TURBO_ROOT$/.agents/skills/review-fix/**",
         "$TURBO_ROOT$/.agents/skills/standards-sync/**",
+        "$TURBO_ROOT$/.agents/skills/unslop/**",
         "$TURBO_ROOT$/.agents/skills/ux-ui/**",
         "$TURBO_ROOT$/.claude/skills/**",
         "$TURBO_ROOT$/.claude/agents/reviewer.md",

@@ -6,7 +6,8 @@
   "exports": {
     "./base": "./base.json",
     "./next": "./next.json",
-    "./react-library": "./react-library.json"
+    "./react-library": "./react-library.json",
+    "./tanstack-start": "./tanstack-start.json"
   },
   "scripts": {
     "lint": "biome check --error-on-warnings .",

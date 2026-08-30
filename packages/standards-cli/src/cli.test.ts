@@ -38,6 +38,8 @@ const STANDARDS_WORKFLOW = join(
   ACTUAL_UPSTREAM,
   '.github/workflows/standards.yml',
 );
+const QUALITY_POSTGRES_IMAGE =
+  'public.ecr.aws/docker/library/postgres:18-alpine';
 const NOTIFY_WORKFLOW = join(
   ACTUAL_UPSTREAM,
   '.github/workflows/notify-pause.yml',
@@ -310,6 +312,22 @@ const parseWorkflow = (path: string): ParsedWorkflow => {
   return workflow as ParsedWorkflow;
 };
 
+const assertQualityPostgresImage = (workflow: ParsedWorkflow): void => {
+  const { services } = workflow.jobs.quality;
+  if (typeof services !== 'object' || services === null) {
+    throw new Error('Quality job must contain a services mapping');
+  }
+  const { postgres } = services as Record<string, unknown>;
+  if (typeof postgres !== 'object' || postgres === null) {
+    throw new Error('Quality job must contain a Postgres service mapping');
+  }
+  if ((postgres as Record<string, unknown>).image !== QUALITY_POSTGRES_IMAGE) {
+    throw new Error(
+      `Quality Postgres service must use ${QUALITY_POSTGRES_IMAGE}`,
+    );
+  }
+};
+
 const qualityStep = (workflow: ParsedWorkflow, name: string): WorkflowStep => {
   const step = workflowSteps(workflow.jobs.quality, 'quality').find(
     (candidate) => candidate.name === name,
@@ -395,7 +413,7 @@ const assertQualityCacheContract = (workflow: ParsedWorkflow): void => {
     {
       name: 'Restore the Turbo cache',
       id: 'turbo-cache',
-      uses: 'actions/cache/restore@v4',
+      uses: 'actions/cache/restore@v6',
       with: {
         path: '.turbo/cache',
         key: TURBO_CACHE_KEY,
@@ -405,7 +423,7 @@ const assertQualityCacheContract = (workflow: ParsedWorkflow): void => {
     {
       name: 'Restore the Bun package cache',
       id: 'bun-cache',
-      uses: 'actions/cache/restore@v4',
+      uses: 'actions/cache/restore@v6',
       with: {
         path: BUN_CACHE_PATH,
         key: BUN_CACHE_KEY,
@@ -416,7 +434,7 @@ const assertQualityCacheContract = (workflow: ParsedWorkflow): void => {
       name: 'Restore the Playwright browser cache',
       if: "steps.a11y.outputs.present == 'true'",
       id: 'playwright-cache',
-      uses: 'actions/cache/restore@v4',
+      uses: 'actions/cache/restore@v6',
       with: {
         path: PLAYWRIGHT_CACHE_PATH,
         key: PLAYWRIGHT_CACHE_KEY,
@@ -426,19 +444,19 @@ const assertQualityCacheContract = (workflow: ParsedWorkflow): void => {
     {
       name: 'Save the Bun package cache',
       if: BUN_CACHE_SAVE_CONDITION,
-      uses: 'actions/cache/save@v4',
+      uses: 'actions/cache/save@v6',
       with: { path: BUN_CACHE_PATH, key: BUN_CACHE_KEY },
     },
     {
       name: 'Save the Playwright browser cache',
       if: PLAYWRIGHT_CACHE_SAVE_CONDITION,
-      uses: 'actions/cache/save@v4',
+      uses: 'actions/cache/save@v6',
       with: { path: PLAYWRIGHT_CACHE_PATH, key: PLAYWRIGHT_CACHE_KEY },
     },
     {
       name: 'Save the Turbo cache',
       if: TURBO_CACHE_SAVE_CONDITION,
-      uses: 'actions/cache/save@v4',
+      uses: 'actions/cache/save@v6',
       with: { path: '.turbo/cache', key: TURBO_CACHE_KEY },
     },
   ];
@@ -613,7 +631,7 @@ const canonicalWorkflowPaths = (
 // This merge-time ratchet keeps configurable routing on the exact compatible
 // canonical jobs. It catches accidental workflow drift after review; it does
 // not authorize a request before CodeBuild starts a runner for the queued job.
-const CONFIGURABLE_RUNNER_VARIABLE_OCCURRENCES = 13;
+const CONFIGURABLE_RUNNER_VARIABLE_OCCURRENCES = 14;
 const QUALITY_JOB_NAME = 'quality';
 const CODEBUILD_JOB_TIMEOUT_MINUTES = 30;
 const NOTIFY_JOB_TIMEOUT_MINUTES = 5;
@@ -622,7 +640,7 @@ const CODEBUILD_RUNNER = githubExpression(
   "vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-small', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || 'ubuntu-latest'",
 );
 const QUALITY_RUNNER = githubExpression(
-  "vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-medium', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || vars.CI_RUNNER || 'ubuntu-latest'",
+  "vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-{3}', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt, vars.CI_CODEBUILD_QUALITY_SIZE || 'medium') || vars.CI_RUNNER || 'ubuntu-latest'",
 );
 const QUALITY_TIMEOUT_MINUTES = 30;
 const CONFIGURABLE_RUNNER_CONTRACTS = {
@@ -699,7 +717,9 @@ const inspectCanonicalWorkflowRunnerBoundaries = (
     const absolutePath = join(upstream, workflowPath);
     const workflow = readFileSync(absolutePath, 'utf8');
     configurableRunnerOccurrences +=
-      workflow.match(/vars\.(?:CI_CODEBUILD_PROJECT|CI_RUNNER)/gu)?.length ?? 0;
+      workflow.match(
+        /vars\.(?:CI_CODEBUILD_PROJECT|CI_CODEBUILD_QUALITY_SIZE|CI_RUNNER)/gu,
+      )?.length ?? 0;
     for (const [jobName, job] of Object.entries(yamlJobs(absolutePath))) {
       const id = `${workflowPath}:${jobName}`;
       if (id in CONFIGURABLE_RUNNER_CONTRACTS) {
@@ -735,7 +755,8 @@ const assertFixedRunnerJobsDoNotUseConfigurableRunner = (
     .filter(
       ({ definition }) =>
         definition.includes('vars.CI_RUNNER') ||
-        definition.includes('vars.CI_CODEBUILD_PROJECT'),
+        definition.includes('vars.CI_CODEBUILD_PROJECT') ||
+        definition.includes('vars.CI_CODEBUILD_QUALITY_SIZE'),
     )
     .map(({ id }) => id);
   if (violations.length > 0) {
@@ -1575,6 +1596,10 @@ describe('structure', () => {
       'extends array',
       '{"extends":["./generated.json","@davidvornholt/typescript-config/next"]}',
     ],
+    [
+      'tanstack-start preset',
+      '{"extends":"@davidvornholt/typescript-config/tanstack-start"}',
+    ],
   ])('accepts canonical inheritance through a %s', (_label, tsconfig) => {
     const { consumer } = initConsumer(buildUpstream());
     write(consumer, 'apps/web/tsconfig.json', tsconfig);
@@ -2312,6 +2337,26 @@ describe('canonical standards workflow security boundaries', () => {
   });
 });
 
+describe('canonical standards workflow Postgres service', () => {
+  it('requires the public ECR Docker Library image', () => {
+    expect(() =>
+      assertQualityPostgresImage(parseWorkflow(STANDARDS_WORKFLOW)),
+    ).not.toThrow();
+
+    const dockerHubWorkflow = structuredClone(
+      parseWorkflow(STANDARDS_WORKFLOW),
+    );
+    const { services } = dockerHubWorkflow.jobs.quality as {
+      readonly services: Record<string, Record<string, unknown>>;
+    };
+    services.postgres = { ...services.postgres, image: 'postgres:18-alpine' };
+
+    expect(() => assertQualityPostgresImage(dockerHubWorkflow)).toThrow(
+      `Quality Postgres service must use ${QUALITY_POSTGRES_IMAGE}`,
+    );
+  });
+});
+
 const SETTINGS_CHECK_STEP_NAMES = [
   'Checkout settings inputs',
   'Install pinned settings checker',
@@ -2752,6 +2797,10 @@ it('rejects stale and untrusted cache action mutations', () => {
           "github.ref == 'refs/heads/main' && '' || format('playwright-{0}-{1}-', runner.os, runner.arch)",
         ),
       };
+    },
+    (workflow) => {
+      qualityStep(workflow, 'Restore the Turbo cache').uses =
+        'actions/cache/restore@v4';
     },
     (workflow) => {
       qualityStep(workflow, 'Restore the Turbo cache').uses =
@@ -3213,6 +3262,9 @@ describe('canonical quality runner merge-time ratchet', () => {
       ),
       githubExpression(
         "vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{1}-{0}-{2}', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || vars.CI_RUNNER || 'ubuntu-latest'",
+      ),
+      githubExpression(
+        "vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-{3}', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt, vars.CI_CODEBUILD_QUALITY_SIZE) || vars.CI_RUNNER || 'ubuntu-latest'",
       ),
     ];
     const mutations: ReadonlyArray<(workflow: ParsedWorkflow) => void> = [

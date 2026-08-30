@@ -54,7 +54,7 @@ Teardown is event-complete; every path that ends a preview's usefulness destroys
 - Build failed, cancelled, or timed out → destroy, so a stale preview never outlives a broken head. A *skipped* build must not trigger this — skipped means no preview was requested, and destroying on `conclusion != 'success'` would fire on every unlabeled PR.
 - Post-deploy verification (`curl --retry` against the public URL) failed → the deploy destroys its own preview and reports failure rather than leaving a half-alive environment behind.
 
-Every deploy and destroy upserts a single PR comment with the preview URL and state. A daily host timer prunes unused preview images (`podman image prune --filter until=168h`).
+Every successful deploy upserts a single PR comment with the preview URL and state. A failed deploy reports its failure state and source without claiming a live URL. A destroy updates that comment when it exists but does not create one. Idempotent cleanup for a PR that never requested a preview is not preview activity and stays silent; the workflow run still reports cleanup failures. A daily host timer prunes unused preview images (`podman image prune --filter until=168h`).
 
 ## DNS
 

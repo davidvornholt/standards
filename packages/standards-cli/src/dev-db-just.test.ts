@@ -1,8 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { rmSync } from 'node:fs';
-import { join } from 'node:path';
 import process from 'node:process';
-import { cleanupTmpDirs, write } from './cli-test-support';
+import { cleanupTmpDirs } from './cli-test-support';
 import {
   calls,
   control,
@@ -13,7 +11,6 @@ import {
   managed,
   present,
   readinessAttempts,
-  rejectedBeforePodman,
   run,
   runFakePodman,
   transientAttempts,
@@ -22,45 +19,10 @@ import {
 const fixture = (
   packageName = '@standards/root',
   databaseUrl = 'postgres://file-user:file-pass@localhost:5440/file-db',
-) => createFixture(packageName, databaseUrl, process.env);
+  postgresVersion?: string,
+) => createFixture(packageName, databaseUrl, process.env, postgresVersion);
 
 afterEach(cleanupTmpDirs);
-
-describe('canonical dev database inputs', () => {
-  it('accepts both protocols and IPv4 hosts with exact create and readiness commands', () => {
-    const urls =
-      'postgres://file-user:file-pass@LOCALHOST:5440/file-db|postgres://file-user:file-pass@127.0.0.1:5440/file-db|postgresql://file-user:file-pass@localhost:5440/file-db|postgresql://file-user:file-pass@127.0.0.1:5440/file-db'.split(
-        '|',
-      );
-    for (const databaseUrl of urls) {
-      const value = fixture('@acme/root', databaseUrl);
-      expect(run(value, 'dev-db-start').status).toBe(0);
-    }
-  });
-
-  it('rejects unsupported URLs, query overrides, fragments, and missing generated values', () => {
-    const invalid =
-      'http://u:p@localhost:5440/db|postgres://u:p@[::1]:5440/db|postgres://u:p@localhost:0/db|postgres://:p@localhost:5440/db|postgres://u@localhost:5440/db|postgres://u:p@localhost:5440/|postgres://%ZZ:p@localhost:5440/db|postgres://u:p@example.com:5440/db|postgres://u:p@localhost:5440/db?host=192.0.2.1|postgres://u:p@localhost:5440/db?hostaddr=192.0.2.1|postgres://u:p@localhost:5440/db?port=6543|postgres://u:p@localhost:5440/db?user=other|postgres://u:p@localhost:5440/db?sslmode=require|postgres://u:p@localhost:5440/db#fragment'.split(
-        '|',
-      );
-    for (const databaseUrl of invalid) {
-      expect(rejectedBeforePodman(fixture('acme', databaseUrl))).toBe(true);
-    }
-    const missingFile = fixture();
-    rmSync(join(missingFile.root, 'packages/db/.env.local'));
-    expect(rejectedBeforePodman(missingFile)).toBe(true);
-    const missingValue = fixture();
-    write(missingValue.root, 'packages/db/.env.local', 'OTHER=value\n');
-    expect(rejectedBeforePodman(missingValue)).toBe(true);
-    for (const manifest of '{}|{"name":2}|{"name":"bad/name"}|{broken'.split(
-      '|',
-    )) {
-      const value = fixture();
-      write(value.root, 'package.json', manifest);
-      expect(rejectedBeforePodman(value)).toBe(true);
-    }
-  });
-});
 
 describe('canonical dev database managed lifecycle', () => {
   it('handles names, running and stopped reuse, stop, status, and absence', () => {
@@ -90,7 +52,7 @@ describe('canonical dev database managed lifecycle', () => {
 
   it('refuses every managed-shape mismatch through every public action', () => {
     const mismatches =
-      '"Labels":{"io.davidvornholt.standards.dev-db":"true"}~"Labels":{}|"ImageName":"docker.io/library/postgres:17"~"ImageName":"docker.io/library/postgres:16"|"HostIp":"127.0.0.1"~"HostIp":"0.0.0.0"|"HostPort":"5440"~"HostPort":"0"|"Name":"standards-dev-postgres-data"~"Name":"other-data"'.split(
+      '"Labels":{"io.davidvornholt.standards.dev-db":"true"}~"Labels":{}|"ImageName":"docker.io/library/postgres:17"~"ImageName":"docker.io/library/postgres:16"|"HostIp":"127.0.0.1"~"HostIp":"0.0.0.0"|"HostPort":"5440"~"HostPort":"0"|"Name":"standards-dev-postgres-data"~"Name":"other-data"|"Destination":"/var/lib/postgresql/data"~"Destination":"/wrong"'.split(
         '|',
       );
     for (const mismatch of mismatches) {

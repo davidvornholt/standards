@@ -1,6 +1,9 @@
 keys:
-  # Standalone age identity at ~/.config/sops/age/keys.txt.
-  - &david-z890-fedora age1gxzu2f027zu227f4wyf4jh5sw0w495482qfzv5flmfyjvgzxm3ys8p9muz
+  # Standalone age identity on david-z890-nixos at ~/.config/sops/age/keys.txt.
+  - &david-z890-nixos age1gxzu2f027zu227f4wyf4jh5sw0w495482qfzv5flmfyjvgzxm3ys8p9muz
+
+  # Standalone age identity on david-x1-nixos at ~/.config/sops/age/keys.txt.
+  - &david-x1-nixos age1cgudsv52h62snquglvayft2n4ck522x4at5aja57un06w9w0gszqzfqtce
 
   # Standalone age identity on david-debian.
   - &david-debian age1j4lkxpdweugkfz900u023kx8p6k7yuhdp8jmxthj0qse3w6ahfesyqnj96
@@ -12,12 +15,14 @@ creation_rules:
   - path_regex: secrets/dev\.yaml$
     key_groups:
       - age:
-          - *david-z890-fedora
+          - *david-z890-nixos
+          - *david-x1-nixos
           - *david-debian
 
   - path_regex: secrets/ci\.yaml$
     key_groups:
       - age:
-          - *david-z890-fedora
+          - *david-z890-nixos
+          - *david-x1-nixos
           - *david-debian
           - *github_actions_ci
