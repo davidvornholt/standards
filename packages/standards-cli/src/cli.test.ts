@@ -2609,66 +2609,65 @@ describe('canonical standards workflow database resolver', () => {
       ].join('\n'),
     );
     write(fixture, 'bin/ip', '#!/bin/sh\nexit 0\n');
+    write(
+      fixture,
+      'bin/timeout',
+      [
+        '#!/bin/sh',
+        'for argument in "$@"; do',
+        '  case "$argument" in',
+        '    *127.0.0.1*|*127.0.0.2*)',
+        '      exit 0',
+        '      ;;',
+        '  esac',
+        'done',
+        'exit 1',
+        '',
+      ].join('\n'),
+    );
     chmodSync(join(fixture, 'bin/docker'), EXECUTABLE_MODE);
     chmodSync(join(fixture, 'bin/ip'), EXECUTABLE_MODE);
+    chmodSync(join(fixture, 'bin/timeout'), EXECUTABLE_MODE);
 
     const environmentPath = join(fixture, 'github-env');
     const marker = join(fixture, 'command-substitution-ran');
     const user = 'app;printf unsafe';
     const password = ['pa$$word$(touch ', marker, ')'].join('');
     const database = 'app$(printf unsafe)';
-    const listeners = [
-      globalThis.Bun.listen({
-        hostname: '127.0.0.2',
-        port: 5432,
-        socket: {
-          close: () => undefined,
-          data: () => undefined,
-          open: () => undefined,
-        },
-      }),
-    ];
+    const result = runExecutable(
+      'bash',
+      fixture,
+      [
+        '-euo',
+        'pipefail',
+        '-c',
+        yamlRunScript(STANDARDS_WORKFLOW, DATABASE_RESOLVER_STEP_NAME),
+      ],
+      {
+        ...process.env,
+        CI_POSTGRES_DB: database,
+        CI_POSTGRES_PASSWORD: password,
+        CI_POSTGRES_USER: user,
+        CODEBUILD_BUILD_ID: 'codebuild-test',
+        GITHUB_ENV: environmentPath,
+        PATH: [join(fixture, 'bin'), process.env.PATH ?? ''].join(':'),
+      },
+    );
 
-    try {
-      const result = runExecutable(
-        'bash',
-        fixture,
-        [
-          '-euo',
-          'pipefail',
-          '-c',
-          yamlRunScript(STANDARDS_WORKFLOW, DATABASE_RESOLVER_STEP_NAME),
-        ],
-        {
-          ...process.env,
-          CI_POSTGRES_DB: database,
-          CI_POSTGRES_PASSWORD: password,
-          CI_POSTGRES_USER: user,
-          CODEBUILD_BUILD_ID: 'codebuild-test',
-          GITHUB_ENV: environmentPath,
-          PATH: [join(fixture, 'bin'), process.env.PATH ?? ''].join(':'),
-        },
-      );
-
-      expect(result.status).toBe(0);
-      expect(result.stdout).toBe('Database endpoint: 127.0.0.2:5432\n');
-      expect(readFileSync(environmentPath, 'utf8')).toBe(
-        [
-          'DATABASE_URL=postgresql://',
-          user,
-          ':',
-          password,
-          '@127.0.0.2:5432/',
-          database,
-          '\n',
-        ].join(''),
-      );
-      expect(existsSync(marker)).toBe(false);
-    } finally {
-      for (const listener of listeners) {
-        listener.stop();
-      }
-    }
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('Database endpoint: 127.0.0.2:5432\n');
+    expect(readFileSync(environmentPath, 'utf8')).toBe(
+      [
+        'DATABASE_URL=postgresql://',
+        user,
+        ':',
+        password,
+        '@127.0.0.2:5432/',
+        database,
+        '\n',
+      ].join(''),
+    );
+    expect(existsSync(marker)).toBe(false);
   });
 });
 
