@@ -114,7 +114,7 @@ jobs:
           }
           candidates=()
           if [ -n "${CODEBUILD_BUILD_ID:-}" ]; then
-            service_container=$(docker ps --filter ancestor=postgres:18-alpine --format '{{.ID}}' | head -n 1)
+            service_container=$(docker ps --filter ancestor=public.ecr.aws/docker/library/postgres:18-alpine --format '{{.ID}}' | head -n 1)
             if [ -n "$service_container" ]; then
               service_networks=$(docker inspect "$service_container" \
                 --format '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{.Gateway}} {{end}}')

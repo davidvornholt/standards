@@ -2588,6 +2588,11 @@ describe('canonical standards workflow database resolver', () => {
         '#!/bin/sh',
         'case "$1" in',
         '  ps)',
+        '    [ "$#" -eq 5 ] || exit 1',
+        '    [ "$2" = "--filter" ] || exit 1',
+        '    [ "$3" = "ancestor=public.ecr.aws/docker/library/postgres:18-alpine" ] || exit 1',
+        '    [ "$4" = "--format" ] || exit 1',
+        '    [ "$5" = "{{.ID}}" ] || exit 1',
         "    printf '%s\\n' postgres-service",
         '    ;;',
         '  inspect)',
@@ -2613,15 +2618,6 @@ describe('canonical standards workflow database resolver', () => {
     const password = ['pa$$word$(touch ', marker, ')'].join('');
     const database = 'app$(printf unsafe)';
     const listeners = [
-      globalThis.Bun.listen({
-        hostname: '127.0.0.1',
-        port: 5432,
-        socket: {
-          close: () => undefined,
-          data: () => undefined,
-          open: () => undefined,
-        },
-      }),
       globalThis.Bun.listen({
         hostname: '127.0.0.2',
         port: 5432,
