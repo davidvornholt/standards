@@ -193,6 +193,14 @@ const workflowRunScript = (stepName: string): string =>
   yamlRunScript(SYNC_WORKFLOW, stepName);
 const githubExpression = (expression: string): string =>
   `${'$'}{{ ${expression} }}`;
+const DATABASE_RESOLVER_STEP_NAME = 'Resolve the database endpoint';
+const DATABASE_RESOLVER_ENV = {
+  CI_POSTGRES_USER: githubExpression("vars.CI_POSTGRES_USER || 'app'"),
+  CI_POSTGRES_PASSWORD: githubExpression(
+    "vars.CI_POSTGRES_PASSWORD || 'app'",
+  ),
+  CI_POSTGRES_DB: githubExpression("vars.CI_POSTGRES_DB || 'app'"),
+};
 const githubMatrixExpression = (property: string): string =>
   githubExpression(`matrix.${property}`);
 const TURBO_CACHE_KEY = `turbo-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-${githubExpression('github.sha')}`;
@@ -379,6 +387,7 @@ fi
 };
 
 const assertQualityCacheContract = (workflow: ParsedWorkflow): void => {
+  assertQualityWorkflowContract(workflow);
   const steps = workflowSteps(workflow.jobs.quality, 'quality');
   const cacheSteps = steps.filter(
     (step) =>
@@ -540,6 +549,25 @@ const rejectedQualityCacheMutations = (
       return true;
     }
   });
+
+const assertQualityWorkflowContract = (workflow: ParsedWorkflow): void => {
+  const steps = workflowSteps(workflow.jobs.quality, 'quality');
+  const resolverIndex = steps.findIndex(
+    (step) => step.name === DATABASE_RESOLVER_STEP_NAME,
+  );
+  const installIndex = steps.findIndex(
+    (step) => step.name === 'Install dependencies',
+  );
+  if (
+    resolverIndex < 0 ||
+    installIndex < 0 ||
+    resolverIndex >= installIndex
+  ) {
+    throw new Error(
+      'The quality workflow must resolve the database endpoint before installing dependencies',
+    );
+  }
+};
 
 // The block-scalar entries of a checkout step's `sparse-checkout` input, so a
 // test can pin the whole list instead of spot-checking individual paths.
@@ -2516,6 +2544,139 @@ it('allows only trusted-publication caches in the approved contract', () => {
   expect(() =>
     assertQualityCacheContract(parseWorkflow(STANDARDS_WORKFLOW)),
   ).not.toThrow();
+});
+
+it('requires database resolution before dependency installation', () => {
+  const mutations: ReadonlyArray<(workflow: ParsedWorkflow) => void> = [
+    (workflow) => {
+      const steps = workflow.jobs.quality.steps;
+      if (!Array.isArray(steps)) {
+        throw new Error('Quality job must contain a steps array');
+      }
+      workflow.jobs.quality.steps = steps.filter(
+        (step) =>
+          typeof step !== 'object' ||
+          step === null ||
+          step.name !== DATABASE_RESOLVER_STEP_NAME,
+      );
+    },
+    (workflow) =>
+      moveQualityStepBefore(
+        workflow,
+        'Install dependencies',
+        DATABASE_RESOLVER_STEP_NAME,
+      ),
+  ];
+
+  for (const mutate of mutations) {
+    const workflow = structuredClone(parseWorkflow(STANDARDS_WORKFLOW));
+    mutate(workflow);
+    expect(() => assertQualityCacheContract(workflow)).toThrow(
+      'The quality workflow must resolve the database endpoint before installing dependencies',
+    );
+  }
+});
+
+describe('canonical standards workflow database resolver', () => {
+  it('keeps shell-significant coordinates literal and prefers the CodeBuild service', () => {
+    const workflow = parseWorkflow(STANDARDS_WORKFLOW);
+    const resolverStep = qualityStep(workflow, DATABASE_RESOLVER_STEP_NAME);
+    expect(resolverStep.env).toEqual(DATABASE_RESOLVER_ENV);
+
+    const fixture = mkTmp('standards-database-resolver-');
+    write(
+      fixture,
+      'bin/docker',
+      [
+        '#!/bin/sh',
+        'case "$1" in',
+        '  ps)',
+        "    printf '%s\\n' postgres-service",
+        '    ;;',
+        '  inspect)',
+        "    printf '%s\\n' '127.0.0.2 127.0.0.2'",
+        '    ;;',
+        '  network)',
+        '    exit 0',
+        '    ;;',
+        '  *)',
+        '    exit 1',
+        '    ;;',
+        'esac',
+        '',
+      ].join('\n'),
+    );
+    write(fixture, 'bin/ip', '#!/bin/sh\nexit 0\n');
+    chmodSync(join(fixture, 'bin/docker'), EXECUTABLE_MODE);
+    chmodSync(join(fixture, 'bin/ip'), EXECUTABLE_MODE);
+
+    const environmentPath = join(fixture, 'github-env');
+    const marker = join(fixture, 'command-substitution-ran');
+    const user = 'app;printf unsafe';
+    const password = ['pa$$word$(touch ', marker, ')'].join('');
+    const database = 'app$(printf unsafe)';
+    const listeners = [
+      Bun.listen({
+        hostname: '127.0.0.1',
+        port: 5432,
+        socket: {
+          close: () => undefined,
+          data: () => undefined,
+          open: () => undefined,
+        },
+      }),
+      Bun.listen({
+        hostname: '127.0.0.2',
+        port: 5432,
+        socket: {
+          close: () => undefined,
+          data: () => undefined,
+          open: () => undefined,
+        },
+      }),
+    ];
+
+    try {
+      const result = runExecutable(
+        'bash',
+        fixture,
+        [
+          '-euo',
+          'pipefail',
+          '-c',
+          yamlRunScript(STANDARDS_WORKFLOW, DATABASE_RESOLVER_STEP_NAME),
+        ],
+        {
+          ...process.env,
+          CI_POSTGRES_DB: database,
+          CI_POSTGRES_PASSWORD: password,
+          CI_POSTGRES_USER: user,
+          CODEBUILD_BUILD_ID: 'codebuild-test',
+          GITHUB_ENV: environmentPath,
+          PATH: [join(fixture, 'bin'), process.env.PATH ?? ''].join(':'),
+        },
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe('Database endpoint: 127.0.0.2:5432\n');
+      expect(readFileSync(environmentPath, 'utf8')).toBe(
+        [
+          'DATABASE_URL=postgresql://',
+          user,
+          ':',
+          password,
+          '@127.0.0.2:5432/',
+          database,
+          '\n',
+        ].join(''),
+      );
+      expect(existsSync(marker)).toBe(false);
+    } finally {
+      for (const listener of listeners) {
+        listener.stop();
+      }
+    }
+  });
 });
 
 it('accepts semantically identical cache mappings in any key order', () => {
