@@ -196,9 +196,7 @@ const githubExpression = (expression: string): string =>
 const DATABASE_RESOLVER_STEP_NAME = 'Resolve the database endpoint';
 const DATABASE_RESOLVER_ENV = {
   CI_POSTGRES_USER: githubExpression("vars.CI_POSTGRES_USER || 'app'"),
-  CI_POSTGRES_PASSWORD: githubExpression(
-    "vars.CI_POSTGRES_PASSWORD || 'app'",
-  ),
+  CI_POSTGRES_PASSWORD: githubExpression("vars.CI_POSTGRES_PASSWORD || 'app'"),
   CI_POSTGRES_DB: githubExpression("vars.CI_POSTGRES_DB || 'app'"),
 };
 const githubMatrixExpression = (property: string): string =>
@@ -558,11 +556,7 @@ const assertQualityWorkflowContract = (workflow: ParsedWorkflow): void => {
   const installIndex = steps.findIndex(
     (step) => step.name === 'Install dependencies',
   );
-  if (
-    resolverIndex < 0 ||
-    installIndex < 0 ||
-    resolverIndex >= installIndex
-  ) {
+  if (resolverIndex < 0 || installIndex < 0 || resolverIndex >= installIndex) {
     throw new Error(
       'The quality workflow must resolve the database endpoint before installing dependencies',
     );
@@ -2549,11 +2543,14 @@ it('allows only trusted-publication caches in the approved contract', () => {
 it('requires database resolution before dependency installation', () => {
   const mutations: ReadonlyArray<(workflow: ParsedWorkflow) => void> = [
     (workflow) => {
-      const steps = workflow.jobs.quality.steps;
+      const {
+        jobs: { quality: qualityJob },
+      } = workflow;
+      const { steps } = qualityJob;
       if (!Array.isArray(steps)) {
         throw new Error('Quality job must contain a steps array');
       }
-      workflow.jobs.quality.steps = steps.filter(
+      qualityJob.steps = steps.filter(
         (step) =>
           typeof step !== 'object' ||
           step === null ||
@@ -2616,7 +2613,7 @@ describe('canonical standards workflow database resolver', () => {
     const password = ['pa$$word$(touch ', marker, ')'].join('');
     const database = 'app$(printf unsafe)';
     const listeners = [
-      Bun.listen({
+      globalThis.Bun.listen({
         hostname: '127.0.0.1',
         port: 5432,
         socket: {
@@ -2625,7 +2622,7 @@ describe('canonical standards workflow database resolver', () => {
           open: () => undefined,
         },
       }),
-      Bun.listen({
+      globalThis.Bun.listen({
         hostname: '127.0.0.2',
         port: 5432,
         socket: {
