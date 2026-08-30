@@ -74,8 +74,6 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10
-    env:
-      DATABASE_URL: postgresql://${{ vars.CI_POSTGRES_USER || 'app' }}:${{ vars.CI_POSTGRES_PASSWORD || 'app' }}@127.0.0.1:5432/${{ vars.CI_POSTGRES_DB || 'app' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -100,6 +98,52 @@ jobs:
           echo "$sha  $archive" | sha256sum --check --quiet
           tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
           "$RUNNER_TEMP/actionlint" -color
+
+      # A fixed 127.0.0.1 database URL only works where the job shares the
+      # service's published loopback — true on GitHub-hosted runners, false on
+      # CodeBuild, whose runner is itself an unprivileged container beside the
+      # service, so the published port lands on the build host instead. The
+      # service stays reachable there on its container address or the docker
+      # network gateway. Resolving the endpoint at runtime keeps one uniform
+      # file for both topologies and fails closed with a named error here
+      # instead of letting the first database consumer time out mid-gate.
+      - name: Resolve the database endpoint
+        env:
+          CI_POSTGRES_USER: ${{ vars.CI_POSTGRES_USER || 'app' }}
+          CI_POSTGRES_PASSWORD: ${{ vars.CI_POSTGRES_PASSWORD || 'app' }}
+          CI_POSTGRES_DB: ${{ vars.CI_POSTGRES_DB || 'app' }}
+        run: |
+          set -euo pipefail
+          reachable() {
+            timeout 2 bash -c "exec 3<>/dev/tcp/$1/5432" 2>/dev/null
+          }
+          candidates=()
+          if [ -n "${CODEBUILD_BUILD_ID:-}" ]; then
+            service_container=$(docker ps --filter ancestor=public.ecr.aws/docker/library/postgres:18-alpine --format '{{.ID}}' | head -n 1)
+            if [ -n "$service_container" ]; then
+              service_networks=$(docker inspect "$service_container" \
+                --format '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{.Gateway}} {{end}}')
+              read -r -a service_addresses <<<"$service_networks"
+              candidates+=("${service_addresses[@]}")
+            fi
+            candidates+=("$(docker network inspect bridge \
+              --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}' 2>/dev/null || true)")
+            candidates+=("$(ip route show default 2>/dev/null \
+              | awk '{ for (i = 1; i < NF; i++) if ($i == "via") print $(i + 1) }' | head -n 1)")
+          else
+            candidates=(127.0.0.1)
+          fi
+          for candidate in "${candidates[@]}"; do
+            if [ -n "$candidate" ] && reachable "$candidate"; then
+              echo "Database endpoint: $candidate:5432"
+              printf 'DATABASE_URL=postgresql://%s:%s@%s:5432/%s\n' \
+                "$CI_POSTGRES_USER" "$CI_POSTGRES_PASSWORD" "$candidate" "$CI_POSTGRES_DB" \
+                >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo "::error::No candidate endpoint reached the Postgres service (tried: ${candidates[*]})"
+          exit 1
 
       # The canonical justfile and secrets.just are gate-tested: the source
       # repository's CLI suite spawns `just` against them, and one uniform file
