@@ -9,7 +9,7 @@ Run one bounded cycle: establish the baseline, review the initial diff, fix merg
 
 ## Model
 
-An explicit user choice wins. Otherwise use Claude Opus 5 at high effort in Claude Code, GPT-5.6 Luna at max effort in a GPT-capable harness, or the current model when neither is available. Use the same model for every lens. Never silently replace an explicitly requested model; report an execution blocker if it cannot run. Do not estimate token usage.
+An explicit user choice wins. Otherwise use Claude Opus 5 at high effort in Claude Code, GPT-5.6 Luna at max effort in a GPT-capable harness, or the current model when neither is available. Use the same model for every lens. Never silently replace an explicitly requested model; report an execution blocker if it cannot run.
 
 ## Scope
 
@@ -72,6 +72,6 @@ Post the report and mark the PR ready unless an `ask` remains. Include every pha
 | Repair verification | repair delta | model × 0–2 lenses | decision counts | final repair, clean, or skipped | elapsed |
 | Final gate | exact final head | deterministic | — | passed or failed | elapsed |
 
-Then link each finding with its decision, impact, and reporting lenses; report lens yield, assumptions, tests added or extended, any new test machinery, deferred work, residual risk, and any final repair left without fresh-eyes review. Measure total wall-clock duration from the scope comment to the report. Do not claim token counts.
+Then link each finding with its decision, impact, and reporting lenses; report lens yield, assumptions, tests added or extended, any new test machinery, deferred work, residual risk, and any final repair left without fresh-eyes review. Measure total wall-clock duration from the scope comment to the report.
 
 Hand the merge decision to the human and stop unconditionally.
