@@ -5,7 +5,7 @@ description: Understand and operate the standards sync system. Use this skill be
 
 # Standards sync
 
-Before editing a managed path, identify its owner. The complete human guide is [`docs/sync-and-ownership.md`](../../../docs/sync-and-ownership.md); CLI details are in [`packages/standards-cli/README.md`](../../../packages/standards-cli/README.md).
+Before editing, classify the path from `sync-standards.json` and the rules below.
 
 ## Ownership
 
@@ -15,7 +15,7 @@ Before editing a managed path, identify its owner. The complete human guide is [
 | Project-owned | Seeded once or created at an extension point, then free to diverge. |
 | Generated | Rebuilt by the CLI from canonical input and project-owned configuration. |
 
-If a change should reach every consumer, make it in this repository. If it belongs to one consumer, use its project-owned extension point. Never patch a canonical file locally or copy its logic into a second owner.
+If a change should reach every consumer, make it upstream. If it belongs to one consumer, use its extension point. For generated output, edit its inputs. Never patch a canonical file locally or copy its logic into a second owner.
 
 ## Extension points
 
@@ -29,13 +29,19 @@ If a change should reach every consumer, make it in this repository. If it belon
 | `.agents/skills/*` | Unmanaged sibling skill directories |
 | `.github/workflows/standards-sync.yml` | `sync-standards.local.json` |
 
-`.github/dependabot.yml` is generated. Edit its two declared inputs and run `bun standards dependabot --write`.
+Extensions are additive. GitHub settings may add stricter settings, rulesets, and labels, but cannot override canonical values. `{"rulesetEnforcement":"unavailable-on-plan"}` is allowed only when the repository plan cannot enforce rulesets.
+
+The Dependabot overlay may add repository-specific update blocks, registries, and `ignore` or `registries` entries for canonical targets; it cannot replace canonical policy. `.github/dependabot.yml` is generated:
+
+```sh
+bun standards dependabot --write
+```
 
 ## Symlinks
 
 Canonical symlinks are managed paths. The CLI mirrors the link itself and hashes its target without following it.
 
-`.claude/skills -> ../.agents/skills` exposes one skill tree to Claude Code and Codex. Consumer skills belong at `.agents/skills/<name>`. A directory of consumer work at a managed destination blocks `init` and `sync` before their first write.
+`.claude/skills -> ../.agents/skills` exposes one skill tree to Claude Code and Codex. Consumer skills belong at `.agents/skills/<name>`, never below `.claude/skills`. A directory of consumer work at a managed destination blocks `init` and `sync` before their first write.
 
 Windows checkouts need `core.symlinks=true` with Developer Mode or elevation, or WSL.
 
@@ -51,9 +57,28 @@ bun standards dependabot --check
 bun standards github --check
 ```
 
-`init` is the one-time ownership cutover. `sync` mirrors the selected source, including deletions, regenerates owned output, and rewrites `sync-standards.lock`. Commit the lock.
+`init` performs the one-time ownership cutover and refuses once a lock exists. Move project-owned work to extension points first.
 
-`check` verifies the lock-backed paths, extension points, generated output, structure, CI secret shape, and declared GitHub settings. It detects local drift from the selected revision, not whether upstream has advanced.
+`sync` mirrors the selected source, including deletions, regenerates owned output, and rewrites `sync-standards.lock`. Preview risky changes with `--dry-run` and commit the lock.
+
+`check` verifies lock-backed paths, extension points, generated output, structure, CI secret shape, and declared GitHub settings. It proves consistency with the selected revision, not whether upstream has advanced.
+
+## Source and recovery
+
+The default remote source is upstream `main`. `--ref` overrides `sync-standards.local.json.ref`; a remote ref must already exist. `{"autoSync":false}` disables only the weekly run.
+
+If the canonical workflow reports an incompatible CLI, first upgrade the exact `@davidvornholt/standards` dependency and `bun.lock` with Bun. A consumer tracking `main` can then sync; a pinned consumer must first move its `ref` to a revision containing the repair. Do not add compatibility shims.
+
+Test an unpublished canonical change through a local checkout:
+
+```sh
+bun standards sync --from ../standards --dry-run
+bun standards sync --from ../standards
+bun run check
+git restore -- sync-standards.lock <paths-touched-by-sync>
+```
+
+Discard the local-sourced result. After publishing, run a normal sync and commit the real upstream state.
 
 ## GitHub settings
 
@@ -64,22 +89,14 @@ bun standards github --apply
 bun standards github --check
 ```
 
-`--apply` needs admin authentication. The CI check uses a restricted workflow token and fails when declared state cannot be verified. A declared non-empty ruleset bypass list therefore requires a local admin-authenticated check.
-
-## Test a canonical change
-
-A remote ref must exist. Test an unpushed source through a local checkout:
-
-```sh
-bun standards sync --from ../standards --dry-run
-bun standards sync --from ../standards
-bun run check
-```
-
-Discard the resulting files and lock afterward. They may describe content that does not exist upstream. After publishing, run a normal sync and commit that result.
+`--apply` needs admin authentication. Run it from a declaration-changing branch before merge. CI uses a restricted workflow token and fails when declared state cannot be verified; a declared non-empty ruleset bypass list therefore requires a local admin-authenticated check.
 
 ## Automatic sync
 
-Repositories tracking `main` receive weekly pull requests when canonical content changes. `sync-standards.local.json` may pin `ref` or set `autoSync` to `false`.
+Repositories tracking `main` receive weekly pull requests when canonical content changes. The workflow reads `ci.broker_app` from SOPS. Provision it after installing the repository owner's private broker App only on the selected repository:
 
-The workflow mints short-lived current-repository tokens from `ci.broker_app`: one writer for contents and workflows, and one pull-request opener. Neither token enters the sync process, and there is no credential fallback.
+```sh
+bun standards creds add github --dest ci:ci.broker_app
+```
+
+The workflow mints one short-lived branch writer for contents and workflows and one pull-request opener. Neither token enters the sync process, and there is no credential fallback. A repository with `autoSync: false` does not need these permissions until automatic sync is re-enabled.
