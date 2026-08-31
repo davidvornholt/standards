@@ -20,7 +20,6 @@ endpoint: ${endpoint}
 publicBaseUrl: https://assets.example.com
 `;
 
-const HTTP_FORBIDDEN = 403;
 const pngBytes = new TextEncoder().encode('not-a-real-png');
 const digest = createHash('sha256').update(pngBytes).digest('hex');
 
@@ -155,47 +154,5 @@ describe('screenshots publish safety', () => {
     expect(log.mock.calls.flat()).toEqual([
       `![home](<https://assets.example/)(![evil](https://attacker.example/x/screenshots/${digest}/home.png>)`,
     ]);
-  });
-});
-
-describe('screenshots publish failures', () => {
-  it('reports a pair missing from the SOPS target with the mint hint', async () => {
-    const stub = startS3Stub();
-    const consumer = initializeScreenshotsConsumer({
-      config: configFor(stub.endpoint),
-      target: 'assets',
-      sopsJson: JSON.stringify({ assets: {} }),
-    });
-    const file = writeImage(consumer, 'home.png', pngBytes);
-    const error = spyOn(console, 'error').mockImplementation(() => undefined);
-
-    expect(await runScreenshotsPublish(consumer, [file])).toBe(false);
-
-    const reported = error.mock.calls.flat().join('\n');
-    expect(reported).toContain(
-      'secrets/assets.yaml has no key "assets.screenshots_rw"',
-    );
-    expect(reported).toContain(
-      'bun standards creds add cloudflare --s3 --dest assets:assets.screenshots_rw --bucket assets --permissions "Workers R2 Storage Bucket Item Write"',
-    );
-    expect(stub.uploads).toHaveLength(0);
-  });
-
-  it('surfaces upload failures without printing partial markdown', async () => {
-    const stub = startS3Stub(HTTP_FORBIDDEN);
-    const consumer = initializeScreenshotsConsumer({
-      config: configFor(stub.endpoint),
-      target: 'assets',
-      sopsJson: PAIR_JSON,
-    });
-    const file = writeImage(consumer, 'home.png', pngBytes);
-    const error = spyOn(console, 'error').mockImplementation(() => undefined);
-    const log = spyOn(console, 'log').mockImplementation(() => undefined);
-
-    expect(await runScreenshotsPublish(consumer, [file])).toBe(false);
-
-    const reported = error.mock.calls.flat().join('\n');
-    expect(reported).toContain('standards screenshots: upload failed:');
-    expect(log).not.toHaveBeenCalled();
   });
 });

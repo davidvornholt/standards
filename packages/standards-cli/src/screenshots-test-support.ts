@@ -32,32 +32,98 @@ export type RecordedUpload = {
 
 export type S3Stub = {
   readonly endpoint: string;
+  readonly objects: ReadonlySet<string>;
   readonly uploads: ReadonlyArray<RecordedUpload>;
 };
 
 const HTTP_OK = 200;
+const HTTP_NOT_FOUND = 404;
+const HTTP_FORBIDDEN = 403;
+
+type S3StubOptions = {
+  readonly existing?: ReadonlyArray<string>;
+  readonly failPath?: string;
+};
+
+type ResponseStatusOptions = {
+  readonly request: Request;
+  readonly pathname: string;
+  readonly status: number;
+  readonly objects: ReadonlySet<string>;
+  readonly failPath: string | undefined;
+};
+
+const responseStatus = ({
+  request,
+  pathname,
+  status,
+  objects,
+  failPath,
+}: ResponseStatusOptions): number => {
+  if (request.method === 'HEAD') {
+    if (status !== HTTP_OK) {
+      return status;
+    }
+    return objects.has(pathname) ? HTTP_OK : HTTP_NOT_FOUND;
+  }
+  if (request.method === 'PUT' && pathname === failPath) {
+    return HTTP_FORBIDDEN;
+  }
+  return status;
+};
+
+const readRequestBody = (request: Request): Promise<ArrayBuffer> => {
+  if (request.method === 'HEAD' || request.method === 'DELETE') {
+    return Promise.resolve(new ArrayBuffer(0));
+  }
+  return request.arrayBuffer();
+};
 
 // Bun's S3 client signs real HTTP requests, so the stub is a live server
 // rather than a fetch mock.
-export const startS3Stub = (status = HTTP_OK): S3Stub => {
+export const startS3Stub = (
+  status = HTTP_OK,
+  options: S3StubOptions = {},
+): S3Stub => {
   const uploads: Array<RecordedUpload> = [];
+  const objects = new Set(options.existing ?? []);
   const server = globalThis.Bun.serve({
     port: 0,
     fetch: async (request) => {
-      const body = await request.arrayBuffer();
-      uploads.push({
-        method: request.method,
-        pathname: new URL(request.url).pathname,
-        contentType: request.headers.get('content-type'),
-        size: body.byteLength,
-      });
-      return new Response(status === HTTP_OK ? '' : 'stub failure', {
+      const url = new URL(request.url);
+      const requestStatus = responseStatus({
+        request,
+        pathname: url.pathname,
         status,
+        objects,
+        failPath: options.failPath,
+      });
+      const body = await readRequestBody(request);
+      if (request.method === 'PUT' && requestStatus === HTTP_OK) {
+        objects.add(url.pathname);
+      }
+      if (request.method === 'DELETE' && requestStatus === HTTP_OK) {
+        objects.delete(url.pathname);
+      }
+      if (request.method !== 'HEAD') {
+        uploads.push({
+          method: request.method,
+          pathname: url.pathname,
+          contentType: request.headers.get('content-type'),
+          size: body.byteLength,
+        });
+      }
+      return new Response(requestStatus === HTTP_OK ? '' : 'stub failure', {
+        status: requestStatus,
       });
     },
   });
   servers.push(server);
-  return { endpoint: `http://127.0.0.1:${server.port}`, uploads };
+  return {
+    endpoint: `http://127.0.0.1:${server.port}`,
+    objects,
+    uploads,
+  };
 };
 
 export const initializeScreenshotsConsumer = (options: {

@@ -35,6 +35,15 @@ const SAFE_BASENAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
 
 const KEY_PREFIX = 'screenshots';
 
+type PublishedScreenshot = {
+  readonly key: string;
+  readonly line: string;
+  readonly wasPresent: boolean;
+};
+
+const errorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
 const readImageFile = (file: string): Uint8Array => {
   const path = resolve(file);
   const link = lstatSync(path);
@@ -86,17 +95,35 @@ const publishOne = async (
   client: Bun.S3Client,
   config: ScreenshotsConfig,
   file: string,
-): Promise<string> => {
+): Promise<PublishedScreenshot> => {
   const bytes = readImageFile(file);
   const digest = createHash('sha256').update(bytes).digest('hex');
   const name = basename(file);
   const key = `${KEY_PREFIX}/${digest}/${name}`;
+  const wasPresent = await client.exists(key);
   await client.write(key, bytes, {
     type: CONTENT_TYPES[extname(name).toLowerCase()],
   });
   const alt = name.slice(0, name.length - extname(name).length);
   const objectUrl = new URL(key, `${config.publicBaseUrl}/`).href;
-  return `![${alt}](<${objectUrl}>)`;
+  return { key, line: `![${alt}](<${objectUrl}>)`, wasPresent };
+};
+
+const cleanupUploads = async (
+  client: Bun.S3Client,
+  results: ReadonlyArray<PromiseSettledResult<PublishedScreenshot>>,
+): Promise<ReadonlyArray<unknown>> => {
+  const keys = results.flatMap((result) =>
+    result.status === 'fulfilled' && !result.value.wasPresent
+      ? [result.value.key]
+      : [],
+  );
+  const cleanupResults = await Promise.allSettled(
+    keys.map((key) => client.delete(key)),
+  );
+  return cleanupResults.flatMap((result) =>
+    result.status === 'rejected' ? [result.reason] : [],
+  );
 };
 
 export const runScreenshotsPublish = async (
@@ -136,18 +163,34 @@ export const runScreenshotsPublish = async (
     endpoint: config.value.endpoint,
   });
   try {
-    const lines = await Promise.all(
+    const results = await Promise.allSettled(
       files.map((file) => publishOne(client, config.value, file)),
     );
-    for (const line of lines) {
-      console.log(line);
+    const failures = results.flatMap((result) =>
+      result.status === 'rejected' ? [result.reason] : [],
+    );
+    if (failures.length > 0) {
+      const cleanupFailures = await cleanupUploads(client, results);
+      const [failure] = failures;
+      const detail = errorMessage(failure);
+      const cleanupDetail =
+        cleanupFailures.length > 0
+          ? `; cleanup failed: ${cleanupFailures.map(errorMessage).join('; ')}`
+          : '';
+      console.error(
+        `standards screenshots: upload failed: ${detail}${cleanupDetail}`,
+      );
+      return false;
+    }
+    for (const result of results) {
+      if (result.status === 'fulfilled') {
+        console.log(result.value.line);
+      }
     }
     return true;
   } catch (error) {
     console.error(
-      `standards screenshots: upload failed: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
+      `standards screenshots: upload failed: ${errorMessage(error)}`,
     );
     return false;
   }
