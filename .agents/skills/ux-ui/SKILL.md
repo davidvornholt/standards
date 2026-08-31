@@ -1,6 +1,6 @@
 ---
 name: ux-ui
-description: Must be used for every task that creates or modifies UI — pages, components, styles, layout, tokens, UI copy, client-side state, or visual behavior. Not optional for small UI edits like tweaking a button, color, or label. Covers the design contract (DESIGN.md), theme tokens, frontend standards, state management, and accessibility testing.
+description: Must be used for every task that creates or modifies UI — pages, components, styles, layout, tokens, UI copy, client-side state, or visual behavior. Not optional for small UI edits like tweaking a button, color, or label. Covers project design intent, theme tokens, frontend standards, state management, and accessibility testing.
 ---
 
 # UX/UI
