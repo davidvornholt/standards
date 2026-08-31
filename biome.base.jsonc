@@ -196,6 +196,7 @@
         "**/*.test.tsx",
         "packages/standards-cli/src/creds-add-test-support.ts",
         "packages/standards-cli/src/creds-plan-run-test-support.ts",
+        "packages/standards-cli/src/screenshots-test-support.ts",
         "packages/standards-cli/src/test-setup.ts"
       ],
       "linter": {
@@ -279,11 +280,13 @@
       }
     },
     {
-      // CLI output is the user interface; dev-env does not read process
+      // CLI output is the user interface; these modules do not read process
       // environment variables directly.
       "includes": [
         "packages/standards-cli/src/dev-env.ts",
-        "packages/standards-cli/src/dev-env-brokered-refresh.ts"
+        "packages/standards-cli/src/dev-env-brokered-refresh.ts",
+        "packages/standards-cli/src/screenshots-commands.ts",
+        "packages/standards-cli/src/screenshots-publish.ts"
       ],
       "linter": {
         "rules": {

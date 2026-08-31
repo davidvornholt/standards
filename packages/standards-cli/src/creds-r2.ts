@@ -8,6 +8,7 @@
 
 import { createHash } from 'node:crypto';
 import type { SopsValueChange } from './creds-sops';
+import { isRecord } from './github-settings-parse';
 
 // Scope the permission_groups endpoint reports for the bucket-item groups
 // ("Workers R2 Storage Bucket Item Read"/"... Write"); account-scoped groups
@@ -40,6 +41,36 @@ export const s3Endpoint = (
   jurisdiction: R2Jurisdiction = DEFAULT_R2_JURISDICTION,
 ): string =>
   `https://${accountId}.${jurisdiction === 'eu' ? 'eu.' : ''}r2.cloudflarestorage.com`;
+
+export type S3PairLookup =
+  | {
+      readonly ok: true;
+      readonly accessKeyId: string;
+      readonly secretAccessKey: string;
+    }
+  | { readonly ok: false; readonly kind: 'missing-key' | 'incomplete' };
+
+// Walks a decrypted SOPS document to the dotted key and requires the complete
+// pair shape destinationWrites stores: both leaves must be strings even when
+// the caller needs only one part.
+export const lookupS3Pair = (document: unknown, key: string): S3PairLookup => {
+  let node: unknown = document;
+  for (const segment of key.split('.')) {
+    if (!isRecord(node) || node[segment] === undefined) {
+      return { ok: false, kind: 'missing-key' };
+    }
+    node = node[segment];
+  }
+  return isRecord(node) &&
+    typeof node.access_key_id === 'string' &&
+    typeof node.secret_access_key === 'string'
+    ? {
+        ok: true,
+        accessKeyId: node.access_key_id,
+        secretAccessKey: node.secret_access_key,
+      }
+    : { ok: false, kind: 'incomplete' };
+};
 
 export type DestinationFormat = 'bearer' | 's3';
 

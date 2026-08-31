@@ -3,12 +3,12 @@
 // after layer composition so a later layer's literal can override an earlier
 // layer's reference, and a reference that lost the merge is never decrypted.
 
+import { lookupS3Pair } from './creds-r2';
 import { resolveTargetRelResult } from './creds-target';
 import type { BrokeredS3Reference } from './dev-env-brokered';
 import type { ComposedDevEnvTarget } from './dev-env-compose';
 import { encodePortableDotenvValue } from './dev-env-dotenv-value';
-import { isRecord } from './github-settings-parse';
-import { runSops } from './sops-exec';
+import { decryptSopsJson, type SopsJsonResult } from './sops-exec';
 
 export type ResolvedDevEnvTarget = {
   readonly group: string;
@@ -22,58 +22,27 @@ export type ResolvedDevEnv = {
   readonly problems: ReadonlyArray<string>;
 };
 
-type SopsDocumentResult =
-  | { readonly ok: true; readonly value: unknown }
-  | { readonly ok: false; readonly problem: string };
-
-const decryptSopsJson = (consumer: string, rel: string): SopsDocumentResult => {
-  const result = runSops(['--decrypt', '--output-type', 'json', rel], consumer);
-  if (result.status !== 0) {
-    const detail = result.errorMessage ?? result.stderr.trim();
-    return {
-      ok: false,
-      problem: detail
-        ? `could not decrypt ${rel}: ${detail}`
-        : `could not decrypt ${rel}`,
-    };
-  }
-  try {
-    return { ok: true, value: JSON.parse(result.stdout) as unknown };
-  } catch (error) {
-    return {
-      ok: false,
-      problem: `could not parse decrypted ${rel} as JSON: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    };
-  }
-};
-
 const lookupReference = (
   document: unknown,
   reference: BrokeredS3Reference,
 ): { readonly value: string | null; readonly problem: string | null } => {
-  let node: unknown = document;
-  for (const segment of reference.key.split('.')) {
-    if (!isRecord(node) || node[segment] === undefined) {
-      return {
-        value: null,
-        problem: `has no key "${reference.key}"; mint the pair with \`bun standards creds add cloudflare --s3 --dest ${reference.brokeredS3}:${reference.key}\``,
-      };
-    }
-    node = node[segment];
-  }
-  if (
-    !isRecord(node) ||
-    typeof node.access_key_id !== 'string' ||
-    typeof node.secret_access_key !== 'string'
-  ) {
+  const pair = lookupS3Pair(document, reference.key);
+  if (!pair.ok) {
     return {
       value: null,
-      problem: `key "${reference.key}" does not hold a complete brokered S3 pair; both "access_key_id" and "secret_access_key" must be strings`,
+      problem:
+        pair.kind === 'missing-key'
+          ? `has no key "${reference.key}"; mint the pair with \`bun standards creds add cloudflare --s3 --dest ${reference.brokeredS3}:${reference.key}\``
+          : `key "${reference.key}" does not hold a complete brokered S3 pair; both "access_key_id" and "secret_access_key" must be strings`,
     };
   }
-  return { value: node[reference.part] as string, problem: null };
+  return {
+    value:
+      reference.part === 'access_key_id'
+        ? pair.accessKeyId
+        : pair.secretAccessKey,
+    problem: null,
+  };
 };
 
 export const resolveBrokeredReferences = (
@@ -83,8 +52,8 @@ export const resolveBrokeredReferences = (
   preservedReferences: ReadonlySet<string> = new Set(),
 ): ResolvedDevEnv => {
   const problems: Array<string> = [];
-  const documents = new Map<string, SopsDocumentResult>();
-  const readDocument = (targetName: string): SopsDocumentResult => {
+  const documents = new Map<string, SopsJsonResult>();
+  const readDocument = (targetName: string): SopsJsonResult => {
     const cached = documents.get(targetName);
     if (cached !== undefined) {
       return cached;

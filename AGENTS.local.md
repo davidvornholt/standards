@@ -14,6 +14,10 @@ This repository is deliberately not a `standards structure` consumer: the root g
 
 `packages/standards-cli` is a deliberate exception to the root Effect standards: use the package's established plain-TypeScript async and error idiom, and keep its runtime dependency surface minimal. The published bin must run through `bunx` before a consumer has installed project dependencies; adding Effect would defeat that bootstrap boundary or split one package into two architectures. Revisit this exception only if the CLI no longer bootstraps dependency-free consumers, its runtime moves to a separately installed package, or that minimal-dependency premise otherwise changes.
 
+## Standards CLI subcommand vs. justfile recipe
+
+New operator tooling goes into `bun standards` as a subcommand when it has real logic such as validation, credential resolution, provider calls, or structured output. This gives the logic typed code, tests, and versioned distribution to every consumer. The canonical `justfile` is only a thin operator-facing entry point. Recipes stay one-liners that compose existing commands, and a recipe that starts growing logic moves into the CLI. Do not add a justfile wrapper for a CLI subcommand that is already a single obvious invocation.
+
 ## Dependency version holds
 
 Template-wide dependency holds are declared as `ignore` entries in the canonical `.github/dependabot.base.yml`, each with a comment stating the reason and the lift condition. Never hold a version by closing Dependabot PRs or via `@dependabot ignore` comments — that is invisible per-repo state. When a hold or a held pin changes, update every affected pin (root `package.json`, `template/package.json`, the `biome.base.jsonc` schema URL) and the hold entry in the same change.

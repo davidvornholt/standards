@@ -8,6 +8,7 @@ description: Must be used for every task that creates or modifies UI — pages, 
 ## Design contract
 
 - Use the `frontend-design` skill for all UI work.
+- When the work lands in a pull request, use the `screenshots-in-prs` skill to capture and publish screenshots of the changed UI for the PR description.
 - Read the root `DESIGN.md` before any UI work and follow it. It defines the design intent and points to the theme/token source.
 - Skip `DESIGN.md` only when the user explicitly asks to explore a new design direction. Treat that exploration as a prototype: prioritize originality, taste, cohesion, and visual force over systemization.
 - After a successful exploration, offer to update `DESIGN.md` and the theme so the system matches the new reality.
