@@ -99,4 +99,4 @@ Repositories tracking `main` receive weekly pull requests when canonical content
 bun standards creds add github --dest ci:ci.broker_app
 ```
 
-The workflow mints one short-lived branch writer for contents and workflows and one pull-request opener. Neither token enters the sync process, and there is no credential fallback. A repository with `autoSync: false` does not need these permissions until automatic sync is re-enabled.
+The workflow mints two short-lived current-repository tokens: one branch writer for contents and workflows, and one pull-request opener. Neither token enters the sync process, and there is no credential fallback. A repository with `autoSync: false` does not need these permissions until automatic sync is re-enabled.
