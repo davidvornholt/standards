@@ -21,16 +21,22 @@ const STRUCTURE_SECRETS_PATH = join(
 );
 const OBSOLETE_SYNC_KEY = ['standards', 'sync', 'token'].join('_');
 // The retired settings PAT. Nothing reads it any more, so a seeded example that
-// still carries it would send every adopter to mint a credential for nothing —
-// and `template/secrets/ci.example.yaml` is what new consumers start from.
+// still carries it would send every adopter to mint a credential for nothing.
 const OBSOLETE_SETTINGS_KEY = ['github', 'settings', 'read', 'token'].join('_');
 const BROKER_DESTINATION = 'ci:ci.broker_app';
+const PROVISION_BROKER_COMMAND =
+  'bun standards creds add github --dest ci:ci.broker_app';
 const WRITER_PERMISSIONS = 'Contents write and Workflows write';
 const PR_PERMISSIONS = 'Contents read and Pull requests write';
 const OBSOLETE_ONE_TOKEN_GUIDANCE = [
   'mints a short-lived token with Contents read and Pull requests write',
   'mints its pull request token from ci.broker_app',
 ];
+const MINIMUM_STANDARDS_VERSION_PATTERN =
+  /MINIMUM_STANDARDS_VERSION: "\d+\.\d+\.\d+"/u;
+
+const readSource = (path: string): string =>
+  readFileSync(join(ACTUAL_UPSTREAM, path), 'utf8');
 
 const brokerAppMapping = (
   document: Readonly<Record<string, unknown>>,
@@ -86,66 +92,84 @@ describe('Standards sync broker configuration', () => {
 });
 
 describe('Standards sync broker documentation contract', () => {
-  it('documents both token roles and one provisioning command everywhere', () => {
-    const rootReadme = readFileSync(join(ACTUAL_UPSTREAM, 'README.md'), 'utf8');
-    const documents = [
-      'packages/standards-cli/README.md',
-      '.agents/skills/standards-sync/SKILL.md',
+  it('keeps provisioning in focused guides and exact roles in authoritative contracts', () => {
+    const rootReadme = readSource('README.md');
+    const adoptionGuide = readSource('docs/adoption.md');
+    const cliReadme = readSource('packages/standards-cli/README.md');
+    const syncSkill = readSource('.agents/skills/standards-sync/SKILL.md');
+    const secretsReference = readSource(
       '.agents/skills/declarative-infra/references/secrets.md',
-    ].map((path) => readFileSync(join(ACTUAL_UPSTREAM, path), 'utf8'));
-    const sourceOwnedGuidance = [
-      rootReadme,
-      ...documents,
-      readFileSync(SOURCE_EXAMPLE_PATH, 'utf8'),
-      readFileSync(TEMPLATE_EXAMPLE_PATH, 'utf8'),
-      readFileSync(STRUCTURE_SECRETS_PATH, 'utf8'),
-    ];
+    );
+    const sourceExample = readFileSync(SOURCE_EXAMPLE_PATH, 'utf8');
+    const templateExample = readFileSync(TEMPLATE_EXAMPLE_PATH, 'utf8');
+    const structureSecrets = readFileSync(STRUCTURE_SECRETS_PATH, 'utf8');
 
-    for (const document of sourceOwnedGuidance) {
+    for (const document of [adoptionGuide, cliReadme, secretsReference]) {
+      expect(document).toContain(BROKER_DESTINATION);
+      expect(document).toContain(PROVISION_BROKER_COMMAND);
+    }
+
+    for (const document of [
+      secretsReference,
+      sourceExample,
+      templateExample,
+      structureSecrets,
+    ]) {
       expect(document).toContain(BROKER_DESTINATION);
       expect(document).toContain(WRITER_PERMISSIONS);
       expect(document).toContain(PR_PERMISSIONS);
+    }
+
+    expect(syncSkill).toContain('ci.broker_app');
+    expect(syncSkill).toContain('short-lived current-repository tokens');
+    expect(syncSkill).toContain('there is no credential fallback');
+    expect(rootReadme).toContain('[Adoption](docs/adoption.md)');
+    expect(rootReadme).toContain(
+      '[Sync and ownership](docs/sync-and-ownership.md)',
+    );
+
+    for (const document of [
+      rootReadme,
+      adoptionGuide,
+      cliReadme,
+      syncSkill,
+      secretsReference,
+      sourceExample,
+      templateExample,
+      structureSecrets,
+    ]) {
       expect(document).not.toContain(OBSOLETE_SYNC_KEY);
+      expect(document).not.toContain(OBSOLETE_SETTINGS_KEY);
       for (const obsolete of OBSOLETE_ONE_TOKEN_GUIDANCE) {
         expect(document).not.toContain(obsolete);
       }
     }
-    // Current guidance must not instruct anyone to provision the retired PAT.
-    // The root README is excluded deliberately: it names the key in dated
-    // migration notes, which stay accurate as history.
-    for (const document of documents) {
-      expect(document).not.toContain(OBSOLETE_SETTINGS_KEY);
-    }
-    expect(rootReadme).toContain('`@davidvornholt/standards` 0.14.0 or newer');
-    expect(rootReadme).toContain('`bun.lock`');
-    expect(rootReadme).not.toContain('current 0.12 workflow');
-    expect(rootReadme).toContain(
-      'the 0.21 dev-env composition cutover raises it to 0.21.0',
-    );
   });
 
-  it('keeps the workflow repair bootstrap policy-aware', () => {
-    const rootReadme = readFileSync(join(ACTUAL_UPSTREAM, 'README.md'), 'utf8');
+  it('documents policy-aware recovery without keeping release history in the landing page', () => {
+    const rootReadme = readSource('README.md');
+    const syncGuide = readSource('docs/sync-and-ownership.md');
+    const workflow = readFileSync(WORKFLOW_PATH, 'utf8');
     const upgrade =
-      'First upgrade the exact `@davidvornholt/standards` dependency and `bun.lock` to at least 0.21.0 with Bun.';
-    const trackingMain = 'A tracking-main consumer';
+      'first upgrade the exact `@davidvornholt/standards` dependency and `bun.lock` with Bun.';
+    const trackingMain = 'A consumer tracking `main`';
     const pinned = 'A pinned consumer';
 
-    expect(rootReadme).toContain(upgrade);
-    expect(rootReadme.indexOf(upgrade)).toBeLessThan(
-      rootReadme.indexOf(trackingMain),
+    expect(workflow).toMatch(MINIMUM_STANDARDS_VERSION_PATTERN);
+    expect(workflow).toContain(
+      'upgrade package.json and bun.lock before accepting this workflow',
     );
-    expect(rootReadme.indexOf(upgrade)).toBeLessThan(
-      rootReadme.indexOf(pinned),
+    expect(syncGuide).toContain(upgrade);
+    expect(syncGuide.indexOf(upgrade)).toBeLessThan(
+      syncGuide.indexOf(trackingMain),
     );
-    expect(rootReadme).toContain(
-      'A pinned consumer first updates the checked-in `sync-standards.local.json.ref`',
+    expect(syncGuide.indexOf(upgrade)).toBeLessThan(syncGuide.indexOf(pinned));
+    expect(syncGuide).toContain(
+      'A plain sync without that policy change follows the old pin and cannot fetch it.',
     );
-    expect(rootReadme).toContain(
-      'a plain sync without that policy change honors the old pin and cannot fetch the repair',
+    expect(syncGuide).toContain(
+      'does not need to expand or approve its broker App permissions until scheduled sync is re-enabled.',
     );
-    expect(rootReadme).toContain(
-      'does not need to expand or approve its broker App permissions until scheduled sync is re-enabled',
-    );
+    expect(rootReadme).not.toContain(upgrade);
   });
 });
