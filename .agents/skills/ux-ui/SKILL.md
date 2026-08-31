@@ -13,7 +13,8 @@ For pull requests that change rendered UI, use `screenshots-in-prs`.
 
 - Take every color and design value from the central theme. Do not hardcode raw color literals in product code.
 - Use semantic utilities instead of default Tailwind palette classes when the project has a semantic token layer.
-- Define authored color tokens with `oklch(...)` and add a semantic token when none fits.
+- Define authored color tokens with `oklch(...)`.
+- If a needed token does not exist, add a semantic token that follows the existing naming scheme rather than misusing a nearby token or hardcoding the value. Report new tokens in the final summary.
 - Use the shared easing token or constant in CSS and JavaScript. Do not encode another curve locally.
 - A context that cannot resolve CSS variables may mirror anchor colors in one colocated constants file.
 
