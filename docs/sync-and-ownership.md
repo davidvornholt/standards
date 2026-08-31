@@ -104,6 +104,14 @@ or repository policy:
 
 An explicit `--ref` wins. To disable only the weekly schedule, set `"autoSync": false`.
 
+## Recover an incompatible sync workflow
+
+A canonical workflow can arrive before the repository-owned CLI dependency. When it reports that the installed CLI is too old, first upgrade the exact `@davidvornholt/standards` dependency and `bun.lock` with Bun.
+
+- A consumer tracking `main` can then run `bun standards sync`.
+- A pinned consumer first updates `sync-standards.local.json.ref` to a release or commit containing the repair. A plain sync without that policy change follows the old pin and cannot fetch it.
+- A consumer with `autoSync: false` does not need to expand or approve its broker App permissions until scheduled sync is re-enabled.
+
 ## Test an unpublished canonical change
 
 Use a local standards checkout because an unpushed ref does not exist remotely:
