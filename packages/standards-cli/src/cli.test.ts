@@ -3814,6 +3814,15 @@ describe('unknown command', () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('Unknown command');
   });
+
+  it('does not treat inherited object keys as command families', () => {
+    const consumer = mkTmp('sync-cons-');
+    for (const command of ['constructor', 'toString', '__proto__']) {
+      const result = run(consumer, [command]);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('Unknown command');
+    }
+  });
 });
 
 describe('path safety', () => {

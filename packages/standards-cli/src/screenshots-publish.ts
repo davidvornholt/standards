@@ -5,7 +5,15 @@
 // used in memory only, never printed.
 
 import { createHash } from 'node:crypto';
-import { readFileSync, statSync } from 'node:fs';
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readFileSync,
+  realpathSync,
+} from 'node:fs';
 import { basename, extname, resolve } from 'node:path';
 import {
   loadScreenshotsConfig,
@@ -27,13 +35,32 @@ const SAFE_BASENAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
 
 const KEY_PREFIX = 'screenshots';
 
+const readImageFile = (file: string): Uint8Array => {
+  const path = resolve(file);
+  const link = lstatSync(path);
+  if (link.isSymbolicLink() || !link.isFile() || realpathSync(path) !== path) {
+    throw new Error('not a regular file');
+  }
+  let descriptor: number | null = null;
+  try {
+    descriptor = openSync(path, constants.O_RDONLY + constants.O_NOFOLLOW);
+    if (!fstatSync(descriptor).isFile()) {
+      throw new Error('not a regular file');
+    }
+    return readFileSync(descriptor);
+  } finally {
+    if (descriptor !== null) {
+      closeSync(descriptor);
+    }
+  }
+};
+
 const fileProblems = (file: string): ReadonlyArray<string> => {
   const name = basename(file);
   const problems: Array<string> = [];
   let size: number | null = null;
   try {
-    const stat = statSync(resolve(file));
-    size = stat.isFile() ? readFileSync(resolve(file)).byteLength : null;
+    size = readImageFile(file).byteLength;
   } catch {
     size = null;
   }
@@ -60,7 +87,7 @@ const publishOne = async (
   config: ScreenshotsConfig,
   file: string,
 ): Promise<string> => {
-  const bytes = readFileSync(resolve(file));
+  const bytes = readImageFile(file);
   const digest = createHash('sha256').update(bytes).digest('hex');
   const name = basename(file);
   const key = `${KEY_PREFIX}/${digest}/${name}`;
@@ -68,7 +95,8 @@ const publishOne = async (
     type: CONTENT_TYPES[extname(name).toLowerCase()],
   });
   const alt = name.slice(0, name.length - extname(name).length);
-  return `![${alt}](${config.publicBaseUrl}/${key})`;
+  const objectUrl = new URL(key, `${config.publicBaseUrl}/`).href;
+  return `![${alt}](<${objectUrl}>)`;
 };
 
 export const runScreenshotsPublish = async (

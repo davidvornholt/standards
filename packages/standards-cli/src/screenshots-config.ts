@@ -15,6 +15,12 @@ export const SCREENSHOTS_CONFIG_FILE = 'config/screenshots.yaml';
 
 const FIELDS = ['pair', 'bucket', 'endpoint', 'publicBaseUrl'] as const;
 
+const R2_ENDPOINT_HOST = /^[0-9a-f]{32}(?:\.eu)?\.r2\.cloudflarestorage\.com$/u;
+const LOCAL_ENDPOINT_HOSTS = new Set(['127.0.0.1', '[::1]', 'localhost']);
+const TRAILING_SLASHES = /\/+$/u;
+const MAX_ASCII_CONTROL_CODE = 0x1f;
+const DELETE_CONTROL_CODE = 0x7f;
+
 export type ScreenshotsConfig = {
   readonly pair: CredsDestination;
   readonly bucket: string;
@@ -30,17 +36,63 @@ type RawScreenshotsConfigResult =
   | { readonly ok: true; readonly value: string }
   | { readonly ok: false; readonly problems: ReadonlyArray<string> };
 
-const isHttpUrl = (value: string): boolean => {
+const parseUrl = (value: string): URL | null => {
+  if (
+    [...value].some((character) => {
+      const code = character.codePointAt(0) ?? 0;
+      return code <= MAX_ASCII_CONTROL_CODE || code === DELETE_CONTROL_CODE;
+    })
+  ) {
+    return null;
+  }
   try {
-    const url = new URL(value);
-    return url.protocol === 'https:' || url.protocol === 'http:';
+    return new URL(value);
   } catch {
-    return false;
+    return null;
   }
 };
 
-const stripTrailingSlash = (value: string): string =>
-  value.endsWith('/') ? value.slice(0, -1) : value;
+const isSafeEndpoint = (value: string): boolean => {
+  const url = parseUrl(value);
+  if (
+    url === null ||
+    url.username !== '' ||
+    url.password !== '' ||
+    url.pathname !== '/' ||
+    url.search !== '' ||
+    url.hash !== ''
+  ) {
+    return false;
+  }
+  if (LOCAL_ENDPOINT_HOSTS.has(url.hostname)) {
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  }
+  return (
+    url.protocol === 'https:' &&
+    url.port === '' &&
+    R2_ENDPOINT_HOST.test(url.hostname)
+  );
+};
+
+const isSafePublicBaseUrl = (value: string): boolean => {
+  const url = parseUrl(value);
+  return (
+    url !== null &&
+    (url.protocol === 'https:' || url.protocol === 'http:') &&
+    url.username === '' &&
+    url.password === '' &&
+    url.search === '' &&
+    url.hash === ''
+  );
+};
+
+const normalizeUrl = (value: string): string => {
+  const url = parseUrl(value);
+  if (url === null) {
+    return value;
+  }
+  return `${url.origin}${url.pathname.replace(TRAILING_SLASHES, '')}`;
+};
 
 const readScreenshotsConfig = (
   consumer: string,
@@ -117,18 +169,21 @@ export const loadScreenshotsConfig = (
       `${SCREENSHOTS_CONFIG_FILE} bucket "${bucket}" is not a valid bucket name`,
     );
   }
-  const urlField = (field: 'endpoint' | 'publicBaseUrl'): string | null => {
+  const urlField = (
+    field: 'endpoint' | 'publicBaseUrl',
+    isValid: (value: string) => boolean,
+  ): string | null => {
     const value = stringField(field);
-    if (value !== null && !isHttpUrl(value)) {
+    if (value !== null && !isValid(value)) {
       problems.push(
-        `${SCREENSHOTS_CONFIG_FILE} ${field} must be an http(s) URL`,
+        `${SCREENSHOTS_CONFIG_FILE} ${field} must be a safe http(s) URL`,
       );
       return null;
     }
-    return value === null ? null : stripTrailingSlash(value);
+    return value === null ? null : normalizeUrl(value);
   };
-  const endpoint = urlField('endpoint');
-  const publicBaseUrl = urlField('publicBaseUrl');
+  const endpoint = urlField('endpoint', isSafeEndpoint);
+  const publicBaseUrl = urlField('publicBaseUrl', isSafePublicBaseUrl);
   return problems.length === 0 &&
     pair !== null &&
     bucket !== null &&

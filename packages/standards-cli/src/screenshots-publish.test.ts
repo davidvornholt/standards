@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, spyOn } from 'bun:test';
 import { createHash } from 'node:crypto';
+import { symlinkSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { runScreenshotsPublish } from './screenshots-publish';
 import {
   cleanupScreenshots,
@@ -40,8 +42,8 @@ describe('screenshots publish', () => {
     expect(await runScreenshotsPublish(consumer, [first, second])).toBe(true);
 
     expect(log.mock.calls.flat()).toEqual([
-      `![home](https://assets.example.com/screenshots/${digest}/home.png)`,
-      `![detail](https://assets.example.com/screenshots/${digest}/detail.png)`,
+      `![home](<https://assets.example.com/screenshots/${digest}/home.png>)`,
+      `![detail](<https://assets.example.com/screenshots/${digest}/detail.png>)`,
     ]);
     expect(error).not.toHaveBeenCalled();
     const paths = stub.uploads.map((upload) => upload.pathname).sort();
@@ -95,7 +97,68 @@ describe('screenshots publish', () => {
     );
     expect(stub.uploads).toHaveLength(0);
   });
+});
 
+describe('screenshots publish safety', () => {
+  it('rejects symlinked image inputs before upload', async () => {
+    const stub = startS3Stub();
+    const consumer = initializeScreenshotsConsumer({
+      config: configFor(stub.endpoint),
+    });
+    const secret = join(consumer, '..', 'outside-secret.txt');
+    const link = join(consumer, 'captured.png');
+    writeFileSync(secret, 'private data');
+    symlinkSync(secret, link);
+    const error = spyOn(console, 'error').mockImplementation(() => undefined);
+
+    expect(await runScreenshotsPublish(consumer, [link])).toBe(false);
+
+    expect(error.mock.calls.flat().join('\n')).toContain(
+      `${link} is not a readable file`,
+    );
+    expect(stub.uploads).toHaveLength(0);
+  });
+
+  it('rejects a non-R2 endpoint before decrypting or uploading', async () => {
+    const stub = startS3Stub();
+    const consumer = initializeScreenshotsConsumer({
+      config: configFor('https://collector.example/upload'),
+      target: 'assets',
+      sopsJson: PAIR_JSON,
+    });
+    const file = writeImage(consumer, 'home.png', pngBytes);
+    const error = spyOn(console, 'error').mockImplementation(() => undefined);
+
+    expect(await runScreenshotsPublish(consumer, [file])).toBe(false);
+
+    expect(error.mock.calls.flat().join('\n')).toContain(
+      'config/screenshots.yaml endpoint must be a safe http(s) URL',
+    );
+    expect(stub.uploads).toHaveLength(0);
+  });
+
+  it('keeps a punctuation-heavy public URL in one Markdown destination', async () => {
+    const stub = startS3Stub();
+    const consumer = initializeScreenshotsConsumer({
+      config: configFor(stub.endpoint).replace(
+        'https://assets.example.com',
+        'https://assets.example/)(![evil](https://attacker.example/x',
+      ),
+      target: 'assets',
+      sopsJson: PAIR_JSON,
+    });
+    const file = writeImage(consumer, 'home.png', pngBytes);
+    const log = spyOn(console, 'log').mockImplementation(() => undefined);
+
+    expect(await runScreenshotsPublish(consumer, [file])).toBe(true);
+
+    expect(log.mock.calls.flat()).toEqual([
+      `![home](<https://assets.example/)(![evil](https://attacker.example/x/screenshots/${digest}/home.png>)`,
+    ]);
+  });
+});
+
+describe('screenshots publish failures', () => {
   it('reports a pair missing from the SOPS target with the mint hint', async () => {
     const stub = startS3Stub();
     const consumer = initializeScreenshotsConsumer({

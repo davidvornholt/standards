@@ -1331,7 +1331,10 @@ const commandFamilies: Readonly<
 
 const main = async (): Promise<void> => {
   const rawArgs = process.argv.slice(2);
-  const family = commandFamilies[rawArgs[0] ?? ''];
+  const familyName = rawArgs[0] ?? '';
+  const family = Object.hasOwn(commandFamilies, familyName)
+    ? commandFamilies[familyName as keyof typeof commandFamilies]
+    : undefined;
   if (family !== undefined) {
     if (!(await family(rawArgs.slice(1)))) {
       process.exitCode = 1;

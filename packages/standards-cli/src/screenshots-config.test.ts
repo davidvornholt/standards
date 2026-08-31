@@ -9,7 +9,7 @@ import {
 
 const validConfig = `pair: assets:assets.screenshots_rw
 bucket: assets
-endpoint: https://account.r2.cloudflarestorage.com/
+endpoint: https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com/
 publicBaseUrl: https://assets.example.com/
 `;
 
@@ -48,7 +48,8 @@ describe('screenshots config loading', () => {
       value: {
         pair: { target: 'assets', key: 'assets.screenshots_rw' },
         bucket: 'assets',
-        endpoint: 'https://account.r2.cloudflarestorage.com',
+        endpoint:
+          'https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com',
         publicBaseUrl: 'https://assets.example.com',
       },
     });
@@ -78,8 +79,38 @@ extra: value
         'config/screenshots.yaml has an unknown key "extra"',
         'config/screenshots.yaml pair must be "<target>:<dotted.key>", e.g. assets:assets.screenshots_rw',
         'config/screenshots.yaml bucket "NOT VALID" is not a valid bucket name',
-        'config/screenshots.yaml endpoint must be an http(s) URL',
+        'config/screenshots.yaml endpoint must be a safe http(s) URL',
         'config/screenshots.yaml publicBaseUrl must be a non-empty string',
+      ],
+    });
+  });
+
+  it('rejects upload endpoints outside R2 or loopback development', () => {
+    const consumer = initializeScreenshotsConsumer({
+      config: validConfig.replace(
+        'https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com/',
+        'https://collector.example/upload',
+      ),
+    });
+
+    expect(loadScreenshotsConfig(consumer)).toEqual({
+      ok: false,
+      problems: ['config/screenshots.yaml endpoint must be a safe http(s) URL'],
+    });
+  });
+
+  it('rejects public base URLs with query or fragment components', () => {
+    const consumer = initializeScreenshotsConsumer({
+      config: validConfig.replace(
+        'https://assets.example.com/',
+        'https://assets.example.com/base?token=secret#latest',
+      ),
+    });
+
+    expect(loadScreenshotsConfig(consumer)).toEqual({
+      ok: false,
+      problems: [
+        'config/screenshots.yaml publicBaseUrl must be a safe http(s) URL',
       ],
     });
   });
