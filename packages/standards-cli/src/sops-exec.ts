@@ -12,6 +12,34 @@ export type SopsRunResult = {
   readonly errorMessage: string | null;
 };
 
+export type SopsJsonResult =
+  | { readonly ok: true; readonly value: unknown }
+  | { readonly ok: false; readonly problem: string };
+
+// sops emits JSON here so callers never parse encrypted YAML themselves.
+export const decryptSopsJson = (cwd: string, rel: string): SopsJsonResult => {
+  const result = runSops(['--decrypt', '--output-type', 'json', rel], cwd);
+  if (result.status !== 0) {
+    const detail = result.errorMessage ?? result.stderr.trim();
+    return {
+      ok: false,
+      problem: detail
+        ? `could not decrypt ${rel}: ${detail}`
+        : `could not decrypt ${rel}`,
+    };
+  }
+  try {
+    return { ok: true, value: JSON.parse(result.stdout) as unknown };
+  } catch (error) {
+    return {
+      ok: false,
+      problem: `could not parse decrypted ${rel} as JSON: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
+  }
+};
+
 export const runSops = (
   args: ReadonlyArray<string>,
   cwd: string,

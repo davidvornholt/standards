@@ -112,7 +112,7 @@ Pin a released tag and, when the consumer already owns nixpkgs, make the standar
 
 ```nix
 inputs.standards = {
-  url = "github:davidvornholt/standards/v0.24.4";
+  url = "github:davidvornholt/standards/v0.25.0";
   inputs.nixpkgs.follows = "nixpkgs";
 };
 
@@ -136,6 +136,10 @@ in
   systemd.user.services.standards-poller-acknowledgements.path = pollerPath;
 }
 ```
+
+### Migration to 0.25.0
+
+Version 0.25.0 adds `standards screenshots publish`, which uploads UI screenshots to a repository-configured public bucket and prints the markdown image lines a pull request description embeds. The feature is opt-in per repository. A repo without the tracked `config/screenshots.yaml`, which declares the brokered S3 `pair`, `bucket`, S3 `endpoint`, and public `publicBaseUrl`, reports that publishing is not enabled. Objects are stored content-addressed under `screenshots/<sha256>/<name>`, so republishing identical bytes is idempotent. The command resolves the signing credential pair from its SOPS target at publish time, never from the environment. The synced `screenshots-in-prs` skill teaches agents when and how to use it. Nothing changes for existing consumers until they add the config file and mint the pair with `bun standards creds add cloudflare --s3`.
 
 ### Breaking migration to 0.24.4
 

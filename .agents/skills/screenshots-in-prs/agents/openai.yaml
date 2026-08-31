@@ -1,0 +1,4 @@
+interface:
+  display_name: "Screenshots in PRs"
+  short_description: "Publish UI screenshots and embed them in PR descriptions"
+  default_prompt: "Use $screenshots-in-prs when a pull request changes rendered UI and needs screenshots in its description."

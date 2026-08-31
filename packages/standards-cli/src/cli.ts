@@ -43,6 +43,7 @@ import {
   unlockedPathsUnder,
 } from './managed-path-ownership';
 import { runPollerCommand } from './poller-commands';
+import { runScreenshotsCommand } from './screenshots-commands';
 import { collectStructureProblems } from './structure-check';
 import type { StructureProfile } from './structure-profile';
 import { hasSafeCommand } from './structure-script';
@@ -973,6 +974,7 @@ Commands:
   dev-env     Compose each workspace's generated .env.local from its three dev layers and authorized broker-owned S3 pair references
   github      Compare (--check) or converge (--apply) live GitHub settings
   creds       Mint, rotate, and revoke brokered credentials (see \`standards creds help\`)
+  screenshots Publish UI screenshots to the configured public bucket and print PR-ready markdown (see \`standards screenshots help\`)
   poller      Run one fix-poller tick over the configured repositories (host automation)
   help        Show this help
 
@@ -1317,12 +1319,21 @@ const runGateCommand = (
   return apply ? runGithubApply(consumer) : runGithubCheckGate(consumer);
 };
 
+// The creds family owns its flag vocabulary and the screenshots family takes
+// variadic file operands; both route before the strict global parser rejects
+// their arguments.
+const commandFamilies: Readonly<
+  Record<string, (argv: ReadonlyArray<string>) => Promise<boolean>>
+> = {
+  creds: runCredsCommand,
+  screenshots: runScreenshotsCommand,
+};
+
 const main = async (): Promise<void> => {
-  // The creds family owns its flag vocabulary; route it before the strict
-  // global parser rejects those flags.
   const rawArgs = process.argv.slice(2);
-  if (rawArgs[0] === 'creds') {
-    if (!(await runCredsCommand(rawArgs.slice(1)))) {
+  const family = commandFamilies[rawArgs[0] ?? ''];
+  if (family !== undefined) {
+    if (!(await family(rawArgs.slice(1)))) {
       process.exitCode = 1;
     }
     return;
