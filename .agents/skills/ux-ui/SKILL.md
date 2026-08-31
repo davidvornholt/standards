@@ -5,41 +5,29 @@ description: Must be used for every task that creates or modifies UI — pages, 
 
 # UX/UI
 
-## Design contract
+Use the `frontend-design` skill for visual work. Read the root `DESIGN.md` and follow its design intent and token source. Skip it only when the user explicitly requests a new direction; treat that work as exploration until the design contract is updated.
 
-- Use the `frontend-design` skill for all UI work.
-- When the work lands in a pull request, use the `screenshots-in-prs` skill to capture and publish screenshots of the changed UI for the PR description.
-- Read the root `DESIGN.md` before any UI work and follow it. It defines the design intent and points to the theme/token source.
-- Skip `DESIGN.md` only when the user explicitly asks to explore a new design direction. Treat that exploration as a prototype: prioritize originality, taste, cohesion, and visual force over systemization.
-- After a successful exploration, offer to update `DESIGN.md` and the theme so the system matches the new reality.
+For pull requests that change rendered UI, use `screenshots-in-prs`.
 
-## Theme tokens
+## Tokens and motion
 
-- All color and design values come from the project's central token source (its theme file). No raw color values (`#hex`, `rgb()`, `hsl()`, `oklch()` literals) in app or component code.
-- When the project uses a semantic token layer, do not use default Tailwind palette classes (`text-blue-400`, `bg-red-500`, …); use only the semantic utilities generated from theme tokens (`bg-primary`, `text-muted`, …).
-- Define color tokens and authored CSS colors with `oklch(...)` in the token source.
-- If a needed token does not exist, add it rather than misusing a nearby token or hardcoding a value. New tokens must be semantic, follow the existing naming scheme, and be reported to the user in the summary.
-- Contexts that cannot resolve CSS variables (for example email HTML) may mirror the theme's anchor colors as raw literals in a single, clearly colocated constants file.
+- Take every color and design value from the central theme. Do not hardcode raw color literals in product code.
+- Use semantic utilities instead of default Tailwind palette classes when the project has a semantic token layer.
+- Define authored color tokens with `oklch(...)` and add a semantic token when none fits.
+- Use the shared easing token or constant in CSS and JavaScript. Do not encode another curve locally.
+- A context that cannot resolve CSS variables may mirror anchor colors in one colocated constants file.
 
-## Motion in code
+## Frontend contract
 
-- Use one easing curve: the project's shared easing token or utility. Do not use ad-hoc `ease-out`, `ease-in-out`, or inline `cubic-bezier(...)` in product code.
-- JS animation code imports the shared easing constant from the project's UI package instead of re-encoding the curve, so CSS and JS stay in sync.
+- Meet WCAG 2.2 AA with semantic HTML, correct headings, keyboard support, visible focus, and communication that does not rely on color alone.
+- Use framework metadata and document primitives. Prefer server-rendered, indexable content where SEO matters.
+- Use browser hyphenation for long prose. Reserve soft hyphens for curated display copy, never identifiers, URLs, form values, searchable data, tests, or accessibility labels.
+- Write controls from the user's perspective with stable action names and specific error or empty-state guidance.
 
-## Frontend standards
+## State
 
-- Meet WCAG 2.2 AA with semantic HTML, correct heading hierarchy, keyboard navigation, visible focus states, and non-color-only communication.
-- Use framework metadata/document primitives for SEO and prefer server-rendered/indexable content when SEO matters.
-- Use browser hyphenation for long reader-facing text, and add manual soft hyphens only in curated display copy where wrapping needs help. Use `&shy;` in markup or `\u00AD` in string literals where entities are not decoded; avoid both in identifiers, URLs, form values, searchable data, tests, and accessibility labels.
+Keep state local when one component owns it. Use Zustand for shared client-side UI state in React or Next.js. Do not use Zustand as a server-data cache; use TanStack Query when remote data needs caching, invalidation, pagination, optimistic updates, or coordinated mutations.
 
-## State management
+## Accessibility tests
 
-- Keep state as local as practical. Use React local state for component-owned UI state.
-- Use Zustand by default for shared client-side UI/app state in React and Next.js.
-- Do not use Zustand as a server-data cache. If client-side remote data needs caching, refetching, invalidation, pagination, optimistic updates, or mutation coordination, propose TanStack Query before building custom store logic.
-
-## Accessibility testing
-
-- Browser-rendered apps must have Playwright + Axe coverage asserting zero violations against the full WCAG 2.2 AA tag set.
-- Keep the Axe scan helper and Playwright config factory in the shared `a11y-testing` package; app-local `a11y/*.a11y.ts` specs stay thin lists of routes and states.
-- Cover every reachable route and meaningful interaction states (open menus, dialogs, expanded/error states).
+Browser-rendered apps need Playwright plus Axe coverage against the shared WCAG 2.2 AA tag set. Keep the scanner and config in `@davidvornholt/a11y-testing`; app-local `a11y/*.a11y.ts` files list routes and meaningful interaction states.

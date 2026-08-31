@@ -1,59 +1,265 @@
 # @davidvornholt/standards
 
-CLI for bootstrapping, synchronizing, and validating repositories that consume [davidvornholt/standards](https://github.com/davidvornholt/standards).
+CLI for initializing, synchronizing, and validating repositories that consume [`davidvornholt/standards`](../../README.md).
+
+## Install
+
+Start a new repository without a prior installation:
 
 ```sh
 bunx @davidvornholt/standards init
-standards sync
-standards check
-standards doctor
-standards structure
-standards dependabot --check
-standards dependabot --write
-standards dev-env
-standards github --check
-standards github --apply
-standards creds login github
-standards creds login cloudflare
-standards creds add cloudflare --dest ci:ci.cloudflare_workers_token --permissions "Workers Scripts Write"
-standards creds add cloudflare --dest ci:ci.cloudflare_dns_token --zone 1bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb --permissions "DNS Write"
-standards creds add cloudflare --dest ci:ci.r2_read --bucket assets --s3 --permissions "Workers R2 Storage Bucket Item Read"
-standards creds add cloudflare --dest ci:ci.eu_r2_read --bucket eu-assets --jurisdiction eu --s3 --permissions "Workers R2 Storage Bucket Item Read"
-standards creds add github --dest ci:ci.broker_app
-standards creds plan
-standards creds apply
-standards creds revoke --token-id <token-id>
-standards screenshots publish docs/pr/settings-page.png docs/pr/settings-empty-state.png
-standards poller --config <path>
-standards poller --print-units --config <path>
+bun install
+bun run check
 ```
 
-`dependabot --write` regenerates the composed `.github/dependabot.yml` from the canonical `.github/dependabot.base.yml` and the optional repo-owned `.github/dependabot.local.yml`; `init` and `sync` do the same automatically. `dependabot --check` verifies the generated file still matches its sources, and `doctor`/`check` include the same verification. The overlay is deliberately lean and additive only: new update blocks for repo-specific ecosystems, top-level private registry definitions, and `ignore` or `registries` entries appended by repeating a canonical block's normalized target. Matching blocks cannot add labels, groups, cooldowns, pull-request limits, or other policy. Update blocks for the same ecosystem and target branch must not select intersecting directories after Dependabot's path normalization. A plural `directories` target is expanded as a glob when it contains `*`, `?`, or both `[` and `]`: `*` and bare `**` stay within one path segment, `**/` matches zero or more directory segments, `?` matches one non-separator character, and bracket expressions match character sets or ranges. Singular `directory` values are always literal.
+Adopt an existing repository by installing the exact package first:
 
-`dev-env` composes each workspace's dev environment from three declaration layers sharing one workspace shape — keyed by workspace group and a one-segment kebab-case workspace name (`apps.<name>`, `packages.<name>`): the tracked plain `config/dev.yaml`, the SOPS-encrypted `secrets/dev.yaml` (required, decrypted via sops), and the gitignored plain `config/dev.local.yaml`, applied in that order with later layers overriding per key. Effective values may also come from authorized broker-owned S3 pairs in separate SOPS targets referenced by either plain layer. Secret-layer env values are strings; a plain-layer env value may be a string or the brokered reference described below. A key declared in both tracked shared layers is a validation problem — a value is either configuration or a secret — while a local override of either is the file's purpose. Plain layers are optional and may be comment-only; `config/dev.local.yaml` must itself be gitignored because it may override secret values. The command transactionally writes every declared workspace's `.env.local` with owner-only permissions and a do-not-edit header naming the contributing sources. It also discovers direct `apps/*` and `packages/*` directories containing `package.json` and removes a stale `.env.local` only when its first line is that exact header; hand-owned files, edited headers, nested directories, and symlinked paths are left untouched. Writes and removals commit or roll back as one transaction, preserving prior contents, modes, and absent files. The final files and the transaction's actual random `.env.local.standards-*.tmp` and `.env.local.standards-*.bak` paths must all be gitignored before staging starts. Existing consumers must add those two artifact patterns themselves because `.gitignore` is seeded only during `init`; `sync` does not change it. Its portable dotenv codec exactly round-trips every value it accepts through Bun and Node without adding helper environment variables. A value the shared syntax cannot encode exactly is gathered as a validation problem instead of being changed silently. Validation gathers all document, containment, destination-type, workspace, and gitignore problems before writing anything; symlink destinations, duplicate resolved destinations, changed parent-directory identities, and symlinked workspace paths are rejected without following the link. Cleanup trouble after a completed commit is reported loudly as a warning rather than falsely reporting generation failure. Parent identities are checked immediately before each path operation; an unavoidable swap in the syscall-sized interval after a check remains outside the non-hostile maintainer threat model. The canonical `justfile` exposes the command as `just dev-env-generate`, and `just dev-refresh` chains a `just secrets edit dev` session into regeneration. A plain configuration layer may declare a **brokered S3 pair reference** instead of a literal: an object value `{ brokeredS3: <secrets-target>, key: <dotted.key>, part: access_key_id | secret_access_key }` pointing at a credential pair `creds add cloudflare --s3` minted into another SOPS target. An existing target name must bind exactly one contained file, either `infra/hosts/<name>/secrets.yaml` or `secrets/<name>.yaml`; both files existing is an ambiguity error, never host preference. The SOPS-encrypted `secrets/dev.yaml` must authorize every referenced pair with its exact `<secrets-target>:<dotted.key>` string under the reserved top-level `brokeredReferences` list. Plain layers reject that reserved key, and the secrets layer rejects reference objects: configuration selects a pair while encrypted policy authorizes its release into plaintext `.env.local`. Resolution rejects an unauthorized reference with the exact allowlist entry to add before invoking SOPS on that target. It then requires both `access_key_id` and `secret_access_key` to be strings, even when the reference selects only one part. Resolution runs after layer composition, so a later layer's literal overrides an earlier layer's reference and a reference that lost the merge is never decrypted; each authorized referenced target is decrypted once per run, and a missing target, ambiguous target, missing or partial pair, or unencodable resolved value is gathered as a named validation problem without exposing secret values. The secret value therefore keeps exactly one home — the broker's ledger. The loop closes on the broker side: after `creds add` verifies an exact referenced pair write, and after `creds apply` verifies a renewal in one, the command regenerates the dev env files itself, so a rotated pair reaches every generated `.env.local` without a manual step. Refresh evidence is pair-granular: a bearer sibling in the same SOPS file cannot trigger rendering of an unsafe pair, and a verified S3 sibling updates while an unsafe pair keeps its prior generated lines. If those prior owned lines cannot be proven and preserved, the refresh fails without changing any env file; every refresh failure is reported after the durable SOPS write remains committed.
+```sh
+bun add --dev --exact @davidvornholt/standards
+bun standards init
+```
 
-`check` also rejects the raw token formed by `biome-` + `ignore` anywhere in lock-listed canonical files. The intentionally blunt policy keeps synced sources compatible with consumer Biome configurations without invoking Biome or maintaining language-aware comment parsing.
+Read the [adoption guide](../../docs/adoption.md) before running `init` in a repository that already has agent instructions, Just recipes, Dependabot configuration, or Claude skills.
 
-`github --check` compares the live GitHub repository (including the canonical squash-only repository settings, rulesets, and declared labels) against the merged declaration in `.github/settings.json` + `.github/settings.local.json`; `github --apply` converges that declared state. The canonical declaration enables squash while disabling merge commits and rebases, and its default-branch ruleset independently allows only squash. Undeclared live labels remain untouched, while undeclared repository-owned rulesets are removed. `check` runs the same comparison whenever `.github/settings.json` is present, and fails closed: declared state the token cannot see fails the gate with a message naming the token fix instead of passing unverified. The canonical workflow sets `STANDARDS_SKIP_GITHUB_CHECK=true` only in its unprivileged quality step because its `check` aggregator job runs the live comparison with its own workflow token; this is a workflow-internal integration seam, not a general way to disable the local gate. The CLI prints an explicit diagnostic whenever that exact value skips either `check`'s live phase or `github --check`; `github --apply` is never skipped. `--apply` re-diffs the PATCH response, so a setting GitHub accepts with HTTP 200 but silently ignores (plan-unavailable features) is a reported failure, not a false success. A repository whose GitHub plan cannot enforce rulesets can declare that in the seam (see `rulesetEnforcement` below); both commands then skip rulesets and plan-gated repository settings, converge the rest, and print an unprotected-branch notice on every run.
+## Commands
 
-`structure` enforces the canonical monorepo structure contract: workspace scripts (`check-types`, `lint`, `lint:fix`, `test`), root gate scripts, filtered Turbo convenience aliases, internal `0.0.0`/`workspace:*` versioning, package `exports`, shared tsconfig inheritance, and browser a11y wiring. Only a workspace containing an explicit `*.a11y.ts` suite must provide a `test:a11y` script and direct `@axe-core/playwright` and `@playwright/test` dependencies. Every repo-owned workspace must carry a non-empty `README.md` as the prerequisite for documenting its configuration and secrets; the gate checks presence, not content completeness. Canonical workspaces synced from the standards template (the `apps/*` or `packages/*` entries in `sync-standards.json`) are exempt under the consumer profile because a consumer cannot fix them locally, and an unreadable or symlinked `sync-standards.json` fails the gate rather than guessing which workspaces are repo-owned. `structure` also validates the CI secrets contract without decrypting anything, using the plaintext key structure SOPS leaves in place: `secrets/ci.yaml` must be a contained regular file with complete SOPS metadata, every business leaf value must have a complete `ENC[AES256_GCM,...]` envelope (a rejected leaf is reported by key path only, never by value), and the repo-owned `secrets/ci.example.yaml` must mirror the structural business-key paths in both directions with plaintext placeholders. `ci.ntfy_topic_url` is always required for `Notify pause`. `ci.broker_app.app_id` and `ci.broker_app.private_key` are required for the weekly `Standards sync` workflow unless the validated `sync-standards.local.json` policy sets `"autoSync": false`. Required workflow values must each be one encrypted scalar because the resolver requires a string. The secrets files, workspace READMEs, and sync manifest cannot be supplied through symlinks. `check` includes `structure`, so these rules gate every consumer PR.
+| Command | Purpose |
+| --- | --- |
+| `init` | Seed project-owned files, mirror canonical paths, generate owned output, and create the lock. |
+| `sync` | Mirror the selected upstream revision and update the lock. |
+| `check` | Verify drift, extension points, structure, generated output, and GitHub settings. |
+| `doctor` | Validate integration points without checking lock-backed drift. |
+| `structure` | Validate the monorepo contract. |
+| `dependabot` | Verify or regenerate `.github/dependabot.yml`. |
+| `dev-env` | Generate workspace `.env.local` files. |
+| `github` | Compare or converge live repository settings. |
+| `creds` | Mint and reconcile brokered credentials. |
+| `screenshots` | Publish pull-request screenshots through the configured bucket. |
+| `poller` | Run one approved fix or review automation tick. |
+| `help` | Print command and option help. |
 
-`poller` runs one tick of the fix poller: host-level automation that turns maintainer-approved GitHub issues into verified draft PRs and maintainer-approved draft PRs into completed review-fix cycles, using headless Codex runs. All workflow state lives in GitHub labels, comments, and draft PRs (the labels are canonical declared settings — see `github --apply`), so ticks are stateless, re-runnable, and safe to schedule from any host. A tick claims work by label (`fix-in-progress` / `review-in-progress`), releases claims stale for longer than `staleClaimHours`, and fails loudly — a red tick means jobs stalled, never silence. A separate acknowledgement tick validates pending approvals and posts one deduplicated queued message per approval generation; it never claims or starts work, so it can keep giving maintainers prompt feedback while the worker is occupied. When a worker claims a request, it posts a concise start message. The exact approval and distributed claim records remain in hidden comment metadata, and losing claim contenders remove their duplicate comments. Trust is verified per event, not per configuration: the approval labels (`approved-for-fix`, `approved-for-review`) only count when the applying user holds the `admin` or `maintain` role, bind to the exact approved issue revision or PR head, and are revalidated before publication; only admin/maintain comments are treated as answers to agent questions. Approved Codex runs inherit the poller's GitHub token and use authenticated `gh` for relevant reads and comments; review runs also maintain the PR review ledger, apply authorized title or body edits, post fix threads, and file deferred findings directly. The run works in a throwaway git worktree, grants Codex write access to that worktree and its exact Git common directory so commits can update the linked repository metadata, and hands results back through a structured outcome file. The poller then verifies the approved head, commits, and protected paths before pushing or publishing; it replies to and resolves agent-posted fix threads only after the reviewed head is pushed, and it alone changes protocol labels, posts the final report, and flips a reviewed draft ready, while required CI remains the quality gate. If publishing a sealed fix or review result fails, the poller releases only its owned in-progress claim and keeps the approval and sealed output, so the next worker tick retries publication without another Codex run. Sealed review plans from the earlier protocol are rejected and their output branches are ignored, so the review reruns on a fresh protocol-versioned branch rather than silently dropping legacy deferred work. Host mutation is declarative-only: `--print-units` emits four correctly escaped systemd units for the polling host's infrastructure repository to adapt and deploy: the worker service and timer plus an independent lightweight acknowledgement service and timer. That repository owns the service identity, writable HOME, PATH, authenticated `gh`, lingering, and deployment. The worker service's tick budget (`TimeoutStartSec`) is derived from `maxJobsPerTick` × `runTimeoutMinutes` plus overhead, so re-render and redeploy the units after changing either value.
+Use `bun standards help`, `bun standards creds help`, or `bun standards screenshots help` for the complete invocation syntax.
 
-`creds` is the credential broker: it mints scoped Cloudflare tokens, rotates and revokes those tokens, and places GitHub App credentials into SOPS-encrypted targets — secret values never touch stdout, argv, or an agent's context; commands print only metadata (token name, scopes, expiry, destination). Cloudflare reconciliation has exactly two sources of truth: the plaintext key structure of the SOPS files and the provider token list under the deterministic naming scheme `standards/<owner>/<repo>/<sops-target>/<dotted.key>`; there is no separate credential manifest. `plan` and `apply` reconcile Cloudflare only: each run uses the stored bootstrap credential to verify its current provider token ID, excludes that ID from reconciliation regardless of its current name, and aborts if the identity cannot be correlated with the complete account token list; a brokered token whose SOPS key was deleted is revoked, while one nearing expiry (30 days) is renewed by creating a fresh-expiry replacement with the live token's policies, durably writing and verifying the new value, and only then revoking the old token; secrets the broker did not mint are never touched. Both also report what reconciliation will never touch, in two separately labelled and separately counted blocks that never block: unmanaged tokens, meaning every unexpired token in the account whose name falls outside the reserved `standards/` namespace — with one exception, this machine's own bootstrap credential, which every run removes by verified ID before anything is classified — and tokens brokered to another repository, each printed with the repository whose `apply` owns it. An expired token is omitted from the unmanaged listing because it grants nothing. Neither block is idle information: nothing here renews or revokes those tokens, and a forgotten one — the original half of a hand-made credential that was replaced rather than retired, or a brokered token whose repository was renamed away — stays valid indefinitely, so a listed token is normally printed with the exact command that retires it, carrying `--account` and, for a token brokered elsewhere, `--force` and the one condition that justifies it. Two rows are exceptions. A token named `standards-broker` holds the reserved name for a machine's bootstrap credential, so it is either another machine's or a superseded one on this machine; `revoke` refuses it by name, so the row names the Cloudflare dashboard rather than a command that would always fail. The other exception looks like an ordinary brokered-elsewhere row, and its command fails. `plan` classifies by exact token name, so a token whose brokered repository differs from this checkout's origin only in capitalisation lands in the brokered-elsewhere block with a `--force` command; `revoke` compares repository names case-insensitively, reads the same token as this checkout's own, and refuses. Row and block header both read that token as foreign — the header labels the block tokens brokered to another repository, and the row explains the `--force` by the owning repository having been renamed, transferred, or deleted. Neither holds there: GitHub names are case-insensitive, so the owning repository is this one and it is still alive. Re-point the origin remote at the capitalisation the token carries, or retire the token in the Cloudflare dashboard. A name that claims this repository's brokered namespace without being one the broker mints is a finding instead, and findings abort reconciliation before any mutation, because reconciliation cannot own that token; plain `revoke --token-id` takes it once you decide it should go. `revoke --token-id <id>` deletes exactly one Cloudflare token, named by its 32-character hexadecimal ID, with `--account <id>` required whenever more than one account is configured; it records no ownership, so the power is momentary rather than standing and a human names the target every time. It refuses an ID the account does not hold, the bootstrap credential this machine has stored (matched by verified ID, so a rename cannot disguise it), and any other token named `standards-broker`, the reserved name for a machine's bootstrap (matched by name, because that one is another machine's bootstrap or a superseded one, retired in the Cloudflare dashboard where you can confirm whose it is — the broker cannot re-mint its own root credential). A token brokered to this repository is refused with the remedy that works here: delete its SOPS key in this repository and run `apply`, which revokes the token and keeps the secret in step. A token whose brokered name differs from this checkout's origin only in capitalisation is refused too, and without the `apply` remedy: reconciliation matches the name exactly, so from here it would neither renew nor revoke the token. Its remedies are re-pointing the origin remote at the capitalisation the token carries, which brings it back under reconciliation, or retiring it in the Cloudflare dashboard. A token brokered to a repository that is genuinely a different one is refused with that repository named, because the same `apply` remedy runs there. `--force` widens exactly that last refusal, and nothing else: it lets `revoke` delete a token whose brokered repository is not this checkout's. It verifies nothing about the state of that repository, so it is justified only when nothing reconciles the token any more — the owning repository was renamed, transferred, or deleted, and no checkout resolves to its name. `revoke` decides ownership from the origin remote and compares it case-insensitively, as GitHub names are; `plan` classifies by exact name instead, which is why the two disagree about a case-only difference. When the origin remote resolves to no GitHub repository, every brokered token is refused, `--force` included, because the check it widens is the one that could not be run. `--force` never bypasses either bootstrap guard, the case-only refusal, or that unresolvable-origin refusal. Without a manifest there is no desired-policy record, so live policy drift is not detected, and a repository rename or transfer changes the deterministic namespace and requires the visible old token to be re-minted under the new name and revoked. `add cloudflare` mints an account-owned API token (default TTL 90 days) scoped to the named permission groups (`permissions` lists the valid names) and writes it to `--dest <target>:<dotted.key>`, where `<target>` resolves like the canonical `just secrets` targets (`ci` → `secrets/ci.yaml`, `prod-1` → `infra/hosts/prod-1/secrets.yaml`). `--zone <zone-id>[,<zone-id>...]` adds a zone resource so zone-scoped groups such as DNS Write can be minted. Zones are named by their 32-character hexadecimal ID, shown on the zone's dashboard overview and not a secret; resolving a domain name instead would need Zone Read on the bootstrap token, which holds Account API Tokens / Edit and nothing else. With zones named, the selection is split by what each group can target: every group Cloudflare reports as zone-scoped forms one policy holding all named zones, and groups that can only target an account keep their own account policy on the same token, so one credential can hold DNS access next to account-wide access. A group Cloudflare reports as both takes the zone policy, which is the narrower reading of `--zone`. A group matching neither resource is named and rejected, `--zone` requires at least one zone-scoped group, and `--zone` cannot be combined with `--bucket`, which is a separate credential. The mint summary prints the resources the token reaches, so an account policy alongside the zones is visible rather than implied. `--bucket <name>` switches the policy resource to a single R2 bucket; `--jurisdiction default|eu` selects the provider jurisdiction and defaults to `default`, producing `com.cloudflare.edge.r2.bucket.<account_id>_default_<bucket>` or `com.cloudflare.edge.r2.bucket.<account_id>_eu_<bucket>`. FedRAMP jurisdictions are not supported. Bucket destinations accept only bucket-scoped groups such as Workers R2 Storage Bucket Item Read/Write, and account-scoped groups are rejected. `--s3` requires `--bucket` and stores the S3-compatible credential pair Cloudflare derives from an API token — access key ID is the token ID, secret access key is the SHA-256 hex digest of the token value — as `<dotted.key>.access_key_id` and `<dotted.key>.secret_access_key` under the destination instead of the raw token value; the default endpoint is `https://<account_id>.r2.cloudflarestorage.com`, while EU uses `https://<account_id>.eu.r2.cloudflarestorage.com`. Reconciliation infers each destination's concrete write footprint from the plaintext SOPS key structure — a bearer owns the leaf at its key, while an S3 token owns both pair leaves — and aborts before mutation when managed footprints intersect. `plan` and `apply` renew and revoke S3 destinations like any other brokered token, but renewal first proves the stored access key ID matches the current provider token; an incomplete pair, unreadable value, or identity mismatch is surfaced as a finding and never mutated automatically. `add github` selects the private broker App whose owner matches the destination repository's origin owner, checks both local SOPS leaves before authenticating, proves that the exact selected App is installed on that repository, and writes only while that full App identity still holds the synchronized broker-store entry; missing, duplicate, replaced, or mismatched owners fail before SOPS changes. Durable GitHub tokens cannot be created via API (PAT and OAuth-app creation are UI-only), so workflows mint short-lived installation tokens from the App at runtime (`actions/create-github-app-token`), scoped per repository and permission. The canonical weekly sync expects `bun standards creds add github --dest ci:ci.broker_app`, then mints a current-repository branch writer with Contents write and Workflows write plus a separate PR opener with Contents read and Pull requests write; both mint before sync but enter only their post-sync operations, and missing credentials, unapproved App permissions, or minting failures stop the workflow without a fallback. Existing broker Apps must add Workflows write on the App settings page and have every installation owner approve that permission before consumers adopt the workflow. Bootstrap is once per machine and per GitHub owner: `login github` creates a private personal App, while `login github --org <org>` creates or replaces only that organization's entry; each manifest conversion records GitHub's authoritative owner, and the command opens the installation page, where the App must be bound to selected repositories rather than all repositories. GitHub App names are globally unique and limited to 34 characters, so organization defaults include owners up to 17 characters; a longer owner or a colliding replacement name requires an explicit shorter unused `--name`. The first GitHub-specific command against an existing singleton broker store authenticates as that App, resolves its registration owner, and atomically migrates the old mapping to that one owner; a failed lookup leaves the persisted bytes untouched. If the singleton was a public App installed on repositories owned by other users or organizations, those repositories stop matching after migration because owner selection no longer treats that App as shared. For each affected owner, run `login github` while signed in as that personal owner or `login github --org <owner>`, install the new private App only on the selected repositories, run `bun standards creds add github --dest <target>:<key>` in every consumer, and verify its workflows can mint tokens. Retire the old public App only after every repository owner has its own entry, every intended SOPS destination has been reprovisioned, and token minting has been verified; until then, keep its key and installation available for any destinations not yet migrated. `login cloudflare` guides the one dashboard paste Cloudflare requires for the first account token (named `standards-broker` to match the App, created from the "Create additional tokens" token template because its "Account API Tokens: Edit" permission is unavailable in the custom token builder, and holding that permission only), verifies that it is active, correlates its verified ID with the complete account token list and an active list record, and stores it; a bootstrap token named inside the minted `standards/` namespace is rejected before storage to keep its role unambiguous, while any other divergence from the recommended name only warns. `plan` and `apply` do not rotate GitHub App keys; create a replacement key on the App's settings page, atomically replace that owner's `private_key` in the protected machine-global broker store while preserving its `0600` mode, then update every intended SOPS destination, verify workflows can mint installation tokens, and revoke the old key manually. Root credentials live in the machine-global broker store (see Configuration); SOPS writes go through `sops edit` with a non-interactive editor, preserving comments and reusing the file's data key.
+## init
 
-`screenshots publish` uploads UI screenshots to the repository's configured public bucket and prints one PR-ready markdown image line per file in input order. The feature is opt-in through the tracked `config/screenshots.yaml`; without it the command reports that publishing is not enabled. Validation gathers every configuration and file problem before any upload starts. It rejects unreadable or empty files, unsupported extensions (`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`), and basenames that are not URL-safe. Objects land at `screenshots/<sha256-of-content>/<basename>`, so identical bytes republish to the same URL and a key cannot identify different bytes. The markdown alt text is the basename without its extension. The command resolves the named S3 pair from its SOPS target at publish time. It uses the values in memory and never prints, exports, or copies them elsewhere. A missing target or pair fails with the exact `creds add cloudflare --s3` invocation that mints it. Published URLs are public to anyone holding the link. The synced `screenshots-in-prs` skill owns the capture conventions and forbids screenshots of real secrets or personal data. `--dir <path>` selects the repository when not running from its root.
+```sh
+bun standards init [--dir <repo>] [--from <source>] [--ref <ref>]
+```
 
-`structure --profile source` validates the standards source repository itself, which is deliberately not a consumer. The profile pins its intentional exceptions so they cannot drift silently: exact, ordered root gate scripts that run this CLI from the local checkout (`structure --profile source`, `dependabot --check` or `dependabot --write`, `github --check`, and the Turbo gate) instead of a recursive `standards check`, and a non-private published bin-only CLI workspace that carries a stable release SemVer and exactly maps the `standards` bin to `src/cli.ts` without `exports`. Every other consumer rule still applies.
+`init` is a one-time ownership cutover. It:
 
-## Configuration
+1. seeds missing project-owned files from `template/`;
+2. mirrors every canonical path in `sync-standards.json`;
+3. regenerates engine-owned output;
+4. writes `sync-standards.lock`.
 
-- **`.github/dependabot.local.yml`** (optional) — repo-owned Dependabot extension composed with the canonical `.github/dependabot.base.yml` into the generated `.github/dependabot.yml`. May define `updates` and top-level `registries`; a block matching a canonical normalized target may only add `ignore` and/or `registries` entries. Other matching-block policy is rejected deliberately. A missing or comments-only file means no additions. CLI 0.10.1 requires the selected content ref to contain the canonical base and rejects older refs before mutation.
-- **`sync-standards.local.json`** (optional) — consumer-owned sync policy at the repo root, validated by `doctor`/`check` and every `init`/`sync` even when an explicit ref or local source makes its `"ref"` irrelevant. All fields optional; a missing file means the defaults. `"ref"` is a non-empty single-line string that pins a tag, branch, or full commit sha to sync from instead of `main` (an explicit `--ref` overrides it; a local-path `--from` source is used as-is and ignores only the validated pin). `"autoSync": false` is read by the standards-sync workflow, not the CLI, and skips the weekly scheduled run; deliberate syncs then run locally because the secret-bearing workflow is schedule-only. Version 0.7.0 removes the legacy `STANDARDS_AUTO_SYNC` and `STANDARDS_SYNC_REF` variable behavior; consumers must upgrade the package and lockfile before adopting a policy file.
-- **`.github/settings.local.json` `"rulesetEnforcement": "unavailable-on-plan"`** (optional) — declares that the repository's GitHub plan cannot enforce rulesets (private repositories on GitHub Free, both personal accounts and organizations). `github --check` and `--apply` then skip rulesets instead of comparing them, because a comparison cannot be trusted there: personal accounts answer ruleset reads with HTTP 403, and free-plan organizations report declared rulesets as active while silently not enforcing them. Plan-gated repository settings that only function alongside branch protection (`allow_auto_merge`) are skipped for the same reason — GitHub accepts a PATCH for them with HTTP 200 and silently keeps the old value. The remaining repository merge settings are still checked and converged, and both commands print an unprotected-branch notice on every run. The only accepted value is `"unavailable-on-plan"` (enforcement is the default; omit the key on paid plans), and combining the opt-out with additional local rulesets is rejected. After upgrading the plan, remove the declaration and run `bun standards github --apply` to restore enforcement.
-- **`config/screenshots.yaml`** (optional; required for `screenshots publish`). This tracked per-repository declaration enables screenshot publishing. It has exactly four required keys: `pair` (the brokered S3 credential as `<target>:<dotted.key>`, e.g. `assets:assets.screenshots_rw`, minted with `bun standards creds add cloudflare --s3 --dest <target>:<key> --bucket <bucket> --permissions "Workers R2 Storage Bucket Item Write"`), `bucket` (the bucket name), `endpoint` (the S3 endpoint URL, e.g. `https://<account_id>.r2.cloudflarestorage.com`), and `publicBaseUrl` (the public base URL serving the bucket, e.g. a custom domain bound to it). Every value here is configuration, not a secret. The credential pair stays in its SOPS target and is resolved only at publish time.
-- **Poller config file** (required for `poller`, passed via `--config`) — host-level JSON, deliberately not repository state. Required: `"repos"` (1–12 unique `owner/repo` strings), `"model"` and `"reasoningEffort"` (passed to `codex exec`; the model choice is deliberate and has no default). The 12-repository maximum and five-minute acknowledgement cooldown keep supported mixed fix/review queues and persisted review-plan recovery below the 5,000-request/hour GitHub API budget with at least 1,400 requests/hour reserved for pagination, active jobs, writes, and other token users; the compound regression bound covers four acknowledged fixes plus four acknowledged reviews with persisted plans in every repository at no more than 3,312 requests/hour. Existing configs above the repository limit must be reduced or split across pollers with independent GitHub API budgets before upgrading. Optional: `"maxJobsPerTick"` (default 1 — the maximum number of new Codex runs the sequential worker may start in one tick), `"staleClaimHours"` (default 6; must exceed `runTimeoutMinutes` so a sweep can never release the claim of a job that is still running), `"runTimeoutMinutes"` (default 240 — the timeout catches wedged agents, not honest multi-hour review runs), `"cacheDir"` (default `~/.cache/standards-poller`; holds bare mirrors and job worktrees; relative paths resolve against the config file), `"extraCodexArgs"` (extra `codex exec` arguments, e.g. enabling the collaboration feature for subagent fan-out). Unknown keys are rejected. The poller needs `git`, `gh`, `codex` (authenticated — its rotating auth state must live in a writable location), and a GitHub token per the bullet below; the token needs issues, pull-requests, and contents write on the watched repos, and nothing else.
-- **Broker store** (created by `creds login`) — machine-global root credentials at `$XDG_CONFIG_HOME/standards/broker.yaml` (default `~/.config/standards/broker.yaml`; override with `STANDARDS_BROKER_FILE`), holding one private GitHub App identity (owner, id, slug, client id, private key) per GitHub account and one bootstrap token per Cloudflare account. The file is plaintext with `0600` permissions — deliberately the same local-account trust boundary as the plaintext personal age identity at `~/.config/sops/age/keys.txt`, which unlocks the same secrets; SOPS-encrypting the store to that adjacent identity would not improve custody. Writes use an owner-only temporary file and atomic replacement, and simultaneous provider logins merge rather than overwrite other accounts; `creds status` lists every App and owner and warns when the final mode is broader. The store lives outside every repository, is never synced or backed up, and losing it is cheap: re-run the provider login commands, revoke the old App keys on each App's settings page, and retire the old bootstrap tokens in the Cloudflare dashboard. The dashboard is the only route for those tokens: `login cloudflare` walks you through creating a second one under the reserved `standards-broker` name, the old one stays live under that same name, and `revoke` refuses every token holding it. On an additional machine, do not create second Apps: generate an additional private key from each existing App's settings page (GitHub Apps support several active keys; key generation has no API) and add it to that machine's store, so retiring a machine revokes one key per owner, not the setups.
-- **`GH_TOKEN` / `GITHUB_TOKEN`** (optional generally; poller automation requires this or a logged-in `gh`) — GitHub API token for the `github` command and the GitHub portion of `check`; poller runs pass environment tokens through to Codex, while a local poller can share the service identity's authenticated `gh` state. When neither is available, other commands can still read public repositories anonymously, but poller writes and `github --apply` fail. GitHub's REST API reveals repo merge settings only to write-capable viewers, and `check` retries REST-hidden keys over GraphQL, which serves them to read-only tokens. REST serves ruleset `bypass_actors` only to a user-scoped token holding repository Administration read (a fine-grained PAT with that permission, or the local `gh` CLI under an admin account), and never to a GitHub App installation token at any permission level, so `check` retries the hidden lists over GraphQL, which withholds the actor identities but answers an exact bypass-actor count (established for a GitHub App installation token and for a non-admin classic-scope viewer, not for every identity class): a declared-empty list verifies exactly, a count that disagrees with the declared length is drift, and a matching non-zero count leaves *which* actors bypass unconfirmed, so the gate fails closed on that ruleset. An installation-token run therefore leaves a declared non-empty list failing until the check is re-run locally with admin `gh` auth; widening the App's permissions is not the fix. Private-repository labels require Issues read (or Pull requests read); a token that still cannot see declared state fails the check rather than passing unverified. In CI, the canonical workflow verifies with the workflow token, granted read-only "Contents" and "Issues"; Issues is what declared-label reads need, listing rulesets rides on the implicit "Metadata" read, and merge settings come over GraphQL. A private-repository probe compared that grant set against a broker App installation token across every read the check performs and found no difference, so CI provisions no settings credential of its own.
+Existing project-owned files are kept. Synced files are replaced. `init` refuses after a lock exists and refuses before writing when a managed destination is a directory containing unowned work.
 
-See the standards repository README for the ownership model and adoption workflow.
+## sync
+
+```sh
+bun standards sync --dry-run
+bun standards sync
+bun standards sync --ref v0.25.0
+bun standards sync --from ../standards
+```
+
+`sync` mirrors canonical files and symlinks, removes canonical paths deleted upstream, regenerates `.github/dependabot.yml`, and rewrites the lock.
+
+`--dry-run` prints the full plan without writing. `--ref` selects a tag, branch, or full commit SHA for a remote source. `--from` accepts another GitHub source or a local checkout.
+
+A local source is useful for testing unpublished canonical changes, but its lock may describe content that does not exist upstream. Discard that test state afterward. See [Sync and ownership](../../docs/sync-and-ownership.md#test-an-unpublished-canonical-change).
+
+## check
+
+```sh
+bun standards check
+```
+
+The command fails when:
+
+- a lock-backed canonical path changed, disappeared, or has the wrong path type;
+- a required extension point is missing or invalid;
+- generated Dependabot output differs from its inputs;
+- the monorepo structure contract fails;
+- the CI secret files have an invalid encrypted or example shape;
+- declared GitHub settings differ from live state or cannot be verified.
+
+The canonical workflow performs the live GitHub comparison in its restricted aggregator job. Local checks use the available `gh`, `GH_TOKEN`, or `GITHUB_TOKEN` authentication.
+
+## doctor and structure
+
+```sh
+bun standards doctor
+bun standards structure
+bun standards structure --profile source
+```
+
+`doctor` checks project-owned integration points such as `biome.jsonc`, `AGENTS.local.md`, package scripts, sync policy, settings overlays, and Dependabot inputs.
+
+`structure` checks workspace scripts, internal dependency versions, package exports, TypeScript inheritance, accessibility wiring, workspace READMEs, and CI secret structure. The `source` profile records the few intentional differences in this repository itself.
+
+## dependabot
+
+```sh
+bun standards dependabot --check
+bun standards dependabot --write
+```
+
+The generated `.github/dependabot.yml` combines:
+
+- canonical `.github/dependabot.base.yml`;
+- project-owned `.github/dependabot.local.yml`.
+
+The local overlay may add update blocks, private registries, and `ignore` or `registries` entries on matching canonical targets. It cannot replace canonical policy.
+
+## dev-env
+
+```sh
+bun standards dev-env
+just dev-env-generate
+```
+
+Each workspace environment is composed in this order:
+
+1. `config/dev.yaml`, tracked configuration;
+2. `secrets/dev.yaml`, SOPS-encrypted shared secrets and reference policy;
+3. `config/dev.local.yaml`, gitignored machine-specific overrides.
+
+Later layers win, but one key cannot exist in both tracked layers. The command validates every destination before writing and commits all generated-file changes as one transaction.
+
+A plain layer may reference one part of a broker-owned S3 pair:
+
+```yaml
+apps:
+  web:
+    R2_ACCESS_KEY_ID:
+      brokeredS3: assets
+      key: assets.web
+      part: access_key_id
+```
+
+Authorize the complete pair in encrypted `secrets/dev.yaml`:
+
+```yaml
+brokeredReferences:
+  - assets:assets.web
+```
+
+The referenced target must contain both `access_key_id` and `secret_access_key`. Every generated `.env.local`, transaction artifact, and `config/dev.local.yaml` must be ignored by Git.
+
+## github
+
+```sh
+bun standards github --check
+bun standards github --apply
+```
+
+The command merges `.github/settings.json` with `.github/settings.local.json`, then compares or converges repository settings, declared rulesets, and canonical labels. Undeclared live labels are left alone. Undeclared repository-owned rulesets are removed by `--apply`.
+
+`--apply` needs admin authentication and rechecks the API response instead of treating an accepted request as success. A repository whose plan cannot enforce rulesets may declare `"rulesetEnforcement": "unavailable-on-plan"` in the local settings file.
+
+## creds
+
+The broker writes secret values directly into SOPS targets. It does not print them or pass them through command arguments.
+
+### Bootstrap providers
+
+```sh
+bun standards creds login github
+bun standards creds login github --org <org>
+bun standards creds login cloudflare
+bun standards creds status
+```
+
+The machine-global broker store lives at `$XDG_CONFIG_HOME/standards/broker.yaml`, or `~/.config/standards/broker.yaml` by default, with owner-only permissions. It holds one private GitHub App per repository owner and one Cloudflare bootstrap token per account.
+
+### Mint credentials
+
+```sh
+bun standards creds add github --dest ci:ci.broker_app
+bun standards creds add cloudflare \
+  --dest ci:ci.cloudflare_workers_token \
+  --permissions "Workers Scripts Write"
+bun standards creds add cloudflare \
+  --dest assets:assets.screenshots_rw \
+  --bucket screenshots \
+  --s3 \
+  --permissions "Workers R2 Storage Bucket Item Write"
+```
+
+Use `--zone <id>` for zone-scoped Cloudflare permissions and `--jurisdiction eu` for an EU R2 bucket. Run `bun standards creds permissions` to list accepted permission-group names.
+
+### Reconcile Cloudflare tokens
+
+```sh
+bun standards creds plan
+bun standards creds apply
+```
+
+The desired destinations are inferred from SOPS key structure. `plan` reports renewals, revocations, unmanaged tokens, and tokens owned by another repository. `apply` renews expiring brokered tokens and revokes brokered tokens whose SOPS destination was removed. It never changes credentials it did not mint.
+
+To delete one Cloudflare token outside normal reconciliation:
+
+```sh
+bun standards creds revoke --account <account-id> --token-id <token-id>
+```
+
+Bootstrap credentials and tokens still owned by an active repository are refused.
+
+## screenshots
+
+```sh
+bun standards screenshots publish docs/pr/settings-page.png docs/pr/settings-empty-state.png
+```
+
+The command reads `config/screenshots.yaml`, resolves its S3 pair from SOPS, uploads each supported image to a content-addressed key, and prints Markdown image lines in input order.
+
+```yaml
+pair: assets:assets.screenshots_rw
+bucket: screenshots
+endpoint: https://<account-id>.r2.cloudflarestorage.com
+publicBaseUrl: https://screenshots.example.com
+```
+
+Published URLs are public and permanent. Use demo data and exclude secrets and personal data.
+
+## poller
+
+```sh
+bun standards poller --config <path>
+bun standards poller --acknowledge-only --config <path>
+bun standards poller --print-units --config <path>
+```
+
+The host-level JSON configuration requires:
+
+```json
+{
+  "repos": ["owner/repo"],
+  "model": "<codex model>",
+  "reasoningEffort": "<effort>"
+}
+```
+
+Optional keys are `maxJobsPerTick`, `staleClaimHours`, `runTimeoutMinutes`, `cacheDir`, and `extraCodexArgs`. One poller supports at most 12 repositories.
+
+The worker accepts only exact issue or draft-PR revisions approved by a user with `admin` or `maintain` role. It runs Codex in a disposable worktree, revalidates approval before publication, and leaves merge to a human. The polling host owns authenticated `codex` and `gh`, the service token, writable home, configuration, and systemd deployment.
+
+## Configuration index
+
+| File or variable | Purpose |
+| --- | --- |
+| `sync-standards.json` | Canonical source, seed directory, and managed paths. |
+| `sync-standards.local.json` | Optional `ref` pin and `autoSync` policy. |
+| `sync-standards.lock` | Exact synchronized commit and managed digests. |
+| `.github/dependabot.local.yml` | Project-owned Dependabot additions. |
+| `.github/settings.local.json` | Project-owned GitHub settings additions. |
+| `config/dev.yaml` | Shared non-secret development configuration. |
+| `secrets/dev.yaml` | Shared development secrets and broker-reference policy. |
+| `config/dev.local.yaml` | Machine-specific overrides. |
+| `config/screenshots.yaml` | Public screenshot bucket and SOPS pair reference. |
+| `STANDARDS_BROKER_FILE` | Optional broker-store path override. |
+| `GH_TOKEN` or `GITHUB_TOKEN` | GitHub API authentication where required. |
+
+The [root README](../../README.md) gives the short overview. The [adoption guide](../../docs/adoption.md) and [sync guide](../../docs/sync-and-ownership.md) explain repository ownership and first use.
