@@ -5,7 +5,7 @@ description: Must be used for every task that creates or modifies UI — pages, 
 
 # UX/UI
 
-Use the `frontend-design` skill for visual work. Read the root `DESIGN.md` and follow its design intent and token source. Skip it only when the user explicitly requests a new direction; treat that work as exploration until the design contract is updated.
+Use the `frontend-design` skill for visual work. Follow the root `DESIGN.md` when present; otherwise infer the design intent and token source from the existing UI and central theme. Explore a new direction only when the user explicitly requests it; treat that work as exploration until the project adopts it in `DESIGN.md` and the theme.
 
 For pull requests that change rendered UI, use `screenshots-in-prs`.
 
