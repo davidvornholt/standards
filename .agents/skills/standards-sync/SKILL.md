@@ -47,15 +47,7 @@ Windows checkouts need `core.symlinks=true` with Developer Mode or elevation, or
 
 ## Commands
 
-```sh
-bun standards init
-bun standards sync --dry-run
-bun standards sync
-bun standards check
-bun standards doctor
-bun standards dependabot --check
-bun standards github --check
-```
+Use `bun standards help` as the authoritative reference for commands and options. Read it before using an unfamiliar command instead of relying on a list embedded in this skill.
 
 `init` performs the one-time ownership cutover and refuses once a lock exists. Move project-owned work to extension points first.
 
