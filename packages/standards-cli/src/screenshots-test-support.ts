@@ -37,8 +37,8 @@ export type S3Stub = {
 };
 
 const HTTP_OK = 200;
-const HTTP_NOT_FOUND = 404;
 const HTTP_FORBIDDEN = 403;
+const HTTP_PRECONDITION_FAILED = 412;
 
 type S3StubOptions = {
   readonly existing?: ReadonlyArray<string>;
@@ -60,14 +60,16 @@ const responseStatus = ({
   objects,
   failPath,
 }: ResponseStatusOptions): number => {
-  if (request.method === 'HEAD') {
-    if (status !== HTTP_OK) {
-      return status;
-    }
-    return objects.has(pathname) ? HTTP_OK : HTTP_NOT_FOUND;
-  }
   if (request.method === 'PUT' && pathname === failPath) {
     return HTTP_FORBIDDEN;
+  }
+  if (
+    request.method === 'PUT' &&
+    status === HTTP_OK &&
+    request.headers.get('if-none-match') === '*' &&
+    objects.has(pathname)
+  ) {
+    return HTTP_PRECONDITION_FAILED;
   }
   return status;
 };

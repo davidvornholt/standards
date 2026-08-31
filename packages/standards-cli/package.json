@@ -161,6 +161,7 @@
     "src/screenshots-config.ts",
     "src/screenshots-pair.ts",
     "src/screenshots-publish.ts",
+    "src/screenshots-upload.ts",
     "src/sops-exec.ts",
     "src/structure-check.ts",
     "src/structure-profile.ts",

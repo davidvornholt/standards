@@ -20,6 +20,11 @@ import {
   type ScreenshotsConfig,
 } from './screenshots-config';
 import { resolveScreenshotsPair } from './screenshots-pair';
+import {
+  cleanupUploads,
+  type PublishedScreenshot,
+  uploadIfAbsent,
+} from './screenshots-upload';
 
 const CONTENT_TYPES: Readonly<Record<string, string>> = {
   '.gif': 'image/gif',
@@ -34,12 +39,6 @@ const CONTENT_TYPES: Readonly<Record<string, string>> = {
 const SAFE_BASENAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
 
 const KEY_PREFIX = 'screenshots';
-
-type PublishedScreenshot = {
-  readonly key: string;
-  readonly line: string;
-  readonly wasPresent: boolean;
-};
 
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
@@ -100,30 +99,11 @@ const publishOne = async (
   const digest = createHash('sha256').update(bytes).digest('hex');
   const name = basename(file);
   const key = `${KEY_PREFIX}/${digest}/${name}`;
-  const wasPresent = await client.exists(key);
-  await client.write(key, bytes, {
-    type: CONTENT_TYPES[extname(name).toLowerCase()],
-  });
+  const contentType = CONTENT_TYPES[extname(name).toLowerCase()];
+  const created = await uploadIfAbsent(client, key, bytes, contentType);
   const alt = name.slice(0, name.length - extname(name).length);
   const objectUrl = new URL(key, `${config.publicBaseUrl}/`).href;
-  return { key, line: `![${alt}](<${objectUrl}>)`, wasPresent };
-};
-
-const cleanupUploads = async (
-  client: Bun.S3Client,
-  results: ReadonlyArray<PromiseSettledResult<PublishedScreenshot>>,
-): Promise<ReadonlyArray<unknown>> => {
-  const keys = results.flatMap((result) =>
-    result.status === 'fulfilled' && !result.value.wasPresent
-      ? [result.value.key]
-      : [],
-  );
-  const cleanupResults = await Promise.allSettled(
-    keys.map((key) => client.delete(key)),
-  );
-  return cleanupResults.flatMap((result) =>
-    result.status === 'rejected' ? [result.reason] : [],
-  );
+  return { key, line: `![${alt}](<${objectUrl}>)`, created };
 };
 
 export const runScreenshotsPublish = async (
