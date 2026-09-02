@@ -67,6 +67,7 @@ export const consumerRootManifest = (
 ): Record<string, unknown> => ({
   name: 'app',
   version: '0.0.0',
+  packageManager: 'bun@1.4.0',
   workspaces: ['apps/*', 'packages/*'],
   scripts: {
     standards: 'standards',
@@ -84,6 +85,9 @@ export const buildConsumer = (
 ): string => {
   const consumer = newStructureTmp('structure-');
   writeInto(consumer, 'package.json', JSON.stringify(root));
+  writeInto(consumer, '.envrc', 'use flake\n');
+  writeInto(consumer, 'flake.nix', '{}\n');
+  writeInto(consumer, 'flake.lock', '{}\n');
   writeInto(
     consumer,
     'sync-standards.json',

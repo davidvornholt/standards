@@ -38,5 +38,11 @@
           };
         }
       );
+
+      devShells = forAllSystems (system: {
+        default = nixpkgs.legacyPackages.${system}.mkShell {
+          packages = [ self.packages.${system}.standards-cli.bun ];
+        };
+      });
     };
 }

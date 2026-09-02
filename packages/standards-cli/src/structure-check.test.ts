@@ -25,6 +25,27 @@ describe('collectStructureProblems basics and scripts', () => {
     expect(await collect(buildConsumer())).toEqual([]);
   });
 
+  it.each(['.envrc', 'flake.nix', 'flake.lock'])(
+    'requires %s for the Nix dev shell',
+    async (path) => {
+      const consumer = buildConsumer();
+      rmSync(join(consumer, path));
+      expect(await collect(consumer)).toContain(
+        `${path}: required for the Nix dev shell`,
+      );
+    },
+  );
+
+  it.each([undefined, 'bun@1.4', 'bun@^1.4.0', 'npm@11.0.0'])(
+    'requires an exact Bun package manager pin: %s',
+    async (packageManager) => {
+      const consumer = buildConsumer(rootManifest({ packageManager }));
+      expect(await collect(consumer)).toContain(
+        'package.json: "packageManager" must pin an exact bun@x.y.z version',
+      );
+    },
+  );
+
   it('fails when package.json is missing', async () => {
     const consumer = newStructureTmp('structure-');
     expect(await collect(consumer)).toEqual([

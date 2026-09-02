@@ -54,6 +54,7 @@ const sourceRootManifest = (
 ): Record<string, unknown> => ({
   name: 'standards',
   version: '0.0.0',
+  packageManager: 'bun@1.4.0',
   workspaces: ['packages/*'],
   scripts: {
     standards: CLI,
@@ -81,6 +82,9 @@ const buildSource = (
 ): string => {
   const dir = newStructureTmp('structure-source-');
   write(dir, 'package.json', JSON.stringify(root));
+  write(dir, '.envrc', 'use flake\n');
+  write(dir, 'flake.nix', '{}\n');
+  write(dir, 'flake.lock', '{}\n');
   writeCiSecretsPair(dir);
   if (cli !== null) {
     write(dir, 'packages/standards-cli/package.json', JSON.stringify(cli));

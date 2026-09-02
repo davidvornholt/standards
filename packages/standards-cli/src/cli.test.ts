@@ -900,6 +900,9 @@ const buildUpstream = (paths: ReadonlyArray<string> = STD_PATHS): string => {
     JSON.stringify({ upstream: up, seedDir: 'template', paths }),
   );
   write(up, 'template/seed.txt', 'seed original\n');
+  write(up, 'template/.envrc', 'use flake\n');
+  write(up, 'template/flake.nix', '{}\n');
+  write(up, 'template/flake.lock', '{}\n');
   write(up, 'template/AGENTS.local.md', '# Local\n');
   write(up, 'template/biome.jsonc', '{"extends":["./biome.base.jsonc"]}\n');
   write(
@@ -924,6 +927,7 @@ const buildUpstream = (paths: ReadonlyArray<string> = STD_PATHS): string => {
     up,
     'template/package.json',
     JSON.stringify({
+      packageManager: 'bun@1.4.0',
       workspaces: ['apps/*'],
       scripts: {
         standards: 'standards',
@@ -2013,6 +2017,7 @@ const installPackedCli = (
     JSON.stringify({
       version: '0.0.0',
       private: true,
+      packageManager: 'bun@1.4.0',
       workspaces: ['apps/*'],
       scripts: {
         standards: 'standards',

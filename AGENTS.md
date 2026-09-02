@@ -18,6 +18,7 @@ This file is the root operating contract for agents in this repository. Keep roo
 - Use Bun only.
 - Add dependencies with `bun add`; do not manually edit dependency versions into `package.json`.
 - Workspaces that rely on Bun runtime or `bun:test` types must declare `@types/bun`, not custom ambient declaration shims.
+- The default Nix dev shell provides the exact Bun version declared by the root `packageManager`. Load it through `.envrc` with nix-direnv fallback disabled.
 
 ## Architecture
 
