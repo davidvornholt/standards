@@ -928,9 +928,9 @@ const buildUpstream = (paths: ReadonlyArray<string> = STD_PATHS): string => {
       scripts: {
         standards: 'standards',
         check:
-          'standards check && turbo run lint check-types test build test:a11y',
+          'standards check && turbo run lint check-types test build test:a11y --output-logs=errors-only',
         'check:fix':
-          'standards check && turbo run lint:fix check-types test build test:a11y',
+          'standards check && turbo run lint:fix check-types test build test:a11y --output-logs=errors-only',
       },
       devDependencies: { '@davidvornholt/standards': '0.1.0' },
     }),
@@ -1510,9 +1510,9 @@ describe('structure', () => {
         workspaces: ['apps/*'],
         scripts: {
           check:
-            'standards check && turbo run lint check-types test build test:a11y --dry',
+            'standards check && turbo run lint check-types test build test:a11y --output-logs=errors-only --dry',
           'check:fix':
-            'standards check && turbo run lint:fix check-types test build test:a11y --version',
+            'standards check && turbo run lint:fix check-types test build test:a11y --output-logs=errors-only --version',
         },
         devDependencies: { '@davidvornholt/standards': '0.1.0' },
       }),
@@ -2017,9 +2017,9 @@ const installPackedCli = (
       scripts: {
         standards: 'standards',
         check:
-          'standards check && turbo run lint check-types test build test:a11y',
+          'standards check && turbo run lint check-types test build test:a11y --output-logs=errors-only',
         'check:fix':
-          'standards check && turbo run lint:fix check-types test build test:a11y',
+          'standards check && turbo run lint:fix check-types test build test:a11y --output-logs=errors-only',
       },
       devDependencies: {
         '@davidvornholt/standards': `file:${tarball}`,

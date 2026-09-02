@@ -1,6 +1,6 @@
 ---
 name: unslop
-description: Cut AI tells from any writing. Must always apply.
+description: Use for every writing task. Removes AI tells while preserving meaning and voice.
 ---
 
 # Unslop

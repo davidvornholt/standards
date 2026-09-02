@@ -8,9 +8,10 @@ import { isRecord } from './github-settings-parse';
 // drifting silently while the normal quality gate stays green.
 export type StructureProfile = 'consumer' | 'source';
 
-const CONSUMER_CHECK = 'turbo run lint check-types test build test:a11y';
+const CONSUMER_CHECK =
+  'turbo run lint check-types test build test:a11y --output-logs=errors-only';
 const CONSUMER_CHECK_FIX =
-  'turbo run lint:fix check-types test build test:a11y';
+  'turbo run lint:fix check-types test build test:a11y --output-logs=errors-only';
 const ROOT_A11Y = 'turbo run test:a11y';
 
 export const PUBLISHED_CLI_WORKSPACE = 'packages/standards-cli';
@@ -32,7 +33,7 @@ const SOURCE_ROOT_EXPECTATIONS: ReadonlyArray<RootScriptExpectation> = [
       `${SOURCE_CLI} structure --profile source`,
       `${SOURCE_CLI} dependabot --check`,
       `${SOURCE_CLI} github --check`,
-      'turbo run lint check-types test',
+      'turbo run lint check-types test --output-logs=errors-only',
     ],
     exact: true,
   },
@@ -42,7 +43,7 @@ const SOURCE_ROOT_EXPECTATIONS: ReadonlyArray<RootScriptExpectation> = [
       `${SOURCE_CLI} structure --profile source`,
       `${SOURCE_CLI} dependabot --write`,
       `${SOURCE_CLI} github --check`,
-      'turbo run lint:fix check-types test',
+      'turbo run lint:fix check-types test --output-logs=errors-only',
     ],
     exact: true,
   },

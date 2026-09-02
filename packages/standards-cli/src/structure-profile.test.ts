@@ -17,13 +17,13 @@ const SOURCE_GATE_COMMANDS = {
     `${CLI} structure --profile source`,
     `${CLI} dependabot --check`,
     `${CLI} github --check`,
-    'turbo run lint check-types test',
+    'turbo run lint check-types test --output-logs=errors-only',
   ],
   'check:fix': [
     `${CLI} structure --profile source`,
     `${CLI} dependabot --write`,
     `${CLI} github --check`,
-    'turbo run lint:fix check-types test',
+    'turbo run lint:fix check-types test --output-logs=errors-only',
   ],
 } as const;
 const INVALID_SOURCE_GATES = (['check', 'check:fix'] as const).flatMap(
@@ -97,8 +97,8 @@ describe('source profile', () => {
 
   it('keeps rejecting the source shape under the consumer profile', async () => {
     expect(await collectStructureProblems(buildSource(), 'consumer')).toEqual([
-      'package.json: root script "check" must run turbo run lint check-types test build test:a11y',
-      'package.json: root script "check:fix" must run turbo run lint:fix check-types test build test:a11y',
+      'package.json: root script "check" must run turbo run lint check-types test build test:a11y --output-logs=errors-only',
+      'package.json: root script "check:fix" must run turbo run lint:fix check-types test build test:a11y --output-logs=errors-only',
       'packages/standards-cli: internal workspace version must be "0.0.0"',
       'packages/standards-cli: package must define its public API with "exports"',
       'sync-standards.json: must contain a JSON object with a "paths" array of strings; the structure gate reads it to tell canonical workspaces from repo-owned ones',
@@ -109,9 +109,9 @@ describe('source profile', () => {
     const scripts = {
       standards: `true && ${CLI}`,
       check:
-        'standards check && turbo run lint check-types test build test:a11y',
+        'standards check && turbo run lint check-types test build test:a11y --output-logs=errors-only',
       'check:fix':
-        'standards check && turbo run lint:fix check-types test build test:a11y',
+        'standards check && turbo run lint:fix check-types test build test:a11y --output-logs=errors-only',
     };
     const problems = await collectStructureProblems(
       buildSource(sourceRootManifest({ scripts })),

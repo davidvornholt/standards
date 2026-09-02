@@ -1,6 +1,6 @@
 ---
 name: frontend-design
-description: Use when building new web UI or reshaping an existing one — pages, landing pages, dashboards, components, or full applications — and whenever styling or beautifying any web UI. Guides aesthetic direction, typography, layout, motion, and UI copy toward distinctive, intentional design that does not read as templated AI defaults.
+description: Use when creating or visually styling a web interface. Establishes a deliberate visual direction before implementation.
 license: Complete terms in LICENSE.txt
 ---
 

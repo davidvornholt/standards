@@ -11,4 +11,4 @@ bun install
 bun run check
 ```
 
-Document project-specific setup, configuration, secrets, and workspace commands here. Each workspace keeps its own README for the values it consumes.
+Document project-specific setup and workspace commands here. Document configuration where it is declared and secrets in the matching example YAML.

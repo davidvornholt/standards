@@ -70,8 +70,8 @@ The root package must declare the CLI directly and run `standards check` before 
 ```json
 {
   "scripts": {
-    "check": "standards check && turbo run lint check-types test build test:a11y",
-    "check:fix": "standards check && turbo run lint:fix check-types test build test:a11y"
+    "check": "standards check && turbo run lint check-types test build test:a11y --output-logs=errors-only",
+    "check:fix": "standards check && turbo run lint:fix check-types test build test:a11y --output-logs=errors-only"
   }
 }
 ```

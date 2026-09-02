@@ -1,6 +1,6 @@
 ---
 name: screenshots-in-prs
-description: Must be used when opening or updating a pull request that changes rendered UI. Covers capturing screenshots, publishing them, and embedding them in the PR description.
+description: Use when opening or editing a pull request for a change to rendered UI. Produces safe, matched visual evidence for reviewers.
 ---
 
 # Screenshots in PRs

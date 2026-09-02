@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   rmSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -21,8 +22,9 @@ const NODE_INVOCATION =
   /node \\\s+packages\/standards-cli\/scripts\/release-recovery\.ts/u;
 
 // The publish workflow runs this dispatcher before `bun install`, so the tree it
-// runs from carries the two source files and nothing else. A dependency that
-// leaks into the startup path fails here rather than in a release.
+// runs from carries the source files and package module metadata, but no
+// installed dependencies. A dependency that leaks into the startup path fails
+// here rather than in a release.
 const runInSourceOnlyTree = (
   runtime: 'bun' | 'node',
   command: ReadonlyArray<string>,
@@ -31,6 +33,7 @@ const runInSourceOnlyTree = (
   try {
     mkdirSync(join(root, 'scripts'));
     mkdirSync(join(root, 'src'));
+    writeFileSync(join(root, 'package.json'), '{"type":"module"}\n');
     copyFileSync(RECOVERY_SCRIPT, join(root, 'scripts/release-recovery.ts'));
     copyFileSync(RECOVERY_MODULE, join(root, 'src/release-recovery.ts'));
     if (existsSync(join(root, 'node_modules'))) {

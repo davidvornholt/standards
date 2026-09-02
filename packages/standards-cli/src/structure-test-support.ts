@@ -70,9 +70,10 @@ export const consumerRootManifest = (
   workspaces: ['apps/*', 'packages/*'],
   scripts: {
     standards: 'standards',
-    check: 'standards check && turbo run lint check-types test build test:a11y',
+    check:
+      'standards check && turbo run lint check-types test build test:a11y --output-logs=errors-only',
     'check:fix':
-      'standards check && turbo run lint:fix check-types test build test:a11y',
+      'standards check && turbo run lint:fix check-types test build test:a11y --output-logs=errors-only',
   },
   ...overrides,
 });
