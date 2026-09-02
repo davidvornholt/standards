@@ -2470,7 +2470,7 @@ describe('canonical standards workflow settings security', () => {
     expect(settingsRun).toContain(
       '[ -z "$SETTINGS_TOKEN" ] || [[ "$SETTINGS_TOKEN" == *$\'\\n\'* ]] || [[ "$SETTINGS_TOKEN" == *$\'\\r\'* ]]',
     );
-    expect(installRun).toContain('bun_version=1.3.14');
+    expect(installRun).toContain('bun_version=1.4.0');
     expect(installRun.match(/bun_sha=[a-f0-9]{64}/gu)).toHaveLength(2);
     expect(installRun).toContain('standards_version=0.21.0');
     expect(installRun).toContain(

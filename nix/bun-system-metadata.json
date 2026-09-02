@@ -1,11 +1,11 @@
 {
   "aarch64-linux": {
-    "archiveHash": "sha256-on/7Y6gxA3WDbg1vZorhf6jY0YuIw3yCHGUzGXOhmjs=",
+    "archiveHash": "sha256-SxozLuhhmD65O8/m93D/+U4+MbLDiL2uo8jtNeWO7Q4=",
     "archivePlatform": "aarch64",
     "runner": "ubuntu-24.04-arm"
   },
   "x86_64-linux": {
-    "archiveHash": "sha256-lR7iruhV8IWVruxiJSJqKY0/6oOj3NZGXAnLzN9+hI8=",
+    "archiveHash": "sha256-LQP7X7g6yLVnrKCigbLOGhoZ1Ij1bClo2Iw/Jekv5FI=",
     "archivePlatform": "x64",
     "runner": "ubuntu-24.04"
   }

@@ -12,6 +12,7 @@ import {
   liveRepository,
   OPT_OUT_NOTICE,
 } from './github-commands-test-support';
+import { restoreProcessEnv } from './process-env-test-support';
 
 const originalFetch = globalThis.fetch;
 const originalGhHost = process.env.GH_HOST;
@@ -25,16 +26,16 @@ beforeEach(() => {
   output.restore();
   output = captureConsole(commandConsole);
   process.env.GH_TOKEN = 'test-token';
-  process.env.GITHUB_TOKEN = undefined;
+  delete process.env.GITHUB_TOKEN;
 });
 
 afterEach(() => {
   output.restore();
   cleanup(...temporaryPaths.splice(0));
   globalThis.fetch = originalFetch;
-  process.env.GH_HOST = originalGhHost;
-  process.env.GH_TOKEN = originalGhToken;
-  process.env.GITHUB_TOKEN = originalGithubToken;
+  restoreProcessEnv('GH_HOST', originalGhHost);
+  restoreProcessEnv('GH_TOKEN', originalGhToken);
+  restoreProcessEnv('GITHUB_TOKEN', originalGithubToken);
 });
 
 const consumer = (options?: Parameters<typeof createConsumer>[0]): string => {
@@ -118,8 +119,8 @@ describe('runGithubApply', () => {
 
     output.logs.length = 0;
     output.errors.length = 0;
-    process.env.GH_TOKEN = undefined;
-    process.env.GITHUB_TOKEN = undefined;
+    delete process.env.GH_TOKEN;
+    delete process.env.GITHUB_TOKEN;
     process.env.GH_HOST = 'missing.invalid';
     expect(await runGithubApply(consumer())).toBe(false);
     expect(output.logs).toEqual([OPT_OUT_NOTICE]);
@@ -128,7 +129,7 @@ describe('runGithubApply', () => {
     output.logs.length = 0;
     output.errors.length = 0;
     process.env.GH_TOKEN = 'test-token';
-    process.env.GH_HOST = originalGhHost;
+    restoreProcessEnv('GH_HOST', originalGhHost);
     installNetworkFailure();
     expect(await runGithubApply(consumer())).toBe(false);
     expect(output.logs).toEqual([OPT_OUT_NOTICE]);

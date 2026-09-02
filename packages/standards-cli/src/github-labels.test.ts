@@ -12,7 +12,7 @@ beforeEach(() => {
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
-  process.env.GH_TOKEN = undefined;
+  delete process.env.GH_TOKEN;
 });
 
 const declared = [

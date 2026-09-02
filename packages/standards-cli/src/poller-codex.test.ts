@@ -13,6 +13,7 @@ import process from 'node:process';
 import { runCodex } from './poller-codex';
 import type { PollerConfig } from './poller-config';
 import { OUTCOME_DIR } from './poller-protocol';
+import { restoreProcessEnv } from './process-env-test-support';
 
 const dirs: Array<string> = [];
 const MAX_FAILURE_LENGTH = 2100;
@@ -50,7 +51,6 @@ const runScript =
   (source: string): NonNullable<Parameters<typeof runCodex>[1]> =>
   (_file, _args, options) =>
     spawn(process.execPath, ['-e', source], options);
-
 const makeWorkDir = (): string => {
   const dir = mkdtempSync(join(tmpdir(), 'poller-codex-'));
   dirs.push(dir);
@@ -64,9 +64,9 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }
-  process.env.GH_TOKEN = originalGhToken;
-  process.env.GITHUB_TOKEN = originalGithubToken;
-  process.env.STANDARDS_POLLER_GIT_TOKEN = originalGitToken;
+  restoreProcessEnv('GH_TOKEN', originalGhToken);
+  restoreProcessEnv('GITHUB_TOKEN', originalGithubToken);
+  restoreProcessEnv('STANDARDS_POLLER_GIT_TOKEN', originalGitToken);
 });
 
 describe('runCodex', () => {
