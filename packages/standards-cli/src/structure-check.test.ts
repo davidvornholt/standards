@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { rmSync } from 'node:fs';
+import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { collectStructureProblems } from './structure-check';
 import {
@@ -35,6 +35,15 @@ describe('collectStructureProblems basics and scripts', () => {
       );
     },
   );
+
+  it('requires Nix dev-shell prerequisites to be regular files', async () => {
+    const consumer = buildConsumer();
+    rmSync(join(consumer, 'flake.nix'));
+    mkdirSync(join(consumer, 'flake.nix'));
+    expect(await collect(consumer)).toContain(
+      'flake.nix: required for the Nix dev shell',
+    );
+  });
 
   it.each([undefined, 'bun@1.4', 'bun@^1.4.0', 'npm@11.0.0'])(
     'requires an exact Bun package manager pin: %s',

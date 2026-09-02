@@ -60,7 +60,7 @@ Existing project-owned files are kept. Synced files are replaced. `init` refuses
 ```sh
 bun standards sync --dry-run
 bun standards sync
-bun standards sync --ref v0.25.0
+bun standards sync --ref v0.26.0
 bun standards sync --from ../standards
 ```
 

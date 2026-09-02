@@ -150,7 +150,7 @@ The default is weekly synchronization from `main`. To pin a source or disable th
 ```json
 {
   "autoSync": false,
-  "ref": "v0.25.0"
+  "ref": "v0.26.0"
 }
 ```
 

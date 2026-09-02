@@ -3427,6 +3427,8 @@ describe('standards sync workflow ordering', () => {
     const mintIndex = stepNames.indexOf('Mint current-repository PR token');
     const clearIndex = stepNames.indexOf('Clear broker App credentials');
     const syncIndex = stepNames.indexOf('Sync canonical files from upstream');
+    const lockIndex = stepNames.indexOf('Refresh consumer lockfile');
+    const detectIndex = stepNames.indexOf('Detect mirror changes');
     const localActionIndexes = steps.flatMap((step, index) =>
       typeof step === 'object' &&
       step !== null &&
@@ -3440,6 +3442,11 @@ describe('standards sync workflow ordering', () => {
     expect(mintIndex).toBeGreaterThan(resolvePrivateKeyIndex);
     expect(clearIndex).toBeGreaterThan(mintIndex);
     expect(syncIndex).toBeGreaterThan(clearIndex);
+    expect(lockIndex).toBeGreaterThan(syncIndex);
+    expect(detectIndex).toBeGreaterThan(lockIndex);
+    expect(yamlStep(SYNC_WORKFLOW, 'Refresh consumer lockfile')).toContain(
+      'run: bun install --lockfile-only --ignore-scripts',
+    );
     expect(localActionIndexes).toEqual([
       resolveAppIdIndex,
       resolvePrivateKeyIndex,

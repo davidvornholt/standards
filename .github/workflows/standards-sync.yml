@@ -190,6 +190,13 @@ jobs:
             bun standards sync
           fi
 
+      # Canonical package manifests can change dependency ranges after the
+      # frozen pre-sync install. Refresh the consumer lock before deciding
+      # whether the mirror produced a change, so the sync branch remains
+      # installable with --frozen-lockfile.
+      - name: Refresh consumer lockfile
+        run: bun install --lockfile-only --ignore-scripts
+
       - name: Detect mirror changes
         id: mirror
         run: |

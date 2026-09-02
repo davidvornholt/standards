@@ -2,11 +2,13 @@
   "aarch64-linux": {
     "archiveHash": "sha256-SxozLuhhmD65O8/m93D/+U4+MbLDiL2uo8jtNeWO7Q4=",
     "archivePlatform": "aarch64",
+    "bunVersion": "1.4.0",
     "runner": "ubuntu-24.04-arm"
   },
   "x86_64-linux": {
     "archiveHash": "sha256-LQP7X7g6yLVnrKCigbLOGhoZ1Ij1bClo2Iw/Jekv5FI=",
     "archivePlatform": "x64",
+    "bunVersion": "1.4.0",
     "runner": "ubuntu-24.04"
   }
 }

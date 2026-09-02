@@ -87,7 +87,7 @@ Each release exposes a self-contained CLI package for `x86_64-linux` and `aarch6
 
 ```nix
 inputs.standards = {
-  url = "github:davidvornholt/standards/v0.25.0";
+  url = "github:davidvornholt/standards/v0.26.0";
   inputs.nixpkgs.follows = "nixpkgs";
 };
 ```

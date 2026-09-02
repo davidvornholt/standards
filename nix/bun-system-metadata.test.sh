@@ -50,6 +50,7 @@ metadata_update="$fixture/nix/bun-system-metadata.update.json"
 jq '.["fixture-linux"] = {
   archiveHash: "sha256-lR7iruhV8IWVruxiJSJqKY0/6oOj3NZGXAnLzN9+hI8=",
   archivePlatform: "x64",
+  bunVersion: "1.4.0",
   runner: "ubuntu-24.04"
 }' "$metadata" >"$metadata_update"
 mv "$metadata_update" "$metadata"
