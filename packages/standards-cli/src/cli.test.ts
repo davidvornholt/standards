@@ -2585,6 +2585,15 @@ it('allows only trusted-publication caches in the approved contract', () => {
   ).not.toThrow();
 });
 
+it('pins Node for quality tools that intentionally require it', () => {
+  const workflow = parseWorkflow(STANDARDS_WORKFLOW);
+  expect(qualityStep(workflow, 'Setup Node')).toEqual({
+    name: 'Setup Node',
+    uses: 'actions/setup-node@v7',
+    with: { 'node-version': '26' },
+  });
+});
+
 it('requires database resolution before dependency installation', () => {
   const mutations: ReadonlyArray<(workflow: ParsedWorkflow) => void> = [
     (workflow) => {

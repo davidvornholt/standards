@@ -168,6 +168,14 @@ jobs:
         with:
           bun-version: 1.3.14
 
+      # Bun is the package manager and default runtime. Some quality tools and
+      # cross-runtime tests intentionally invoke Node, so honor the version the
+      # canonical package manifest declares instead of the runner's ambient one.
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "26"
+
       # PRs may restore the latest default-branch Turbo snapshot but never
       # publish cache state. A successful default-branch run saves at most one
       # pruned snapshot per commit, so reruns cannot duplicate an upload and PR
