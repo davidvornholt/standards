@@ -140,6 +140,19 @@
             }
           },
           "nursery": {
+            // Biome 2.5.11's first implementation can spend indefinitely
+            // traversing Tailwind and workspace CSS import graphs.
+            "noUndeclaredCustomProperties": "off",
+            // Arbitrary Tailwind values can encode intentional one-off layout
+            // constraints that do not belong in a shared design token.
+            "noTailwindArbitraryValue": "off",
+            // The experimental analyzer reports deliberately wider public
+            // return contracts as errors even when the annotation is useful.
+            "noMisleadingReturnType": "off",
+            // This experimental rule enforces React Compiler constraints even
+            // in projects that do not use the compiler and still reports known
+            // unsupported patterns.
+            "useReactCompiler": "off",
             // Rejects assertions even when a runtime check or controlled test
             // fixture has already established the asserted fact.
             "noUnsafeTypeAssertion": "off",
