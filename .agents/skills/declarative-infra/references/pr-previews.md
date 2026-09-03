@@ -47,7 +47,7 @@ Each active preview materializes, from the modules, as:
 - its own Postgres database `<app>_pr_<number>` with peer auth mapped only to that system user (the bootstrap Postgres module's `databaseSystemUsers` seam exists for exactly this)
 - its own internal Podman network with a non-overlapping host-reachable subnet and deterministic container address, so previews cannot reach each other or the internet
 - a Caddy virtual host `<pr>.pr.<domain>` that reverse-proxies the container address directly and sends `X-Robots-Tag: noindex, nofollow, noarchive`; do not publish a host port because rootful Podman's internal bridge disables the forwarding that published ports require
-- a host firewall rule that rejects every packet sourced from the reserved preview subnet range before any host-service allow rule; this closes the bridge-gateway path to Caddy and other host listeners while preserving host-originated Caddy and readiness traffic to preview addresses
+- a host firewall rule that rejects every new connection sourced from the reserved preview subnet range before any host-service allow rule; this closes the bridge-gateway path to Caddy and other host listeners while allowing replies to host-originated Caddy and readiness traffic
 
 Assert the invariants in the module: unique bounded PR numbers, digest-pinned images matching the allowed name, and enough addresses in the host-reserved subnet range.
 
@@ -74,7 +74,7 @@ One wildcard record `*.pr.<domain>` pointing at the host, managed in the tofu st
 - The host-side rebuild evaluates the flake from the deployed system. A path converted with `toString` can disappear after `nix gc` even when `system.extraDependencies` retains a different source path; keep the command's own closure complete instead.
 - An image that starts as its declared user can still fail immediately under the host's dedicated preview UID. Exercise the exact UID override in the build workflow.
 - A port published from a rootful Podman `--internal` bridge is not a host ingress path. Give each preview a deterministic address on its internal bridge and route host Caddy and readiness probes to that address directly; do not restore forwarding or outbound access to make port publication work.
-- Separate internal bridges do not stop a preview from reaching services bound to its host-side gateway. Reject the whole reserved preview source range before host-service allow rules, or a preview can send another preview's hostname to host Caddy and use it as a cross-network proxy.
+- Separate internal bridges do not stop a preview from reaching services bound to its host-side gateway. Reject new connections from the whole reserved preview source range before host-service allow rules, or a preview can send another preview's hostname to host Caddy and use it as a cross-network proxy. Keep established replies allowed so host-originated readiness and proxy traffic can return.
 - Caddy cannot reload through an admin API configured as `off`; disable reload-on-change or keep the API available.
 - `workflow_run.pull_requests` can be empty depending on event provenance; guard teardown jobs on the PR number being present instead of assuming `[0]` exists.
 - The deploy workflow must check out the *default branch*, never the triggering head — `workflow_run` runs with secrets, and the artifact is the only thing taken from the untrusted build.
