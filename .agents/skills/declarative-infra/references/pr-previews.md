@@ -21,6 +21,8 @@ Two workflows, split so untrusted PR code never runs with secrets:
 
 Deploy secrets live in a dedicated GitHub Environment (`pr-preview`) whose SOPS file contains exactly one secret: the preview deploy SSH private key. It never holds production deploy keys or cloud credentials, and its age key is distinct from the production deploy environment's. The preview deploy job and the production deploy job share one Actions concurrency group (`<repo>-<host>-deploy`, `cancel-in-progress: false`) so their `switch` operations never interleave — this serialization is a load-bearing invariant, since the host-side lock only covers preview invocations.
 
+Give every temporary resource in the trusted deploy job its own path. Create secret files with `mktemp` and artifact extraction directories with `mktemp -d`, using distinct templates for each resource. A fixed basename shared by an SSH key and an artifact directory turns the key file into a guaranteed deployment failure when the artifact step calls `mkdir`. Keep a contract test that reads the SSH helper and deploy workflow together and rejects reused temp paths.
+
 ## Host-side forced command
 
 The only mutation channel is an SSH key restricted to a single command in root's `authorized_keys`:
