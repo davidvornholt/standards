@@ -240,7 +240,9 @@ jobs:
             echo "::error::Found a browser a11y suite but no installed playwright binary. Declare @playwright/test in the workspace that owns the suite."
             exit 1
           fi
-          "$playwright" install --with-deps chromium
+          # The installed CLI has a Node shebang. Invoke it through Bun so the
+          # gate does not depend on an ambient Node version from the runner.
+          bun "$playwright" install --with-deps chromium
 
       - name: Check
         env:
