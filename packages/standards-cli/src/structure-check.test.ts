@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, rmSync } from 'node:fs';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { collectStructureProblems } from './structure-check';
 import {
@@ -25,26 +25,6 @@ describe('collectStructureProblems basics and scripts', () => {
     expect(await collect(buildConsumer())).toEqual([]);
   });
 
-  it.each(['.envrc', 'flake.nix', 'flake.lock'])(
-    'requires %s for the Nix dev shell',
-    async (path) => {
-      const consumer = buildConsumer();
-      rmSync(join(consumer, path));
-      expect(await collect(consumer)).toContain(
-        `${path}: required for the Nix dev shell`,
-      );
-    },
-  );
-
-  it('requires Nix dev-shell prerequisites to be regular files', async () => {
-    const consumer = buildConsumer();
-    rmSync(join(consumer, 'flake.nix'));
-    mkdirSync(join(consumer, 'flake.nix'));
-    expect(await collect(consumer)).toContain(
-      'flake.nix: required for the Nix dev shell',
-    );
-  });
-
   it.each([undefined, 'bun@1.4', 'bun@^1.4.0', 'npm@11.0.0'])(
     'requires an exact Bun package manager pin: %s',
     async (packageManager) => {
@@ -52,6 +32,36 @@ describe('collectStructureProblems basics and scripts', () => {
       expect(await collect(consumer)).toContain(
         'package.json: "packageManager" must pin an exact bun@x.y.z version',
       );
+    },
+  );
+
+  it('accepts a matching optional mise pin', async () => {
+    const consumer = buildConsumer();
+    write(consumer, 'mise.toml', '[tools]\nbun = "1.4.0"\n');
+    expect(await collect(consumer)).toEqual([]);
+  });
+
+  it('rejects an optional mise pin that differs from packageManager', async () => {
+    const consumer = buildConsumer();
+    write(consumer, 'mise.toml', '[tools]\nbun = "1.3.9"\n');
+    expect(await collect(consumer)).toContain(
+      'mise.toml: tools.bun must match package.json packageManager (1.4.0)',
+    );
+  });
+
+  it.each([
+    ['malformed TOML', 'bun =\n', 'mise.toml: must contain valid TOML'],
+    [
+      'no Bun tool',
+      '[tools]\nnode = "26"\n',
+      'mise.toml: tools.bun must be a version string',
+    ],
+  ])(
+    'rejects optional mise config with %s',
+    async (_label, contents, expected) => {
+      const consumer = buildConsumer();
+      write(consumer, 'mise.toml', contents);
+      expect(await collect(consumer)).toContain(expected);
     },
   );
 

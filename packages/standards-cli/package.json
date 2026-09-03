@@ -164,7 +164,7 @@
     "src/screenshots-upload.ts",
     "src/sops-exec.ts",
     "src/structure-check.ts",
-    "src/structure-dev-shell.ts",
+    "src/structure-bun-version.ts",
     "src/structure-profile.ts",
     "src/structure-readme.ts",
     "src/structure-secret-document.ts",

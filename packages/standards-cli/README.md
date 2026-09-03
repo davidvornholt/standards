@@ -97,7 +97,7 @@ bun standards structure --profile source
 
 `doctor` checks project-owned integration points such as `biome.jsonc`, `AGENTS.local.md`, package scripts, sync policy, settings overlays, and Dependabot inputs.
 
-`structure` checks workspace scripts, internal dependency versions, package exports, TypeScript inheritance, accessibility wiring, workspace READMEs, and CI secret structure. The `source` profile records the few intentional differences in this repository itself.
+`structure` checks the exact Bun declaration, an optional mise pin, workspace scripts, internal dependency versions, package exports, TypeScript inheritance, accessibility wiring, workspace READMEs, and CI secret structure. The `source` profile records the few intentional differences in this repository itself.
 
 ## dependabot
 

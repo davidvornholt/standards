@@ -78,6 +78,8 @@ The root package must declare the CLI directly and run `standards check` before 
 
 Use the repository's actual tasks. The invariant is that a failed standards check remains fatal.
 
+The root `packageManager` is the Bun version contract. New repositories also receive project-owned mise and Nix configurations pinned to that version. Either can provision Bun when installed; neither tool is required. If a repository keeps `mise.toml`, the structure gate checks that `tools.bun` matches `packageManager`.
+
 ## Generate development environments
 
 The effective workspace environment is composed in this order:

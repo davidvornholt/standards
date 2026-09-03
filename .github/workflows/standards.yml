@@ -163,10 +163,31 @@ jobs:
             echo "present=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Read Bun version
+        id: bun
+        run: |
+          set -euo pipefail
+          if ! package_manager="$(jq -er '.packageManager | select(type == "string" and test("^bun@(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"))' package.json)"; then
+            echo '::error::package.json packageManager must pin an exact bun@x.y.z version'
+            exit 1
+          fi
+          echo "version=${package_manager#bun@}" >> "$GITHUB_OUTPUT"
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.0
+          bun-version: ${{ steps.bun.outputs.version }}
+
+      - name: Verify Bun version
+        env:
+          EXPECTED_BUN_VERSION: ${{ steps.bun.outputs.version }}
+        run: |
+          set -euo pipefail
+          actual="$(bun --version)"
+          if [[ "$actual" != "$EXPECTED_BUN_VERSION" ]]; then
+            echo "::error::Expected Bun $EXPECTED_BUN_VERSION from package.json, received $actual"
+            exit 1
+          fi
 
       # Bun is the package manager and default runtime. Some quality tools and
       # cross-runtime tests intentionally invoke Node, so honor the version the

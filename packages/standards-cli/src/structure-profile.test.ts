@@ -82,9 +82,6 @@ const buildSource = (
 ): string => {
   const dir = newStructureTmp('structure-source-');
   write(dir, 'package.json', JSON.stringify(root));
-  write(dir, '.envrc', 'use flake\n');
-  write(dir, 'flake.nix', '{}\n');
-  write(dir, 'flake.lock', '{}\n');
   writeCiSecretsPair(dir);
   if (cli !== null) {
     write(dir, 'packages/standards-cli/package.json', JSON.stringify(cli));

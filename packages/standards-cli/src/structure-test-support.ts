@@ -85,9 +85,6 @@ export const buildConsumer = (
 ): string => {
   const consumer = newStructureTmp('structure-');
   writeInto(consumer, 'package.json', JSON.stringify(root));
-  writeInto(consumer, '.envrc', 'use flake\n');
-  writeInto(consumer, 'flake.nix', '{}\n');
-  writeInto(consumer, 'flake.lock', '{}\n');
   writeInto(
     consumer,
     'sync-standards.json',

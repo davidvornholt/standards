@@ -568,15 +568,75 @@ const rejectedQualityCacheMutations = (
 
 const assertQualityWorkflowContract = (workflow: ParsedWorkflow): void => {
   const steps = workflowSteps(workflow.jobs.quality, 'quality');
+  const bunSteps = [
+    qualityStep(workflow, 'Read Bun version'),
+    qualityStep(workflow, 'Setup Bun'),
+    qualityStep(workflow, 'Verify Bun version'),
+  ];
+  const expectedBunSteps: ReadonlyArray<WorkflowStep> = [
+    {
+      name: 'Read Bun version',
+      id: 'bun',
+      run: `set -euo pipefail
+if ! package_manager="$(jq -er '.packageManager | select(type == "string" and test("^bun@(0|[1-9][0-9]*)\\\\.(0|[1-9][0-9]*)\\\\.(0|[1-9][0-9]*)$"))' package.json)"; then
+  echo '::error::package.json packageManager must pin an exact bun@x.y.z version'
+  exit 1
+fi
+echo "version=\${package_manager#bun@}" >> "$GITHUB_OUTPUT"
+`,
+    },
+    {
+      name: 'Setup Bun',
+      uses: 'oven-sh/setup-bun@v2',
+      with: { 'bun-version': githubExpression('steps.bun.outputs.version') },
+    },
+    {
+      name: 'Verify Bun version',
+      env: {
+        EXPECTED_BUN_VERSION: githubExpression('steps.bun.outputs.version'),
+      },
+      run: `set -euo pipefail
+actual="$(bun --version)"
+if [[ "$actual" != "$EXPECTED_BUN_VERSION" ]]; then
+  echo "::error::Expected Bun $EXPECTED_BUN_VERSION from package.json, received $actual"
+  exit 1
+fi
+`,
+    },
+  ];
+  if (!isDeepStrictEqual(bunSteps, expectedBunSteps)) {
+    throw new Error(
+      'The quality workflow must install and verify the exact Bun packageManager version',
+    );
+  }
+  const bunIndices = bunSteps.map((step) => steps.indexOf(step));
+  if (
+    bunIndices.some((index, position) => {
+      const previous = bunIndices[position - 1];
+      return index < 0 || (previous !== undefined && previous >= index);
+    })
+  ) {
+    throw new Error('The quality workflow Bun steps are out of order');
+  }
   const resolverIndex = steps.findIndex(
     (step) => step.name === DATABASE_RESOLVER_STEP_NAME,
   );
   const installIndex = steps.findIndex(
     (step) => step.name === 'Install dependencies',
   );
-  if (resolverIndex < 0 || installIndex < 0 || resolverIndex >= installIndex) {
+  const [, , verifyBunIndex] = bunIndices;
+  if (resolverIndex < 0 || resolverIndex >= installIndex) {
     throw new Error(
       'The quality workflow must resolve the database endpoint before installing dependencies',
+    );
+  }
+  if (
+    installIndex < 0 ||
+    verifyBunIndex === undefined ||
+    verifyBunIndex >= installIndex
+  ) {
+    throw new Error(
+      'The quality workflow must verify Bun before installing dependencies',
     );
   }
 };
@@ -903,6 +963,7 @@ const buildUpstream = (paths: ReadonlyArray<string> = STD_PATHS): string => {
   write(up, 'template/.envrc', 'use flake\n');
   write(up, 'template/flake.nix', '{}\n');
   write(up, 'template/flake.lock', '{}\n');
+  write(up, 'template/mise.toml', '[tools]\nbun = "1.4.0"\n');
   write(up, 'template/AGENTS.local.md', '# Local\n');
   write(up, 'template/biome.jsonc', '{"extends":["./biome.base.jsonc"]}\n');
   write(
@@ -1006,6 +1067,7 @@ const exerciseSeededGitignore = (
 } => {
   const ignoredPaths = [
     'node_modules/package/index.js',
+    '.direnv/flake-profile',
     '.turbo/cache/state',
     'dist/app.js',
     '.next/server/app.js',
