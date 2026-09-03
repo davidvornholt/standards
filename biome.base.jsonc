@@ -149,6 +149,9 @@
             // The experimental analyzer reports deliberately wider public
             // return contracts as errors even when the annotation is useful.
             "noMisleadingReturnType": "off",
+            // Empty strings can be meaningful fallback signals, so replacing
+            // every intentional logical-or chain with ?? changes behavior.
+            "useNullishCoalescing": "off",
             // This experimental rule enforces React Compiler constraints even
             // in projects that do not use the compiler and still reports known
             // unsupported patterns.
@@ -193,6 +196,11 @@
             // pattern this rule demands targets memoization-sensitive React
             // Native trees and makes components strictly harder to read.
             "noJsxPropsBind": "off"
+          },
+          "suspicious": {
+            // Biome's type analysis treats mutable refs as their initial
+            // literals and can collapse annotated async result unions.
+            "noUnnecessaryConditions": "off"
           }
         }
       }
