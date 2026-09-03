@@ -13,10 +13,8 @@ import { join } from 'node:path';
 import { withBrokerLock } from './creds-store-lock';
 import { brokerStorePaths } from './creds-store-lock-test-support';
 
-// What release does when the lock directory is no longer its own to remove,
-// decided without the clock. Keeping it out of the live-lock file next door is
-// what holds both under the 200-line limit; none of that file's wall time buys
-// anything here.
+// Keep release ownership races separate from the clock-dependent live-lock
+// cases so failures identify which contract broke.
 const SCALED = { retryMs: 20, staleMs: 500, timeoutMs: 5000 };
 const { cleanup, mkStorePath } = brokerStorePaths('creds-lock-release-');
 

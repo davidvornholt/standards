@@ -1,6 +1,6 @@
 ---
 name: review-fix
-description: Use for a review with fixes or a review loop. Runs one autonomous, bounded review → fix → verify cycle on a pull request with a small lens fan-out.
+description: Use when asked to review a pull request and fix its findings in the same review loop. Runs one bounded review, repair, and verification cycle.
 ---
 
 # Review and fix

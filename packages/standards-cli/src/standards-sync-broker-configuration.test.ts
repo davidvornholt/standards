@@ -97,6 +97,9 @@ describe('Standards sync broker documentation contract', () => {
     const adoptionGuide = readSource('docs/adoption.md');
     const cliReadme = readSource('packages/standards-cli/README.md');
     const syncSkill = readSource('.agents/skills/standards-sync/SKILL.md');
+    const syncGithubReference = readSource(
+      '.agents/skills/standards-sync/references/github.md',
+    );
     const secretsReference = readSource(
       '.agents/skills/declarative-infra/references/secrets.md',
     );
@@ -120,9 +123,10 @@ describe('Standards sync broker documentation contract', () => {
       expect(document).toContain(PR_PERMISSIONS);
     }
 
-    expect(syncSkill).toContain('ci.broker_app');
-    expect(syncSkill).toContain('short-lived current-repository tokens');
-    expect(syncSkill).toContain('there is no credential fallback');
+    expect(syncSkill).toContain('(references/github.md)');
+    expect(syncGithubReference).toContain('ci.broker_app');
+    expect(syncGithubReference).toContain('short-lived tokens');
+    expect(syncGithubReference).toContain('there is no fallback credential');
     expect(rootReadme).toContain('[Adoption](docs/adoption.md)');
     expect(rootReadme).toContain(
       '[Sync and ownership](docs/sync-and-ownership.md)',
@@ -133,6 +137,7 @@ describe('Standards sync broker documentation contract', () => {
       adoptionGuide,
       cliReadme,
       syncSkill,
+      syncGithubReference,
       secretsReference,
       sourceExample,
       templateExample,

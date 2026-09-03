@@ -1,32 +1,28 @@
 ---
 name: declarative-infra
-description: Operating contract for declarative infrastructure (NixOS hosts, OpenTofu stacks). Use when touching host configuration, flakes, secrets or deploy wiring, PR preview environments, or cloud resources (DNS, buckets) — even when the infrastructure's home is another repo — or when a task needs a provider credential or API token.
+description: Use when changing NixOS, OpenTofu, cloud resources, infrastructure secrets, deployments, or provider credentials, even when another repository owns them. Routes changes through the owning repository and trusted deployment path.
 ---
 
 # Declarative infrastructure
 
-## Model
+## Ownership and mutation
 
-- Infrastructure has exactly one home per host: an `infra/` directory in the repo the host serves, or — usually when one host serves apps from several repos — a dedicated infra repo. If this repo is not that home, make infrastructure changes (virtual hosts, databases, DNS, buckets) in the home repo.
-- Apply changes by pushing to GitHub and letting trusted main-branch automation converge. Never run `deploy-rs`, `tofu apply`, or `nixos-rebuild switch` by hand; direct mutation is for emergencies only, and must be flagged when used.
-- PR previews are the one sanctioned exception to state-in-git: the active preview set lives in a host-local desired-state file mutated only by a validated forced SSH command, which converges the same flake that defines production. How previews are shaped stays fully declarative; see `references/pr-previews.md`.
-- App services run as Podman `oci-containers` with digest-pinned images, published only through Caddy; hosts never run Docker. Wiring details live in `references/bootstrap.md`.
-- Deploys are not zero-downtime: changing an app's image restarts its container in place, and the brief interruption is the accepted default for this profile. The deploy workflow pre-pulls gated images before activation so the window is container startup, not registry pull. Zero-downtime switchover is a per-host documented decision, not part of the profile; see `references/bootstrap.md#deploy-downtime`.
-- When the home is a dedicated infra repo, image freshness is automation-owned: the source repo announces new digests via `repository_dispatch`, the home repo bumps its committed desired state through its own gates, and completion requires the exact infra merge SHA plus healthy exact-digest readback from every target. Public images stay anonymously readable; private images use separate workflow and host pull credentials with their real provider authority documented — see `references/image-promotion.md`.
-- Provider credentials (Cloudflare API tokens, GitHub automation credentials) come from the broker: `bun standards creds` mints them and writes the values directly into SOPS targets — never ask the operator to create tokens in provider dashboards for needs the broker covers, and never claim it manages what it does not (GitHub App keys rotate manually). `creds plan` / `apply` reconcile only Cloudflare tokens the broker minted, list what they will never touch alongside the command that retires it, and fail closed on ambiguous shapes. The full minting, reconciliation, and `revoke` contract — including the refusal shapes — is in `references/secrets.md#brokered-provider-credentials`.
-- Trusted CI that builds and deploys NixOS closures uses a signed binary cache: validation publishes only after the full Nix gate passes, and deployment reads the validated closure with separate read-only credentials instead of rebuilding it. Leaving the cache out is a documented decision in the host repo; see `references/bootstrap.md#nix-binary-cache`.
+Infrastructure has one home per host: the serving repository's `infra/` directory or a dedicated infrastructure repository. Make virtual host, database, DNS, bucket, and deployment changes in that owner.
+
+Apply live changes only through reviewed main-branch automation. Direct `deploy-rs`, `tofu apply`, or `nixos-rebuild switch` is an emergency action and must be reported as such.
 
 ## Changing existing infrastructure
 
 - Restructuring tofu resources uses `moved` blocks; adopting existing resources uses `import` blocks; both stay in the repo as history. Any migration or refactor must show a no-op plan before merging.
-- Removing a data-bearing resource (bucket, database, volume) is a deliberate two-step — lift `prevent_destroy`, then destroy — never a plan side effect.
+- Removing a data-bearing resource is a deliberate two-step: lift `prevent_destroy`, then destroy. Never make deletion a plan side effect.
 
 ## Validation
 
-Non-mutating gates before pushing: `nix flake check`, build the host toplevel, `tofu fmt -check`, `tofu init -backend=false && tofu validate`, and `tofu plan` where credentials exist. Never let validation become an apply.
+Before pushing, run `nix flake check`, build the host toplevel, run `tofu fmt -check` and `tofu init -backend=false && tofu validate`, and obtain a plan where credentials exist. Validation never applies changes.
 
-## Bootstrap
+## References
 
-Creating a new host, repo, or first cloud stack — read `references/bootstrap.md`. Setting up SOPS + age secrets alone, without host infrastructure — read `references/secrets.md`.
-
-A host serving a web app also gets PR preview environments as a default part of adoption — an expected add-on, not something the consumer asks for. Wire them per `references/pr-previews.md`; leaving them out is a documented decision in the host repo.
+- For a new infrastructure home or changes to host layout, Podman/Caddy, PostgreSQL, Nix caching, or deployment behavior, read [Bootstrapping a host repo](references/bootstrap.md).
+- For SOPS, development environments, CI secrets, or provider credentials, read [Secrets bootstrap](references/secrets.md).
+- For preview environments, read [Pull request previews](references/pr-previews.md). They are the default for web-host adoption; omitting them requires a recorded decision in the host repository.
+- For image promotion into a dedicated infrastructure repository, read [Image promotion](references/image-promotion.md).

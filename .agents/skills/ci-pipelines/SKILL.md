@@ -1,6 +1,6 @@
 ---
 name: ci-pipelines
-description: Use when adding or changing GitHub Actions workflows, CI jobs, runners, caching, or deploy pipelines. Cost-efficient workflow shapes and the fail-closed patterns that keep the shortcuts safe.
+description: Use when changing continuous integration, GitHub Actions workflows, runners, caches, or deployment pipelines. Keeps cost-saving shortcuts fail-closed.
 ---
 
 # CI pipelines
@@ -27,5 +27,6 @@ description: Use when adding or changing GitHub Actions workflows, CI jobs, runn
 
 ## Ordering and failure
 
+- Deployment requires a passing quality gate for the exact commit deployed. A missing or failed lookup fails the deployment.
 - Serialize deployments with FIFO queueing (`concurrency.queue: max`) so a late-finishing run for an older commit cannot evict the pending run for the newest one, and guard the deployment itself against stale commits, so ordering mistakes cost latency, never correctness.
 - Every shortcut above obeys the root fail-closed rule: a skip, self-cancel, or proof that errors selects the full path or fails the run — never a green.

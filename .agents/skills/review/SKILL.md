@@ -1,6 +1,6 @@
 ---
 name: review
-description: Evidence-based read-only review for code, documentation, configuration, and workflows. Supports one narrow lens per reviewer and one actionable decision per finding.
+description: Use when asked for a read-only review of code, documentation, configuration, or workflows. Returns evidence-backed decisions without editing.
 ---
 
 # Review

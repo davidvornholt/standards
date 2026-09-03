@@ -55,6 +55,12 @@
       "linter": {
         "rules": {
           "complexity": {
+            "noExcessiveCognitiveComplexity": {
+              "level": "error",
+              "options": {
+                "maxAllowedComplexity": 15
+              }
+            },
             // JSX render bodies and Effect.gen service pipelines are cohesive
             // single units; the default of 50 lines forces arbitrary splits.
             // 100 still mechanically rejects genuinely sprawling functions.
@@ -82,6 +88,12 @@
               "level": "error",
               "options": {
                 "strictCase": false
+              }
+            },
+            "useFilenamingConvention": {
+              "level": "error",
+              "options": {
+                "filenameCases": ["kebab-case"]
               }
             },
             // Conflicts with the repository standard of inline exports
@@ -123,7 +135,7 @@
             "noExcessiveLinesPerFile": {
               "level": "error",
               "options": {
-                "maxLines": 200
+                "maxLines": 400
               }
             }
           },
@@ -359,6 +371,36 @@
       }
     },
     {
+      // Next.js loads App Router UI and metadata special files through default
+      // exports.
+      "includes": [
+        "**/src/app/**/page.tsx",
+        "**/src/app/**/layout.tsx",
+        "**/src/app/**/loading.tsx",
+        "**/src/app/**/error.tsx",
+        "**/src/app/**/global-error.tsx",
+        "**/src/app/**/not-found.tsx",
+        "**/src/app/**/forbidden.tsx",
+        "**/src/app/**/unauthorized.tsx",
+        "**/src/app/**/default.tsx",
+        "**/src/app/**/template.tsx",
+        "**/src/app/**/manifest.ts",
+        "**/src/app/**/robots.ts",
+        "**/src/app/**/sitemap.ts",
+        "**/src/app/**/opengraph-image.tsx",
+        "**/src/app/**/twitter-image.tsx",
+        "**/src/app/**/icon.tsx",
+        "**/src/app/**/apple-icon.tsx"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noDefaultExport": "off"
+          }
+        }
+      }
+    },
+    {
       // The structure gate requires a playwright.config.* beside every
       // browser a11y suite, and Playwright loads that config through a
       // default export — every consumer with a browser app hits this.
@@ -448,7 +490,7 @@
       }
     },
     {
-      // Files allowed to exceed the 200-line limit. Consumers extend this list
+      // Files allowed to exceed the 400-line limit. Consumers extend this list
       // in their own biome.jsonc wrapper and document each entry.
       "includes": [
         "biome.base.jsonc",

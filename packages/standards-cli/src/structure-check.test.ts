@@ -36,8 +36,8 @@ describe('collectStructureProblems basics and scripts', () => {
 
   it('rejects fail-open root gate scripts', async () => {
     const expected = [
-      'package.json: root script "check" must run turbo run lint check-types test build test:a11y',
-      'package.json: root script "check:fix" must run turbo run lint:fix check-types test build test:a11y',
+      'package.json: root script "check" must run turbo run lint check-types test build test:a11y --output-logs=errors-only',
+      'package.json: root script "check:fix" must run turbo run lint:fix check-types test build test:a11y --output-logs=errors-only',
     ];
     const scripts = rootManifest().scripts as Record<string, string>;
     scripts.check =

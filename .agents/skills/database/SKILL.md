@@ -1,6 +1,6 @@
 ---
 name: database
-description: Drizzle-first database architecture and migration workflow for this monorepo. Use when touching database schemas, migrations, or database package structure.
+description: Use when changing database schemas, migrations, database access, or database package structure. Keeps the Drizzle schema authoritative and migrations generated.
 ---
 
 # Database & migrations

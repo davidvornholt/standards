@@ -1,27 +1,24 @@
 ---
 name: ux-ui
-description: Must be used for every task that creates or modifies UI — pages, components, styles, layout, tokens, UI copy, client-side state, or visual behavior. Not optional for small UI edits like tweaking a button, color, or label. Covers project design intent, theme tokens, frontend standards, state management, and accessibility testing.
+description: Use when creating or changing any user-facing interface behavior or presentation. Keeps changes consistent with the project's UI and accessibility contracts.
 ---
 
 # UX/UI
 
-Use the `frontend-design` skill for visual work. Follow the root `DESIGN.md` when present; otherwise infer the design intent and token source from the existing UI and central theme. Explore a new direction only when the user explicitly requests it; treat that work as exploration until the project adopts it in `DESIGN.md` and the theme.
+Use `frontend-design` for visual work. Follow the root `DESIGN.md` when present; otherwise infer the direction from the existing UI and theme. Explore a new direction only when the user requests it; it remains exploratory until adopted in `DESIGN.md` and the theme.
 
 For pull requests that change rendered UI, use `screenshots-in-prs`.
 
-## Tokens and motion
+## Theme
 
-- Take every color and design value from the central theme. Do not hardcode raw color literals in product code.
-- Use semantic utilities instead of default Tailwind palette classes when the project has a semantic token layer.
-- Define authored color tokens with `oklch(...)`.
-- If a needed token does not exist, add a semantic token that follows the existing naming scheme rather than misusing a nearby token or hardcoding the value. Report new tokens in the final summary.
-- Use the shared easing token or constant in CSS and JavaScript. Do not encode another curve locally.
+- Use the central theme and semantic utilities instead of raw color literals or default Tailwind palette classes.
+- Add a semantic token when none fits; author color tokens with `oklch(...)`.
+- Use the shared easing token or constant rather than defining another curve.
 - A context that cannot resolve CSS variables may mirror anchor colors in one colocated constants file.
 
 ## Frontend contract
 
 - Meet WCAG 2.2 AA with semantic HTML, correct headings, keyboard support, visible focus, and communication that does not rely on color alone.
-- Use framework metadata and document primitives. Prefer server-rendered, indexable content where SEO matters.
 - Use browser hyphenation for long prose. Reserve soft hyphens for curated display copy, never identifiers, URLs, form values, searchable data, tests, or accessibility labels.
 - Write controls from the user's perspective with stable action names and specific error or empty-state guidance.
 
