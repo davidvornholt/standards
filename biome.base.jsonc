@@ -152,6 +152,9 @@
             // Empty strings can be meaningful fallback signals, so replacing
             // every intentional logical-or chain with ?? changes behavior.
             "useNullishCoalescing": "off",
+            // Cross-file inference can classify imported async functions as
+            // synchronous, including React act() and Next server actions.
+            "useAwaitThenable": "off",
             // This experimental rule enforces React Compiler constraints even
             // in projects that do not use the compiler and still reports known
             // unsupported patterns.
@@ -201,18 +204,6 @@
             // Biome's type analysis treats mutable refs as their initial
             // literals and can collapse annotated async result unions.
             "noUnnecessaryConditions": "off"
-          }
-        }
-      }
-    },
-    {
-      // Biome does not resolve React's async act() overload and reports every
-      // awaited test settlement as a non-Promise value.
-      "includes": ["**/*.test.tsx"],
-      "linter": {
-        "rules": {
-          "nursery": {
-            "useAwaitThenable": "off"
           }
         }
       }
