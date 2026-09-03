@@ -67,6 +67,7 @@ export const consumerRootManifest = (
 ): Record<string, unknown> => ({
   name: 'app',
   version: '0.0.0',
+  packageManager: 'bun@1.4.0',
   workspaces: ['apps/*', 'packages/*'],
   scripts: {
     standards: 'standards',

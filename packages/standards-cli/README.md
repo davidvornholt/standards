@@ -60,7 +60,7 @@ Existing project-owned files are kept. Synced files are replaced. `init` refuses
 ```sh
 bun standards sync --dry-run
 bun standards sync
-bun standards sync --ref v0.25.0
+bun standards sync --ref v0.26.0
 bun standards sync --from ../standards
 ```
 
@@ -97,7 +97,7 @@ bun standards structure --profile source
 
 `doctor` checks project-owned integration points such as `biome.jsonc`, `AGENTS.local.md`, package scripts, sync policy, settings overlays, and Dependabot inputs.
 
-`structure` checks workspace scripts, internal dependency versions, package exports, TypeScript inheritance, accessibility wiring, workspace READMEs, and CI secret structure. The `source` profile records the few intentional differences in this repository itself.
+`structure` checks the exact Bun declaration, workspace scripts, internal dependency versions, package exports, TypeScript inheritance, accessibility wiring, workspace READMEs, and CI secret structure. The `source` profile records the few intentional differences in this repository itself.
 
 ## dependabot
 

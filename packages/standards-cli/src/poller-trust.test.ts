@@ -24,7 +24,7 @@ beforeEach(() => {
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
-  process.env.GH_TOKEN = undefined;
+  delete process.env.GH_TOKEN;
 });
 
 const comment = (author: string, body: string): unknown => {

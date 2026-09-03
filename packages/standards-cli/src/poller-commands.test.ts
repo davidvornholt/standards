@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
 import { runPollerCommand } from './poller-commands';
+import { restoreProcessEnv } from './process-env-test-support';
 
 const originalGhToken = process.env.GH_TOKEN;
 const originalPath = process.env.PATH;
@@ -14,7 +15,7 @@ afterEach(() => {
   for (const restore of restoreMocks.splice(0)) {
     restore();
   }
-  process.env.GH_TOKEN = originalGhToken;
+  restoreProcessEnv('GH_TOKEN', originalGhToken);
   process.env.PATH = originalPath;
   for (const dir of dirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });

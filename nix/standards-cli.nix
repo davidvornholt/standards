@@ -13,7 +13,9 @@ let
   cliManifest = builtins.fromJSON (builtins.readFile (src + "/packages/standards-cli/package.json"));
   packageName = cliManifest.name;
   version = cliManifest.version;
-  bunVersion = lib.removePrefix "bun@" rootManifest.packageManager;
+  bunVersion =
+    assert builtins.match "^bun@(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$" rootManifest.packageManager != null;
+    lib.removePrefix "bun@" rootManifest.packageManager;
   systemMetadata = bunSystemMetadata.${stdenvNoCC.hostPlatform.system};
   standardsBun = bun.overrideAttrs {
     version = bunVersion;
@@ -52,6 +54,7 @@ let
   };
 in
 assert rootManifest.packageManager == "bun@${bunVersion}";
+assert systemMetadata.bunVersion == bunVersion;
 assert cliManifest.engines.bun == ">=${bunVersion}";
 stdenvNoCC.mkDerivation {
   pname = "standards-cli";

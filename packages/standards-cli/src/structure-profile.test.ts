@@ -54,6 +54,7 @@ const sourceRootManifest = (
 ): Record<string, unknown> => ({
   name: 'standards',
   version: '0.0.0',
+  packageManager: 'bun@1.4.0',
   workspaces: ['packages/*'],
   scripts: {
     standards: CLI,

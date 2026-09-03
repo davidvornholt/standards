@@ -10,6 +10,7 @@ import {
   liveRepository,
   liveRulesetSummary,
 } from './github-commands-test-support';
+import { restoreProcessEnv } from './process-env-test-support';
 
 const originalFetch = globalThis.fetch;
 const originalGhToken = process.env.GH_TOKEN;
@@ -22,15 +23,15 @@ beforeEach(() => {
   output.restore();
   output = captureConsole(commandConsole);
   process.env.GH_TOKEN = 'test-token';
-  process.env.GITHUB_TOKEN = undefined;
+  delete process.env.GITHUB_TOKEN;
 });
 
 afterEach(() => {
   output.restore();
   cleanup(...temporaryPaths.splice(0));
   globalThis.fetch = originalFetch;
-  process.env.GH_TOKEN = originalGhToken;
-  process.env.GITHUB_TOKEN = originalGithubToken;
+  restoreProcessEnv('GH_TOKEN', originalGhToken);
+  restoreProcessEnv('GITHUB_TOKEN', originalGithubToken);
 });
 
 const consumer = (options?: Parameters<typeof createConsumer>[0]): string => {

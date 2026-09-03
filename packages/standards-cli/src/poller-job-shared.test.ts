@@ -50,7 +50,7 @@ const labels = {
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
-  process.env.GH_TOKEN = undefined;
+  delete process.env.GH_TOKEN;
 });
 
 describe('jobPreamble', () => {

@@ -29,6 +29,11 @@ end
       else
         error("Bun system metadata for \(.key) has an invalid archivePlatform")
       end
+    | if ((.value.bunVersion | nonempty_string) and (.value.bunVersion | test("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"))) then
+        .
+      else
+        error("Bun system metadata for \(.key) has an invalid bunVersion")
+      end
     | if ((.value.archiveHash | nonempty_string) and (.value.archiveHash | test("^sha256-[A-Za-z0-9+/]{43}=$"))) then
         .
       else

@@ -24,7 +24,7 @@ export const startBrokerLockLease = (
   holderPath: string,
   intervalMs: number,
 ): Worker => {
-  const lease = new Worker(import.meta.url, {
+  const lease = new Worker(new URL(import.meta.url), {
     workerData: { holderPath, intervalMs } satisfies LeaseWorkerData,
   });
   lease.unref();

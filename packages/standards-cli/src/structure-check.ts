@@ -3,6 +3,7 @@ import { readdir } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { isRecord } from './github-settings-parse';
 import { readJsonFile } from './json-file';
+import { collectBunVersionProblems } from './structure-bun-version';
 import {
   missingPublishedCliProblems,
   rootScriptExpectations,
@@ -189,6 +190,7 @@ export const collectStructureProblems = async (
     ...resolved.flatMap((r) => (r.problem === null ? [] : [r.problem])),
     ...loaded.flatMap((l) => (l.problem === null ? [] : [l.problem])),
     ...missingPublishedCliProblems(profile, workspaces),
+    ...collectBunVersionProblems(root),
     ...inspectRootScripts(root, profile, requireA11y),
     ...inspections.flatMap((i) => [...i.problems]),
     ...readmeProblems,

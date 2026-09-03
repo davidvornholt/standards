@@ -56,6 +56,8 @@ The command seeds missing project-owned files, mirrors every canonical path, reg
 | `.github/dependabot.base.yml` | `.github/dependabot.local.yml` adds ecosystems, registries, and repository-specific holds. |
 | `.agents/skills` | Unmanaged sibling directories contain project skills. |
 | `.github/workflows/standards-sync.yml` | `sync-standards.local.json` selects the source and automatic-sync policy. |
+| `.mise/config.toml` | `mise.toml` adds project tools. |
+| `nix/standards-bun.nix` | `flake.nix` and `dev-shell.local.nix` define the project shell. |
 
 A minimal Biome wrapper is:
 
@@ -77,6 +79,19 @@ The root package must declare the CLI directly and run `standards check` before 
 ```
 
 Use the repository's actual tasks. The invariant is that a failed standards check remains fatal.
+
+The root `packageManager` is the Bun version contract. The synced mise config reads it directly. Add project tools to the project-owned `mise.toml`.
+
+New repositories also receive a project-owned Nix flake and `.envrc`. The flake builds Bun through the synced `nix/standards-bun.nix` helper. Add project packages or shell settings in `dev-shell.local.nix`:
+
+```nix
+{ pkgs }:
+{
+  packages = [ pkgs.postgresql_18 ];
+}
+```
+
+Nix, direnv, and mise are optional. Repositories may change or remove their project-owned integration files.
 
 ## Generate development environments
 
@@ -150,7 +165,7 @@ The default is weekly synchronization from `main`. To pin a source or disable th
 ```json
 {
   "autoSync": false,
-  "ref": "v0.25.0"
+  "ref": "v0.26.0"
 }
 ```
 

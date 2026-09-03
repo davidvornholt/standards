@@ -1,9 +1,8 @@
 // End-to-end coverage for the ruleset bypass-actor fallback. REST omits
 // `bypass_actors` for anything short of an administrator and for a GitHub App
-// installation token at every permission level, so the check retries the hidden
-// lists as GraphQL counts: a brokered installation token stays sufficient as
-// far as the *count* goes, while a declared non-empty list still fails closed
-// because GraphQL withholds the identities that would verify it.
+// installation token, so the check retries hidden lists as GraphQL counts: a
+// brokered token stays sufficient as far as the *count* goes, while a declared
+// non-empty list still fails because GraphQL withholds the identities.
 //
 // Every test pins the exact request sequence, not just the outcome: the fetch
 // stub answers by call order, so a regression that fired the bypass query
@@ -24,6 +23,7 @@ import {
   liveRepository,
   liveRulesetSummary,
 } from './github-commands-test-support';
+import { restoreProcessEnv } from './process-env-test-support';
 
 const originalFetch = globalThis.fetch;
 const originalGhToken = process.env.GH_TOKEN;
@@ -36,15 +36,15 @@ beforeEach(() => {
   output.restore();
   output = captureConsole(commandConsole);
   process.env.GH_TOKEN = 'test-token';
-  process.env.GITHUB_TOKEN = undefined;
+  delete process.env.GITHUB_TOKEN;
 });
 
 afterEach(() => {
   output.restore();
   cleanup(...temporaryPaths.splice(0));
   globalThis.fetch = originalFetch;
-  process.env.GH_TOKEN = originalGhToken;
-  process.env.GITHUB_TOKEN = originalGithubToken;
+  restoreProcessEnv('GH_TOKEN', originalGhToken);
+  restoreProcessEnv('GITHUB_TOKEN', originalGithubToken);
 });
 
 const RULESET_ID = 7;

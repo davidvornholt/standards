@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.5.8/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.5.11/schema.json",
   // Canonical strict Biome base, synced from davidvornholt/standards. Do NOT
   // edit locally: repos extend this from their own `biome.jsonc` wrapper and add
   // project-specific overrides there. The baseline turns every applicable rule
@@ -140,6 +140,9 @@
             }
           },
           "nursery": {
+            // Rejects assertions even when a runtime check or controlled test
+            // fixture has already established the asserted fact.
+            "noUnsafeTypeAssertion": "off",
             // React Native rule: requires raw text to be wrapped in <Text>.
             // This is a DOM application (reactNative domain is "none"); the
             // group-level "error" above would otherwise force it on.
@@ -208,6 +211,7 @@
         "**/*.test.tsx",
         "packages/standards-cli/src/creds-add-test-support.ts",
         "packages/standards-cli/src/creds-plan-run-test-support.ts",
+        "packages/standards-cli/src/process-env-test-support.ts",
         "packages/standards-cli/src/screenshots-test-support.ts",
         "packages/standards-cli/src/test-setup.ts"
       ],

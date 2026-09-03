@@ -44,7 +44,7 @@ const loadWithBun = (path: string, keys: ReadonlyArray<string>) =>
       '--env-file',
       path,
       '-e',
-      `const keys=${JSON.stringify(keys)};console.log(JSON.stringify({values:keys.map((key) => Bun.env[key]),unexpected:Object.keys(Bun.env).filter((key) => !keys.includes(key))}))`,
+      `const keys=${JSON.stringify(keys)};const runtimeKeys=new Set(['LD_LIBRARY_PATH']);console.log(JSON.stringify({values:keys.map((key) => Bun.env[key]),unexpected:Object.keys(Bun.env).filter((key) => !keys.includes(key)&&!runtimeKeys.has(key))}))`,
     ],
     { encoding: 'utf8', env: {} },
   );

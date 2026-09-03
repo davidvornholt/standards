@@ -15,7 +15,7 @@ This file is the root operating contract for agents in this repository. Keep roo
 
 ## Package management
 
-- Use Bun only.
+- Use Bun only, at the exact version declared by the root `packageManager`.
 - Add dependencies with `bun add`; do not manually edit dependency versions into `package.json`.
 - Workspaces that rely on Bun runtime or `bun:test` types must declare `@types/bun`, not custom ambient declaration shims.
 
