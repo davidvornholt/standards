@@ -50,6 +50,10 @@ Each active preview materializes, from the modules, as:
 
 Assert the invariants in the module: unique bounded PR numbers, digest-pinned images matching the allowed name, and enough port room above `basePort`.
 
+The image is part of the isolation contract. The dedicated preview UID overrides the image's declared user, so every non-secret runtime file and parent directory must be readable and traversable by an arbitrary unprivileged identity. Run the preview image's smoke test with `--user=<base-uid>:<base-gid>` and the same read-only root, tmpfs mounts, capabilities, and security options used by the host. A smoke test that runs as the image's default user does not validate the deployed shape.
+
+If Caddy's admin API is disabled with `admin off`, also set NixOS `services.caddy.enableReload = false`. The generated reload command calls that API and makes an otherwise healthy host activation fail. Configuration changes then restart Caddy, so record the brief interruption in the host profile.
+
 ## Lifecycle
 
 Teardown is event-complete; every path that ends a preview's usefulness destroys it:
@@ -67,5 +71,7 @@ One wildcard record `*.pr.<domain>` pointing at the host, managed in the tofu st
 ## Traps
 
 - The host-side rebuild evaluates the flake from the deployed system. A path converted with `toString` can disappear after `nix gc` even when `system.extraDependencies` retains a different source path; keep the command's own closure complete instead.
+- An image that starts as its declared user can still fail immediately under the host's dedicated preview UID. Exercise the exact UID override in the build workflow.
+- Caddy cannot reload through an admin API configured as `off`; disable reload-on-change or keep the API available.
 - `workflow_run.pull_requests` can be empty depending on event provenance; guard teardown jobs on the PR number being present instead of assuming `[0]` exists.
 - The deploy workflow must check out the *default branch*, never the triggering head — `workflow_run` runs with secrets, and the artifact is the only thing taken from the untrusted build.
