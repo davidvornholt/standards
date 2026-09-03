@@ -18,6 +18,7 @@
     ".agents/skills/screenshots-in-prs",
     ".agents/skills/standards-sync",
     ".agents/skills/unslop",
+    ".agents/skills/ux-ui",
     ".claude/skills",
     ".claude/agents/reviewer.md",
     ".claude/workflows/review-pass.js",
