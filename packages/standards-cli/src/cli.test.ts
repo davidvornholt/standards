@@ -390,7 +390,7 @@ bun "$playwright" install --with-deps chromium
     {
       name: 'Check',
       env: { STANDARDS_SKIP_GITHUB_CHECK: 'true' },
-      run: 'bun run --bun check',
+      run: 'bun run check',
     },
   ];
   const consumerSteps = expectedConsumerSteps.map(({ name }) =>

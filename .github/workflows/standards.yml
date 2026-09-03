@@ -250,7 +250,7 @@ jobs:
           # in CI. This workflow-only seam keeps local `bun run check`
           # fail-closed.
           STANDARDS_SKIP_GITHUB_CHECK: "true"
-        run: bun run --bun check
+        run: bun run check
 
       - name: Save the Bun package cache
         if: success() && github.ref == 'refs/heads/main' && steps.bun-cache.outputs.cache-hit != 'true'
