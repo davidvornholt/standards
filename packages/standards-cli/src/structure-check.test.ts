@@ -35,36 +35,6 @@ describe('collectStructureProblems basics and scripts', () => {
     },
   );
 
-  it('accepts a matching optional mise pin', async () => {
-    const consumer = buildConsumer();
-    write(consumer, 'mise.toml', '[tools]\nbun = "1.4.0"\n');
-    expect(await collect(consumer)).toEqual([]);
-  });
-
-  it('rejects an optional mise pin that differs from packageManager', async () => {
-    const consumer = buildConsumer();
-    write(consumer, 'mise.toml', '[tools]\nbun = "1.3.9"\n');
-    expect(await collect(consumer)).toContain(
-      'mise.toml: tools.bun must match package.json packageManager (1.4.0)',
-    );
-  });
-
-  it.each([
-    ['malformed TOML', 'bun =\n', 'mise.toml: must contain valid TOML'],
-    [
-      'no Bun tool',
-      '[tools]\nnode = "26"\n',
-      'mise.toml: tools.bun must be a version string',
-    ],
-  ])(
-    'rejects optional mise config with %s',
-    async (_label, contents, expected) => {
-      const consumer = buildConsumer();
-      write(consumer, 'mise.toml', contents);
-      expect(await collect(consumer)).toContain(expected);
-    },
-  );
-
   it('fails when package.json is missing', async () => {
     const consumer = newStructureTmp('structure-');
     expect(await collect(consumer)).toEqual([

@@ -12,43 +12,28 @@
       ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
       manifest = builtins.fromJSON (builtins.readFile ./package.json);
-      bunVersion =
-        assert builtins.match "^bun@(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$" manifest.packageManager != null;
-        nixpkgs.lib.removePrefix "bun@" manifest.packageManager;
-      bunSources = {
-        "1.4.0" = {
-          x86_64-linux = {
-            asset = "bun-linux-x64-baseline.zip";
-            hash = "sha256-GE+0WV8NQBohfPfHjBvEMLqDMU2reouUgFurv3+nCX8=";
-          };
-          aarch64-linux = {
-            asset = "bun-linux-aarch64.zip";
-            hash = "sha256-SxozLuhhmD65O8/m93D/+U4+MbLDiL2uo8jtNeWO7Q4=";
-          };
-        };
-      };
     in
     {
       devShells = forAllSystems (
         system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
-          bunVersionSources =
-            bunSources.${bunVersion}
-            or (throw "Unsupported Bun version ${bunVersion}; add archive hashes before updating packageManager");
-          bunSource = bunVersionSources.${system};
-          bun = pkgs.bun.overrideAttrs (_final: _previous: {
-            version = bunVersion;
-            src = pkgs.fetchurl {
-              url = "https://github.com/oven-sh/bun/releases/download/bun-v${bunVersion}/${bunSource.asset}";
-              inherit (bunSource) hash;
-            };
-          });
+          bun = pkgs.callPackage ./nix/standards-bun.nix {
+            inherit (manifest) packageManager;
+          };
+          localShell =
+            if builtins.pathExists ./dev-shell.local.nix then
+              import ./dev-shell.local.nix { inherit pkgs; }
+            else
+              { };
         in
         {
-          default = pkgs.mkShell {
-            packages = [ bun ];
-          };
+          default = pkgs.mkShell (
+            localShell
+            // {
+              packages = [ bun ] ++ (localShell.packages or [ ]);
+            }
+          );
         }
       );
     };

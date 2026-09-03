@@ -174,7 +174,7 @@ export const collectStructureProblems = async (
       .map((ws) => ws.manifest.name)
       .filter((name): name is string => typeof name === 'string'),
   );
-  const [inspections, readmeProblems, bunVersionProblems] = await Promise.all([
+  const [inspections, readmeProblems] = await Promise.all([
     Promise.all(
       workspaces.map((ws) => inspectWorkspace(ws, workspaceNames, profile)),
     ),
@@ -183,7 +183,6 @@ export const collectStructureProblems = async (
       profile,
       workspaces.map((ws) => ws.rel),
     ),
-    collectBunVersionProblems(consumer, root),
   ]);
   const requireA11y = inspections.some((i) => i.hasA11ySuite);
   return [
@@ -191,7 +190,7 @@ export const collectStructureProblems = async (
     ...resolved.flatMap((r) => (r.problem === null ? [] : [r.problem])),
     ...loaded.flatMap((l) => (l.problem === null ? [] : [l.problem])),
     ...missingPublishedCliProblems(profile, workspaces),
-    ...bunVersionProblems,
+    ...collectBunVersionProblems(root),
     ...inspectRootScripts(root, profile, requireA11y),
     ...inspections.flatMap((i) => [...i.problems]),
     ...readmeProblems,

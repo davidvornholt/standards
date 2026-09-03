@@ -963,7 +963,6 @@ const buildUpstream = (paths: ReadonlyArray<string> = STD_PATHS): string => {
   write(up, 'template/.envrc', 'use flake\n');
   write(up, 'template/flake.nix', '{}\n');
   write(up, 'template/flake.lock', '{}\n');
-  write(up, 'template/mise.toml', '[tools]\nbun = "1.4.0"\n');
   write(up, 'template/AGENTS.local.md', '# Local\n');
   write(up, 'template/biome.jsonc', '{"extends":["./biome.base.jsonc"]}\n');
   write(
@@ -1072,6 +1071,7 @@ const exerciseSeededGitignore = (
     'dist/app.js',
     '.next/server/app.js',
     'debug.log',
+    'mise.local.toml',
     '.claude/worktrees/task/src/wip.ts',
   ];
   for (const path of ignoredPaths) {

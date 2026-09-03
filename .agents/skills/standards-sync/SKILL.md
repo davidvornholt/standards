@@ -28,6 +28,8 @@ Make shared changes upstream, consumer-specific changes at an extension point, a
 | `.github/dependabot.base.yml` | `.github/dependabot.local.yml` |
 | `.agents/skills/*` | Unmanaged sibling skill directories |
 | `.github/workflows/standards-sync.yml` | `sync-standards.local.json` |
+| `.mise/config.toml` | `mise.toml` |
+| `nix/standards-bun.nix` | `flake.nix` and `dev-shell.local.nix` |
 
 Extensions are additive. GitHub settings may only add stricter settings, rulesets, and labels.
 

@@ -42,6 +42,8 @@ Generated files are engine output. Change their inputs, then regenerate them.
 | `.github/dependabot.base.yml` | `.github/dependabot.local.yml` |
 | `.agents/skills/*` | Unmanaged sibling skill directories |
 | `.github/workflows/standards-sync.yml` | `sync-standards.local.json` |
+| `.mise/config.toml` | `mise.toml` |
+| `nix/standards-bun.nix` | `flake.nix` and `dev-shell.local.nix` |
 
 Extensions are additive unless their contract says otherwise. Do not restate a canonical file merely to change one value.
 

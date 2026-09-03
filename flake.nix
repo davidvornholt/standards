@@ -7,6 +7,7 @@
     { self, nixpkgs }:
     let
       bunSystemMetadata = builtins.fromJSON (builtins.readFile ./nix/bun-system-metadata.json);
+      manifest = builtins.fromJSON (builtins.readFile ./package.json);
       systems = builtins.attrNames bunSystemMetadata;
       forAllSystems = nixpkgs.lib.genAttrs systems;
     in
@@ -39,10 +40,19 @@
         }
       );
 
-      devShells = forAllSystems (system: {
-        default = nixpkgs.legacyPackages.${system}.mkShell {
-          packages = [ self.packages.${system}.standards-cli.bun ];
-        };
-      });
+      devShells = forAllSystems (
+        system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+          bun = pkgs.callPackage ./nix/standards-bun.nix {
+            inherit (manifest) packageManager;
+          };
+        in
+        {
+          default = pkgs.mkShell {
+            packages = [ bun ];
+          };
+        }
+      );
     };
 }
