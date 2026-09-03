@@ -45,10 +45,10 @@ Each active preview materializes, from the modules, as:
 
 - a dedicated system user and group at a reserved UID/GID range (e.g. base 200000 + index), the container running `--user` as that identity with `--cap-drop=ALL`, `--security-opt=no-new-privileges`, CPU/memory/pids caps, and a tmpfs `/tmp`
 - its own Postgres database `<app>_pr_<number>` with peer auth mapped only to that system user (the bootstrap Postgres module's `databaseSystemUsers` seam exists for exactly this)
-- its own internal Podman network, so previews cannot reach each other
-- a loopback port assigned deterministically (`basePort` + index over the sorted preview set) and a Caddy virtual host `<pr>.pr.<domain>` that reverse-proxies it and sends `X-Robots-Tag: noindex, nofollow, noarchive`
+- its own internal Podman network with a non-overlapping host-reachable subnet and deterministic container address, so previews cannot reach each other or the internet
+- a Caddy virtual host `<pr>.pr.<domain>` that reverse-proxies the container address directly and sends `X-Robots-Tag: noindex, nofollow, noarchive`; do not publish a host port because rootful Podman's internal bridge disables the forwarding that published ports require
 
-Assert the invariants in the module: unique bounded PR numbers, digest-pinned images matching the allowed name, and enough port room above `basePort`.
+Assert the invariants in the module: unique bounded PR numbers, digest-pinned images matching the allowed name, and enough addresses in the host-reserved subnet range.
 
 The image is part of the isolation contract. The dedicated preview UID overrides the image's declared user, so every non-secret runtime file and parent directory must be readable and traversable by an arbitrary unprivileged identity. Run the preview image's smoke test with `--user=<base-uid>:<base-gid>` and the same read-only root, tmpfs mounts, capabilities, and security options used by the host. A smoke test that runs as the image's default user does not validate the deployed shape.
 
@@ -72,6 +72,7 @@ One wildcard record `*.pr.<domain>` pointing at the host, managed in the tofu st
 
 - The host-side rebuild evaluates the flake from the deployed system. A path converted with `toString` can disappear after `nix gc` even when `system.extraDependencies` retains a different source path; keep the command's own closure complete instead.
 - An image that starts as its declared user can still fail immediately under the host's dedicated preview UID. Exercise the exact UID override in the build workflow.
+- A port published from a rootful Podman `--internal` bridge is not a host ingress path. Give each preview a deterministic address on its internal bridge and route host Caddy and readiness probes to that address directly; do not restore forwarding or outbound access to make port publication work.
 - Caddy cannot reload through an admin API configured as `off`; disable reload-on-change or keep the API available.
 - `workflow_run.pull_requests` can be empty depending on event provenance; guard teardown jobs on the PR number being present instead of assuming `[0]` exists.
 - The deploy workflow must check out the *default branch*, never the triggering head — `workflow_run` runs with secrets, and the artifact is the only thing taken from the untrusted build.
