@@ -31,11 +31,19 @@ The default pair is:
 
 Add a specialized lens only when a material risk such as authorization, persistence, concurrency, deployment provenance, untrusted output, or complex accessibility otherwise lacks an owner. Give every lens explicit exclusions. Every lens after the second must name the material failure class that would otherwise lack an owner.
 
+## Review execution
+
+Use the harness's native subagent tools to run each required lens in a separate read-only reviewer subagent with its own context. This applies to the initial review even when it finds zero blockers, and to every required fix or repair verification lens. The coordinator must not substitute inline perspectives for reviewer subagents. Run lenses concurrently when capacity permits, or sequentially in separate subagents. Verification reviewers must not be the workers who wrote the changes.
+
+Give each reviewer the [review skill](../review/SKILL.md), exact base and head, scope and threat model, gate result, decisions registry, lens charter and exclusions, and selected model and effort. Collect findings and inspected coverage from each reviewer. Retry a skipped or failed lens once; if coverage remains incomplete or subagents are unavailable, report the execution blocker, keep the PR draft, and stop.
+
+Workflow support is optional. Harnesses that can execute [review-pass](../../../.claude/workflows/review-pass.js) may use it to dispatch and collect the reviewers; all other harnesses perform the same steps with native subagents. These requirements are the contract regardless of the dispatch mechanism.
+
 ## Baseline and review
 
 Reuse a successful equivalent exact-head gate. Otherwise run the repository gate once. Repair only PR-introduced mechanical failures before review and record pre-existing failures.
 
-Run `review-pass` over the PR base → initial head with the scope, gate result, decisions registry, lenses, and any model override. Retry a skipped lens once, then stop if coverage is still incomplete. Merge duplicate findings while preserving every reporting lens, and assign one decision:
+Run the selected reviewer subagents over the PR base → initial head as specified above. Merge duplicate findings while preserving every reporting lens, and assign one decision:
 
 - `block`: demonstrated, in scope, material under the threat model, and worth stopping the merge;
 - `defer`: real but outside this PR or below the merge bar;
@@ -46,7 +54,7 @@ Do not ask about inferable implementation details, naming, local refactors, test
 
 ## Fix
 
-Create one self-contained review thread per blocker. A worker reproduces the failure first, makes the smallest correction, and runs focused checks. If it cannot reproduce the failure, leave the thread unresolved and reclassify the finding instead of fixing it speculatively.
+Create one self-contained review thread per blocker and delegate the fix to a worker subagent. The worker reproduces the failure first, makes the smallest correction, and runs focused checks. If it cannot reproduce the failure, leave the thread unresolved and reclassify the finding instead of fixing it speculatively. With zero blockers, skip repair workers; the initial reviewer subagents are still required.
 
 Add at most one regression test per failure class, preferably by extending existing or table-driven coverage. The test should fail on the pre-fix behavior when practical. Do not add a dependency, parser, fixture framework, generic harness, or shared guard for one finding. Use browser tests only for browser-specific behavior.
 
@@ -72,6 +80,6 @@ Post the report and mark the PR ready unless an `ask` remains. Include every pha
 | Repair verification | repair delta | model × 0–2 lenses | decision counts | final repair, clean, or skipped | elapsed |
 | Final gate | exact final head | deterministic | — | passed or failed | elapsed |
 
-Then link each finding with its decision, impact, and reporting lenses; report lens yield, assumptions, tests added or extended, any new test machinery, deferred work, residual risk, and any final repair left without fresh-eyes review. Measure total wall-clock duration from the scope comment to the report.
+Then link each finding with its decision, impact, and reporting lenses; identify each reviewer by its agent ID and actual model and effort, and report lens yield, assumptions, tests added or extended, any new test machinery, deferred work, residual risk, and any final repair left without fresh-eyes review. Mark unavailable execution metadata as unknown. Measure total wall-clock duration from the scope comment to the report.
 
 Hand the merge decision to the human and stop unconditionally.
