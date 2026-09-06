@@ -35,7 +35,7 @@ Add a specialized lens only when a material risk such as authorization, persiste
 
 Reuse a successful equivalent exact-head gate. Otherwise run the repository gate once. Repair only PR-introduced mechanical failures before review and record pre-existing failures.
 
-For every required review or verification lens, spawn a separate read-only subagent using the [review skill](../review/SKILL.md). Inline perspectives do not count. Use native subagents; `review-pass` is an optional workflow helper. If delegation is unavailable, report incomplete coverage and stop.
+For every required review or verification lens, spawn a separate read-only subagent using the [review skill](../review/SKILL.md). `review-pass` is an optional workflow helper. If delegation is unavailable, report incomplete coverage and stop.
 
 Review the PR base → initial head with the scope, gate result, decisions registry, lenses, and any model override. Retry a skipped lens once, then stop if coverage is still incomplete. Merge duplicate findings while preserving every reporting lens, and assign one decision:
 
