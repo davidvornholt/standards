@@ -28,7 +28,7 @@ const live: AppState = {
 };
 const changedMetadata = {
   ...metadata,
-  trackedTag: 'production',
+  sourceRef: 'refs/heads/production',
 };
 const changedRegistryAccess = {
   ...metadata,
@@ -149,7 +149,7 @@ it('requires disable and clear before metadata change or removal', () => {
 it('rejects unrelated app and file edits from full before/after state', () => {
   const changedOther = {
     ...other,
-    trackedTag: 'attacker',
+    sourceRef: 'refs/heads/attacker',
   };
   expect(
     transition({

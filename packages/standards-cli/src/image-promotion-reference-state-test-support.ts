@@ -9,16 +9,13 @@ const GHCR_REPOSITORY =
 const SOURCE_REF = /^refs\/heads\/[^\s]+$/u;
 const SOURCE_REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
 const SOURCE_SHA = /^[0-9a-f]{40}$/u;
-const TRACKED_TAG = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/u;
 
 const metadataKeys = [
   'imageRepository',
-  'promotionLatencyMinutes',
   'registryAccess',
   'sourceRef',
   'sourceRepository',
   'sourceWorkflow',
-  'trackedTag',
 ] as const;
 const pinKeys = ['digest', 'promotedSourceSha', 'promotionEnabled'] as const;
 
@@ -42,8 +39,6 @@ const hasValidMetadataValues = (
   return (
     typeof value.imageRepository === 'string' &&
     GHCR_REPOSITORY.test(value.imageRepository) &&
-    Number.isSafeInteger(value.promotionLatencyMinutes) &&
-    Number(value.promotionLatencyMinutes) > 0 &&
     (allowMissingRegistryAccess ||
       value.registryAccess === 'public' ||
       value.registryAccess === 'private') &&
@@ -56,9 +51,7 @@ const hasValidMetadataValues = (
     Number.isSafeInteger(workflow.id) &&
     Number(workflow.id) > 0 &&
     typeof workflow.path === 'string' &&
-    workflow.path.startsWith('.github/workflows/') &&
-    typeof value.trackedTag === 'string' &&
-    TRACKED_TAG.test(value.trackedTag)
+    workflow.path.startsWith('.github/workflows/')
   );
 };
 

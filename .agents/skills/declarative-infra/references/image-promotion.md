@@ -4,11 +4,11 @@ When an app's infrastructure home is a dedicated infra repo, deployment freshnes
 
 **Completion invariant:** an approved deployment is done only when the exact infra merge SHA has passed its fail-closed gate and every required target has returned a healthy readback of the expected digest. A failed or partial activation is incomplete; report it instead of attempting automatic cross-system rollback.
 
-The machine-readable writer, provenance, deploy, completion, and detector examples in [Image promotion contracts](image-promotion-contracts.md) are part of this contract and must be copied with the policy below.
+The machine-readable writer, provenance, deploy, and completion examples in [Image promotion contracts](image-promotion-contracts.md) are part of this contract and must be copied with the policy below.
 
 ## One desired-state owner
 
-The home repo owns one `images.json` (`infra/images.json`, or root `images.json` in a dedicated infra repo). Announcement validation, the trusted writer, deployment, readback, and drift detection all read its per-app objects:
+The home repo owns one `images.json` (`infra/images.json`, or root `images.json` in a dedicated infra repo). Announcement validation, the trusted writer, deployment, and readback all read its per-app objects:
 
 <!-- contract:images-json -->
 ```json
@@ -22,8 +22,6 @@ The home repo owns one `images.json` (`infra/images.json`, or root `images.json`
     },
     "imageRepository": "ghcr.io/example/app/web",
     "registryAccess": "private",
-    "trackedTag": "main",
-    "promotionLatencyMinutes": 30,
     "promotionEnabled": true,
     "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
     "promotedSourceSha": "1111111111111111111111111111111111111111"
@@ -35,7 +33,7 @@ The home repo owns one `images.json` (`infra/images.json`, or root `images.json`
 
 ## Source side: bind and announce the build
 
-The trusted build job publishes `imageRepository:trackedTag`, obtains the registry digest, and emits exactly one single-line JSON record to its immutable job log. The marker is assembled from fragments so the full marker cannot appear in the runner's echoed shell source. A separate announcement job runs only after build success. Its fallback token is read-only; its one-infra-repository App token has only Contents write.
+The trusted build job publishes an image under its source-owned tag, obtains the registry digest, and emits exactly one single-line JSON record to its immutable job log. The marker is assembled from fragments so the full marker cannot appear in the runner's echoed shell source. A separate announcement job runs only after build success. Its fallback token is read-only; its one-infra-repository App token has only Contents write.
 
 The App credentials live at `ci.broker_app.app_id` and `ci.broker_app.private_key` in `secrets/ci.yaml`. Resolve both with the canonical action, which transports nested multiline values through `GITHUB_ENV`, never outputs.
 
@@ -120,19 +118,15 @@ The `registryAccess` hard cutover has one document-wide migration operation for 
 
 Private host adoption has a separate two-stage boundary that runs before private metadata or promotion can require a pull. First deploy the SOPS secret, login unit, explicit auth files, and container-unit environment while a new app remains disabled or the existing app remains public. Read back the decrypted secret presence, successful login unit, and root-only private auth file. Only a later reviewed metadata change and trusted promotion may select `private` and require private pre-pull. The same sequence applies to a new private app and a public-to-private migration; an old host never has to pull a private image to install the credential plumbing needed for that pull.
 
-## Deploy, completion, and drift
+## Deploy and completion
 
 The deploy workflow serializes production without cancellation. Its deploy job depends on a successful gate for exact `github.sha`. Immediately before its first mutation it requires checkout, gated, event, and current remote-main SHAs to be identical, then reruns the shared exact repository/digest registry-access proof from the gated `images.json`. A queued run therefore performs zero mutations when main moved, visibility changed, anonymous access changed, or the job token lost its package grant. It derives full references from the gated `images.json`; every activation must pass exact registry-digest and health readback, followed by all OpenTofu postconditions.
 
 Completion filters merged PRs before uniqueness, then authenticates the App bot, canonical same-repository branch, `images.json`-only file set, successful trusted provenance check, and exact resulting pin at the merge SHA. Open and closed marker copies are ignored; forged or multiple merged candidates fail closed. The exact merge-SHA deploy and its one successful deploy job are required.
 
-Available builds and deployment drift are separate observations. Announcing or opening a promotion proposes a release; it does not authorize deployment. An open or deliberately deferred PR is informational and must not fail a freshness check because a newer image exists. Record the pending proposal and its evidence without treating it as completed deployment.
+Announcing or opening a promotion proposes a release; it does not authorize deployment. An open or deliberately deferred PR is informational and must not fail a freshness check because a newer image exists. Record the pending proposal and its evidence without treating it as completed deployment.
 
-A deployment-drift detector compares approved desired pins from current infrastructure main with actual running digests on every required host. It also verifies service health. It must not substitute the tracked registry tag or a successful historical workflow for host readback. Authenticate readback through the infrastructure owner's read-only host access. Missing, malformed, stale, or inaccessible observations fail the detector instead of being treated as matching state.
-
-`promotionLatencyMinutes` is the allowed convergence window for approved desired state. Start timing when an approved desired/running mismatch is first observed. A newer published build or an unmerged PR never starts that window. Only an unchanged desired/running mismatch after a complete window fails; movement of either value starts a new window. Record observations and elapsed time persistently if the detector spans scheduled runs. Do not derive elapsed time from source publication timestamps. Health and observation failures are reported immediately. Prefer separate scheduled observations over holding a billed runner asleep.
-
-Report available updates in a workflow summary or neutral check. Report overdue deployment drift with the affected app and host, desired and running digests, first-observed time, and the relevant deployment link, and fail the detector run. GitHub notification delivery depends on the user's notification settings; a failed run is not proof that a notification was delivered. The detector never writes desired state, merges PRs, dispatches deployments, or performs remediation.
+Promotion is push-based. Verify the exact approved images and service health during deployment and report completion on the promotion PR. Do not add a scheduled image drift detector, periodic running-image comparisons, publication-age failures, or a promotion latency field. There is no periodic image recheck after successful completion.
 
 Registry-access checks remain mandatory and independent of release deferral. Use Contents read and Packages read through the per-job `GITHUB_TOKEN` where needed. Public entries must remain anonymously readable. Private entries require exact package visibility `private`, anonymous denial, and digest resolution with the workflow token; grant the infrastructure repository read access in the package's Actions access settings. Missing access, changed visibility, invalid access modes, or registry errors fail closed. Never decrypt a durable registry credential for this check.
 

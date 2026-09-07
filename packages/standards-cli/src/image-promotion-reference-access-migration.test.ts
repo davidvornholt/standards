@@ -84,7 +84,7 @@ it('compares semantically identical records without key-order dependence', () =>
 it('rejects invalid modes and every edit beyond adding access metadata', () => {
   for (const invalidAfter of [
     { web: { ...legacyDisabled, registryAccess: 'legacy' } },
-    { web: { ...finalDisabled, trackedTag: 'changed' } },
+    { web: { ...finalDisabled, sourceRef: 'refs/heads/changed' } },
     { web: { ...finalDisabled, digest: DIGEST_A } },
     { web: { ...finalDisabled, credential: 'secret' } },
     { extra: finalSibling, web: finalDisabled },
