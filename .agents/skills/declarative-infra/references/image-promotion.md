@@ -31,6 +31,10 @@ The home repo owns one `images.json` (`infra/images.json`, or root `images.json`
 
 `sourceWorkflow.path` and `sourceWorkflow.id` bind the immutable authorized Actions workflow; a different successful workflow with a job named `build` is not evidence. `registryAccess` is required metadata with exactly two values: `public` requires anonymous manifest access, while `private` requires exact provider visibility `private`, anonymous denial, and authenticated workflow and host access. Every reader first requires a plain object document root, then validates each complete object at runtime: the exact metadata and pin key sets, a GHCR repository, the access enum, and valid paired pins. Arrays, primitives, prototype-bearing objects, unknown fields, and authentication material fail closed. Derive production references only as `imageRepository@digest`. `images.json` is the single declarative state owner being converged, not a third credential ledger of the kind rejected by `CREDS-CLOUDFLARE-001`; it never contains a credential, secret path, username, or authentication-file path.
 
+## Coordinated releases
+
+When multiple images must be released together, use the [coordinated release extension](image-promotion-groups.md). Its group proof replaces the single-record proof below for those apps. Independent apps keep the single-image contract.
+
 ## Source side: bind and announce the build
 
 The trusted build job publishes an image under its source-owned tag, obtains the registry digest, and emits exactly one single-line JSON record to its immutable job log. The marker is assembled from fragments so the full marker cannot appear in the runner's echoed shell source. A separate announcement job runs only after build success. Its fallback token is read-only; its one-infra-repository App token has only Contents write.
