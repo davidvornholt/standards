@@ -19,9 +19,10 @@ const detectorPrelude = `
 read-desired-digest() {
   printenv "DESIRED_$1_$2"
 }
-resolve-tracked-tag() {
+read-running-digest() {
   printenv "OBSERVED_$1_$2"
 }
+resolve-tracked-tag() { printf 'unexpected registry discovery\\n' >&2; return 99; }
 wait-promotion-window() {
   printf 'wait:%s\\n' "$1"
 }
@@ -60,6 +61,25 @@ const fixtures: Readonly<Record<string, DetectorFixture>> = {
       ['OBSERVED_0_initial', DIGEST_A],
     ]),
   },
+  'missing host observation fails': {
+    expectedStatus: 1,
+    expectedWindows: 0,
+    values: environment([['DESIRED_0_initial', DIGEST_A]]),
+  },
+  'missing approved desired state fails': {
+    expectedStatus: 1,
+    expectedWindows: 0,
+    values: environment([['OBSERVED_0_initial', DIGEST_A]]),
+  },
+  'unmerged publication does not affect healthy deployment': {
+    expectedStatus: 0,
+    expectedWindows: 0,
+    values: environment([
+      ['DESIRED_0_initial', DIGEST_A],
+      ['OBSERVED_0_initial', DIGEST_A],
+      ['PUBLISHED_DIGEST', DIGEST_B],
+    ]),
+  },
   fresh: {
     expectedStatus: 0,
     expectedWindows: 1,
@@ -82,7 +102,7 @@ const fixtures: Readonly<Record<string, DetectorFixture>> = {
       ['OBSERVED_0_initial', DIGEST_B],
     ]),
   },
-  'tag B to C': {
+  'running B to C': {
     expectedStatus: 0,
     expectedWindows: 2,
     values: environment([
@@ -98,7 +118,7 @@ const fixtures: Readonly<Record<string, DetectorFixture>> = {
       ['OBSERVED_2_initial', DIGEST_C],
     ]),
   },
-  'desired and tag restart separately': {
+  'desired and running restart separately': {
     expectedStatus: 0,
     expectedWindows: 2,
     values: environment([

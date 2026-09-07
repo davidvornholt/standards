@@ -243,17 +243,19 @@ result=$(gh run view "$run_id" --repo example/infra --json headSha,conclusion,jo
 jq -er --arg sha "$merge_sha" 'if .headSha == $sha and .conclusion == "success" and ([.jobs[] | select(.name == "deploy" and .conclusion == "success")] | length) == 1 and ([.jobs[] | select(.name == "deploy")] | length) == 1 then true else error("exact deploy did not complete successfully") end' <<<"$result" >/dev/null
 ```
 
+The detector fragment below exercises one app and host. Its adapters read current approved main and fresh authenticated host state, require valid digests and healthy service state, and fail on observation errors. Run it for every required app and host. `wait-promotion-window` represents elapsed-time accounting; scheduled implementations persist the pair and first-observed timestamp between runs. Registry-tag discovery is a separate informational operation.
+
 <!-- contract:drift-detector -->
 ```sh
 set -euo pipefail
 window=0
 while :; do
   initial_desired=$(read-desired-digest "$window" initial)
-  initial_observed=$(resolve-tracked-tag "$window" initial)
+  initial_observed=$(read-running-digest "$window" initial)
   test "$initial_desired" != "$initial_observed" || exit 0
   wait-promotion-window "$window"
   current_desired=$(read-desired-digest "$window" current)
-  current_observed=$(resolve-tracked-tag "$window" current)
+  current_observed=$(read-running-digest "$window" current)
   if test "$current_desired" != "$initial_desired" || test "$current_observed" != "$initial_observed"; then window=$((window + 1)); continue; fi
   exit 1
 done
