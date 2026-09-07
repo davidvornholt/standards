@@ -30,4 +30,4 @@ Use the infrastructure home's exact-commit quality gate, current-main guard, ser
 
 A rollback is a new reviewed manifest change with verified old digests and an explicit database recovery decision where needed. Never move a tag or reactivate a closed candidate to bypass review.
 
-An available version is informational until approved through merge. Report failed discovery separately from failed deployment. Any deployment-drift monitor compares the approved desired state with actual host state, not with the newest vendor tag.
+An available version is informational until approved through merge. Report failed discovery separately from failed deployment. Verify approved images and health during deployment. Do not add a scheduled image drift detector or deployment deadline.
