@@ -15,7 +15,10 @@ import {
 } from './image-promotion-reference-test-support';
 
 const disabled = disabledApp();
-const changed = disabledApp({ ...metadata, trackedTag: 'production' });
+const changed = disabledApp({
+  ...metadata,
+  sourceRef: 'refs/heads/production',
+});
 const live = {
   ...metadata,
   digest: DIGEST_A,

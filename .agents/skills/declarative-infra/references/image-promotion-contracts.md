@@ -65,7 +65,7 @@ lifecycle: [announced, branch, open, merged, deploy-failed, completed, supersede
 <!-- contract:metadata-transition -->
 ```yaml
 imagesPath: infra/images.json
-metadataFields: [sourceRepository, sourceRef, sourceWorkflow, imageRepository, registryAccess, trackedTag, promotionLatencyMinutes]
+metadataFields: [sourceRepository, sourceRef, sourceWorkflow, imageRepository, registryAccess]
 pinFields: [promotionEnabled, digest, promotedSourceSha]
 disabledPin: { promotionEnabled: false, digest: null, promotedSourceSha: null }
 operations:
@@ -80,14 +80,14 @@ operations:
 <!-- contract:registry-access -->
 ```yaml
 public:
-  detectorCredential: none
-  detectorProof: anonymously-readable
+  workflowCredential: none
+  workflowProof: anonymously-readable
   hostCredential: none
   hostAuthFile: /run/containers/auth/anonymous.json
 private:
-  detectorCredential: github-actions-token
-  detectorPermissions: { contents: read, packages: read }
-  detectorProof: exact-private-visibility-then-anonymous-denied-then-authenticated-readable
+  workflowCredential: github-actions-token
+  workflowPermissions: { contents: read, packages: read }
+  workflowProof: exact-private-visibility-then-anonymous-denied-then-authenticated-readable
   hostCredential: sops-classic-pat
   hostCredentialScopes: [read:packages]
   hostCredentialAuthority: all-packages-readable-by-token-owner
@@ -97,25 +97,6 @@ private:
   rotationChecks: [intended-package-readable, unrelated-package-authority-reviewed]
   rotation: replace-verify-revoke
 forbiddenDesiredStateFields: [credential, secretPath, username, authFile]
-```
-
-<!-- contract:registry-resolution -->
-```sh
-set -euo pipefail
-case "$REGISTRY_ACCESS" in
-  public)
-    resolve-anonymous-tag
-    ;;
-  private)
-    require-exact-private-visibility
-    reject-anonymous-readable
-    resolve-authenticated-tag
-    ;;
-  *)
-    printf 'unsupported registry access mode: %s\n' "$REGISTRY_ACCESS" >&2
-    exit 1
-    ;;
-esac
 ```
 
 <!-- contract:registry-access-proof -->
@@ -241,20 +222,4 @@ run_id=$(jq -er --arg sha "$merge_sha" '[.[] | select(.headSha == $sha)] | if le
 gh run watch "$run_id" --repo example/infra --exit-status
 result=$(gh run view "$run_id" --repo example/infra --json headSha,conclusion,jobs)
 jq -er --arg sha "$merge_sha" 'if .headSha == $sha and .conclusion == "success" and ([.jobs[] | select(.name == "deploy" and .conclusion == "success")] | length) == 1 and ([.jobs[] | select(.name == "deploy")] | length) == 1 then true else error("exact deploy did not complete successfully") end' <<<"$result" >/dev/null
-```
-
-<!-- contract:drift-detector -->
-```sh
-set -euo pipefail
-window=0
-while :; do
-  initial_desired=$(read-desired-digest "$window" initial)
-  initial_observed=$(resolve-tracked-tag "$window" initial)
-  test "$initial_desired" != "$initial_observed" || exit 0
-  wait-promotion-window "$window"
-  current_desired=$(read-desired-digest "$window" current)
-  current_observed=$(resolve-tracked-tag "$window" current)
-  if test "$current_desired" != "$initial_desired" || test "$current_observed" != "$initial_observed"; then window=$((window + 1)); continue; fi
-  exit 1
-done
 ```

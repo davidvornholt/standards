@@ -2,13 +2,13 @@
 
 When an app's infrastructure home is a dedicated infra repo, deployment freshness is automation-owned: the source repo announces every successful image build, and the home repo's trusted writer proposes the desired-state change. Never edit a live pin by hand or treat either PR merge as deployment completion.
 
-**Completion invariant:** a source change is done only when the exact infra merge SHA has passed its fail-closed gate and every required target has returned a healthy readback of the expected digest. A failed or partial activation is incomplete; report it instead of attempting automatic cross-system rollback.
+**Completion invariant:** an approved deployment is done only when the exact infra merge SHA has passed its fail-closed gate and every required target has returned a healthy readback of the expected digest. A failed or partial activation is incomplete; report it instead of attempting automatic cross-system rollback.
 
-The machine-readable writer, provenance, deploy, completion, and detector examples in [Image promotion contracts](image-promotion-contracts.md) are part of this contract and must be copied with the policy below.
+The machine-readable writer, provenance, deploy, and completion examples in [Image promotion contracts](image-promotion-contracts.md) are part of this contract and must be copied with the policy below.
 
 ## One desired-state owner
 
-The home repo owns one `images.json` (`infra/images.json`, or root `images.json` in a dedicated infra repo). Announcement validation, the trusted writer, deployment, readback, and drift detection all read its per-app objects:
+The home repo owns one `images.json` (`infra/images.json`, or root `images.json` in a dedicated infra repo). Announcement validation, the trusted writer, deployment, and readback all read its per-app objects:
 
 <!-- contract:images-json -->
 ```json
@@ -22,8 +22,6 @@ The home repo owns one `images.json` (`infra/images.json`, or root `images.json`
     },
     "imageRepository": "ghcr.io/example/app/web",
     "registryAccess": "private",
-    "trackedTag": "main",
-    "promotionLatencyMinutes": 30,
     "promotionEnabled": true,
     "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
     "promotedSourceSha": "1111111111111111111111111111111111111111"
@@ -39,7 +37,7 @@ When multiple images must be released together, use the [coordinated release ext
 
 ## Source side: bind and announce the build
 
-The trusted build job publishes `imageRepository:trackedTag`, obtains the registry digest, and emits exactly one single-line JSON record to its immutable job log. The marker is assembled from fragments so the full marker cannot appear in the runner's echoed shell source. A separate announcement job runs only after build success. Its fallback token is read-only; its one-infra-repository App token has only Contents write.
+The trusted build job publishes an image under its source-owned tag, obtains the registry digest, and emits exactly one single-line JSON record to its immutable job log. The marker is assembled from fragments so the full marker cannot appear in the runner's echoed shell source. A separate announcement job runs only after build success. Its fallback token is read-only; its one-infra-repository App token has only Contents write.
 
 The App credentials live at `ci.broker_app.app_id` and `ci.broker_app.private_key` in `secrets/ci.yaml`. Resolve both with the canonical action, which transports nested multiline values through `GITHUB_ENV`, never outputs.
 
@@ -124,13 +122,17 @@ The `registryAccess` hard cutover has one document-wide migration operation for 
 
 Private host adoption has a separate two-stage boundary that runs before private metadata or promotion can require a pull. First deploy the SOPS secret, login unit, explicit auth files, and container-unit environment while a new app remains disabled or the existing app remains public. Read back the decrypted secret presence, successful login unit, and root-only private auth file. Only a later reviewed metadata change and trusted promotion may select `private` and require private pre-pull. The same sequence applies to a new private app and a public-to-private migration; an old host never has to pull a private image to install the credential plumbing needed for that pull.
 
-## Deploy, completion, and drift
+## Deploy and completion
 
 The deploy workflow serializes production without cancellation. Its deploy job depends on a successful gate for exact `github.sha`. Immediately before its first mutation it requires checkout, gated, event, and current remote-main SHAs to be identical, then reruns the shared exact repository/digest registry-access proof from the gated `images.json`. A queued run therefore performs zero mutations when main moved, visibility changed, anonymous access changed, or the job token lost its package grant. It derives full references from the gated `images.json`; every activation must pass exact registry-digest and health readback, followed by all OpenTofu postconditions.
 
 Completion filters merged PRs before uniqueness, then authenticates the App bot, canonical same-repository branch, `images.json`-only file set, successful trusted provenance check, and exact resulting pin at the merge SHA. Open and closed marker copies are ignored; forged or multiple merged candidates fail closed. The exact merge-SHA deploy and its one successful deploy job are required.
 
-The scheduled detector has Contents read and Packages read through its per-job `GITHUB_TOKEN`. It records initial desired and observed tag digests. A public entry resolves anonymously and fails when anonymous access stops working. A private entry queries the GitHub package API for the exact package path and fails unless visibility is exactly `private`; inability to read visibility also fails. It then proves anonymous denial and resolves the same digest with the workflow token; grant the infrastructure repository read access in that package's Actions access settings. `internal` is not private: broader organization or enterprise access fails the declared mode even though anonymous access is denied. Missing package access, a package that became public, an invalid access mode, or any registry error fails closed. Only an unchanged mismatch after a complete latency window fails; movement of either value starts a new window. The detector never writes and never decrypts a durable registry credential.
+Announcing or opening a promotion proposes a release; it does not authorize deployment. An open or deliberately deferred PR is informational and must not fail a freshness check because a newer image exists. Record the pending proposal and its evidence without treating it as completed deployment.
+
+Promotion is push-based. Verify the exact approved images and service health during deployment and report completion on the promotion PR. Do not add a scheduled image drift detector, periodic running-image comparisons, publication-age failures, or a promotion latency field. There is no periodic image recheck after successful completion.
+
+Registry-access checks remain mandatory and independent of release deferral. Use Contents read and Packages read through the per-job `GITHUB_TOKEN` where needed. Public entries must remain anonymously readable. Private entries require exact package visibility `private`, anonymous denial, and digest resolution with the workflow token; grant the infrastructure repository read access in the package's Actions access settings. Missing access, changed visibility, invalid access modes, or registry errors fail closed. Never decrypt a durable registry credential for this check.
 
 ## Private GHCR host access
 
@@ -144,4 +146,4 @@ Rotation is replace, refresh, verify, revoke: create a replacement classic PAT w
 
 ## Adoption boundary
 
-This contract supports public and private GHCR images. Choose `registryAccess` explicitly during disabled adoption and prove that access mode before the first trusted promotion. Source-repository API access remains a separate plane: a private source repository uses the existing broker App's short-lived Actions-read token for provenance and drift timing, never the registry PAT. Registries other than GHCR and private-image credentials other than the host `read:packages` PAT are out of scope and require a new reviewed contract.
+This contract supports public and private GHCR images. Choose `registryAccess` explicitly during disabled adoption and prove that access mode before the first trusted promotion. Source-repository API access remains a separate plane: a private source repository uses the existing broker App's short-lived Actions-read token for build provenance, never the registry PAT. Registries other than GHCR and private-image credentials other than the host `read:packages` PAT are out of scope and require a new reviewed contract.
