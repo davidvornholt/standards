@@ -26,3 +26,5 @@ Before pushing, run `nix flake check`, build the host toplevel, run `tofu fmt -c
 - For SOPS, development environments, CI secrets, or provider credentials, read [Secrets bootstrap](references/secrets.md).
 - For preview environments, read [Pull request previews](references/pr-previews.md). They are the default for web-host adoption; omitting them requires a recorded decision in the host repository.
 - For image promotion into a dedicated infrastructure repository, read [Image promotion](references/image-promotion.md).
+
+- For third-party container updates whose publisher is outside the infrastructure owner's control, read [Vendor image promotion](references/vendor-image-promotion.md).
