@@ -7,7 +7,9 @@
 }:
 let
   bunVersion =
-    if builtins.match "^bun@(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$" packageManager == null then
+    if
+      builtins.match "^bun@(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$" packageManager == null
+    then
       throw "packageManager must pin an exact bun@x.y.z version"
     else
       lib.removePrefix "bun@" packageManager;
@@ -22,6 +24,16 @@ let
         hash = "sha256-SxozLuhhmD65O8/m93D/+U4+MbLDiL2uo8jtNeWO7Q4=";
       };
     };
+    "1.4.2" = {
+      x86_64-linux = {
+        asset = "bun-linux-x64-baseline.zip";
+        hash = "sha256-xngEDxT+BEDrg503y9DOTAUaMtpygGrJfeamqra/co8=";
+      };
+      aarch64-linux = {
+        asset = "bun-linux-aarch64.zip";
+        hash = "sha256-VDKLvC2cjgyfiSxUTWbFeoO4QTnjSQnl7oF1jxrI/ac=";
+      };
+    };
   };
   versionSources =
     sources.${bunVersion}
@@ -30,10 +42,12 @@ let
     versionSources.${stdenv.hostPlatform.system}
       or (throw "Bun ${bunVersion} is not available for ${stdenv.hostPlatform.system}");
 in
-bun.overrideAttrs (_final: _previous: {
-  version = bunVersion;
-  src = fetchurl {
-    url = "https://github.com/oven-sh/bun/releases/download/bun-v${bunVersion}/${source.asset}";
-    inherit (source) hash;
-  };
-})
+bun.overrideAttrs (
+  _final: _previous: {
+    version = bunVersion;
+    src = fetchurl {
+      url = "https://github.com/oven-sh/bun/releases/download/bun-v${bunVersion}/${source.asset}";
+      inherit (source) hash;
+    };
+  }
+)
