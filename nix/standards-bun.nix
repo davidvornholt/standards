@@ -22,6 +22,16 @@ let
         hash = "sha256-SxozLuhhmD65O8/m93D/+U4+MbLDiL2uo8jtNeWO7Q4=";
       };
     };
+    "1.4.2" = {
+      x86_64-linux = {
+        asset = "bun-linux-x64-baseline.zip";
+        hash = "sha256-xngEDxT+BEDrg503y9DOTAUaMtpygGrJfeamqra/co8=";
+      };
+      aarch64-linux = {
+        asset = "bun-linux-aarch64.zip";
+        hash = "sha256-VDKLvC2cjgyfiSxUTWbFeoO4QTnjSQnl7oF1jxrI/ac=";
+      };
+    };
   };
   versionSources =
     sources.${bunVersion}

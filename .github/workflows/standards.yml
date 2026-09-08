@@ -403,10 +403,10 @@ jobs:
       - name: Install pinned settings checker
         run: |
           set -euo pipefail
-          bun_version=1.4.0
+          bun_version=1.4.2
           case "$(uname -m)" in
-            x86_64) bun_arch=x64; bun_sha=2d03fb5fb83ac8b567aca0a281b2ce1a1a19d488f56c2968d88c3f25e92fe452 ;;
-            aarch64) bun_arch=aarch64; bun_sha=4b1a332ee861983eb93bcfe6f770fff94e3e31b2c388bdaea3c8ed35e58eed0e ;;
+            x86_64) bun_arch=x64; bun_sha=36368faef7527875d5ffa52e53cd48021741f2a83eb6208a8dd64068d422a913 ;;
+            aarch64) bun_arch=aarch64; bun_sha=54328bbc2d9c8e0c9f892c544d66c57a83b84139e34909e5ee81758f1ac8fda7 ;;
             *)
               echo "::error::No pinned Bun binary for runner architecture $(uname -m)"
               exit 1
