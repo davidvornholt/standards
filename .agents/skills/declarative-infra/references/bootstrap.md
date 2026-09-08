@@ -146,6 +146,26 @@ in {
     email = acmeEmail; # required: ACME registration contact
   };
 
+  systemd.services.podman-image-prune = {
+    description = "Remove unused container images older than seven days";
+    serviceConfig = {
+      Type = "oneshot";
+      Nice = 19;
+      IOSchedulingClass = "idle";
+    };
+    script = ''
+      ${pkgs.podman}/bin/podman image prune --all --force --filter until=168h
+    '';
+  };
+  systemd.timers.podman-image-prune = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnCalendar = "daily";
+      Persistent = true;
+      RandomizedDelaySec = "30m";
+    };
+  };
+
   virtualisation.podman = {
     enable = true;
     defaultNetwork.settings.dns_enabled = true; # containers resolve each other by name
@@ -162,6 +182,9 @@ Beyond the module:
 
 - Only Caddy publishes services; nothing else opens 80/443, and every additional firewall port is a documented decision in the host repo.
 - Pin container images by digest.
+- Every Podman host needs image retention for production as well as previews. Daily image-only pruning of unused images created more than seven days ago is the default. Podman protects images referenced by any container, including stopped containers. Do not use `podman system prune`, volume pruning, or external-container removal as a substitute. Nix garbage collection and journal retention do not reclaim OCI images.
+- The age filter uses the image creation timestamp, not its pull or last-use time. Retired images may need to be pulled again for rollback; keep registry access available. Where a deployment or preview controller protects staged or rollback images beyond container references, coordinate cleanup with that controller or exclude its labels and retain its own collector. A preview-only collector does not replace production retention.
+- Verify the timer and a successful cleanup on each host after deployment. During a disk-full incident, check PostgreSQL recovery and every service sharing the filesystem after reclaiming unused images; never remove database files or volumes to make room.
 - A host running PostgreSQL also runs a local dump timer with retention (hourly `pg_dump --format=custom` into a `postgres`-owned directory is the norm); shape the unit however reads best.
 - A host running GitHub Actions jobs uses `services.github-runners.<name>` with a SOPS-provided token, `programs.nix-ld.enable = true` plus `NIX_LD`/`NIX_LD_LIBRARY_PATH` in the runner environment so downloaded tooling executes, and systemd resource caps (`CPUQuota`, `MemoryHigh`/`MemoryMax`) so jobs cannot starve the host's services.
 
