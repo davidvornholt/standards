@@ -7,7 +7,9 @@
 }:
 let
   bunVersion =
-    if builtins.match "^bun@(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$" packageManager == null then
+    if
+      builtins.match "^bun@(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$" packageManager == null
+    then
       throw "packageManager must pin an exact bun@x.y.z version"
     else
       lib.removePrefix "bun@" packageManager;
@@ -40,10 +42,12 @@ let
     versionSources.${stdenv.hostPlatform.system}
       or (throw "Bun ${bunVersion} is not available for ${stdenv.hostPlatform.system}");
 in
-bun.overrideAttrs (_final: _previous: {
-  version = bunVersion;
-  src = fetchurl {
-    url = "https://github.com/oven-sh/bun/releases/download/bun-v${bunVersion}/${source.asset}";
-    inherit (source) hash;
-  };
-})
+bun.overrideAttrs (
+  _final: _previous: {
+    version = bunVersion;
+    src = fetchurl {
+      url = "https://github.com/oven-sh/bun/releases/download/bun-v${bunVersion}/${source.asset}";
+      inherit (source) hash;
+    };
+  }
+)
