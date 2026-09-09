@@ -1,23 +1,18 @@
 # AGENTS.md
 
-This file is the root operating contract for agents in this repository. Keep root instructions for non-negotiable constraints; put specialized workflows in `.agents/skills/*/SKILL.md`.
-
 ## Quality gates
 
-- Never weaken a quality gate (lint, types, tests, a11y) to make a change pass. Fix findings in the code instead of downgrading or disabling rules.
-- Every inline suppression needs a reason. Use a per-file override only when a rule genuinely cannot apply, narrowed to that path and rule.
+Do not weaken quality gates to make a change pass. Explain inline suppressions. Use configuration exceptions only where a rule cannot apply, scoped to the affected path and rule.
 
 ## Change policy
 
 - Do not build backwards compatibility by default. Migrate every call site and delete the old shape in the same change. Do not add deprecated aliases, versioned copies, or compatibility-only optional parameters.
-- Ask before choosing product intent or another costly, durable direction. Assume no background knowledge or familiarity with the code; explain what is at stake, where each option leads, and recommend one before presenting technical evidence.
-- Propose before changing CI workflows, quality gates, or canonical synced files, even to unblock a failure. The file class is the trigger.
+- Ask before choosing product intent or another costly, durable direction. Explain the decision and tradeoffs in plain language and recommend an option.
 
 ## Package management
 
 - Use Bun only, at the exact version declared by the root `packageManager`.
-- Add dependencies with `bun add`; do not manually edit dependency versions into `package.json`.
-- Workspaces that rely on Bun runtime or `bun:test` types must declare `@types/bun`, not custom ambient declaration shims.
+- Workspaces using Bun runtime or `bun:test` types must declare `@types/bun`.
 
 ## Architecture
 
@@ -35,28 +30,22 @@ This file is the root operating contract for agents in this repository. Keep roo
 
 ## Effect standards
 
-- Decode untrusted input with Schema before using it.
-- Required for async work, concurrency, retries, timeouts, resource acquisition, cancellation, and injected dependencies; at service boundaries the error and requirement channels are the contract.
-- Not required for total synchronous logic or UI components, which stay plain and consume Effect at the boundary.
-- Never `throw` for expected failures; return typed Effect errors. Recoverable errors are `Data.TaggedError` classes with stable `_tag` values and actionable `message` fields.
-- A workspace may opt out wholesale only for a stated architectural reason recorded in `AGENTS.local.md`; do not mix idioms inside one workspace.
+- Use Effect for async work, concurrency, retries, timeouts, resource management, cancellation, and injected dependencies. Keep total synchronous logic and UI components plain, consuming Effect at boundaries.
+- Service contracts expose typed errors and requirements. Represent expected failures with `Data.TaggedError`, a stable `_tag`, and an actionable `message` instead of throwing.
+- Decode untrusted input with Effect Schema before using it.
+- Workspace-wide exceptions require an architectural reason in `AGENTS.local.md`; keep each workspace consistent.
 
 ## Writing style
 
 - Use sentence case for reader-facing text — UI copy, labels, command-style actions, Markdown headings — preserving proper nouns, acronyms, filenames, package names, and domain terms.
-- Comment only non-obvious intent.
 - Do not hard-wrap Markdown prose; keep each paragraph or list item on one logical line.
 
 ## Definition of done
 
-1. Test changed behavior and regression-prone states. Do not add tests that only pin trivial copy, static literals, or type-impossible states.
-2. Search for stale references to changed concepts, names, paths, configuration, secrets, commands, public APIs, error types, or architectural patterns. Update docs and SOPS secret examples when needed.
-3. Run `bun run check:fix` from the repo root for code changes. If it fails, read the full error, fix the root cause, and run it again.
-
-For documentation-only changes, run a narrower verification when the full check would not add useful signal.
+Test changed behavior without tests that merely pin copy or static values. Update affected references and documentation. For code changes, run `bun run check:fix` from the root and resolve failures. Use narrower checks for documentation-only changes.
 
 ## Project-specific rules
 
-This file is canonical and synced from the standards template — do not edit it locally. Project-specific rules that extend this contract live in `AGENTS.local.md`; add local guidance there instead.
+Synced from the standards repository; make canonical changes there. Put project-specific instructions in `AGENTS.local.md`.
 
 @AGENTS.local.md
