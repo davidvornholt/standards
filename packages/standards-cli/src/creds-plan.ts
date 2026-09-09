@@ -7,6 +7,8 @@
 // tokens it minted for another repository, are reported
 // (creds-plan-unmanaged.ts) but never mutated. Execution lives in
 // creds-plan-run.ts.
+// Live policy is preserved, not compared with a separate desired-policy manifest.
+// Adding policy-drift enforcement would require a new source of truth.
 
 import { cloudflareExpiresOn } from './creds-cloudflare-expiry';
 import { groupByIntersectingFootprint } from './creds-plan-groups';

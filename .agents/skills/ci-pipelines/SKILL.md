@@ -5,6 +5,8 @@ description: Use when changing continuous integration, GitHub Actions workflows,
 
 # CI pipelines
 
+Canonical workflows use maintained major-version tags for external actions.
+
 ## Billing shapes the job graph
 
 - Jobs bill per minute, rounded up, minimum one. Fold sub-minute checks into an existing job on the same trust level instead of giving them their own.

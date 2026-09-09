@@ -163,6 +163,9 @@ export const runCodex = async (
       {
         detached: true,
         stdio: ['ignore', 'ignore', 'pipe'],
+        // Approved runs share the host service identity and its GitHub token.
+        // Approval and write revalidation constrain the workflow; they do not
+        // isolate credentials. This assumes trusted, maintainer-approved work.
         env: { ...process.env },
       },
     );

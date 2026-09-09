@@ -36,8 +36,13 @@ Do not weaken quality gates to make a change pass. Explain inline suppressions. 
 
 ## Writing style
 
+- Write plainly and directly. Avoid mannered prose, decorative metaphors, and stock phrases. Prefer literal wording and sentences that are easy to follow.
 - Use sentence case for reader-facing text — UI copy, labels, command-style actions, Markdown headings — preserving proper nouns, acronyms, filenames, package names, and domain terms.
 - Do not hard-wrap Markdown prose; keep each paragraph or list item on one logical line.
+
+## Documentation
+
+Write documentation when it helps someone use, operate, or change the project. Keep it concise and current; do not narrate the implementation or repeat what the code makes clear. Put local rationale near the code and change history in PRs.
 
 ## Project-specific rules
 

@@ -3,6 +3,8 @@
 // itself, lists and mints scoped tokens, and revokes them. Token values
 // returned by create flow only into SOPS writers,
 // never stdout.
+// User-owned tokens are intentionally outside this API and the bootstrap
+// credential's authority; they must be managed separately in Cloudflare.
 
 import {
   type CfResult,

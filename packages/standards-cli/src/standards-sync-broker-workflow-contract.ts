@@ -72,6 +72,8 @@ const writerConsumerName = 'Commit and push mirror changes';
 const prConsumerName = 'Open a pull request if the mirror changed';
 export const syncPolicyRefName = ['SYNC', 'POLICY', 'REF'].join('_');
 
+// Any new field can change execution or failure semantics. Even safe metadata
+// additions require an explicit contract update so reviewers see the change.
 const assertExactStep = (
   workflow: ParsedWorkflow,
   name: string,
