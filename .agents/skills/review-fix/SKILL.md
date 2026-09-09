@@ -37,14 +37,14 @@ Reuse a successful equivalent exact-head gate. Otherwise run the repository gate
 
 For every required review or verification lens, spawn a separate read-only subagent using the [review skill](../review/SKILL.md). `review-pass` is an optional workflow helper. If delegation is unavailable, report incomplete coverage and stop.
 
-Review the PR base → initial head with the scope, gate result, relevant rationale from code and project instructions, lenses, and any model override. Retry a skipped lens once, then stop if coverage is still incomplete. Merge duplicate findings while preserving every reporting lens, and assign one decision:
+Review the PR base → initial head with the scope, gate result, lenses, and any model override. Retry a skipped lens once, then stop if coverage is still incomplete. Merge duplicate findings while preserving every reporting lens, and assign one decision:
 
 - `block`: demonstrated, in scope, material under the threat model, and worth stopping the merge;
 - `defer`: real but outside this PR or below the merge bar;
 - `discard`: refuted, speculative, already accepted, or not worth scheduling;
 - `ask`: a costly, durable product or architecture choice remains unresolved.
 
-Do not ask about inferable implementation details, naming, local refactors, test shape, or other reversible choices. Choose the smallest sound option and record durable assumptions in the PR report. Collect every unavoidable `ask` into one decision brief with the options, consequences, and a recommendation.
+Do not ask about inferable implementation details, naming, local refactors, test shape, or other reversible choices. Choose the smallest sound option. Collect every unavoidable `ask` into one decision brief with the options, consequences, and a recommendation.
 
 ## Fix
 

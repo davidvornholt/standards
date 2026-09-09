@@ -42,7 +42,7 @@ Do not weaken quality gates to make a change pass. Explain inline suppressions. 
 
 ## Documentation
 
-Write documentation when it helps someone use, operate, or change the project. Keep it concise and current; do not narrate the implementation or repeat what the code makes clear. Put local rationale near the code and change history in PRs. Keep agent working notes out of the repository unless requested.
+Write documentation when it helps someone use, operate, or change the project. Keep it concise and current; do not narrate the implementation or repeat what the code makes clear. Put local rationale near the code and change history in PRs.
 
 ## Project-specific rules
 

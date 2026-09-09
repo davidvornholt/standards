@@ -13,7 +13,6 @@ Review the requested change without editing it. The goal is a trustworthy merge 
 - Ground findings in inspected code, repository contracts, tests, command output, or documented framework behavior.
 - Show a reachable failure scenario. Suspicious patterns or theoretical possibilities alone are not findings.
 - Judge materiality against the supplied intent and threat model. Repository-rule drift is evidence, not automatically a blocker.
-- Respect relevant rationale in code and project instructions; challenge an accepted tradeoff only with new evidence or a changed premise.
 - If an exact-head gate result was supplied, do not rerun the full gate. Use focused probes only. Instrumented probes belong in a disposable worktree; never modify the shared checkout.
 
 Enumerate the surfaces owned by the lens rather than sampling them. Read other files when they prove an in-lens finding, but do not duplicate another lens’s charter.
@@ -24,7 +23,7 @@ Return exactly one decision per finding; do not add a separate severity:
 
 - **block** — demonstrated, in intent, material under the threat model, and serious enough to stop this merge.
 - **defer** — real and actionable, but outside the PR or below the merge bar.
-- **discard** — refuted, speculative, already accepted, or too low-value to schedule. Report only discards that explain a material review decision.
+- **discard** — refuted, speculative, already accepted, or too low-value to schedule.
 - **ask** — the repository cannot choose between materially different durable product or architecture outcomes, and choosing wrongly would be expensive to reverse.
 
 Do not ask about inferable implementation details, reversible choices, local refactors, naming, or test shape. Prefer the smallest in-scope correction and defer optional machinery.

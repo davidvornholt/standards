@@ -5,7 +5,7 @@ description: Use when changing continuous integration, GitHub Actions workflows,
 
 # CI pipelines
 
-Canonical workflows use maintained major-version tags for external actions. The maintainer accepts the risk that those tags can move.
+Canonical workflows use maintained major-version tags for external actions.
 
 ## Billing shapes the job graph
 
