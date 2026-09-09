@@ -41,6 +41,6 @@ Do not weaken quality gates to make a change pass. Explain inline suppressions. 
 
 ## Project-specific rules
 
-This file is shared across repositories and maintained in the standards repository. Add project-specific rules to `AGENTS.local.md`.
+This is a canonical file from the standards repository. Project-specific rules belong in `AGENTS.local.md`.
 
 @AGENTS.local.md
