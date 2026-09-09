@@ -128,6 +128,8 @@ The deploy workflow serializes production without cancellation. Its deploy job d
 
 Completion filters merged PRs before uniqueness, then authenticates the App bot, canonical same-repository branch, `images.json`-only file set, successful trusted provenance check, and exact resulting pin at the merge SHA. Open and closed marker copies are ignored; forged or multiple merged candidates fail closed. The exact merge-SHA deploy and its one successful deploy job are required.
 
+Read provenance through the Checks API for the exact PR head SHA, filter by `trusted-promotion-provenance` and `latest`, paginate, and require exactly one completed, successful GitHub Actions check. A missing, duplicate, failed, pending, wrong-head, or foreign-App check fails closed. The completion reader needs Actions read, Contents read, Pull requests read and Checks read; a reporter that publishes the completion check needs Checks write. Do not request `statusCheckRollup`: it also fetches commit statuses and can fail without `statuses: read`, even when the needed check is readable. Completion does not need access to those unrelated statuses.
+
 Announcing or opening a promotion proposes a release; it does not authorize deployment. An open or deliberately deferred PR is informational and must not fail a freshness check because a newer image exists. Record the pending proposal and its evidence without treating it as completed deployment.
 
 Promotion is push-based. Verify the exact approved images and service health during deployment and report completion on the promotion PR. Do not add a scheduled image drift detector, periodic running-image comparisons, publication-age failures, or a promotion latency field. There is no periodic image recheck after successful completion.
