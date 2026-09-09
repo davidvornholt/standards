@@ -72,7 +72,6 @@ Read [Sync and ownership](docs/sync-and-ownership.md) before changing a path who
 | [Operations](docs/operations.md) | CodeBuild, local PostgreSQL, the poller, Nix packaging, and releases. |
 | [CLI reference](packages/standards-cli/README.md) | Commands, configuration, and focused examples. |
 | [Agent contract](AGENTS.md) | Rules enforced in every consumer. |
-| [Review decisions](.agents/review/decisions.md) | Durable architecture and trust decisions. |
 | [Infrastructure skill](.agents/skills/declarative-infra/SKILL.md) | NixOS hosts, OpenTofu, secrets, previews, and image promotion. |
 
 ## Packages

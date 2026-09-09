@@ -22,6 +22,8 @@ export type ResolvedDevEnv = {
   readonly problems: ReadonlyArray<string>;
 };
 
+// Each variable independently selects a complete pair and then one part.
+// Variable names and neighboring references do not imply a shared credential.
 const lookupReference = (
   document: unknown,
   reference: BrokeredS3Reference,

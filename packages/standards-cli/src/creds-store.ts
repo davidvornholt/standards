@@ -24,6 +24,9 @@ export type BrokerStore = {
   readonly cloudflare: ReadonlyArray<CloudflareBrokerAccount>;
 };
 export const EMPTY_BROKER_STORE: BrokerStore = { github: [], cloudflare: [] };
+// This machine-global store trusts the local account, like its age private key.
+// Encrypting it with a colocated key would not protect against that account.
+// Repository secrets still belong in SOPS; this store stays outside repositories.
 const OWNER_ONLY_FILE_MODE = 0o600;
 const OWNER_ONLY_DIR_MODE = 0o700;
 const FILE_MODE_MODULUS = 0o1000;

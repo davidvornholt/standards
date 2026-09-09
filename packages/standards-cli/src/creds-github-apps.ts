@@ -57,6 +57,8 @@ export const loadOwnedGithubStore = async (
   return { ok: true, value: migrated };
 };
 
+// Private Apps belong to one owner. Selecting by repository owner keeps each
+// owner's credentials separate; installation access is verified before export.
 export const selectGithubAppForRepo = (
   apps: ReadonlyArray<GithubBrokerApp>,
   repo: string,

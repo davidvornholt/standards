@@ -120,6 +120,8 @@ const BYPASS_ACTOR_PROBE = 1;
 // `totalCount` means the connection is being filtered rather than merely
 // redacted, so it supplies no count; a null *element* is the documented
 // identity-withholding shape, so only the length is checked.
+// Probes with restricted tokens confirmed that hidden actors still count:
+// https://github.com/davidvornholt/standards/pull/176
 const countedRuleset = (node: unknown): readonly [number, number] | null => {
   if (!isRecord(node) || typeof node.databaseId !== 'number') {
     return null;

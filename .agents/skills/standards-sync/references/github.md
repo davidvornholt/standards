@@ -20,3 +20,5 @@ bun standards creds add github --dest ci:ci.broker_app
 ```
 
 The workflow mints two short-lived tokens for the current repository: a branch writer for contents and workflows, and a pull-request opener. Neither token enters the sync process, and there is no fallback credential. A repository with `autoSync: false` does not need these permissions until automatic sync is re-enabled.
+
+Canonical sync branches contain trusted upstream code and may run consumer CI before the generated PR is reviewed.
