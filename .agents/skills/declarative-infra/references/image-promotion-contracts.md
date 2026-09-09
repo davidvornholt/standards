@@ -212,8 +212,13 @@ digest_hex=${DIGEST#sha256:}
 branch="image-bump/${APP}/${SOURCE_SHA:0:12}-${digest_hex:0:12}"
 prs=$(gh pr list --repo example/infra --state all --search "\"$marker\" in:body" --json number,body,state)
 pr=$(jq -er --arg marker "$marker" '[.[] | select(.state == "MERGED" and (.body | contains($marker)))] | if length == 1 then .[0].number else error("expected one merged promotion PR") end' <<<"$prs")
-view=$(gh pr view "$pr" --repo example/infra --json state,mergeCommit,author,headRefName,headRepository,files,statusCheckRollup)
-merge_sha=$(jq -er --arg branch "$branch" 'if .state == "MERGED" and .author.login == "promotion-bot[bot]" and .headRefName == $branch and .headRepository.nameWithOwner == "example/infra" and [.files[].path] == ["infra/images.json"] and ([.statusCheckRollup[] | select(.name == "trusted-promotion-provenance" and .conclusion == "SUCCESS")] | length) == 1 then .mergeCommit.oid else error("merged promotion PR is not trusted") end' <<<"$view")
+view=$(gh pr view "$pr" --repo example/infra --json state,mergeCommit,author,headRefName,headRepository,headRefOid,files)
+merge_sha=$(jq -er --arg branch "$branch" 'if .state == "MERGED" and .author.login == "promotion-bot[bot]" and .headRefName == $branch and .headRepository.nameWithOwner == "example/infra" and [.files[].path] == ["infra/images.json"] then .mergeCommit.oid else error("merged promotion PR is not trusted") end' <<<"$view")
+head=$(jq -er '.headRefOid | select(test("^[0-9a-f]{40}$"))' <<<"$view")
+checks=$(gh api "repos/example/infra/commits/$head/check-runs?check_name=trusted-promotion-provenance&filter=latest&per_page=100" --paginate --slurp)
+jq -e --arg head "$head" '[.[].check_runs[]] | length == 1 and all(.[];
+  .name == "trusted-promotion-provenance" and .head_sha == $head and
+  .app.slug == "github-actions" and .status == "completed" and .conclusion == "success")' <<<"$checks" >/dev/null
 encoded=$(gh api "repos/example/infra/contents/infra/images.json?ref=$merge_sha")
 images=$(jq -er '.content' <<<"$encoded" | base64 --decode)
 jq -er --arg app "$APP" --arg digest "$DIGEST" --arg sha "$SOURCE_SHA" 'select(.[$app].promotionEnabled == true and .[$app].digest == $digest and .[$app].promotedSourceSha == $sha) | true' <<<"$images" >/dev/null
