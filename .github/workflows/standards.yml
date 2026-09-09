@@ -269,6 +269,9 @@ jobs:
             echo "::error::Found a browser a11y suite but no installed playwright binary. Declare @playwright/test in the workspace that owns the suite."
             exit 1
           fi
+          # Playwright downloads its own Chromium. The runner's unused Chrome APT
+          # repository can break dependency installation with inconsistent metadata.
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.list /etc/apt/sources.list.d/google-chrome.sources
           "$playwright" install --with-deps chromium
 
       - name: Check
