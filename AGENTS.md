@@ -7,7 +7,7 @@ Do not weaken quality gates to make a change pass. Explain inline suppressions. 
 ## Change policy
 
 - Do not build backwards compatibility by default. Migrate every call site and delete the old shape in the same change. Do not add deprecated aliases, versioned copies, or compatibility-only optional parameters.
-- Ask before choosing product intent or another costly, durable direction. Explain the decision and tradeoffs in plain language and recommend an option.
+- Ask before choosing product intent or another costly, durable direction. Assume no background knowledge or familiarity with the code; explain what is at stake, where each option leads, and recommend one before presenting technical evidence.
 
 ## Package management
 
@@ -30,9 +30,8 @@ Do not weaken quality gates to make a change pass. Explain inline suppressions. 
 
 ## Effect standards
 
-- Use Effect for async work, concurrency, retries, timeouts, resource management, cancellation, and injected dependencies. Keep total synchronous logic and UI components plain, consuming Effect at boundaries.
+- Use Effect extensively where it makes code more robust. Keep simple synchronous logic and UI components plain, integrating Effect at boundaries.
 - Service contracts expose typed errors and requirements. Represent expected failures with `Data.TaggedError`, a stable `_tag`, and an actionable `message` instead of throwing.
-- Decode untrusted input with Effect Schema before using it.
 - Workspace-wide exceptions require an architectural reason in `AGENTS.local.md`; keep each workspace consistent.
 
 ## Writing style
@@ -40,12 +39,8 @@ Do not weaken quality gates to make a change pass. Explain inline suppressions. 
 - Use sentence case for reader-facing text — UI copy, labels, command-style actions, Markdown headings — preserving proper nouns, acronyms, filenames, package names, and domain terms.
 - Do not hard-wrap Markdown prose; keep each paragraph or list item on one logical line.
 
-## Definition of done
-
-Test changed behavior without tests that merely pin copy or static values. Update affected references and documentation. For code changes, run `bun run check:fix` from the root and resolve failures. Use narrower checks for documentation-only changes.
-
 ## Project-specific rules
 
-Synced from the standards repository; make canonical changes there. Put project-specific instructions in `AGENTS.local.md`.
+This file is shared across repositories and maintained in the standards repository. Add project-specific rules to `AGENTS.local.md`.
 
 @AGENTS.local.md
