@@ -15,12 +15,12 @@
   },
   "devDependencies": {
     "@davidvornholt/typescript-config": "workspace:*",
-    "@types/bun": "^1.4.0",
+    "@types/bun": "^1.4.2",
     "typescript": "7.0.2"
   },
   "dependencies": {
     "@axe-core/playwright": "^4.13.0",
-    "@playwright/test": "1.62.1",
-    "playwright-core": "1.62.1"
+    "@playwright/test": "1.63.0",
+    "playwright-core": "1.63.0"
   }
 }

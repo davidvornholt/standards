@@ -75,7 +75,7 @@ describe('template biome wrapper', () => {
     expect(result.status).toBe(0);
   });
 
-  it('keeps ordinary worktree exclusion compatible with Biome 2.5.11', () => {
+  it('keeps ordinary worktree exclusion compatible with the pinned Biome version', () => {
     const ordinaryExclude = WRAPPER.replace(
       WORKTREE_ENTRY,
       ', "!.claude/worktrees"',
@@ -90,5 +90,19 @@ describe('template biome wrapper', () => {
     const result = check(buildFixture(stripped));
     expect(result.status).not.toBe(0);
     expect(result.output).toContain('nested root configuration');
+  });
+});
+
+describe('Bun runtime boundaries', () => {
+  it('allows Bun imports in tests while rejecting them in application code', () => {
+    const dir = buildFixture(WRAPPER);
+    const source =
+      "import { expect, it } from 'bun:test';\nit('works', () => { expect(true).toBe(true); });\n";
+    write(dir, 'src/runtime.test.ts', source);
+    expect(check(dir).output).not.toContain('lint/nursery/noBunModules');
+    write(dir, 'src/runtime.ts', source);
+    const result = check(dir);
+    expect(result.status).not.toBe(0);
+    expect(result.output).toContain('lint/nursery/noBunModules');
   });
 });

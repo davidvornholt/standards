@@ -48,7 +48,7 @@ let
       cp -R packages/standards-cli/node_modules "$out/packages/standards-cli/node_modules"
       runHook postInstall
     '';
-    outputHash = "sha256-VbwHHtCVE0ASZxPIr5yiybBJqiB5FTbvUOcA7OLwV24=";
+    outputHash = "sha256-2Y6v9QEwnBI6vUgLUBZcQn3ewjH/R1Gycn+z2gEYUqk=";
     outputHashAlgo = "sha256";
     outputHashMode = "recursive";
   };
