@@ -1,6 +1,6 @@
 {
   "name": "@davidvornholt/standards",
-  "version": "0.26.0",
+  "version": "0.26.1",
   "description": "Bootstrap, synchronize, and validate davidvornholt/standards consumers",
   "license": "MIT",
   "repository": {
@@ -184,7 +184,7 @@
   },
   "devDependencies": {
     "@davidvornholt/typescript-config": "workspace:*",
-    "@types/bun": "^1.4.0",
+    "@types/bun": "^1.4.2",
     "sigstore": "5.0.0",
     "typescript": "7.0.2"
   },
@@ -195,6 +195,6 @@
     "access": "public"
   },
   "dependencies": {
-    "yaml": "^2.9.0"
+    "yaml": "^2.9.1"
   }
 }

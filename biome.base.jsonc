@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.5.11/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.5.13/schema.json",
   // Canonical strict Biome base, synced from davidvornholt/standards. Do NOT
   // edit locally: repos extend this from their own `biome.jsonc` wrapper and add
   // project-specific overrides there. The baseline turns every applicable rule
@@ -229,7 +229,8 @@
       // Tests legitimately manipulate process.env to exercise
       // configuration-dependent behavior, and fixtures contain literal dummy
       // tokens that trip entropy-based secret detection. Biome also does not
-      // resolve Bun's virtual `bun:test` module.
+      // resolve Bun's virtual `bun:test` module. These tests and helpers run
+      // under Bun, so its built-ins are available.
       "includes": [
         "**/*.test.ts",
         "**/*.test.tsx",
@@ -243,6 +244,9 @@
         "rules": {
           "correctness": {
             "noUnresolvedImports": "off"
+          },
+          "nursery": {
+            "noBunModules": "off"
           },
           "security": {
             "noSecrets": "off"

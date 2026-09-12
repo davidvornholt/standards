@@ -12,7 +12,7 @@ updates:
       interval: "weekly"
     ignore:
       # Not a temporary hold: biome.base.jsonc is authored against the exact
-      # pinned Biome version, so consumers never self-bump it. Upgrades happen
+      # Biome 2.5.13 pin, so consumers never self-bump it. Upgrades happen
       # in the standards template and roll out through sync.
       - dependency-name: "@biomejs/biome"
       # Temporary hold: Next.js does not support TypeScript releases above
