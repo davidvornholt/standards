@@ -93,14 +93,14 @@ The check is local to the selected revision. It does not ask whether upstream ha
 The default is upstream `main`. Pin a tag, branch, or full commit SHA with either command-line policy:
 
 ```sh
-bun standards sync --ref v0.26.1
+bun standards sync --ref v0.27.0
 ```
 
 or repository policy:
 
 ```json
 {
-  "ref": "v0.26.1"
+  "ref": "v0.27.0"
 }
 ```
 

@@ -304,6 +304,7 @@
         "packages/standards-cli/src/creds-revoke.ts",
         "packages/standards-cli/src/creds-sops-editor.ts",
         "packages/standards-cli/src/creds-store.ts",
+        "packages/standards-cli/src/dev-db-commands.ts",
         "packages/standards-cli/src/github-api.ts",
         "packages/standards-cli/src/github-commands.ts",
         "packages/standards-cli/src/poller-codex.ts",

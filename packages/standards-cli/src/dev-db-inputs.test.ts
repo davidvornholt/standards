@@ -8,7 +8,7 @@ import {
   createFixture,
   rejectedBeforePodman,
   run,
-} from './dev-db-just-test-support';
+} from './dev-db-test-support';
 
 const fixture = (
   packageName = '@standards/root',

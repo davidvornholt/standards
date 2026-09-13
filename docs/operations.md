@@ -18,7 +18,7 @@ Use `CI_RUNNER` instead when only the unprivileged quality job needs another run
 
 ## Local PostgreSQL
 
-Repositories using the standard `packages/db` shape get:
+Repositories with a local PostgreSQL database get:
 
 ```sh
 just dev-db-start
@@ -26,19 +26,22 @@ just dev-db-stop
 just dev-db-status
 ```
 
-Run `just dev-env-generate` first. The recipes read `packages/db/.env.local`, accept only a local `postgres:` or `postgresql:` URL without query parameters or fragments, and ignore a conflicting shell `DATABASE_URL`.
+Run `just dev-env-generate` first. The recipes call `bun standards dev-db <start|stop|status>`, read `<devDatabase.workspace>/.env.local` (default: `packages/db/.env.local`), accept only a local `postgres:` or `postgresql:` URL without query parameters or fragments, and ignore a conflicting shell `DATABASE_URL`.
 
 The container is named `<repo>-dev-postgres`, publishes only to IPv4 loopback, and stores data in `<repo>-dev-postgres-data`. Before acting, every recipe verifies the canonical ownership label, image, port binding, and volume mount.
 
-Declare the PostgreSQL major version in the root manifest:
+Declare the PostgreSQL major version in the root manifest. Set `workspace` when the database belongs to an app or a package other than `packages/db`:
 
 ```json
 {
   "devDatabase": {
-    "postgresVersion": "18"
+    "postgresVersion": "18",
+    "workspace": "apps/web"
   }
 }
 ```
+
+`workspace` must name an existing `apps/<name>` or `packages/<name>` directory with a `package.json`; the workspace and generated env file must stay inside the repository without symlinks. Start reads only that generated env file and fails with its path if it is missing. Stop and status do not need the workspace or env file.
 
 PostgreSQL fixes credentials and its data format when the volume is initialized. Changing the password or major version requires intentionally removing the managed container and volume after confirming the data may be discarded.
 
@@ -86,7 +89,7 @@ The package includes `standards`, `bun`, and `bunx`, with the CLI wrapper placin
 
 ```nix
 inputs.standards = {
-  url = "github:davidvornholt/standards/v0.26.1";
+  url = "github:davidvornholt/standards/v0.27.0";
   inputs.nixpkgs.follows = "nixpkgs";
 };
 ```
