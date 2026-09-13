@@ -42,7 +42,7 @@ Do not weaken quality gates to make a change pass. Explain inline suppressions. 
 
 ## Documentation
 
-Write documentation when it helps someone use, operate, or change the project. Keep it concise and current; do not narrate the implementation or repeat what the code makes clear. Put local rationale near the code and change history in PRs.
+Document only what readers need beyond the code and configuration. Keep change history in PRs; avoid separate implementation summaries and inventories. Read documentation relevant to the current task, not the entire documentation tree.
 
 ## Project-specific rules
 
