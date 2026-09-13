@@ -34,7 +34,6 @@ dev-db-status:
 _dev-db-action action:
     #!/usr/bin/env bun
     const action = {{ quote(action) }};
-    const envFile = 'packages/db/.env.local';
     const ownershipLabel = 'io.davidvornholt.standards.dev-db';
     const fail = (message) => { console.error(message); process.exit(1); };
     const detail = (result) => result.stderr.toString().trim() || result.stdout.toString().trim() || `exit ${result.exitCode}`;
@@ -68,13 +67,17 @@ _dev-db-action action:
       }
     };
     const readConnection = async () => {
-      if (!(await Bun.file(envFile).exists())) fail(`${envFile} not found. Run \`just dev-env-generate\` first.`);
+      const configuredWorkspace = manifest?.devDatabase?.workspace;
+      const workspace = configuredWorkspace === undefined ? 'packages/db' : configuredWorkspace;
+      if (typeof workspace !== 'string' || !/^(apps|packages)\/[a-zA-Z0-9][a-zA-Z0-9._-]*$/u.test(workspace)) fail('devDatabase.workspace must be a workspace path such as "packages/db" or "apps/web".');
+      const envFile = `${workspace}/.env.local`;
+      if (!(await Bun.file(envFile).exists())) fail(`${envFile} not found. Run \`just dev-env-generate\` first, or set devDatabase.workspace in the root package.json to the workspace that owns DATABASE_URL.`);
       const cleanEnvironment = { ...process.env };
       delete cleanEnvironment.DATABASE_URL;
       const loaded = Bun.spawnSync(['bun', `--env-file=${envFile}`, '-e', 'process.stdout.write(process.env.DATABASE_URL ?? "")'], { env: cleanEnvironment });
       if (loaded.exitCode !== 0) fail(`Unable to read DATABASE_URL from ${envFile}: ${detail(loaded)}`);
       const databaseUrl = loaded.stdout.toString();
-      if (!databaseUrl) fail(`${envFile} declares no DATABASE_URL. dev-db manages only repos whose db package uses one.`);
+      if (!databaseUrl) fail(`${envFile} declares no DATABASE_URL. Set devDatabase.workspace to the workspace that owns it.`);
       let url;
       try {
         url = new URL(databaseUrl);

@@ -96,3 +96,72 @@ describe('canonical dev database inputs', () => {
     }
   });
 });
+
+describe('canonical dev database workspace selection', () => {
+  const selectWorkspace = (
+    value: ReturnType<typeof fixture>,
+    workspace: unknown,
+  ): void => {
+    write(
+      value.root,
+      'package.json',
+      JSON.stringify({
+        name: '@standards/root',
+        devDatabase: { postgresVersion: '17', workspace },
+      }),
+    );
+  };
+
+  it('starts from an app or named package without packages/db', () => {
+    for (const workspace of ['apps/web', 'packages/storage']) {
+      const value = fixture();
+      selectWorkspace(value, workspace);
+      write(
+        value.root,
+        `${workspace}/.env.local`,
+        'DATABASE_URL=postgres://file-user:file-pass@localhost:5440/file-db\n',
+      );
+      rmSync(join(value.root, 'packages/db'), { recursive: true });
+      const result = run(value, 'dev-db-start');
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain('accepts the configured DATABASE_URL');
+    }
+  });
+
+  it('reports the selected missing env file without falling back to packages/db', () => {
+    const value = fixture();
+    selectWorkspace(value, 'apps/web');
+    const result = run(value, 'dev-db-start');
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('apps/web/.env.local not found');
+    expect(result.stderr).toContain('devDatabase.workspace');
+    expect(calls(value)).toBe('');
+  });
+
+  it('rejects invalid workspace paths before calling Podman', () => {
+    for (const workspace of [
+      null,
+      2,
+      '',
+      '/tmp/db',
+      '../db',
+      'apps/../db',
+      'apps/web/../../db',
+      'apps\\web',
+    ]) {
+      const value = fixture();
+      selectWorkspace(value, workspace);
+      const result = run(value, 'dev-db-start');
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('devDatabase.workspace');
+      expect(calls(value)).toBe('');
+    }
+  });
+
+  it('does not require the selected env file for stop or status', () => {
+    const value = fixture();
+    selectWorkspace(value, 'apps/web');
+    expect(run(value, 'dev-db-stop').status).toBe(0);
+    expect(run(value, 'dev-db-status').status).toBe(0);
+  });
+});

@@ -18,7 +18,7 @@ Use `CI_RUNNER` instead when only the unprivileged quality job needs another run
 
 ## Local PostgreSQL
 
-Repositories using the standard `packages/db` shape get:
+Repositories with a local PostgreSQL database get:
 
 ```sh
 just dev-db-start
@@ -26,16 +26,17 @@ just dev-db-stop
 just dev-db-status
 ```
 
-Run `just dev-env-generate` first. The recipes read `packages/db/.env.local`, accept only a local `postgres:` or `postgresql:` URL without query parameters or fragments, and ignore a conflicting shell `DATABASE_URL`.
+Run `just dev-env-generate` first. The recipes read `<devDatabase.workspace>/.env.local` (default: `packages/db/.env.local`), accept only a local `postgres:` or `postgresql:` URL without query parameters or fragments, and ignore a conflicting shell `DATABASE_URL`.
 
 The container is named `<repo>-dev-postgres`, publishes only to IPv4 loopback, and stores data in `<repo>-dev-postgres-data`. Before acting, every recipe verifies the canonical ownership label, image, port binding, and volume mount.
 
-Declare the PostgreSQL major version in the root manifest:
+Declare the PostgreSQL major version in the root manifest. For an app-private database or another database package, also set `workspace` to its `apps/<name>` or `packages/<name>` path:
 
 ```json
 {
   "devDatabase": {
-    "postgresVersion": "18"
+    "postgresVersion": "18",
+    "workspace": "apps/web"
   }
 }
 ```
