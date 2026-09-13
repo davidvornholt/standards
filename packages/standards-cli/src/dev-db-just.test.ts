@@ -14,7 +14,7 @@ import {
   run,
   runFakePodman,
   transientAttempts,
-} from './dev-db-test-support';
+} from './dev-db-just-test-support';
 
 const fixture = (
   packageName = '@standards/root',

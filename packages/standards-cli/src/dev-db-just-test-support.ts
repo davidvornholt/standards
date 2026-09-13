@@ -8,6 +8,7 @@ const databaseUrlVariable = 'DATABASE_URL';
 const fakeRootVariable = 'FAKE_PODMAN_ROOT';
 const pathVariable = 'PATH';
 const passwordVariable = 'PGPASSWORD';
+const canonicalSleep = 'await Bun.sleep(1000);';
 
 export const readinessAttempts = 30;
 export const transientAttempts = 3;
@@ -128,23 +129,19 @@ export const createFixture = (
   baseEnvironment: Readonly<Record<string, string | undefined>>,
   postgresVersion = defaultPostgresVersion,
 ) => {
-  const root = mkTmp('dev-db-');
+  const root = mkTmp('dev-db-just-');
   const bin = join(root, 'bin');
   const repo =
     scopedPackagePattern.exec(packageName)?.groups?.scope ?? packageName;
   const name = `${repo}-dev-postgres`;
+  const source = readFileSync(join(ACTUAL_UPSTREAM, 'justfile'), 'utf8');
+  if (source.split(canonicalSleep).length !== 2) {
+    throw new Error('canonical Bun.sleep statement must occur exactly once');
+  }
   write(
     root,
     'justfile',
-    readFileSync(join(ACTUAL_UPSTREAM, 'justfile'), 'utf8'),
-  );
-  write(
-    root,
-    'test-command.ts',
-    `import { runDevDbCommand } from ${JSON.stringify(join(ACTUAL_UPSTREAM, 'packages/standards-cli/src/dev-db-commands.ts'))};
-try { await runDevDbCommand(process.argv.slice(2), async () => {}); }
-catch (error) { console.error(error instanceof Error ? error.message : String(error)); process.exitCode = 1; }
-`,
+    source.replace(canonicalSleep, 'await Bun.sleep(0);'),
   );
   write(
     root,
@@ -156,7 +153,6 @@ catch (error) { console.error(error instanceof Error ? error.message : String(er
     'package.json',
     `${JSON.stringify({ devDatabase: { postgresVersion }, name: packageName })}\n`,
   );
-  write(root, 'packages/db/package.json', '{"name":"@fixture/db"}');
   write(
     root,
     'packages/db/.env.local',
@@ -186,12 +182,7 @@ catch (error) { console.error(error instanceof Error ? error.message : String(er
 export type Fixture = ReturnType<typeof createFixture>;
 
 export const run = (value: Fixture, action: string) =>
-  runProcess(
-    'bun',
-    value.root,
-    ['test-command.ts', action.replace('dev-db-', '')],
-    value.environment,
-  );
+  runProcess('just', value.root, [action], value.environment);
 
 export const calls = (value: Fixture): string =>
   existsSync(join(value.root, 'calls.log'))

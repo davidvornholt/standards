@@ -31,7 +31,6 @@ Read the [adoption guide](../../docs/adoption.md) before running `init` in a rep
 | `doctor` | Validate integration points without checking lock-backed drift. |
 | `structure` | Validate the monorepo contract. |
 | `dependabot` | Verify or regenerate `.github/dependabot.yml`. |
-| `dev-db <start|stop|status>` | Manage the local PostgreSQL container; see [configuration and lifecycle](../../docs/operations.md#local-postgresql). |
 | `dev-env` | Generate workspace `.env.local` files. |
 | `github` | Compare or converge live repository settings. |
 | `creds` | Mint and reconcile brokered credentials. |
@@ -61,7 +60,7 @@ Existing project-owned files are kept. Synced files are replaced. `init` refuses
 ```sh
 bun standards sync --dry-run
 bun standards sync
-bun standards sync --ref v0.27.0
+bun standards sync --ref v0.26.1
 bun standards sync --from ../standards
 ```
 

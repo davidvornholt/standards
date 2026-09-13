@@ -25,7 +25,6 @@ import {
   DEPENDABOT_LOCAL_FILE,
 } from './dependabot-compose';
 import { inspectDependabot } from './dependabot-inspect';
-import { runDevDbCommand } from './dev-db-commands';
 import { runDevEnv } from './dev-env';
 import { CANONICAL_SETTINGS_FILE, LOCAL_SETTINGS_FILE } from './github-api';
 import { runGithubApply, runGithubCheck } from './github-commands';
@@ -972,7 +971,6 @@ Commands:
   doctor      Validate extension seams only
   structure   Validate monorepo structure rules only
   dependabot  Verify (--check) or regenerate (--write) the composed .github/dependabot.yml
-  dev-db      Start, stop, or inspect the local PostgreSQL container (see \`standards dev-db help\`)
   dev-env     Compose each workspace's generated .env.local from its three dev layers and authorized broker-owned S3 pair references
   github      Compare (--check) or converge (--apply) live GitHub settings
   creds       Mint, rotate, and revoke brokered credentials (see \`standards creds help\`)
@@ -1321,13 +1319,13 @@ const runGateCommand = (
   return apply ? runGithubApply(consumer) : runGithubCheckGate(consumer);
 };
 
-// Command families own their subcommands and flags, so they route before
-// the strict global parser rejects their arguments.
+// The creds family owns its flag vocabulary and the screenshots family takes
+// variadic file operands; both route before the strict global parser rejects
+// their arguments.
 const commandFamilies: Readonly<
   Record<string, (argv: ReadonlyArray<string>) => Promise<boolean>>
 > = {
   creds: runCredsCommand,
-  'dev-db': runDevDbCommand,
   screenshots: runScreenshotsCommand,
 };
 

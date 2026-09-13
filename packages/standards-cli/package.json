@@ -1,6 +1,6 @@
 {
   "name": "@davidvornholt/standards",
-  "version": "0.27.0",
+  "version": "0.26.1",
   "description": "Bootstrap, synchronize, and validate davidvornholt/standards consumers",
   "license": "MIT",
   "repository": {
@@ -75,9 +75,6 @@
     "src/dependabot-directory-overlap.ts",
     "src/dependabot-inspect.ts",
     "src/dependabot-update.ts",
-    "src/dev-db.ts",
-    "src/dev-db-config.ts",
-    "src/dev-db-commands.ts",
     "src/dev-env-brokered.ts",
     "src/dev-env-brokered-allowlist.ts",
     "src/dev-env-brokered-preserve.ts",
