@@ -16,9 +16,19 @@ A scheduled or manually invoked trusted workflow discovers versions only within 
 
 This contract covers public GHCR and Docker Hub images. Normalize Docker Hub names for registry requests without changing the declared publisher. Use anonymous pull-scoped registry tokens, restrict pagination to the same registry and repository, bound requests, and validate returned digests. Resolve all release-family members before writing anything. Registry errors, missing members, invalid versions, or ambiguous selection fail discovery; they must not produce a partial update or a successful no-op.
 
-The updater opens a manifest-only PR containing the previous and proposed immutable references, selected version, publisher, and upstream release notes. Its canonical candidate identity includes the complete repository-to-digest map. Reruns reuse the same open candidate; a closed candidate remains closed. A newer candidate can be proposed while an older one is deliberately deferred. Do not execute vendor source or image contents in a workflow holding a write token.
+The updater opens a manifest-only PR containing the previous and proposed immutable references, selected version, publisher, and upstream release notes. Its canonical candidate identity includes the complete repository-to-digest map. Reruns reuse the same open candidate; a closed candidate remains closed. Do not execute vendor source or image contents in a workflow holding a write token.
 
 Human review authorizes the publisher and release. Registry availability proves pullability, not authenticity or application compatibility. Verify upstream signatures or attestations when the declared publisher policy requires them. Review migration prerequisites and backups for data-bearing upgrades. Do not enable automatic merge as part of adoption; any later automation requires a separate explicit release policy.
+
+## Superseding older candidates
+
+Opening or reusing a verified vendor-update PR retires every other trusted open candidate for the same release family whose selected version is provably older under the declared version policy. Verification requires the approved publishers, allowed version, and resolved immutable digests for every family member; retirement does not wait for the newer PR's CI, merge, or deployment. Before closing an older PR, verify both PRs' trusted updater author, same-repository canonical branch and candidate identity, and manifest-only changes confined to that family. Require the same family membership, publisher repositories, and version policy. Untrusted, malformed, or unrelated PRs remain untouched.
+
+Version ordering must come from the publisher's version scheme and the declared policy. PR numbers, creation times, discovery order, and digest differences do not prove that a release is newer. Equal versions with different digests, moving tags without independent release-order proof, publisher or family changes, and otherwise incomparable candidates close nothing. Do not apply source-commit ancestry rules to vendor releases.
+
+Record retirement through the trusted updater's closure event and link the replacement PR. Reruns of an open candidate retry unfinished retirement, and failed closure or verification is reported rather than treated as success. A retired candidate is terminal: reruns do not recreate it, and merge and deployment gates reject its promotion even if someone reopens the PR. If the newer candidate fails, repair or retry it or propose a verified newer release; never reactivate the retired identity. Restoring a previously deployed digest uses the separate reviewed rollback below.
+
+Verify this lifecycle in the owning updater's tests: strictly newer candidates retire only eligible older PRs; reuse retries incomplete retirement; equal, incomparable, untrusted, and unrelated candidates remain open; and newer-release failure or manual reopening cannot reactivate a retired candidate.
 
 ## Release families and deployment
 
