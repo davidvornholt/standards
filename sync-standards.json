@@ -4,7 +4,6 @@
   "paths": [
     "sync-standards.json",
     "AGENTS.md",
-    "CLAUDE.md",
     ".agents/skills/ci-pipelines",
     ".agents/skills/database",
     ".agents/skills/declarative-infra",

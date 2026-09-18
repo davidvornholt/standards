@@ -21,7 +21,6 @@
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/sync-standards.json",
         "$TURBO_ROOT$/AGENTS.md",
-        "$TURBO_ROOT$/CLAUDE.md",
         "$TURBO_ROOT$/.agents/skills/ci-pipelines/**",
         "$TURBO_ROOT$/.agents/skills/database/**",
         "$TURBO_ROOT$/.agents/skills/declarative-infra/**",
