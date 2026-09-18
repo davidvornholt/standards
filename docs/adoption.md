@@ -2,6 +2,8 @@
 
 Use `init` once. After `sync-standards.lock` exists, use `sync` for every update.
 
+Agent instructions live in `AGENTS.md`, with project-specific rules in `AGENTS.local.md`. Claude Code requires [2.1.277 or later](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md#21277) to read `AGENTS.md` directly when `CLAUDE.md` is absent; this support is not yet available on Bedrock, Vertex, or Foundry.
+
 > [!WARNING]
 > `init` keeps existing project-owned files, but it replaces synced files and regenerates engine-owned files. Prepare an existing repository before running it.
 
@@ -28,7 +30,7 @@ bun add --dev --exact @davidvornholt/standards
 | Managed path | Project-owned destination |
 | --- | --- |
 | `AGENTS.md` | `AGENTS.local.md` |
-| `CLAUDE.md` | No local content. The canonical file contains only `@AGENTS.md`. |
+| `CLAUDE.md` | Move any project rules into `AGENTS.local.md`, then delete the file so Claude Code discovers `AGENTS.md`. |
 | `justfile` and `secrets.just` | `local.just` |
 | `.github/dependabot.yml` | `.github/dependabot.local.yml` for supported additions |
 | `.claude/skills/<name>` | `.agents/skills/<name>` |
