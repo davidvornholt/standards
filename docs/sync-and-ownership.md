@@ -10,7 +10,7 @@ Paths listed in `sync-standards.json` are owned by this repository. `sync` mirro
 
 A consumer edit is drift. Change the canonical source or use a project-owned extension point.
 
-Examples include `AGENTS.md`, `CLAUDE.md`, `biome.base.jsonc`, canonical workflows and skills, `justfile`, and `secrets.just`.
+Examples include `AGENTS.md`, `biome.base.jsonc`, canonical workflows and skills, `justfile`, and `secrets.just`.
 
 ### Project-owned
 
