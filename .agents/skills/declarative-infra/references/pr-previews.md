@@ -23,6 +23,12 @@ Deploy secrets live in a dedicated GitHub Environment (`pr-preview`) whose SOPS 
 
 Give every temporary resource in the trusted deploy job its own path. Create secret files with `mktemp` and artifact extraction directories with `mktemp -d`, using distinct templates for each resource. A fixed basename shared by an SSH key and an artifact directory turns the key file into a guaranteed deployment failure when the artifact step calls `mkdir`. Keep a contract test that reads the SSH helper and deploy workflow together and rejects reused temp paths.
 
+## Transfer artifact lifecycle
+
+Image archives in Actions are temporary transfer inputs. Their storage quota is shared with production artifacts, so retaining obsolete preview archives can block production publication. Size the archive limit and expected concurrent transfers against that shared allowance; a per-archive size limit alone does not bound aggregate storage.
+
+Trusted default-branch control removes archives for closed pull requests and superseded heads after querying current PR state, and removes a consumed archive after successful public verification. Scope deletion to the preview archive namespace and fail closed on API errors or invalid state. Preserve deployment proofs and current unconsumed retry inputs. Give unconsumed archives a short expiration, such as one day, as a fallback for interrupted cleanup. Grant artifact-deletion authority only to trusted control, never to the PR build. Document that retrying after a consumed archive has been deleted requires a fresh build; the running container and published registry digest do not depend on that archive.
+
 ## Host-side forced command
 
 The only mutation channel is an SSH key restricted to a single command in root's `authorized_keys`:
