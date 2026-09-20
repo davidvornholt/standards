@@ -87,7 +87,7 @@ The package includes `standards`, `bun`, and `bunx`, with the CLI wrapper placin
 
 ```nix
 inputs.standards = {
-  url = "github:davidvornholt/standards/v0.26.1";
+  url = "github:davidvornholt/standards/v0.26.2";
   inputs.nixpkgs.follows = "nixpkgs";
 };
 ```

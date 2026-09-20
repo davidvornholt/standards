@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
+import { isContainedPath } from './contained-path';
 import { isRecord } from './github-settings-parse';
 import { readJsonFile } from './json-file';
 import { collectBunVersionProblems } from './structure-bun-version';
@@ -9,7 +10,6 @@ import {
   rootScriptExpectations,
   type StructureProfile,
 } from './structure-profile';
-import { collectWorkspaceReadmeProblems } from './structure-readme';
 import { filteredTurboAliasProblem, hasSafeCommands } from './structure-script';
 import { collectCiSecretsProblems } from './structure-secrets';
 import { inspectWorkspace, type Workspace } from './structure-workspace';
@@ -106,6 +106,12 @@ const loadWorkspace = async (
   if (!existsSync(path)) {
     return { workspace: null, problem: null };
   }
+  if (!isContainedPath(consumer, `${rel}/package.json`, 'file')) {
+    return {
+      workspace: null,
+      problem: `${rel}: package.json must be a contained regular file; symlinked paths are not allowed`,
+    };
+  }
   const manifest = await readJsonFile(path);
   if (manifest === null) {
     return {
@@ -174,16 +180,9 @@ export const collectStructureProblems = async (
       .map((ws) => ws.manifest.name)
       .filter((name): name is string => typeof name === 'string'),
   );
-  const [inspections, readmeProblems] = await Promise.all([
-    Promise.all(
-      workspaces.map((ws) => inspectWorkspace(ws, workspaceNames, profile)),
-    ),
-    collectWorkspaceReadmeProblems(
-      consumer,
-      profile,
-      workspaces.map((ws) => ws.rel),
-    ),
-  ]);
+  const inspections = await Promise.all(
+    workspaces.map((ws) => inspectWorkspace(ws, workspaceNames, profile)),
+  );
   const requireA11y = inspections.some((i) => i.hasA11ySuite);
   return [
     ...declaration.problems,
@@ -193,7 +192,6 @@ export const collectStructureProblems = async (
     ...collectBunVersionProblems(root),
     ...inspectRootScripts(root, profile, requireA11y),
     ...inspections.flatMap((i) => [...i.problems]),
-    ...readmeProblems,
     ...secretsProblems,
   ];
 };

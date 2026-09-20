@@ -1,23 +1,18 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, rmSync, symlinkSync } from 'node:fs';
+import { rmSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { collectWorkspaceReadmeProblems } from './structure-readme';
+import { collectStructureProblems } from './structure-check';
 import { collectCiSecretsProblems } from './structure-secrets';
 import {
+  buildConsumer,
   cleanupStructureTmps,
+  consumerRootManifest,
   newStructureTmp,
   writeInto as write,
   writeCiSecretsPair,
 } from './structure-test-support';
 
 afterEach(cleanupStructureTmps);
-
-const buildReadmeRepo = (): string => {
-  const dir = newStructureTmp('structure-paths-');
-  write(dir, 'sync-standards.json', JSON.stringify({ paths: [] }));
-  write(dir, 'apps/web/README.md', '# web\n');
-  return dir;
-};
 
 describe('contained structure inputs', () => {
   it.each(['ci.yaml', 'ci.example.yaml'])(
@@ -49,63 +44,20 @@ describe('contained structure inputs', () => {
     ]);
   });
 
-  it('rejects a symlinked workspace with a valid external README', async () => {
-    const external = newStructureTmp('structure-paths-external-');
-    const consumer = newStructureTmp('structure-paths-consumer-');
-    write(external, 'README.md', '# external\n');
-    write(consumer, 'sync-standards.json', JSON.stringify({ paths: [] }));
-    mkdirSync(join(consumer, 'apps'));
-    symlinkSync(external, join(consumer, 'apps/web'));
-    expect(
-      await collectWorkspaceReadmeProblems(consumer, 'consumer', ['apps/web']),
-    ).toEqual([
-      'apps/web: README.md must be a contained regular file; symlinked paths are not allowed',
-    ]);
-  });
-
-  it('rejects a symlinked README leaf with valid external content', async () => {
-    const external = newStructureTmp('structure-paths-external-');
-    const consumer = buildReadmeRepo();
-    write(external, 'README.md', '# external\n');
-    rmSync(join(consumer, 'apps/web/README.md'));
-    symlinkSync(
-      join(external, 'README.md'),
-      join(consumer, 'apps/web/README.md'),
-    );
-    expect(
-      await collectWorkspaceReadmeProblems(consumer, 'consumer', ['apps/web']),
-    ).toEqual([
-      'apps/web: README.md must be a contained regular file; symlinked paths are not allowed',
-    ]);
-  });
-
-  it('rejects a symlinked sync manifest with valid external JSON', async () => {
-    const external = newStructureTmp('structure-paths-external-');
-    const consumer = buildReadmeRepo();
-    write(external, 'sync-standards.json', JSON.stringify({ paths: [] }));
-    rmSync(join(consumer, 'sync-standards.json'));
-    symlinkSync(
-      join(external, 'sync-standards.json'),
-      join(consumer, 'sync-standards.json'),
-    );
-    expect(
-      await collectWorkspaceReadmeProblems(consumer, 'consumer', ['apps/web']),
-    ).toEqual([
-      'sync-standards.json: must be a contained regular file; symlinked paths are not allowed',
-    ]);
-  });
-
-  it('rejects a symlinked consumer root as a manifest ancestor', async () => {
-    const actual = buildReadmeRepo();
-    const parent = newStructureTmp('structure-paths-parent-');
-    const consumer = join(parent, 'consumer');
-    symlinkSync(actual, consumer);
-    expect(
-      await collectWorkspaceReadmeProblems(consumer, 'consumer', ['apps/web']),
-    ).toEqual([
-      'sync-standards.json: must be a contained regular file; symlinked paths are not allowed',
-    ]);
-  });
+  it.each(['apps/web', 'apps/web/package.json'])(
+    'rejects a symlinked workspace input: %s',
+    async (rel) => {
+      const external = buildConsumer();
+      const consumer = buildConsumer(
+        consumerRootManifest({ workspaces: ['apps/web', 'packages/ui'] }),
+      );
+      rmSync(join(consumer, rel), { recursive: true });
+      symlinkSync(join(external, rel), join(consumer, rel));
+      expect(await collectStructureProblems(consumer, 'consumer')).toEqual([
+        'apps/web: package.json must be a contained regular file; symlinked paths are not allowed',
+      ]);
+    },
+  );
 
   it('does not let a symlinked sync policy disable credential checks', async () => {
     const external = newStructureTmp('structure-paths-external-');

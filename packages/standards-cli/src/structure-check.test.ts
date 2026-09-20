@@ -21,7 +21,7 @@ const aliasSyntaxProblem = (name: string): string =>
   `package.json: root script "${name}" contains shell syntax the structure gate does not parse (quotes, |, ;, #, backticks, $(, CR/LF line breaks, or malformed ampersand separators); write one command with plain arguments, using --filter=./apps/* for a glob`;
 
 describe('collectStructureProblems basics and scripts', () => {
-  it('accepts a canonical consumer', async () => {
+  it('accepts a canonical consumer without workspace READMEs', async () => {
     expect(await collect(buildConsumer())).toEqual([]);
   });
 
@@ -88,13 +88,11 @@ describe('collectStructureProblems basics and scripts', () => {
     );
   });
 
-  it('surfaces README and CI secrets problems through the root entry point', async () => {
+  it('surfaces CI secrets problems through the root entry point', async () => {
     const consumer = buildConsumer();
-    rmSync(join(consumer, 'apps/web/README.md'));
     rmSync(join(consumer, 'secrets/ci.yaml'));
     const problems = await collect(consumer);
     expect(problems).toEqual([
-      'apps/web: repo-owned workspace must have a non-empty README.md',
       'secrets/ci.yaml: must exist as a SOPS-encrypted file; the synced CI workflows read ci.ntfy_topic_url and, when automatic sync is enabled, ci.broker_app from it',
     ]);
   });
