@@ -42,7 +42,7 @@ Do not weaken quality gates to make a change pass. Explain inline suppressions. 
 
 ## Documentation
 
-Document only what readers need beyond the code and configuration. Keep change history in PRs; avoid separate implementation summaries and inventories. Read documentation relevant to the current task, not the entire documentation tree.
+Document only what readers need beyond code, configuration, skills, and existing docs; link instead of repeating. Keep change history, implementation summaries, and test-run logs in PRs. Read only documentation relevant to the current task.
 
 ## Project-specific rules
 

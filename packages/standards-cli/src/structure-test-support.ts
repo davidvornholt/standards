@@ -105,7 +105,6 @@ export const buildConsumer = (
     }),
   );
   writeInto(consumer, 'apps/web/tsconfig.json', TSCONFIG);
-  writeInto(consumer, 'apps/web/README.md', '# web\n\nNo configuration.\n');
   writeInto(
     consumer,
     'packages/ui/package.json',
@@ -117,7 +116,6 @@ export const buildConsumer = (
     }),
   );
   writeInto(consumer, 'packages/ui/tsconfig.json', TSCONFIG);
-  writeInto(consumer, 'packages/ui/README.md', '# ui\n\nNo configuration.\n');
   writeCiSecretsPair(consumer);
   return consumer;
 };

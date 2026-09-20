@@ -86,7 +86,6 @@ const buildSource = (
   if (cli !== null) {
     write(dir, 'packages/standards-cli/package.json', JSON.stringify(cli));
     write(dir, 'packages/standards-cli/tsconfig.json', TSCONFIG);
-    write(dir, 'packages/standards-cli/README.md', '# standards CLI\n');
   }
   return dir;
 };
@@ -102,7 +101,6 @@ describe('source profile', () => {
       'package.json: root script "check:fix" must run turbo run lint:fix check-types test build test:a11y --output-logs=errors-only',
       'packages/standards-cli: internal workspace version must be "0.0.0"',
       'packages/standards-cli: package must define its public API with "exports"',
-      'sync-standards.json: must contain a JSON object with a "paths" array of strings; the structure gate reads it to tell canonical workspaces from repo-owned ones',
     ]);
   });
 

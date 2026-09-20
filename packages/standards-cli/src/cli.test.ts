@@ -1021,7 +1021,6 @@ const buildUpstream = (paths: ReadonlyArray<string> = STD_PATHS): string => {
     'template/apps/web/tsconfig.json',
     '{ "extends": "@davidvornholt/typescript-config/base" }\n',
   );
-  write(up, 'template/apps/web/README.md', '# web\n\nNo configuration.\n');
   write(up, 'template/secrets/ci.example.yaml', CI_EXAMPLE_YAML);
   write(up, 'managed/a.txt', 'alpha\n');
   write(up, 'managed/b.txt', 'beta\n');
