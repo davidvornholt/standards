@@ -84,6 +84,9 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
   sync:
+    # Repository/organization variable; empty keeps repository-scoped secrets.
+    # See the standards-sync skill reference for environment-scoped bootstrap.
+    environment: ${{ vars.CI_SECRETS_ENVIRONMENT }}
     needs: policy
     if: needs.policy.outputs.auto-sync != 'false'
     runs-on: ${{ vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-small', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || 'ubuntu-latest' }}
