@@ -37,6 +37,8 @@ permissions:
 
 jobs:
   notify:
+    # Same trusted bootstrap environment as Standards sync, when configured.
+    environment: ${{ vars.CI_SECRETS_ENVIRONMENT }}
     if: github.event.label.name == 'needs-clarification'
     # Sole-maintainer personal repositories may trust the same permissionless,
     # ephemeral CodeBuild project with this workflow's injected notification secret.
