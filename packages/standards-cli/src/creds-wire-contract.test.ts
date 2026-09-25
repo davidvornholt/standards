@@ -148,9 +148,7 @@ describe('provider wire contract', () => {
   it('Cloudflare permission groups: GET /accounts/{id}/tokens/permission_groups', async () => {
     stubFetch(HTTP_OK, cfEnvelope([]));
     expect((await listPermissionGroups(ACCOUNT, 'cfat')).ok).toBe(true);
-    expect(requests).toEqual([
-      `GET ${CF}/tokens/permission_groups?per_page=1000`,
-    ]);
+    expect(requests).toEqual([`GET ${CF}/tokens/permission_groups`]);
   });
 
   // https://developers.cloudflare.com/api/resources/accounts/subresources/tokens/methods/create/

@@ -120,7 +120,7 @@ export const listPermissionGroups = async (
   const response = await cfRequest(
     token,
     'GET',
-    `/accounts/${accountId}/tokens/permission_groups?per_page=1000`,
+    `/accounts/${accountId}/tokens/permission_groups`,
   );
   if (!response.ok) {
     return response;
