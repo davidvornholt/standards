@@ -2625,7 +2625,7 @@ describe('canonical standards workflow settings security', () => {
     expect(installRun).toContain(
       'standards_sha=afb8576434e62730e06d30d8249b1d275f586a874826ad7b50fe5e4d1b32b0da0e4adea176c6151160fc50a8ac049bab91095d18867b2a2544f40408f9e8f8ff',
     );
-    expect(installRun).toContain('yaml_version=2.9.0');
+    expect(installRun).toContain('yaml_version=2.9.1');
     expect(installRun.match(/sha=[a-f0-9]{128}/gu)).toHaveLength(2);
     expect(installRun).toContain('sha512sum --check --quiet');
     expect(installRun).not.toContain('bun add');
