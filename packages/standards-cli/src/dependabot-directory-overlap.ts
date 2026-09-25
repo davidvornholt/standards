@@ -134,6 +134,19 @@ const automataOverlap = (
   return false;
 };
 
+const dotAliasScan = (segments: ReadonlyArray<string>) => {
+  const firstScan = segments.findIndex((segment) =>
+    compilePattern(segment, true).edges.some(
+      (edge) => edge.matcher === null || edge.matcher.kind !== 'literal',
+    ),
+  );
+  let aliasIndex = firstScan;
+  while (segments[aliasIndex] === '**' && aliasIndex < segments.length - 1) {
+    aliasIndex += 1;
+  }
+  return { firstScan, aliasIndex };
+};
+
 const compileDirectory = (
   directory: string,
   supportsGlobs: boolean,
@@ -145,9 +158,17 @@ const compileDirectory = (
   let current = 0;
   let states = 1;
   const segments = directory.split('/').slice(1);
+  const { firstScan, aliasIndex } = dotAliasScan(segments);
+  let aliasStart = 0;
   for (const [index, segment] of segments.entries()) {
-    const start = current;
+    if (index === firstScan) {
+      aliasStart = current;
+    }
     if (segment === '**' && index < segments.length - 1) {
+      const loop = states;
+      states += 1;
+      edges.push({ from: current, to: loop, matcher: null });
+      current = loop;
       const part = compilePattern('/*', true);
       const offset = states;
       states += part.accept + 1;
@@ -174,14 +195,16 @@ const compileDirectory = (
       );
       current = offset + part.accept;
       if (
+        index === aliasIndex &&
         automataOverlap(
           compilePattern(segment, true),
           compilePattern('.', false),
         )
       ) {
-        // FNM_DOTMATCH can select the current-directory pseudo-entry. Its
-        // slash and dot normalize away, so allow the whole segment to vanish.
-        edges.push({ from: start, to: current, matcher: null });
+        // Ruby sets FNM_GLOB_SKIPDOT after its first directory scan. A
+        // recursive prefix may match zero directories in that same scan;
+        // after consuming a child it cannot return to this alias start.
+        edges.push({ from: aliasStart, to: current, matcher: null });
       }
     }
   }

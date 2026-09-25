@@ -229,3 +229,20 @@ describe('Dependabot FNM_DOTMATCH pseudo-entry aliases', () => {
     },
   );
 });
+
+it.each([
+  ['/packages/*/*', '/packages'],
+  ['/packages/[.]/nested/[.]', '/packages/nested'],
+  ['/packages/**/nested/*', '/packages/nested'],
+  ['/packages/[a]/nested/*', '/packages/a/nested'],
+])(
+  'does not reintroduce dot entries after the first scan: %s',
+  (glob, concrete) => {
+    const result = composeDependabot(
+      baseWithTarget(`    directories: ['${glob}']`),
+      localWithTarget(`    directory: ${concrete}`),
+    );
+    expect(result.problems).toEqual([]);
+    expect(result.composed).not.toBeNull();
+  },
+);
