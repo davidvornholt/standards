@@ -3,9 +3,9 @@
 // one and deleting the original; without this the second half could only be
 // done in the dashboard. The power granted is deliberately momentary: nothing
 // is recorded, nothing becomes automatic, and a human names the target every
-// time. Tokens reconciliation owns are refused — those are retired by deleting
-// their SOPS key and running `standards creds apply`, which keeps the secret
-// and the provider in step.
+// time. Singular tokens reconciliation owns are retired through apply. A
+// same-name duplicate may be explicitly retired after proving it is not the
+// stored credential; this recovers interrupted renewal without deleting a key.
 
 import { deleteAccountToken } from './creds-cloudflare';
 import { isCloudflareId } from './creds-cloudflare-id';
@@ -16,6 +16,7 @@ import {
   type BrokeredTokenRef,
   parseAnyTokenName,
 } from './creds-naming';
+import { revokeStoredDuplicate } from './creds-revoke-duplicate';
 import { readBrokerStore, resolveBrokerPath } from './creds-store';
 import { resolveGithubRepo } from './github-api';
 
@@ -30,8 +31,8 @@ const fail = (message: string): false => {
 // live credential this very checkout reconciles. Owner and name are compared
 // together: `otherowner/example` shares this repository's name and nothing
 // else.
-const sameRepo = (left: string, right: string): boolean =>
-  left.toLowerCase() === right.toLowerCase();
+const sameRepo = (left: string, right: string | null): boolean =>
+  right !== null && left.toLowerCase() === right.toLowerCase();
 
 // A brokered name carries the repository that owns it, and the reconciled
 // remedy — delete the SOPS key, run `apply` — only works in that repository.
@@ -64,6 +65,16 @@ const brokeredRefusal = ({
     return null;
   }
   return `token ${tokenId} is brokered as ${name}, which belongs to ${brokered.repo}, and this checkout is ${currentRepo}; the remedy runs there: delete ${brokered.target}:${brokered.key} from ${brokered.repo}'s SOPS target and run \`standards creds apply\` in that checkout. Pass --force only if ${brokered.repo} was renamed, transferred, or deleted, so no checkout resolves to that name and no apply will ever revoke this token`;
+};
+
+const reportDuplicate = (problem: string | null, label: string): boolean => {
+  if (problem !== null) {
+    return fail(problem);
+  }
+  console.log(
+    `standards creds: revoked duplicate ${label}; preserved the stored credential`,
+  );
+  return true;
 };
 
 export const runCredsRevoke = async (options: {
@@ -121,11 +132,28 @@ export const runCredsRevoke = async (options: {
   }
   const brokered = parseAnyTokenName(target.name);
   if (brokered !== null) {
+    const currentRepo = resolveGithubRepo(options.dir);
+    const duplicates = identified.value.tokens.filter(
+      (entry) => entry.name === target.name,
+    );
+    if (sameRepo(brokered.repo, currentRepo) && duplicates.length > 1) {
+      const problem = await revokeStoredDuplicate({
+        consumer: options.dir,
+        account,
+        tokenId,
+        ref: brokered,
+        duplicates,
+      });
+      return reportDuplicate(
+        problem,
+        `${target.name} (${account.accountId}/${tokenId})`,
+      );
+    }
     const refusal = brokeredRefusal({
       tokenId,
       name: target.name,
       brokered,
-      currentRepo: resolveGithubRepo(options.dir),
+      currentRepo,
       force: options.force,
     });
     if (refusal !== null) {

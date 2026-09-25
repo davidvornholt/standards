@@ -230,7 +230,9 @@ To delete one Cloudflare token outside normal reconciliation:
 bun standards creds revoke --account <account-id> --token-id <token-id>
 ```
 
-Bootstrap credentials and tokens still owned by an active repository are refused.
+For same-name brokered duplicates left by interrupted renewal, keep the stored key intact and select the unused token ID. `revoke` proves which credential is stored, refuses that token, and rechecks the destination before deleting the selected duplicate. Unreadable or unidentifiable stored credentials leave every token intact. A destination already missing its key can also be recovered after successful decryption.
+
+Bootstrap credentials and singular tokens still owned by an active repository are refused.
 
 ### Prepare existing consumers for GitHub App client IDs
 
