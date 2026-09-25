@@ -97,6 +97,7 @@ export const refreshOwnedGithubStore = async (
   if (refreshed.every((app, index) => app.owner === observed[index]?.owner)) {
     return loaded;
   }
+  const committed = { value: loaded.value };
   try {
     await updateBrokerStore(path, (current) => {
       if (
@@ -110,7 +111,8 @@ export const refreshOwnedGithubStore = async (
           'GitHub Apps changed while authenticated owners were refreshed; retry',
         );
       }
-      return { ...current, github: refreshed };
+      committed.value = { ...current, github: refreshed };
+      return committed.value;
     });
   } catch (error) {
     return {
@@ -118,7 +120,7 @@ export const refreshOwnedGithubStore = async (
       problem: error instanceof Error ? error.message : String(error),
     };
   }
-  return { ok: true, value: await readBrokerStore(path) };
+  return { ok: true, value: committed.value };
 };
 
 // Private Apps belong to one owner. Selecting by repository owner keeps each

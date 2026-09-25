@@ -115,7 +115,11 @@ export const runCredsLoginGithub = async (
     return false;
   }
   const storePath = resolveBrokerPath();
-  const loaded = await refreshOwnedGithubStore(storePath);
+  const loaded = await refreshOwnedGithubStore(
+    storePath,
+    undefined,
+    options.org,
+  );
   if (!loaded.ok) {
     console.error(`standards creds: ${loaded.problem}`);
     return false;
