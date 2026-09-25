@@ -127,6 +127,15 @@ jobs:
             exit 1
           fi
 
+      # Preserve the installed CLI before checking out a reusable branch. That
+      # branch can change package scripts, Bun configuration, and dependencies.
+      - name: Preserve trusted sync runtime
+        run: |
+          runtime=$(mktemp -d "$RUNNER_TEMP/standards-sync.XXXXXX")
+          cp -RL node_modules "$runtime/node_modules"
+          printf '' > "$runtime/bunfig.toml"
+          echo "STANDARDS_SYNC_RUNTIME=$runtime" >> "$GITHUB_ENV"
+
       # Resolve through the action from the trusted pre-sync checkout. Sync
       # replaces managed files, including this action, so no local action may
       # execute after the mirror changes.
@@ -188,6 +197,7 @@ jobs:
           SYNC_BASE_REF: ${{ github.ref_name }}
           SYNC_READ_TOKEN: ${{ github.token }}
         run: |
+          git() { command git -c core.hooksPath=/dev/null -c core.fsmonitor=false -c commit.gpgsign=false "$@"; }
           branch=standards-sync/update
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -213,10 +223,12 @@ jobs:
         env:
           SYNC_POLICY_REF: ${{ needs.policy.outputs.ref }}
         run: |
+          cd "$STANDARDS_SYNC_RUNTIME"
+          cli=node_modules/@davidvornholt/standards/src/cli.ts
           if [ -n "$SYNC_POLICY_REF" ]; then
-            bun standards sync --ref "$SYNC_POLICY_REF"
+            bun --no-env-file "$cli" sync --dir "$GITHUB_WORKSPACE" --ref "$SYNC_POLICY_REF"
           else
-            bun standards sync
+            bun --no-env-file "$cli" sync --dir "$GITHUB_WORKSPACE"
           fi
 
       # Canonical package manifests can change dependency ranges after the
@@ -224,7 +236,7 @@ jobs:
       # whether the mirror produced a change, so the sync branch remains
       # installable with --frozen-lockfile.
       - name: Refresh consumer lockfile
-        run: bun install --lockfile-only --ignore-scripts
+        run: bun install --lockfile-only --ignore-scripts --config "$STANDARDS_SYNC_RUNTIME/bunfig.toml"
 
       - name: Detect mirror changes
         id: mirror
@@ -259,6 +271,7 @@ jobs:
           BRANCH_WRITER_TOKEN: ${{ steps.branch-writer-token.outputs.token }}
           EXPECTED_SYNC_HEAD: ${{ steps.sync-base.outputs.previous }}
         run: |
+          git() { command git -c core.hooksPath=/dev/null -c core.fsmonitor=false -c commit.gpgsign=false "$@"; }
           branch=standards-sync/update
           git config --local credential.helper "!f() { echo username=x-access-token; echo \"password=\$BRANCH_WRITER_TOKEN\"; }; f"
           trap 'git config --unset credential.helper' EXIT

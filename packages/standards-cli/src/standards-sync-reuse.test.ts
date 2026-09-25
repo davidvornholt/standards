@@ -145,3 +145,79 @@ fi
     expect(readFileSync(join(root, 'pr-creations'), 'utf8')).toBe('created\n');
   },
 );
+
+it('does not execute branch package scripts, Bun preloads, or Git hooks with writer credentials', () => {
+  const root = mkTmp('sync-runtime-');
+  const cwd = join(root, 'consumer');
+  const remote = join(root, 'remote.git');
+  git(root, 'init', '--bare', '--initial-branch=main', remote);
+  git(root, 'clone', remote, cwd);
+  git(cwd, 'config', 'user.name', 'fixture');
+  git(cwd, 'config', 'user.email', 'fixture@example.invalid');
+  git(cwd, 'config', 'commit.gpgsign', 'false');
+  write(cwd, '.gitignore', 'node_modules/\n');
+  write(
+    cwd,
+    'node_modules/@davidvornholt/standards/src/cli.ts',
+    `import { writeFileSync } from 'node:fs';
+writeFileSync(process.argv[process.argv.indexOf('--dir') + 1] + '/canonical.txt', 'trusted sync');\n`,
+  );
+  git(cwd, 'add', '.gitignore');
+  git(cwd, 'commit', '-m', 'base');
+  git(cwd, 'push', 'origin', 'main');
+  const output = join(root, 'output');
+  const values = Object.fromEntries([
+    ['RUNNER_TEMP', root],
+    ['GITHUB_ENV', output],
+    ['GITHUB_OUTPUT', join(root, 'branch-output')],
+    ['GITHUB_WORKSPACE', cwd],
+    ['SYNC_BASE_REF', 'main'],
+    ['SYNC_READ_TOKEN', 'read-fixture'],
+    ['SYNC_POLICY_REF', ''],
+  ]);
+  expect(shell(cwd, 'Preserve trusted sync runtime', values).status).toBe(0);
+  const runtime = readFileSync(output, 'utf8').trim().split('=')[1] ?? '';
+  expect(shell(cwd, 'Prepare reusable sync branch', values).status).toBe(0);
+  write(
+    cwd,
+    'package.json',
+    '{"scripts":{"standards":"touch package-script-ran"}}\n',
+  );
+  write(cwd, 'bunfig.toml', 'preload = ["./evil.ts"]\n');
+  write(
+    cwd,
+    'evil.ts',
+    "import { writeFileSync } from 'node:fs'; writeFileSync('preload-ran', 'unsafe');\n",
+  );
+  const syncEnv = {
+    ...values,
+    [['STANDARDS', 'SYNC', 'RUNTIME'].join('_')]: runtime,
+  };
+  expect(shell(cwd, 'Sync canonical files from upstream', syncEnv).status).toBe(
+    0,
+  );
+  expect(readFileSync(join(cwd, 'canonical.txt'), 'utf8')).toBe('trusted sync');
+  expect(existsSync(join(cwd, 'package-script-ran'))).toBe(false);
+  expect(existsSync(join(cwd, 'preload-ran'))).toBe(false);
+  write(
+    cwd,
+    '.git/hooks/pre-commit',
+    '#!/bin/sh\necho "$BRANCH_WRITER_TOKEN" > hook-leak\n',
+  );
+  chmodSync(join(cwd, '.git/hooks/pre-commit'), MODE);
+  write(
+    cwd,
+    '.git/hooks/pre-push',
+    '#!/bin/sh\necho "$BRANCH_WRITER_TOKEN" > push-leak\n',
+  );
+  chmodSync(join(cwd, '.git/hooks/pre-push'), MODE);
+  expect(
+    shell(cwd, 'Commit and push mirror changes', {
+      ...syncEnv,
+      [['BRANCH', 'WRITER', 'TOKEN'].join('_')]: 'synthetic-write-token',
+      [['EXPECTED', 'SYNC', 'HEAD'].join('_')]: '',
+    }).status,
+  ).toBe(0);
+  expect(existsSync(join(cwd, 'hook-leak'))).toBe(false);
+  expect(existsSync(join(cwd, 'push-leak'))).toBe(false);
+});

@@ -31,7 +31,8 @@ const consumerContracts: TokenConsumerContracts = {
         'steps.sync-base.outputs.previous',
       ),
     },
-    run: `branch=standards-sync/update
+    run: `git() { command git -c core.hooksPath=/dev/null -c core.fsmonitor=false -c commit.gpgsign=false "$@"; }
+branch=standards-sync/update
 git config --local credential.helper "!f() { echo username=x-access-token; echo \\"password=\\$BRANCH_WRITER_TOKEN\\"; }; f"
 trap 'git config --unset credential.helper' EXIT
 git add -A
