@@ -73,3 +73,17 @@ describe('creds token naming', () => {
     ).toThrow('invalid repository');
   });
 });
+
+it.each(['DAVIDVORNHOLT/EXAMPLE', 'DavidVornholt/Example'])(
+  'recognizes existing tokens for the same GitHub repository %s',
+  (repo) => {
+    expect(
+      parseTokenName('standards/davidvornholt/example/ci/ci.Token', repo),
+    ).toEqual({ repo, target: 'ci', key: 'ci.Token' });
+    expect(parseTokenName(`standards/${repo}/ci/ci.Token`, REPO)).toEqual({
+      repo: REPO,
+      target: 'ci',
+      key: 'ci.Token',
+    });
+  },
+);

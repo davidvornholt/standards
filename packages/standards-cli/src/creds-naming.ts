@@ -60,7 +60,10 @@ export const parseTokenName = (
   repo: string,
 ): BrokeredTokenRef | null => {
   const prefix = repoTokenPrefix(repo);
-  if (!name.startsWith(prefix)) {
+  if (
+    !isInMintedNamespace(name) ||
+    name.slice(0, prefix.length).toLowerCase() !== prefix.toLowerCase()
+  ) {
     return null;
   }
   const rest = name.slice(prefix.length);

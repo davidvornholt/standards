@@ -8,7 +8,6 @@
 import type { CloudflareToken } from './creds-cloudflare-api';
 import {
   type BrokeredTokenRef,
-  isInMintedNamespace,
   parseAnyTokenName,
   parseTokenName,
   repoTokenPrefix,
@@ -39,7 +38,9 @@ const classifyAccountToken = (
   if (token.status === 'expired') {
     return { kind: 'ignored' };
   }
-  if (token.name.startsWith(repoTokenPrefix(repo))) {
+  if (
+    token.name.toLowerCase().startsWith(repoTokenPrefix(repo).toLowerCase())
+  ) {
     return { kind: 'malformed' };
   }
   // A brokered name carries the repository that owns it, which normally
@@ -53,9 +54,7 @@ const classifyAccountToken = (
   if (elsewhere !== null) {
     return { kind: 'brokered-elsewhere', repo: elsewhere.repo };
   }
-  return isInMintedNamespace(token.name)
-    ? { kind: 'ignored' }
-    : { kind: 'unmanaged' };
+  return { kind: 'unmanaged' };
 };
 
 export type ManagedTokenRef = AccountToken & {

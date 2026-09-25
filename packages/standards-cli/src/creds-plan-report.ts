@@ -25,7 +25,7 @@ const revokeCommand = (token: UnmanagedToken, extra: string): string =>
 // send the operator down a dead end. The remedy is the dashboard, which is
 // also the only place the machine it belongs to can be confirmed.
 const unmanagedRemedy = (token: UnmanagedToken): string =>
-  token.name === BROKER_IDENTITY_NAME
+  token.name.toLowerCase() === BROKER_IDENTITY_NAME
     ? "the reserved name for a machine's broker bootstrap credential, which `revoke` refuses; retire it in the Cloudflare dashboard, where you can confirm which machine it belongs to"
     : `retire it with ${revokeCommand(token, '')}`;
 

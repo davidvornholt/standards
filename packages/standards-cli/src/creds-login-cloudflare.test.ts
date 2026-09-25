@@ -86,8 +86,10 @@ describe('Cloudflare bootstrap authority', () => {
       problem: expect.stringContaining('valid token ID'),
     });
   });
+});
 
-  it('reports the pasted token name for the recommendation check', async () => {
+describe('Cloudflare bootstrap custody', () => {
+  it('rejects a bootstrap token outside the mandatory reserved name', async () => {
     globalThis.fetch = ((input: string | URL | Request) =>
       Promise.resolve(
         String(input).endsWith('/verify')
@@ -99,8 +101,10 @@ describe('Cloudflare bootstrap authority', () => {
       )) as typeof fetch;
 
     expect(await verifyCloudflareBootstrapAuthority(ACCOUNT, TOKEN)).toEqual({
-      ok: true,
-      value: { tokenName: 'my-token' },
+      ok: false,
+      problem: expect.stringContaining(
+        'must use the reserved name standards-broker',
+      ),
     });
   });
 
@@ -165,3 +169,19 @@ describe('Cloudflare bootstrap authority', () => {
     expect(calls).toHaveLength(1);
   });
 });
+
+it.each(['standards-broker', 'Standards-Broker'])(
+  'accepts the reserved bootstrap name %s',
+  async (name) => {
+    globalThis.fetch = ((input: string | URL | Request) =>
+      Promise.resolve(
+        String(input).endsWith('/verify')
+          ? response({ id: 'bootstrap', status: 'active' })
+          : tokenListResponse([{ id: 'bootstrap', name }]),
+      )) as typeof fetch;
+    expect(await verifyCloudflareBootstrapAuthority(ACCOUNT, TOKEN)).toEqual({
+      ok: true,
+      value: { tokenName: name },
+    });
+  },
+);

@@ -129,3 +129,10 @@ describe('creds plan unmanaged reporting', () => {
     expect(plan.unmanaged).toEqual([]);
   });
 });
+
+it('reports unparseable tokens elsewhere in the reserved namespace without blocking renewals', () => {
+  const names = ['standards/other/repo/ci', 'standards/', 'standards/other'];
+  const partition = partitionAccountTokens(names.map(entry), REPO);
+  expect(partition.unmanaged.map((found) => found.name)).toEqual(names);
+  expect(partition.findings).toEqual([]);
+});
