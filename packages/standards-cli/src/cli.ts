@@ -155,13 +155,50 @@ const symlinkTargetProblem = (rel: string, target: string): string | null => {
   return null;
 };
 
+const managedTargetExists = (
+  target: string,
+  entries: ReadonlyMap<string, ManagedEntry>,
+  seen: ReadonlySet<string> = new Set(),
+): boolean => {
+  if (seen.has(target)) {
+    return false;
+  }
+  const entry = entries.get(target);
+  if (entry?.kind === 'symlink') {
+    return managedTargetExists(
+      posix.normalize(posix.join(posix.dirname(target), entry.target)),
+      entries,
+      new Set([...seen, target]),
+    );
+  }
+  return (
+    entry !== undefined ||
+    [...entries.keys()].some(
+      (path) => target === '.' || path.startsWith(`${target}/`),
+    )
+  );
+};
+
 const symlinkTargetProblems = (
   entries: ReadonlyMap<string, ManagedEntry>,
+  requireManagedTarget = false,
 ): ReadonlyArray<string> =>
   [...entries]
-    .map(([rel, entry]) =>
-      entry.kind === 'symlink' ? symlinkTargetProblem(rel, entry.target) : null,
-    )
+    .map(([rel, entry]) => {
+      if (entry.kind !== 'symlink') {
+        return null;
+      }
+      const problem = symlinkTargetProblem(rel, entry.target);
+      if (problem !== null) {
+        return problem;
+      }
+      const target = posix.normalize(
+        posix.join(posix.dirname(rel), entry.target),
+      );
+      return requireManagedTarget && !managedTargetExists(target, entries)
+        ? `canonical symlink ${rel} targets ${target}, which is missing from the managed payload or forms a symlink cycle`
+        : null;
+    })
     .filter((problem): problem is string => problem !== null);
 
 const parseManifest = (raw: unknown): Manifest => {
@@ -334,6 +371,10 @@ const mirrorPreconditionProblems = async (
   const locked = new Set(Object.keys(previous));
   const collisions = await Promise.all(
     [...upstream.keys()].map(async (rel) => {
+      const ancestor = await interposedAncestor(consumer, rel, upstream);
+      if (ancestor !== null) {
+        return `${rel} is below the ${ancestor.kind} ${ancestor.rel}; refusing to write through an existing file or symlink ancestor; move it aside before syncing this payload`;
+      }
       const current = await inspectManagedPath(join(consumer, rel));
       if (current?.kind !== 'directory') {
         return null;
@@ -345,7 +386,7 @@ const mirrorPreconditionProblems = async (
     }),
   );
   return [
-    ...symlinkTargetProblems(upstream),
+    ...symlinkTargetProblems(upstream, true),
     ...collisions.filter((problem): problem is string => problem !== null),
   ];
 };
@@ -364,7 +405,7 @@ const assertNoProblems = (
 };
 
 type PruneOutcome =
-  | { readonly kind: 'absent' }
+  | { readonly kind: 'replaced'; readonly rel: string }
   | { readonly kind: 'delete'; readonly rel: string }
   | { readonly kind: 'retain'; readonly note: string }
   | { readonly kind: 'stale'; readonly note: string };
@@ -390,13 +431,21 @@ const pruneOutcome = async (
   // whether or not a directory still stands there while a dry run looks.
   const current =
     ancestor === null ? await inspectManagedPath(join(consumer, rel)) : null;
+  if (ancestor?.kind === 'file' && planned.has(ancestor.rel)) {
+    return { kind: 'replaced', rel };
+  }
   if (current === null) {
-    return { kind: 'absent' };
+    return {
+      kind: 'stale',
+      note: `${rel} (already absent; nothing was deleted)`,
+    };
   }
   if (current.kind === 'directory') {
     return {
       kind: 'retain',
-      note: `${rel}: removed upstream but now a directory this repository does not manage; delete it yourself if you no longer want it`,
+      note: [...planned.keys()].some((path) => path.startsWith(`${rel}/`))
+        ? `${rel}: removed upstream as a file, but retained as a directory containing canonical paths; keep those managed descendants`
+        : `${rel}: removed upstream but now a directory this repository does not manage; delete it yourself if you no longer want it`,
     };
   }
   return { kind: 'delete', rel };
@@ -434,7 +483,16 @@ const prune = async (
       deleted.map((rel) => rm(join(consumer, rel), { force: true })),
     );
   }
-  return { deleted, retained, stale };
+  return {
+    deleted: [
+      ...deleted,
+      ...outcomes.flatMap((outcome) =>
+        outcome.kind === 'replaced' ? [outcome.rel] : [],
+      ),
+    ],
+    retained,
+    stale,
+  };
 };
 
 // Mirror managed files into the consumer, deleting any previously-locked file
@@ -477,9 +535,8 @@ const mirror = async ({
       }
       if (!dryRun) {
         await mkdir(dirname(dest), { recursive: true });
-        // The precondition above proved every path inside this directory is one
-        // the lock already records, so replacing it restores the managed shape
-        // rather than destroying consumer work.
+        // The precondition proved every non-directory entry is locked. Empty
+        // directories are not tracked and are removed with the old shape.
         if (current?.kind === 'directory') {
           await rm(dest, { recursive: true, force: true });
         }
@@ -696,7 +753,10 @@ const runCheck = async (consumer: string): Promise<boolean> => {
       return null;
     }),
   );
-  const problems = results.filter((p): p is string => p !== null);
+  const problems = [
+    ...results.filter((p): p is string => p !== null),
+    ...symlinkTargetProblems(lockedFiles, true),
+  ];
   const directiveFiles =
     await findManagedFilesContainingBiomeDirectiveToken(lockedFiles);
   if (problems.length > 0) {
@@ -822,6 +882,15 @@ const prepareProspectiveDependabot = async (
   const existingLocal = await readTextIfPresent(
     join(consumer, DEPENDABOT_LOCAL_FILE),
   );
+  if (
+    existingLocal === null &&
+    localSeed !== null &&
+    localSeed.kind !== 'file'
+  ) {
+    throw new Error(
+      `source seed ${DEPENDABOT_LOCAL_FILE} must be a regular file; replace its symlink with the overlay content`,
+    );
+  }
   const local =
     existingLocal ??
     (localSeed === null || localSeed.kind !== 'file'
