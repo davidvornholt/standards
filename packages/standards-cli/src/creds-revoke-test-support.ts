@@ -28,7 +28,7 @@ export const RENAMED_BOOTSTRAP_ID = `9${'7'.repeat(ID_LENGTH - 1)}`;
 
 const ACCOUNT_TOKENS = [
   { id: BOOTSTRAP_ID, name: 'standards-broker', status: 'active' },
-  { id: OTHER_MACHINE_BROKER_ID, name: 'standards-broker', status: 'active' },
+  { id: OTHER_MACHINE_BROKER_ID, name: 'Standards-Broker', status: 'active' },
   { id: FOREIGN_ID, name: 'dns-token-from-2023', status: 'active' },
   {
     id: BROKERED_ID,

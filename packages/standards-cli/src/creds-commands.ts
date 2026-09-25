@@ -31,7 +31,7 @@ Options:
   --dir <path>          Repository to operate on (default: current directory)
   --dest <target>:<key> SOPS destination, e.g. ci:ci.cloudflare_dns_token
   --permissions <list>  Comma-separated Cloudflare permission group names
-  --account <id>        Cloudflare account when more than one is configured
+  --account <id>        Cloudflare account for login, add, revoke, or permissions; plan/apply always cover all accounts
   --ttl-days <n>        Token lifetime in days (default: 90)
   --bucket <name>       Scope a Cloudflare token to one R2 bucket
   --zone <zone-id>      Add a zone resource for zone-scoped groups (comma-separated IDs)
@@ -111,6 +111,12 @@ export const runCredsCommand = (
   if (route === '' || route === 'help') {
     console.log(CREDS_USAGE);
     return Promise.resolve(route === 'help');
+  }
+  if (flags.account !== undefined && (route === 'plan' || route === 'apply')) {
+    console.error(
+      `standards creds: ${route} always covers every configured account; --account is not supported for this command`,
+    );
+    return Promise.resolve(false);
   }
   const handlers: Readonly<Record<string, () => Promise<boolean>>> = {
     'login github': () =>

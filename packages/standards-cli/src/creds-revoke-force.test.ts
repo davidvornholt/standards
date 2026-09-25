@@ -95,10 +95,6 @@ describe('creds revoke --force', () => {
     expect(unresolved).toContain('standards creds apply');
   });
 
-  // Reconciliation matches token names exactly, so a checkout that differs only
-  // in capitalisation neither owns the token nor can act on it. Offering the
-  // owner's remedy here would prescribe a no-op: `apply` would not recognise
-  // the token either.
   it('refuses a token brokered to this repository under other casing', async () => {
     const consumer = initializeConsumer([ACCOUNT_A]);
     setConsumerOrigin(consumer, 'git@github.com:DavidVornholt/Example.git');
@@ -107,12 +103,8 @@ describe('creds revoke --force', () => {
     expect(await revokeWithForce(BROKERED_ID, consumer)).toBe(false);
     expect(deletes(requests)).toEqual([]);
     const [message = ''] = refusals(error);
-    expect(message).toContain(
-      'differs from davidvornholt/example only in capitalisation',
-    );
-    expect(message).toContain('Re-point the origin remote');
-    expect(message).toContain('Cloudflare dashboard');
-    expect(message).not.toContain('ci:ci.dns_token');
-    expect(message).not.toContain('standards creds apply');
+    expect(message).toContain('for this repository (davidvornholt/example)');
+    expect(message).toContain('ci:ci.dns_token');
+    expect(message).toContain('standards creds apply');
   });
 });

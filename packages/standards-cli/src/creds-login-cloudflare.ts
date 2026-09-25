@@ -83,6 +83,12 @@ export const verifyCloudflareBootstrapAuthority = async (
       problem: `the token is named "${identified.value.name}", inside the broker's minted-token namespace — bootstrap credentials must remain distinguishable from minted credentials; rename it ${BROKER_IDENTITY_NAME} in the dashboard and re-run login`,
     };
   }
+  if (identified.value.name.toLowerCase() !== BROKER_IDENTITY_NAME) {
+    return {
+      ok: false,
+      problem: `bootstrap tokens must use the reserved name ${BROKER_IDENTITY_NAME}; rename this token in the dashboard and re-run login so other machines cannot revoke it as unmanaged`,
+    };
+  }
   return { ok: true, value: { tokenName: identified.value.name } };
 };
 
@@ -135,12 +141,6 @@ export const runCredsLoginCloudflare = async (options: {
       `standards creds: token verification failed — ${verified.problem}`,
     );
     return false;
-  }
-  const { tokenName } = verified.value;
-  if (tokenName !== BROKER_IDENTITY_NAME) {
-    console.error(
-      `standards creds: warning — the token is named "${tokenName}", not "${BROKER_IDENTITY_NAME}"; rename it in the dashboard so it stays identifiable`,
-    );
   }
   await updateBrokerStore(storePath, (current) => {
     if (current.cloudflare.some((entry) => entry.accountId === accountId)) {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { parseTtlDays } from './creds-args';
+import { runCredsCommand } from './creds-commands';
 
 const DEFAULT_TTL_DAYS = 90;
 
@@ -29,3 +30,12 @@ describe('credential command parsing', () => {
     }
   });
 });
+
+it.each(['plan', 'apply'])(
+  'rejects silently ignored account scoping on %s before provider access',
+  async (command) => {
+    expect(await runCredsCommand([command, '--account', 'unconfigured'])).toBe(
+      false,
+    );
+  },
+);

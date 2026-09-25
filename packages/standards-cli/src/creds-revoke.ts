@@ -57,15 +57,8 @@ const brokeredRefusal = ({
   if (currentRepo === null) {
     return `token ${tokenId} is brokered as ${name}, which belongs to ${brokered.repo}, and this checkout cannot resolve the GitHub repository from its origin remote, so whether this checkout owns the token could not be determined; --force widens only that ownership check, so here it has nothing to widen. Re-run from a checkout whose origin remote names a GitHub repository, or point --dir at one. If ${brokered.repo} still exists, the remedy runs there: delete ${brokered.target}:${brokered.key} from its SOPS target and run \`standards creds apply\` in that checkout`;
   }
-  if (brokered.repo === currentRepo) {
-    return `token ${tokenId} is brokered as ${name} for this repository (${brokered.repo}); delete ${brokered.target}:${brokered.key} from this repository's SOPS target and run \`standards creds apply\`, which revokes it and keeps the secret in step`;
-  }
-  // Revoke compares repository names case-insensitively, but reconciliation
-  // matches the token name exactly, so a checkout whose origin differs only in
-  // capitalisation renews nothing and revokes nothing. Sending the operator to
-  // the reconciled remedy would prescribe a no-op.
   if (sameRepo(brokered.repo, currentRepo)) {
-    return `token ${tokenId} is brokered as ${name}, and this checkout's origin names ${currentRepo}, which differs from ${brokered.repo} only in capitalisation; reconciliation matches the token name exactly, so from here it will neither renew nor revoke this token. Re-point the origin remote at ${brokered.repo} to bring the token back under reconciliation, or retire it in the Cloudflare dashboard`;
+    return `token ${tokenId} is brokered as ${name} for this repository (${brokered.repo}); delete ${brokered.target}:${brokered.key} from this repository's SOPS target and run \`standards creds apply\`, which revokes it and keeps the secret in step`;
   }
   if (force) {
     return null;
@@ -121,7 +114,7 @@ export const runCredsRevoke = async (options: {
   // — one per machine. Only this machine's is identified by ID above; the rest
   // are refused by name, because deleting one locks another machine out of the
   // account and the broker cannot re-mint its own root credential.
-  if (target.name === BROKER_IDENTITY_NAME) {
+  if (target.name.toLowerCase() === BROKER_IDENTITY_NAME) {
     return fail(
       `token ${tokenId} is named ${BROKER_IDENTITY_NAME}, the reserved name for a machine's broker bootstrap credential; this machine's own bootstrap is a different token, so this one belongs to another machine or is a superseded one — retire it in the Cloudflare dashboard, where you can confirm which machine it belongs to`,
     );
