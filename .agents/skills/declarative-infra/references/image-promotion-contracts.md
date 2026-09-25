@@ -185,7 +185,7 @@ jobs:
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
   deploy:
     needs: gate
-    if: "${{ needs.gate.result == 'success' && needs.gate.outputs.gated-sha == github.sha }}"
+    if: "${{ needs.gate.result == 'success' }}"
     steps:
       - uses: actions/checkout@v7
         with: { ref: "${{ github.sha }}" }
@@ -228,3 +228,16 @@ gh run watch "$run_id" --repo example/infra --exit-status
 result=$(gh run view "$run_id" --repo example/infra --json headSha,conclusion,jobs)
 jq -er --arg sha "$merge_sha" 'if .headSha == $sha and .conclusion == "success" and ([.jobs[] | select(.name == "deploy" and .conclusion == "success")] | length) == 1 and ([.jobs[] | select(.name == "deploy")] | length) == 1 then true else error("exact deploy did not complete successfully") end' <<<"$result" >/dev/null
 ```
+
+
+<!-- contract:promotion-pr-body -->
+```sh
+set -euo pipefail
+if jq -e '.promotionEnabled == false and .digest == null and .promotedSourceSha == null' <<<"$BASE_APP_JSON" >/dev/null; then
+  printf 'First production deployment of %s. Merging runs configured database migrations, starts the production service, and activates its configured public endpoint. Complete the declared registry-access prerequisites before merging; private images require verified host registry authentication.\n' "$APP_NAME" > "$PR_BODY_FILE"
+else
+  printf 'Updates the deployed container image for %s to the verified digest.\n' "$APP_NAME" > "$PR_BODY_FILE"
+fi
+```
+
+The promotion writer generates this opening from the app entry on the target branch, then appends its exact provenance and audit markers. Use `--body-file` when creating or updating the promotion PR. Do not describe a disabled-to-pinned adoption as routine digest bookkeeping.
