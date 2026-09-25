@@ -16,7 +16,7 @@ import { isRecord } from './github-settings-parse';
 const API_ROOT = 'https://api.github.com';
 
 const GITHUB_REMOTE_PATTERN =
-  /^(?:https?:\/\/(?:[^/@]+@)?github\.com\/|ssh:\/\/git@github\.com\/|git@github\.com:)(?<repo>[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9][A-Za-z0-9._-]*?)(?:\.git)*$/iu;
+  /^(?:https?:\/\/(?:[^/@]+@)?github\.com\/|ssh:\/\/git@github\.com\/|git@github\.com:)(?<repo>[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9._-]+?)(?:\.git)*$/iu;
 
 export const HTTP_OK = 200;
 export const HTTP_CREATED = 201;
@@ -55,7 +55,10 @@ export const resolveToken = (): string | null => {
 
 export const resolveGithubRepo = (consumer: string): string | null => {
   const url = quietExec('git', ['-C', consumer, 'remote', 'get-url', 'origin']);
-  return url?.match(GITHUB_REMOTE_PATTERN)?.groups?.repo?.toLowerCase() ?? null;
+  const repo = url?.match(GITHUB_REMOTE_PATTERN)?.groups?.repo?.toLowerCase();
+  return repo === undefined || ['.', '..'].includes(repo.split('/')[1] ?? '')
+    ? null
+    : repo;
 };
 
 export type ApiResponse = { readonly status: number; readonly body: unknown };
