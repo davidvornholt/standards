@@ -156,6 +156,7 @@ it('does not execute branch package scripts, Bun preloads, or Git hooks with wri
   git(cwd, 'config', 'user.email', 'fixture@example.invalid');
   git(cwd, 'config', 'commit.gpgsign', 'false');
   write(cwd, '.gitignore', 'node_modules/\n');
+  write(cwd, 'sync-standards.json', '{"upstream":"owner/trusted"}\n');
   write(
     cwd,
     'node_modules/@davidvornholt/standards/src/cli.ts',
@@ -197,6 +198,16 @@ writeFileSync(process.argv[process.argv.indexOf('--dir') + 1] + '/canonical.txt'
     0,
   );
   expect(readFileSync(join(cwd, 'canonical.txt'), 'utf8')).toBe('trusted sync');
+  write(cwd, 'sync-standards.json', '{"upstream":"owner/different"}\n');
+  expect(shell(cwd, 'Sync canonical files from upstream', syncEnv).status).toBe(
+    1,
+  );
+  write(cwd, 'sync-standards.json', '{"upstream":"owner/trusted"}\n');
+  write(cwd, 'sync-standards.local.json', '{"ref":"different"}\n');
+  expect(shell(cwd, 'Sync canonical files from upstream', syncEnv).status).toBe(
+    1,
+  );
+  write(cwd, 'sync-standards.local.json', '{}\n');
   expect(existsSync(join(cwd, 'package-script-ran'))).toBe(false);
   expect(existsSync(join(cwd, 'preload-ran'))).toBe(false);
   write(

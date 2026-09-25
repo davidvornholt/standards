@@ -133,6 +133,12 @@ jobs:
         run: |
           runtime=$(mktemp -d "$RUNNER_TEMP/standards-sync.XXXXXX")
           cp -RL node_modules "$runtime/node_modules"
+          cp sync-standards.json "$runtime/sync-standards.json"
+          if [ -f sync-standards.local.json ]; then
+            jq -cS . sync-standards.local.json > "$runtime/policy.json"
+          else
+            echo '{}' > "$runtime/policy.json"
+          fi
           printf '' > "$runtime/bunfig.toml"
           echo "STANDARDS_SYNC_RUNTIME=$runtime" >> "$GITHUB_ENV"
 
@@ -223,12 +229,23 @@ jobs:
         env:
           SYNC_POLICY_REF: ${{ needs.policy.outputs.ref }}
         run: |
+          trusted_source="$(jq -er '.upstream | strings | select(length > 0)' "$STANDARDS_SYNC_RUNTIME/sync-standards.json")"
+          branch_source="$(jq -er '.upstream | strings | select(length > 0)' sync-standards.json)"
+          if [ -f sync-standards.local.json ]; then
+            branch_policy="$(jq -cS . sync-standards.local.json)"
+          else
+            branch_policy='{}'
+          fi
+          if [[ "$branch_source" != "$trusted_source" || "$branch_policy" != "$(cat "$STANDARDS_SYNC_RUNTIME/policy.json")" ]]; then
+            echo "::error::The reusable sync branch changes source authority or sync policy; review and merge that policy change separately before retrying."
+            exit 1
+          fi
           cd "$STANDARDS_SYNC_RUNTIME"
           cli=node_modules/@davidvornholt/standards/src/cli.ts
           if [ -n "$SYNC_POLICY_REF" ]; then
-            bun --no-env-file "$cli" sync --dir "$GITHUB_WORKSPACE" --ref "$SYNC_POLICY_REF"
+            bun --no-env-file "$cli" sync --from "$trusted_source" --dir "$GITHUB_WORKSPACE" --ref "$SYNC_POLICY_REF"
           else
-            bun --no-env-file "$cli" sync --dir "$GITHUB_WORKSPACE"
+            bun --no-env-file "$cli" sync --from "$trusted_source" --dir "$GITHUB_WORKSPACE"
           fi
 
       # Canonical package manifests can change dependency ranges after the
@@ -236,7 +253,7 @@ jobs:
       # whether the mirror produced a change, so the sync branch remains
       # installable with --frozen-lockfile.
       - name: Refresh consumer lockfile
-        run: bun install --lockfile-only --ignore-scripts --config "$STANDARDS_SYNC_RUNTIME/bunfig.toml"
+        run: bun install --lockfile-only --ignore-scripts --no-env-file --config "$STANDARDS_SYNC_RUNTIME/bunfig.toml"
 
       - name: Detect mirror changes
         id: mirror
