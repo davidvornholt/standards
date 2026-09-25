@@ -25,7 +25,9 @@ describe('renderUnits', () => {
     expect(timer).toContain('OnUnitInactiveSec=1min');
     expect(timer).not.toContain('OnUnitActiveSec');
     expect(timer).toContain('AccuracySec=15s');
-    expect(timer).toContain('Persistent=true');
+    expect(timer).not.toContain('Persistent=');
+    expect(timer).toContain('OnBootSec=2min');
+    expect(acknowledgementTimer).not.toContain('Persistent=');
     expect(acknowledgementService).toContain('Type=oneshot');
     expect(acknowledgementService).toContain(
       'poller --acknowledge-only --config "/etc/standards-poller/config.json"',

@@ -1,0 +1,32 @@
+[
+  {
+    "name": "Checkout settings inputs",
+    "uses": "actions/checkout@v7",
+    "with": {
+      "persist-credentials": false,
+      "sparse-checkout": ".github/settings.json\n.github/settings.local.json\n",
+      "sparse-checkout-cone-mode": false
+    }
+  },
+  {
+    "name": "Install pinned settings checker",
+    "run": "set -euo pipefail\nbun_version=1.4.2\ncase \"$(uname -m)\" in\n  x86_64) bun_arch=x64; bun_sha=36368faef7527875d5ffa52e53cd48021741f2a83eb6208a8dd64068d422a913 ;;\n  aarch64) bun_arch=aarch64; bun_sha=54328bbc2d9c8e0c9f892c544d66c57a83b84139e34909e5ee81758f1ac8fda7 ;;\n  *)\n    echo \"::error::No pinned Bun binary for runner architecture $(uname -m)\"\n    exit 1\n    ;;\nesac\nbun_archive=\"$RUNNER_TEMP/bun.zip\"\nbun_root=\"$RUNNER_TEMP/standards-bin\"\ncurl -sfLo \"$bun_archive\" \"https://github.com/oven-sh/bun/releases/download/bun-v${bun_version}/bun-linux-${bun_arch}.zip\"\necho \"$bun_sha  $bun_archive\" | sha256sum --check --quiet\nmkdir \"$bun_root\"\nunzip -q \"$bun_archive\" -d \"$bun_root\"\ninstall -m 0755 \"$bun_root/bun-linux-${bun_arch}/bun\" \"$bun_root/bun\"\n\nstandards_version=0.21.0\nstandards_sha=afb8576434e62730e06d30d8249b1d275f586a874826ad7b50fe5e4d1b32b0da0e4adea176c6151160fc50a8ac049bab91095d18867b2a2544f40408f9e8f8ff\nstandards_archive=\"$RUNNER_TEMP/standards.tgz\"\ncli_root=\"$RUNNER_TEMP/standards-cli\"\nmkdir -p \"$cli_root/package\"\ncurl -sfLo \"$standards_archive\" \"https://registry.npmjs.org/@davidvornholt/standards/-/standards-${standards_version}.tgz\"\necho \"$standards_sha  $standards_archive\" | sha512sum --check --quiet\ntar -xzf \"$standards_archive\" -C \"$cli_root/package\" --strip-components=1\n\nyaml_version=2.9.0\nyaml_sha=d80be1357de66fccdde99cbb20d4ed4a9975175e475ba5a7aa3d2cad696428b729625fe03083098b2b86ab629e236605c543e376507edcb735d2c78c2ed2f870\nyaml_archive=\"$RUNNER_TEMP/yaml.tgz\"\nmkdir -p \"$cli_root/node_modules/yaml\"\ncurl -sfLo \"$yaml_archive\" \"https://registry.npmjs.org/yaml/-/yaml-${yaml_version}.tgz\"\necho \"$yaml_sha  $yaml_archive\" | sha512sum --check --quiet\ntar -xzf \"$yaml_archive\" -C \"$cli_root/node_modules/yaml\" --strip-components=1\n"
+  },
+  {
+    "name": "Check GitHub settings",
+    "env": {
+      "SETTINGS_TOKEN": "${{ github.token }}"
+    },
+    "run": "set -euo pipefail\nif [ -z \"$SETTINGS_TOKEN\" ] || [[ \"$SETTINGS_TOKEN\" == *$'\\n'* ]] || [[ \"$SETTINGS_TOKEN\" == *$'\\r'* ]]; then\n  echo \"::error::Resolved GitHub settings token must be non-empty and single-line\"\n  exit 1\nfi\ncd \"$RUNNER_TEMP/standards-cli\"\nGH_TOKEN=\"$SETTINGS_TOKEN\" \"$RUNNER_TEMP/standards-bin/bun\" \\\n  package/src/cli.ts github --check --dir \"$GITHUB_WORKSPACE\"\n"
+  },
+  {
+    "name": "Require all standards gates",
+    "env": {
+      "IS_SOURCE_REPOSITORY": "${{ github.repository == 'davidvornholt/standards' }}",
+      "NIX_DISCOVERY_RESULT": "${{ needs.nix-discovery.result }}",
+      "NIX_RESULT": "${{ needs.nix.result }}",
+      "QUALITY_RESULT": "${{ needs.quality.result }}"
+    },
+    "run": "case \"$IS_SOURCE_REPOSITORY\" in\n  true)\n    expected_nix_result=success\n    ;;\n  false)\n    expected_nix_result=skipped\n    ;;\n  *)\n    echo \"::error::Unexpected source-repository mode (is-source-repository=$IS_SOURCE_REPOSITORY)\"\n    exit 1\n    ;;\nesac\nif [ \"$QUALITY_RESULT\" != success ]; then\n  echo \"::error::Standards gates did not all succeed (quality=$QUALITY_RESULT, nix-discovery=$NIX_DISCOVERY_RESULT, nix=$NIX_RESULT)\"\n  exit 1\nfi\nif [ \"$NIX_DISCOVERY_RESULT\" != \"$expected_nix_result\" ] || [ \"$NIX_RESULT\" != \"$expected_nix_result\" ]; then\n  echo \"::error::Nix gates did not match the repository mode (is-source-repository=$IS_SOURCE_REPOSITORY, expected=$expected_nix_result, nix-discovery=$NIX_DISCOVERY_RESULT, nix=$NIX_RESULT)\"\n  exit 1\nfi\n"
+  }
+]

@@ -86,3 +86,11 @@ describe('standards CLI publish recovery workflow', () => {
     );
   });
 });
+
+it('keeps every package publication and release job on an isolated hosted runner', () => {
+  for (const job of Object.values(publishWorkflowJobs())) {
+    expect(job['runs-on']).toBe('ubuntu-latest');
+    expect(JSON.stringify(job)).not.toContain('vars.CI_RUNNER');
+    expect(JSON.stringify(job)).not.toContain('vars.CI_CODEBUILD_PROJECT');
+  }
+});

@@ -20,6 +20,7 @@ export type SopsActionOptions = {
   readonly createSecretFile?: boolean;
   readonly curlStatus?: number;
   readonly envName?: string;
+  readonly script?: string;
   readonly secretKey?: string;
   readonly secretRoot?: string;
   readonly sha256Status?: number;
@@ -47,6 +48,7 @@ const DEFAULT_OPTIONS = {
   createSecretFile: true,
   curlStatus: 0,
   envName: 'GH_TOKEN',
+  script: yamlRunScript(SOPS_ACTION, 'Resolve and validate secret'),
   secretKey: 'example_token',
   secretRoot: 'ci',
   sha256Status: 0,
@@ -93,8 +95,10 @@ export const createSopsActionRunner =
     shim(fixture, 'bin/sha256sum', [
       '#!/usr/bin/env bash',
       'set -euo pipefail',
-      // Consume the piped checksum line so the writer never sees SIGPIPE.
-      'cat > /dev/null',
+      'read -r digest target',
+      '[[ "$digest" =~ ^[a-f0-9]{64}$ ]] || exit 1',
+      '[ "$target" = "$RUNNER_TEMP/sops" ] || exit 1',
+      'cmp -s "$target" "$FAKE_SOPS" || exit 1',
       'exit "$FAKE_SHA256_STATUS"',
     ]);
     shim(fixture, 'fake-sops', [
@@ -112,12 +116,7 @@ export const createSopsActionRunner =
     const result = runProcess(
       'bash',
       fixture,
-      [
-        '-euo',
-        'pipefail',
-        '-c',
-        yamlRunScript(SOPS_ACTION, 'Resolve and validate secret'),
-      ],
+      ['-euo', 'pipefail', '-c', resolved.script],
       {
         ...baseEnvironment,
         CURL_MARKER: curlMarker,

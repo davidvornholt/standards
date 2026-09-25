@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import process from 'node:process';
 import { parse as parseYaml } from 'yaml';
-import { cleanupTmpDirs, SOPS_ACTION } from './cli-test-support';
+import { cleanupTmpDirs, SOPS_ACTION, yamlRunScript } from './cli-test-support';
 import {
   createSopsActionRunner,
   type SopsActionOptions,
@@ -183,4 +183,15 @@ describe('caller configuration errors', () => {
       expect(actionRun.sopsExecuted).toBe(false);
     },
   );
+});
+
+it('refuses checksum verification aimed at a different file', () => {
+  const script = yamlRunScript(
+    SOPS_ACTION,
+    'Resolve and validate secret',
+  ).replace('$sha  $sops', '$sha  $decrypted_file');
+  const actionRun = runSopsAction({ script });
+  expect(actionRun.result.status).toBe(1);
+  expect(actionRun.sopsExecuted).toBe(false);
+  expect(actionRun.sopsBinaryPresent).toBe(false);
 });

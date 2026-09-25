@@ -73,7 +73,6 @@ Description=Run the standards fix poller on an interval
 OnBootSec=2min
 OnUnitInactiveSec=${WORKER_INTERVAL_MINUTES}min
 AccuracySec=15s
-Persistent=true
 
 [Install]
 WantedBy=timers.target
@@ -95,7 +94,6 @@ Description=Check for newly queued standards poller requests
 OnBootSec=1min
 OnUnitInactiveSec=${ACKNOWLEDGEMENT_INTERVAL_MINUTES}min
 AccuracySec=15s
-Persistent=true
 
 [Install]
 WantedBy=timers.target

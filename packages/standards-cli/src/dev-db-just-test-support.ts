@@ -40,7 +40,7 @@ export const expectedRunArguments = (
   '-e',
   'POSTGRES_USER=file-user',
   '-e',
-  'POSTGRES_PASSWORD=file-pass',
+  'POSTGRES_PASSWORD',
   '-e',
   'POSTGRES_DB=file-db',
   '-p',
@@ -97,6 +97,8 @@ if (same(['container', 'inspect', ${JSON.stringify(name)}])) {
   process.exit(0);
 }
 if (same(${JSON.stringify(expectedRunArguments(name, postgresVersion))})) {
+  if (process.env.POSTGRES_PASSWORD !== 'file-pass') fail('unexpected creation password');
+  if (args.some((arg) => arg.includes('file-pass'))) fail('password leaked through argv');
   if (present('run-error')) fail('create failed', 125);
   writeFileSync(path('present'), '');
   process.exit(0);
