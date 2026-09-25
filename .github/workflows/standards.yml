@@ -34,13 +34,10 @@ jobs:
   # Per-repo DB coordinates come from repository Actions VARIABLES (Settings →
   # Secrets and variables → Actions → Variables), not edits to this synced file:
   #   CI_POSTGRES_USER, CI_POSTGRES_PASSWORD, CI_POSTGRES_DB  (defaults below)
-  #   CI_RUNNER  — override only the unprivileged quality runner label when
-  #                CI_CODEBUILD_PROJECT is absent
   #   CI_CODEBUILD_PROJECT — in a sole-maintainer personal repository that
   #                trusts workflow edits before merge, select an ephemeral AWS
   #                CodeBuild runner for every compatible canonical consumer job;
-  #                this takes precedence over CI_RUNNER and adds the unique run
-  #                identity CodeBuild requires
+  #                the unique run identity prevents reuse across jobs
   #   CI_CODEBUILD_QUALITY_SIZE — override the CodeBuild quality job's instance
   #                size when a measured gate cannot run reliably on `medium`;
   #                compatible values are CodeBuild's runner size labels
@@ -56,7 +53,7 @@ jobs:
   # an `if:` whereas a service cannot. So gating it keeps one uniform file while
   # skipping a pointless download in repos with nothing to render.
   quality:
-    runs-on: ${{ vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-{3}', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt, vars.CI_CODEBUILD_QUALITY_SIZE || 'medium') || vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-{3}', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt, vars.CI_CODEBUILD_QUALITY_SIZE || 'medium') || 'ubuntu-latest' }}
     timeout-minutes: 30
     services:
       postgres:
@@ -221,9 +218,9 @@ jobs:
       # a relocated store is invisible to exactly the processes that need it.
       # Trust comes from publication, not location: pull requests may restore
       # trusted snapshots but cannot publish; only a successful main run
-      # saves. A persistent self-hosted runner's user-level cache reuse is a
-      # property of that runner pool, tracked upstream, and is not fixable
-      # here without breaking the strict-env seam.
+      # saves. Quality always uses an ephemeral hosted or per-run CodeBuild
+      # runner; arbitrary persistent CI_RUNNER pools are unsupported so an
+      # earlier PR cannot leave executable state in the next run's defaults.
       #
       # Published Bun and Playwright snapshots must be history-free. A main
       # snapshot published after a lock change contains only what the current
