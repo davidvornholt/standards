@@ -53,12 +53,16 @@ requiredProvenance:
   - imagesJsonOnly
 rollback:
   identity: rollback:<current-identity>-><target-identity>
+  retry: reuse-announced-branch-or-open-with-identical-audit
+  terminal: never-reopen
   required: [protectedApproval, nonEmptyReason, operator, exactAncestorDigestProof]
 superseding:
   trigger: promotion-opened-or-reused
   candidates: same-app-open-promotions
   compareOutcome: descendant
   result: superseded
+  readiness: draft-until-comparisons-and-required-retirements-succeed
+  retry: reuse-operation-and-reconcile-remaining-open-predecessors
 lifecycle: [announced, branch, open, merged, deploy-failed, completed, superseded]
 ```
 

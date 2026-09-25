@@ -85,6 +85,8 @@ it('parses compare outcomes and makes every provenance condition fail closed', (
   expect(writerContract.superseding).toEqual({
     candidates: 'same-app-open-promotions',
     compareOutcome: 'descendant',
+    readiness: 'draft-until-comparisons-and-required-retirements-succeed',
+    retry: 'reuse-operation-and-reconcile-remaining-open-predecessors',
     result: 'superseded',
     trigger: 'promotion-opened-or-reused',
   });
