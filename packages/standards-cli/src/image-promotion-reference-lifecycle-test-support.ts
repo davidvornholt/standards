@@ -20,7 +20,7 @@ const allowedTransitions: Readonly<
   announced: ['branch'],
   branch: ['open'],
   completed: [],
-  'deploy-failed': ['completed'],
+  'deploy-failed': ['deploy-failed', 'completed'],
   merged: ['deploy-failed', 'completed'],
   open: ['merged'],
   superseded: [],

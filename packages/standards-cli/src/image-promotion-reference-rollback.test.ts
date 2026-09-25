@@ -119,6 +119,14 @@ it('uses a new audited operation for A to B to rollback A', () => {
     phase: 'completed',
     prNumber: 3,
   });
+  const completedB = state.operations[canonicalIdentity(b)];
+  const reannouncedB = { ...b, sourceRunId: '44' };
+  const reannounced = announceCandidate(state, reannouncedB, 'descendant');
+  expect(reannounced.kind).toBe('attached');
+  expect(reannounced.state.operations[canonicalIdentity(b)]).toEqual({
+    ...completedB,
+    runEvidence: [...completedB.runEvidence, '44'],
+  });
   for (const required of writerContract.rollback.required) {
     const invalid = { ...audit, [required]: '' };
     const before = progress(

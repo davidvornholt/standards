@@ -405,13 +405,29 @@ sudo rm -f /etc/apt/sources.list.d/google-chrome.list /etc/apt/sources.list.d/go
   return consumerSteps;
 };
 
+const assertNoQualityLocalActions = (
+  steps: ReadonlyArray<WorkflowStep>,
+): void => {
+  if (
+    steps.some(
+      (step) => typeof step.uses === 'string' && step.uses.startsWith('./'),
+    )
+  ) {
+    throw new Error(
+      'Quality local actions require an explicit cache-boundary review',
+    );
+  }
+};
+
 const assertQualityCacheContract = (workflow: ParsedWorkflow): void => {
   assertQualityWorkflowContract(workflow);
   const steps = workflowSteps(workflow.jobs.quality, 'quality');
   const cacheSteps = steps.filter(
     (step) =>
-      typeof step.uses === 'string' && step.uses.startsWith('actions/cache'),
+      typeof step.uses === 'string' &&
+      step.uses.toLowerCase().startsWith('actions/cache'),
   );
+  assertNoQualityLocalActions(steps);
   const expectedCacheSteps = [
     {
       name: 'Restore the Turbo cache',
@@ -2485,6 +2501,16 @@ const assertSettingsTrustBoundary = (
     'The check job must contain only the four trusted steps in order',
   );
 
+  requireExactWorkflowValue(
+    checkSteps,
+    JSON.parse(
+      readFileSync(
+        join(import.meta.dir, 'fixtures/trusted-settings-steps.json'),
+        'utf8',
+      ),
+    ),
+    'Trusted settings steps must match their complete reviewed bodies',
+  );
   const [checkoutStep] = checkSteps;
   requireExactWorkflowValue(
     checkoutStep?.uses,
@@ -3398,7 +3424,7 @@ describe('canonical configurable runner merge-time ratchet', () => {
         'on:',
         '  push:',
         'jobs:',
-        '  additional-check:',
+        '  quality:',
         `    runs-on: ${githubExpression("vars.CI_CODEBUILD_PROJECT || 'ubuntu-latest'")}`,
         '    steps:',
         '      - run: echo additional-check',
@@ -3420,7 +3446,7 @@ describe('canonical configurable runner merge-time ratchet', () => {
         inspection.fixedRunnerJobDefinitions,
       ),
     ).toThrow(
-      'Jobs outside the approved compatible set select a configurable runner: .github/workflows/additional-check.yaml:additional-check, .github/workflows/additional-check.yaml:additional-verify.',
+      'Jobs outside the approved compatible set select a configurable runner: .github/workflows/additional-check.yaml:quality, .github/workflows/additional-check.yaml:additional-verify.',
     );
   });
 });
@@ -3987,4 +4013,37 @@ describe('poller', () => {
     );
     expect(result.stdout).toContain('TimeoutStartSec=270min');
   });
+});
+
+describe('cache discovery regression cases', () => {
+  it.each([
+    'Actions/cache/restore@v6',
+    'ACTIONS/CACHE@v6',
+    './.github/actions/cache-wrapper',
+  ])('rejects an unapproved cache or local wrapper %s', (uses) => {
+    const workflow = structuredClone(parseWorkflow(STANDARDS_WORKFLOW));
+    workflow.jobs.quality.steps = [
+      ...workflowSteps(workflow.jobs.quality, 'quality'),
+      { uses, with: { path: '~/.bun/install/cache', key: 'unsafe' } },
+    ];
+    expect(() => assertQualityCacheContract(workflow)).toThrow();
+  });
+});
+
+it('rejects shell-local settings bypasses and repository-controlled execution', () => {
+  for (const prefix of [
+    'STANDARDS_SKIP_GITHUB_CHECK=true ',
+    'eval "$(cat .github/settings.local.json)"; ',
+  ]) {
+    const workflow = structuredClone(parseWorkflow(STANDARDS_WORKFLOW));
+    const steps = workflowSteps(workflow.jobs.check, 'check');
+    workflow.jobs.check.steps = steps.map((step) =>
+      step.name === 'Check GitHub settings'
+        ? { ...step, run: prefix + step.run }
+        : step,
+    );
+    expect(() => assertSettingsTrustBoundary(workflow)).toThrow(
+      'complete reviewed bodies',
+    );
+  }
 });

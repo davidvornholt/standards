@@ -18,6 +18,7 @@ export type WorkflowStep = {
 };
 
 export type WorkflowJob = {
+  readonly 'runs-on'?: unknown;
   readonly if?: unknown;
   readonly needs?: unknown;
   readonly outputs?: unknown;

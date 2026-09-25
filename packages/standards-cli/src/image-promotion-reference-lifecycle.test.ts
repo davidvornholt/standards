@@ -108,6 +108,9 @@ it('attaches distinct run ids throughout one operation lifecycle', () => {
   );
   expect(deploy(state, identity, MERGE_B, true).kind).toBe('rejected');
   state = requireState(deploy(state, identity, MERGE_A, false), 'advanced');
+  const failed = state.operations[identity];
+  state = requireState(deploy(state, identity, MERGE_A, false), 'advanced');
+  expect(state.operations[identity]).toEqual(failed);
   state = requireState(
     announceCandidate(state, afterFailure, 'same'),
     'attached',

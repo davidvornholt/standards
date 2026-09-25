@@ -139,7 +139,9 @@ export const announce = ({
     state.app.digest === candidate.digest;
   if (
     existing?.kind === 'promotion' &&
-    (existing.phase !== 'completed' || currentMatches)
+    (existing.phase !== 'completed' ||
+      currentMatches ||
+      compare === 'descendant')
   ) {
     return {
       kind: 'attached',

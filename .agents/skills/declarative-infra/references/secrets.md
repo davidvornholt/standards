@@ -85,6 +85,8 @@ Each machine creates its own `standards-broker` bootstrap token; Cloudflare perm
 
 To consume a brokered S3 pair in generated dev env files without copying it, authorize the destination's exact `<target>:<dotted.key>` entry under encrypted `secrets/dev.yaml` `brokeredReferences`, then point plain-layer env reference objects at the same target and key. Every verified `creds add` write or `creds apply` renewal of that exact referenced pair regenerates the dev env files. If one pair cannot be verified after a write while a sibling pair commits, regeneration updates the verified sibling but preserves the unsafe pair's prior generated values; it fails loudly without changing any env file when those prior generated values cannot be proven and preserved. A regeneration failure does not roll back a durable SOPS write.
 
+The unmanaged-token report is an account-wide inventory, not a change feed. Unrelated legitimate tokens repeat in every repository sharing the account and on every run; there is no acknowledgement list or first-seen history. A nonempty report does not itself mean reconciliation failed, and operators must still assess unfamiliar entries.
+
 ## Rotation
 
 Application-owned values rotate by editing the encrypted file; recipients rotate in `.sops.yaml` followed by `updatekeys`. Both land as reviewed commits. Brokered Cloudflare credentials renew via `bun standards creds apply`, which creates a fresh-expiry replacement, durably writes and verifies its value, regenerates dev env files when the destination is referenced, and then revokes the old token. A failed post-write regeneration is reported as a command failure without rolling back the already durable SOPS replacement.

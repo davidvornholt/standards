@@ -140,7 +140,7 @@ _dev-db-action action:
     const dataDestination = Number(postgresVersion) >= parentDataLayoutVersion ? '/var/lib/postgresql' : '/var/lib/postgresql/data';
     if (action === 'start') {
       if (!present) {
-        const created = podman(['run', '-d', '--name', name, '--label', `${ownershipLabel}=true`, '-e', `POSTGRES_USER=${connection.user}`, '-e', `POSTGRES_PASSWORD=${connection.password}`, '-e', `POSTGRES_DB=${connection.database}`, '-p', `127.0.0.1:${connection.port}:5432`, '-v', `${volume}:${dataDestination}`, image]);
+        const created = podman(['run', '-d', '--name', name, '--label', `${ownershipLabel}=true`, '-e', `POSTGRES_USER=${connection.user}`, '-e', 'POSTGRES_PASSWORD', '-e', `POSTGRES_DB=${connection.database}`, '-p', `127.0.0.1:${connection.port}:5432`, '-v', `${volume}:${dataDestination}`, image], { env: { ...process.env, POSTGRES_PASSWORD: connection.password } });
         if (created.exitCode !== 0) podmanFailed(`Unable to create container ${name}`, created);
       }
       const container = inspectManaged(connection.port);
