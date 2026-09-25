@@ -44,6 +44,63 @@ const hasLegacyCaller = (value: unknown): boolean => {
   );
 };
 
+const localActions = (value: unknown): Array<string> => {
+  if (Array.isArray(value)) {
+    return value.flatMap(localActions);
+  }
+  if (!isRecord(value)) {
+    return [];
+  }
+  const reference = value.uses;
+  return [
+    ...(typeof reference === 'string' && reference.startsWith('./')
+      ? [posix.normalize(reference)]
+      : []),
+    ...Object.values(value).flatMap(localActions),
+  ];
+};
+const callerProblems = async (
+  consumer: string,
+  incoming: ReadonlyMap<string, ManagedEntry>,
+): Promise<Array<string>> => {
+  const visited = new Set<string>();
+  const visit = async (path: string): Promise<Array<string>> => {
+    if (visited.has(path)) {
+      return [];
+    }
+    visited.add(path);
+    const source = incoming.get(path)?.absolutePath ?? join(consumer, path);
+    const parsed = parseYaml(await readFile(source, 'utf8'), path);
+    if (parsed.problem !== null) {
+      return [parsed.problem];
+    }
+    const problems =
+      !incoming.has(path) && hasLegacyCaller(parsed.value)
+        ? [
+            `${path} still passes env-name to ${LOCAL_ACTION}; before syncing, give the resolver step an id, remove env-name, and pass steps.<id>.outputs.value only to each consuming step's env or action input`,
+          ]
+        : [];
+    const nested = await Promise.all(
+      localActions(parsed.value).map(async (directory) => {
+        if (directory === '..' || directory.startsWith('../')) {
+          return [`${path} references a local action outside the repository`];
+        }
+        const paths = ['action.yml', 'action.yaml']
+          .map((filename) => posix.join(directory, filename))
+          .filter(
+            (target) =>
+              incoming.has(target) || existsSync(join(consumer, target)),
+          );
+        return (await Promise.all(paths.map(visit))).flat();
+      }),
+    );
+    return [...problems, ...nested.flat()];
+  };
+  return (
+    await Promise.all((await yamlFiles(consumer, '.github')).map(visit))
+  ).flat();
+};
+
 // Called before mirror writes. Consumer-owned workflows and composite actions
 // are not silently rewritten, so an action interface migration must stop before
 // replacing the implementation they still invoke with its retired input.
@@ -72,23 +129,5 @@ export const collectSopsActionCallerProblems = async (
   ) {
     return [];
   }
-  const paths = await yamlFiles(consumer, '.github');
-  return (
-    await Promise.all(
-      paths
-        .filter((path) => !incoming.has(path))
-        .map(async (path) => {
-          const parsed = parseYaml(
-            await readFile(join(consumer, path), 'utf8'),
-            path,
-          );
-          if (parsed.problem !== null) {
-            return parsed.problem;
-          }
-          return hasLegacyCaller(parsed.value)
-            ? `${path} still passes env-name to ${LOCAL_ACTION}; before syncing, give the resolver step an id, remove env-name, and pass steps.<id>.outputs.value only to each consuming step's env or action input`
-            : null;
-        }),
-    )
-  ).filter((problem): problem is string => problem !== null);
+  return callerProblems(consumer, incoming);
 };

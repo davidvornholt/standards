@@ -56,3 +56,38 @@ it.each(['./.github/actions/sops-secret/', './.github/actions/./sops-secret'])(
     ).toContain('still passes env-name');
   },
 );
+
+it('follows nested local composites outside .github and handles cycles', async () => {
+  const old = buildUpstream({ extra: [ACTION] });
+  write(old, ACTION, 'inputs: { env-name: { required: true } }\n');
+  const { consumer } = initConsumer(old);
+  write(
+    consumer,
+    '.github/workflows/deploy.yml',
+    'jobs: { deploy: { steps: [{ uses: ./actions/deploy }] } }\n',
+  );
+  write(
+    consumer,
+    'actions/deploy/action.yml',
+    'runs: { using: composite, steps: [{ uses: ./actions/nested }] }\n',
+  );
+  write(
+    consumer,
+    'actions/nested/action.yaml',
+    'runs:\n  using: composite\n  steps:\n    - uses: ./actions/deploy\n    - uses: ./.github/actions/sops-secret/\n      with: { env-name: TOKEN }\n',
+  );
+  const up = buildUpstream({ extra: [ACTION] });
+  write(up, ACTION, OUTPUT_ACTION);
+  write(up, SKILL, 'new skill\n');
+  const previous = readFileSync(join(consumer, SKILL), 'utf8');
+  const result = run(consumer, ['sync', '--from', up, '--dir', consumer]);
+  expect(result.status).not.toBe(0);
+  expect(result.stderr).toContain(
+    'actions/nested/action.yaml still passes env-name',
+  );
+  expect(readFileSync(join(consumer, SKILL), 'utf8')).toBe(previous);
+  write(consumer, ACTION, OUTPUT_ACTION);
+  expect((await collectSopsActionCallerProblems(consumer)).join(' ')).toContain(
+    'actions/nested/action.yaml',
+  );
+});
