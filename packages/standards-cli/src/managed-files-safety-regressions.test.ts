@@ -120,3 +120,15 @@ it('checks that a locked symlink still has a delivered target', () => {
   expect(result.status).not.toBe(0);
   expect(result.stderr).toContain('missing from the managed payload');
 });
+
+it.each([
+  '../missing/../.agents/skills',
+  '../.agents/skills/probe/SKILL.md/../..',
+])(
+  'refuses a target with an untraversable intermediate component: %s',
+  (target) => {
+    const { result } = initConsumer(buildUpstream({ target }));
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('missing from the managed payload');
+  },
+);

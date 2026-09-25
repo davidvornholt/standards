@@ -155,28 +155,69 @@ const symlinkTargetProblem = (rel: string, target: string): string | null => {
   return null;
 };
 
+// Resolve components in filesystem order: missing/../real is dangling, and a
+// symlink component must be followed before a subsequent .. is interpreted.
+const MAX_SYMLINK_TRAVERSALS = 40;
+type ManagedTargetTraversal = {
+  readonly pending: Array<string>;
+  readonly resolved: Array<string>;
+  traversals: number;
+};
+const resolveManagedComponent = (
+  component: string,
+  state: ManagedTargetTraversal,
+  entries: ReadonlyMap<string, ManagedEntry>,
+): boolean => {
+  if (component === '' || component === '.') {
+    return true;
+  }
+  if (component === '..') {
+    return state.resolved.pop() !== undefined;
+  }
+  const path = [...state.resolved, component].join('/');
+  const entry = entries.get(path);
+  if (entry?.kind === 'symlink') {
+    state.traversals += 1;
+    if (
+      state.traversals > MAX_SYMLINK_TRAVERSALS ||
+      symlinkTargetProblem(path, entry.target) !== null
+    ) {
+      return false;
+    }
+    state.pending.unshift(...entry.target.split('/'));
+    return true;
+  }
+  const directory = [...entries.keys()].some((key) =>
+    key.startsWith(`${path}/`),
+  );
+  if (
+    !(directory || entry?.kind === 'file') ||
+    (state.pending.length > 0 && !directory)
+  ) {
+    return false;
+  }
+  state.resolved.push(component);
+  return true;
+};
 const managedTargetExists = (
   target: string,
   entries: ReadonlyMap<string, ManagedEntry>,
-  seen: ReadonlySet<string> = new Set(),
 ): boolean => {
-  if (seen.has(target)) {
-    return false;
+  const state: ManagedTargetTraversal = {
+    pending: target.split('/'),
+    resolved: [],
+    traversals: 0,
+  };
+  while (state.pending.length > 0) {
+    const component = state.pending.shift();
+    if (
+      component !== undefined &&
+      !resolveManagedComponent(component, state, entries)
+    ) {
+      return false;
+    }
   }
-  const entry = entries.get(target);
-  if (entry?.kind === 'symlink') {
-    return managedTargetExists(
-      posix.normalize(posix.join(posix.dirname(target), entry.target)),
-      entries,
-      new Set([...seen, target]),
-    );
-  }
-  return (
-    entry !== undefined ||
-    [...entries.keys()].some(
-      (path) => target === '.' || path.startsWith(`${target}/`),
-    )
-  );
+  return true;
 };
 
 const symlinkTargetProblems = (
@@ -192,9 +233,7 @@ const symlinkTargetProblems = (
       if (problem !== null) {
         return problem;
       }
-      const target = posix.normalize(
-        posix.join(posix.dirname(rel), entry.target),
-      );
+      const target = `${posix.dirname(rel)}/${entry.target}`;
       return requireManagedTarget && !managedTargetExists(target, entries)
         ? `canonical symlink ${rel} targets ${target}, which is missing from the managed payload or forms a symlink cycle`
         : null;
