@@ -82,13 +82,15 @@ exit 1
   );
   chmodSync(sops, EXECUTABLE_MODE);
   process.env.PATH = `${bin}:${originalPath ?? ''}`;
-  globalThis.fetch = (() =>
+  globalThis.fetch = ((input: string | URL | Request) =>
     Promise.resolve(
-      Response.json({
-        // biome-ignore lint/style/useNamingConvention: GitHub's installation response uses snake_case.
-        app_id: 2,
-        account: { login: 'example' },
-      }),
+      String(input).endsWith('/app')
+        ? Response.json({ id: 2, owner: { login: 'example' } })
+        : Response.json({
+            // biome-ignore lint/style/useNamingConvention: GitHub's installation response uses snake_case.
+            app_id: 2,
+            account: { login: 'example' },
+          }),
     )) as unknown as typeof fetch;
   return consumer;
 };

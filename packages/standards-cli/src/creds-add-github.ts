@@ -8,7 +8,7 @@ import { inspectDestinations } from './creds-add-preflight';
 import { resolveContext } from './creds-dest';
 import { verifyGithubAppInstallation } from './creds-github-app-api';
 import {
-  loadOwnedGithubStore,
+  refreshOwnedGithubStore,
   sameGithubApp,
   selectGithubAppForRepo,
 } from './creds-github-apps';
@@ -38,7 +38,11 @@ export const runCredsAddGithub = async (
     return false;
   }
   const storePath = resolveBrokerPath();
-  const loaded = await loadOwnedGithubStore(storePath);
+  const loaded = await refreshOwnedGithubStore(
+    storePath,
+    undefined,
+    context.repo.split('/')[0],
+  );
   if (!loaded.ok) {
     console.error(`standards creds: ${loaded.problem}`);
     return false;

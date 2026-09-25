@@ -57,6 +57,70 @@ export const loadOwnedGithubStore = async (
   return { ok: true, value: migrated };
 };
 
+// Refresh authenticated metadata before selecting by a mutable owner login.
+// Owner changes are committed together, and concurrent credential replacement
+// aborts the refresh rather than attaching stale metadata to a different App.
+export const refreshOwnedGithubStore = async (
+  path: string,
+  lookupOwner: (
+    app: GithubBrokerApp,
+  ) => Promise<GithubAppsResult<string>> = resolveGithubAppOwner,
+  requestedOwner?: string,
+): Promise<GithubAppsResult<BrokerStore>> => {
+  const loaded = await loadOwnedGithubStore(path, lookupOwner);
+  if (!loaded.ok) {
+    return loaded;
+  }
+  const observed = loaded.value.github;
+  const hasDirectMatch = observed.some(
+    (app) => app.owner?.toLowerCase() === requestedOwner?.toLowerCase(),
+  );
+  const results = await Promise.all(
+    observed.map((app) =>
+      hasDirectMatch &&
+      app.owner?.toLowerCase() !== requestedOwner?.toLowerCase()
+        ? Promise.resolve({ ok: true as const, value: app.owner ?? '' })
+        : lookupOwner(app),
+    ),
+  );
+  const failed = results.find((result) => !result.ok);
+  if (failed !== undefined && !failed.ok) {
+    return {
+      ok: false,
+      problem: `cannot refresh authenticated GitHub App owners: ${failed.problem}; keep existing credentials and retry before creating another App`,
+    };
+  }
+  const refreshed = observed.map((app, index) => {
+    const result = results[index];
+    return result?.ok ? { ...app, owner: result.value } : app;
+  });
+  if (refreshed.every((app, index) => app.owner === observed[index]?.owner)) {
+    return loaded;
+  }
+  try {
+    await updateBrokerStore(path, (current) => {
+      if (
+        current.github.length !== observed.length ||
+        !current.github.every((app, index) => {
+          const previous = observed[index];
+          return previous !== undefined && sameGithubApp(app, previous);
+        })
+      ) {
+        throw new Error(
+          'GitHub Apps changed while authenticated owners were refreshed; retry',
+        );
+      }
+      return { ...current, github: refreshed };
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      problem: error instanceof Error ? error.message : String(error),
+    };
+  }
+  return { ok: true, value: await readBrokerStore(path) };
+};
+
 // Private Apps belong to one owner. Selecting by repository owner keeps each
 // owner's credentials separate; installation access is verified before export.
 export const selectGithubAppForRepo = (
@@ -79,10 +143,13 @@ export const selectGithubAppForRepo = (
   const loginHint =
     apps.length === 0
       ? 'no broker GitHub Apps are configured'
-      : `configured owners: ${apps.map((app) => app.owner).join(', ')}`;
+      : `authenticated configured owners: ${apps.map((app) => app.owner).join(', ')}; if an account was renamed, update this checkout origin to the current owner shown here before retrying; do not create a duplicate App for a renamed account`;
   return {
     ok: false,
-    problem: `no broker GitHub App is configured for repository owner ${owner} (${loginHint}); run \`standards creds login github --org ${owner}\` for an organization, or run it without --org while signed in as ${owner}`,
+    problem:
+      apps.length > 0
+        ? `no broker GitHub App matches repository owner ${owner} (${loginHint}); verify the origin and existing App ownership before configuring a new App`
+        : `no broker GitHub App is configured for repository owner ${owner} (${loginHint}); run \`standards creds login github --org ${owner}\` for an organization, or run it without --org while signed in as ${owner}`,
   };
 };
 

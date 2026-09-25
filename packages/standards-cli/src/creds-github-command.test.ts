@@ -103,9 +103,11 @@ describe('GitHub credential commands', () => {
   it('does not touch SOPS when the selected App lacks repository installation', async () => {
     const { consumer, secrets } = setup();
     const before = readFileSync(secrets);
-    globalThis.fetch = ((_input: string | URL | Request, _init?: RequestInit) =>
+    globalThis.fetch = ((input: string | URL | Request, _init?: RequestInit) =>
       Promise.resolve(
-        Response.json({ message: 'Not Found' }, { status: HTTP_NOT_FOUND }),
+        String(input).endsWith('/app')
+          ? Response.json({ id: 2, owner: { login: 'example' } })
+          : Response.json({ message: 'Not Found' }, { status: HTTP_NOT_FOUND }),
       )) as typeof fetch;
     const error = spyOn(console, 'error').mockImplementation(() => undefined);
 
@@ -144,7 +146,9 @@ describe('GitHub credential commands', () => {
       expect.stringContaining('SOPS key path names a mapping'),
     );
   });
+});
 
+describe('GitHub credential replacement race', () => {
   it('does not write an App replaced while installation verification is paused', async () => {
     const { broker, consumer, secrets } = setup();
     const before = readFileSync(secrets);
@@ -153,7 +157,12 @@ describe('GitHub credential commands', () => {
     const verifying = new Promise<void>((resolve) => {
       markVerifying = resolve;
     });
-    globalThis.fetch = (() => {
+    globalThis.fetch = ((input: string | URL | Request) => {
+      if (String(input).endsWith('/app')) {
+        return Promise.resolve(
+          Response.json({ id: 2, owner: { login: 'example' } }),
+        );
+      }
       markVerifying();
       return new Promise<Response>((resolve) => {
         releaseVerification = () => {
