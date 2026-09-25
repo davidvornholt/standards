@@ -19,6 +19,8 @@ import {
   s3PairPaths,
 } from './creds-r2';
 import { readEncryptedKeys, setSopsValues } from './creds-sops';
+import { resolveBrokerPath } from './creds-store';
+import { withBrokerLock } from './creds-store-lock';
 import { refreshDevEnvForSopsWrites } from './dev-env-brokered-refresh';
 
 const DEFAULT_TTL_DAYS = 90;
@@ -80,7 +82,7 @@ const warnOccupiedDestinations = (
   }
 };
 
-export const runCredsAddCloudflare = async (
+const addCloudflareWhileLocked = async (
   consumer: string,
   options: {
     readonly dest: string | undefined;
@@ -196,3 +198,14 @@ export const runCredsAddCloudflare = async (
     addRefreshEvidence(format, context.dest),
   );
 };
+
+// Share the transaction boundary with renewal and duplicate retirement. No
+// contender may mint from an outdated collision check or retire an in-flight
+// token before its destination is durably verified.
+export const runCredsAddCloudflare = (
+  consumer: string,
+  options: Parameters<typeof addCloudflareWhileLocked>[1],
+): Promise<boolean> =>
+  withBrokerLock(resolveBrokerPath(), () =>
+    addCloudflareWhileLocked(consumer, options),
+  );

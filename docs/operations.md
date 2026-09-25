@@ -111,7 +111,7 @@ The version in `packages/standards-cli/package.json` is the release declaration.
 
 After the exact declaring commit passes the `Standards` workflow on `main`, the release workflow publishes through npm trusted publishing, verifies provenance, and creates the matching tag and GitHub Release at that commit.
 
-Publishing runs only while the declaring commit is the tip of `main`. If an unpublished release cannot complete before `main` advances, declare a new version in the fix-forward commit. A version already published to npm can still have its missing tag reconciled by rerunning the original workflow after provenance verification.
+Publication starts from the declaring push, preserving its exact provenance commit while a read-only gate waits for that commit’s successful `Standards` push run. Later merges do not change the checked-out or attested commit. Pending publication runs queue, and each pushed commit has its own quality-gate concurrency group. Rerun the original failed publication to recover its release; an already published npm version is verified before its tag and GitHub Release are reconciled. Inherited and withdrawn versions must have both a tag and a published GitHub Release; those completeness checks query GitHub without looking up npm.
 
 ## Infrastructure
 

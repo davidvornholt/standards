@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { openInBrowser } from './creds-browser';
 import {
-  loadOwnedGithubStore,
+  refreshOwnedGithubStore,
   sameGithubApp,
   upsertGithubApp,
 } from './creds-github-apps';
@@ -115,7 +115,11 @@ export const runCredsLoginGithub = async (
     return false;
   }
   const storePath = resolveBrokerPath();
-  const loaded = await loadOwnedGithubStore(storePath);
+  const loaded = await refreshOwnedGithubStore(
+    storePath,
+    undefined,
+    options.org,
+  );
   if (!loaded.ok) {
     console.error(`standards creds: ${loaded.problem}`);
     return false;

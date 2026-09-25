@@ -4,10 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   loadOwnedGithubStore,
+  refreshOwnedGithubStore,
   selectGithubAppForRepo,
   upsertGithubApp,
 } from './creds-github-apps';
-import { readBrokerStore } from './creds-store';
+import { readBrokerStore, updateBrokerStore } from './creds-store';
 
 const dirs: Array<string> = [];
 const REPLACEMENT_APP_ID = 3;
@@ -140,7 +141,7 @@ describe('GitHub broker App selection', () => {
     expect(missing).toEqual({
       ok: false,
       problem: expect.stringContaining(
-        'no broker GitHub App is configured for repository owner example',
+        'no broker GitHub App matches repository owner example',
       ),
     });
     const ambiguous = selectGithubAppForRepo(
@@ -169,5 +170,64 @@ describe('GitHub broker App selection', () => {
       apps: [...initial, app('second-org', SECOND_ORG_APP_ID)],
       replaced: null,
     });
+  });
+});
+
+describe('authenticated GitHub owner rename recovery', () => {
+  it('refreshes the stored App before selecting an updated organization origin', async () => {
+    const path = storePath();
+    await updateBrokerStore(path, () => ({
+      github: [app('old-org', 1)],
+      cloudflare: [],
+    }));
+    const loaded = await refreshOwnedGithubStore(path, () =>
+      Promise.resolve({ ok: true, value: 'new-org' }),
+    );
+    expect(loaded.ok).toBe(true);
+    const stored = await readBrokerStore(path);
+    expect(selectGithubAppForRepo(stored.github, 'new-org/repo')).toEqual({
+      ok: true,
+      value: app('new-org', 1),
+    });
+    const stale = selectGithubAppForRepo(stored.github, 'old-org/repo');
+    expect(stale.ok).toBe(false);
+    expect(JSON.stringify(stale)).toContain('update this checkout origin');
+    expect(JSON.stringify(stale)).toContain('do not create a duplicate App');
+  });
+
+  it('retains every credential when owner refresh fails or converges to a duplicate account', async () => {
+    const path = storePath();
+    await updateBrokerStore(path, () => ({
+      github: [app('one', 1), app('two', 2)],
+      cloudflare: [],
+    }));
+    const before = readFileSync(path, 'utf8');
+    const failed = await refreshOwnedGithubStore(path, () =>
+      Promise.resolve({ ok: false, problem: 'offline' }),
+    );
+    expect(failed.ok).toBe(false);
+    expect(readFileSync(path, 'utf8')).toBe(before);
+    const duplicate = await refreshOwnedGithubStore(path, () =>
+      Promise.resolve({ ok: true, value: 'same-org' }),
+    );
+    expect(duplicate.ok).toBe(false);
+    expect(readFileSync(path, 'utf8')).toBe(before);
+  });
+
+  it('does not apply an old owner lookup to concurrently replaced credentials', async () => {
+    const path = storePath();
+    await updateBrokerStore(path, () => ({
+      github: [app('old', 1)],
+      cloudflare: [],
+    }));
+    const loaded = await refreshOwnedGithubStore(path, async () => {
+      await updateBrokerStore(path, () => ({
+        github: [app('old', 2)],
+        cloudflare: [],
+      }));
+      return { ok: true, value: 'new' };
+    });
+    expect(loaded.ok).toBe(false);
+    expect((await readBrokerStore(path)).github).toEqual([app('old', 2)]);
   });
 });

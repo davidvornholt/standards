@@ -1,0 +1,8 @@
+paths:
+  .github/workflows/publish-standards-cli.yml:
+    ignore:
+      # GitHub supports queue:max, but the latest actionlint release (1.7.12)
+      # rejects this documented key. Remove when upstream supports it:
+      # https://github.com/rhysd/actionlint/issues/657
+      # The release behavior tests independently require queue:max here.
+      - '^unexpected key "queue" for "concurrency" section\. expected one of "cancel-in-progress", "group"$'

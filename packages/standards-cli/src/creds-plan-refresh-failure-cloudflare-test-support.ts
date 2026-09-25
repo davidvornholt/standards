@@ -43,15 +43,9 @@ type StubFailure = {
   readonly revoke?: string;
 };
 
-type CreationRejectionGate = {
-  oldDeletionObserved: boolean;
-  rejectPendingCreation: (() => void) | null;
-};
-
 const createResponse = (
   targets: ReadonlyArray<string>,
   failure: StubFailure,
-  gate: CreationRejectionGate,
   init: RequestInit | undefined,
 ): Promise<Response> => {
   const body = JSON.parse(String(init?.body)) as { readonly name: string };
@@ -66,22 +60,14 @@ const createResponse = (
         : envelope({ id: `new${target}`, value: `value-${target}` }),
     );
   }
-  return new Promise((_resolve, reject) => {
-    const rejectCreation = () => {
-      reject(new Error(`creation transport failed: ${target}`));
-    };
-    if (gate.oldDeletionObserved) {
-      rejectCreation();
-    } else {
-      gate.rejectPendingCreation = rejectCreation;
-    }
-  });
+  // Renewals hold the shared broker lock, so provider failures must not wait
+  // for a sibling renewal to acquire that same lock and finish its deletion.
+  return Promise.reject(new Error(`creation transport failed: ${target}`));
 };
 
 const deleteResponse = (
   targets: ReadonlyArray<string>,
   failure: StubFailure,
-  gate: CreationRejectionGate,
   url: string,
 ): Promise<Response> => {
   const target = targets.find((candidate) => url.endsWith(`/old${candidate}`));
@@ -89,11 +75,6 @@ const deleteResponse = (
   calls.push(`delete-${tokenId}`);
   if (failure.rejectRevoke !== undefined && target === failure.rejectRevoke) {
     return Promise.reject(new Error(`revocation transport failed: ${target}`));
-  }
-  if (target !== undefined) {
-    gate.oldDeletionObserved = true;
-    gate.rejectPendingCreation?.();
-    gate.rejectPendingCreation = null;
   }
   return Promise.resolve(
     target === failure.revoke
@@ -106,10 +87,6 @@ export const stubRefreshFailureCloudflare = (
   targets: ReadonlyArray<string>,
   failure: StubFailure,
 ): void => {
-  const gate: CreationRejectionGate = {
-    oldDeletionObserved: false,
-    rejectPendingCreation: null,
-  };
   globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? 'GET';
@@ -117,10 +94,10 @@ export const stubRefreshFailureCloudflare = (
       return Promise.resolve(envelope({ id: 'bootstrap', status: 'active' }));
     }
     if (method === 'POST') {
-      return createResponse(targets, failure, gate, init);
+      return createResponse(targets, failure, init);
     }
     if (method === 'DELETE') {
-      return deleteResponse(targets, failure, gate, url);
+      return deleteResponse(targets, failure, url);
     }
     const listed = [
       { id: 'bootstrap', name: 'standards-broker', status: 'active' },

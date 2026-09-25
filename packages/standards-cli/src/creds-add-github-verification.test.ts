@@ -24,7 +24,7 @@ const PRIVATE_KEY = generateKeyPairSync('rsa', {
   .privateKey.export({ format: 'pem', type: 'pkcs1' })
   .toString();
 
-const setup = (): string => {
+const setup = (onlyClientIdDiffers = false): string => {
   const root = mkdtempSync(join(tmpdir(), 'creds-add-github-verify-'));
   roots.push(root);
   const consumer = join(root, 'consumer');
@@ -58,6 +58,7 @@ ${PRIVATE_KEY.split('\n')
 `,
   );
   process.env.STANDARDS_BROKER_FILE = broker;
+  writeFileSync(join(root, 'private-key'), PRIVATE_KEY);
   const bin = join(root, 'bin');
   mkdirSync(bin);
   const sops = join(bin, 'sops');
@@ -70,8 +71,9 @@ if [ "$1" = "edit" ]; then
 fi
 if [ "$1" = "decrypt" ]; then
   case "$3" in
-    *app_id*) printf 'different-app-id' ;;
-    *) printf 'different-private-key' ;;
+    *app_id*) printf '${onlyClientIdDiffers ? '2' : 'different-app-id'}' ;;
+    *client_id*) printf 'different-client-id' ;;
+    *) ${onlyClientIdDiffers ? `cat '${join(root, 'private-key')}'` : "printf 'different-private-key'"} ;;
   esac
   exit 0
 fi
@@ -80,13 +82,15 @@ exit 1
   );
   chmodSync(sops, EXECUTABLE_MODE);
   process.env.PATH = `${bin}:${originalPath ?? ''}`;
-  globalThis.fetch = (() =>
+  globalThis.fetch = ((input: string | URL | Request) =>
     Promise.resolve(
-      Response.json({
-        // biome-ignore lint/style/useNamingConvention: GitHub's installation response uses snake_case.
-        app_id: 2,
-        account: { login: 'example' },
-      }),
+      String(input).endsWith('/app')
+        ? Response.json({ id: 2, owner: { login: 'example' } })
+        : Response.json({
+            // biome-ignore lint/style/useNamingConvention: GitHub's installation response uses snake_case.
+            app_id: 2,
+            account: { login: 'example' },
+          }),
     )) as unknown as typeof fetch;
   return consumer;
 };
@@ -123,4 +127,17 @@ describe('GitHub credential exact-value verification', () => {
       'standards creds: wrote App',
     );
   });
+});
+
+it('verifies the newly provisioned client ID as well as the existing App fields', async () => {
+  const consumer = setup(true);
+  const error = spyOn(console, 'error').mockImplementation(() => undefined);
+  const log = spyOn(console, 'log').mockImplementation(() => undefined);
+  expect(await runCredsAddGithub(consumer, { dest: 'ci:ci.broker_app' })).toBe(
+    false,
+  );
+  expect(error).toHaveBeenCalledWith(
+    'standards creds: the stored SOPS value at ci.broker_app.client_id does not match the selected GitHub App',
+  );
+  expect(log.mock.calls.join(' ')).not.toContain('standards creds: wrote App');
 });

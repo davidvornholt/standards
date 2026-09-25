@@ -133,7 +133,7 @@ const dispositionForGroup = (
     const [first] = group;
     return {
       kind: 'finding',
-      finding: `ambiguous Cloudflare tokens have destination footprints intersecting in ${first?.ref.target}: ${group.map((candidate) => `${candidate.ref.key} (${candidate.accountId}/${candidate.token.id})`).join(', ')}; revoke duplicates manually before plan/apply`,
+      finding: `ambiguous Cloudflare tokens have destination footprints intersecting in ${first?.ref.target}: ${group.map((candidate) => `${candidate.ref.key} (${candidate.accountId}/${candidate.token.id})`).join(', ')}; for same-name duplicates, keep the encrypted key intact and use \`standards creds revoke --account <account-id> --token-id <duplicate-id>\` to retire only a token proven not to be stored; resolve other intersecting destinations before plan/apply`,
     };
   }
   const [entry] = group;

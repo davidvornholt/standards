@@ -96,6 +96,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Setup Bun
@@ -125,6 +126,21 @@ jobs:
             echo "::error::Canonical managed-file checks require @davidvornholt/standards >= $MINIMUM_STANDARDS_VERSION; upgrade package.json and bun.lock before accepting this workflow"
             exit 1
           fi
+
+      # Preserve the installed CLI before checking out a reusable branch. That
+      # branch can change package scripts, Bun configuration, and dependencies.
+      - name: Preserve trusted sync runtime
+        run: |
+          runtime=$(mktemp -d "$RUNNER_TEMP/standards-sync.XXXXXX")
+          cp -RL node_modules "$runtime/node_modules"
+          cp sync-standards.json "$runtime/sync-standards.json"
+          if [ -f sync-standards.local.json ]; then
+            jq -cS . sync-standards.local.json > "$runtime/policy.json"
+          else
+            echo '{}' > "$runtime/policy.json"
+          fi
+          printf '' > "$runtime/bunfig.toml"
+          echo "STANDARDS_SYNC_RUNTIME=$runtime" >> "$GITHUB_ENV"
 
       # Resolve through the action from the trusted pre-sync checkout. Sync
       # replaces managed files, including this action, so no local action may
@@ -179,6 +195,31 @@ jobs:
             echo "BROKER_APP_PRIVATE_KEY="
           } >> "$GITHUB_ENV"
 
+      # Rebase the durable automation branch so maintainer seam edits survive.
+      # A concurrent push is guarded by the exact head lease in the writer step.
+      - name: Prepare reusable sync branch
+        id: sync-base
+        env:
+          SYNC_BASE_REF: ${{ github.ref_name }}
+          SYNC_READ_TOKEN: ${{ github.token }}
+        run: |
+          git() { command git -c core.hooksPath=/dev/null -c core.fsmonitor=false -c commit.gpgsign=false "$@"; }
+          branch=standards-sync/update
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local credential.helper "!f() { echo username=x-access-token; echo \"password=\$SYNC_READ_TOKEN\"; }; f"
+          trap 'git config --unset credential.helper' EXIT
+          git fetch --no-tags origin "$SYNC_BASE_REF"
+          previous=$(git ls-remote --heads origin "refs/heads/$branch" | cut -f1)
+          if [ -n "$previous" ]; then
+            git fetch --no-tags origin "refs/heads/$branch"
+            git switch -c "$branch" "$previous"
+            git rebase "origin/$SYNC_BASE_REF"
+          else
+            git switch -c "$branch"
+          fi
+          echo "previous=$previous" >> "$GITHUB_OUTPUT"
+
       # Forward the validated policy pin explicitly as a second fail-closed
       # boundary. The CLI also reads and validates the same document, so local
       # init/sync commands and this workflow retain one policy owner. The
@@ -188,10 +229,23 @@ jobs:
         env:
           SYNC_POLICY_REF: ${{ needs.policy.outputs.ref }}
         run: |
-          if [ -n "$SYNC_POLICY_REF" ]; then
-            bun standards sync --ref "$SYNC_POLICY_REF"
+          trusted_source="$(jq -er '.upstream | strings | select(length > 0)' "$STANDARDS_SYNC_RUNTIME/sync-standards.json")"
+          branch_source="$(jq -er '.upstream | strings | select(length > 0)' sync-standards.json)"
+          if [ -f sync-standards.local.json ]; then
+            branch_policy="$(jq -cS . sync-standards.local.json)"
           else
-            bun standards sync
+            branch_policy='{}'
+          fi
+          if [[ "$branch_source" != "$trusted_source" || "$branch_policy" != "$(cat "$STANDARDS_SYNC_RUNTIME/policy.json")" ]]; then
+            echo "::error::The reusable sync branch changes source authority or sync policy; review and merge that policy change separately before retrying."
+            exit 1
+          fi
+          cd "$STANDARDS_SYNC_RUNTIME"
+          cli=node_modules/@davidvornholt/standards/src/cli.ts
+          if [ -n "$SYNC_POLICY_REF" ]; then
+            bun --no-env-file "$cli" sync --from "$trusted_source" --dir "$GITHUB_WORKSPACE" --ref "$SYNC_POLICY_REF"
+          else
+            bun --no-env-file "$cli" sync --from "$trusted_source" --dir "$GITHUB_WORKSPACE"
           fi
 
       # Canonical package manifests can change dependency ranges after the
@@ -199,12 +253,14 @@ jobs:
       # whether the mirror produced a change, so the sync branch remains
       # installable with --frozen-lockfile.
       - name: Refresh consumer lockfile
-        run: bun install --lockfile-only --ignore-scripts
+        run: bun install --lockfile-only --ignore-scripts --no-env-file --config "$STANDARDS_SYNC_RUNTIME/bunfig.toml"
 
       - name: Detect mirror changes
         id: mirror
+        env:
+          SYNC_BASE_REF: ${{ github.ref_name }}
         run: |
-          if [ -z "$(git status --porcelain)" ]; then
+          if [ -z "$(git status --porcelain)" ] && git diff --quiet "origin/$SYNC_BASE_REF"; then
             echo "Already in sync with upstream standards; nothing to open."
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
@@ -230,16 +286,17 @@ jobs:
         if: steps.mirror.outputs.changed == 'true'
         env:
           BRANCH_WRITER_TOKEN: ${{ steps.branch-writer-token.outputs.token }}
+          EXPECTED_SYNC_HEAD: ${{ steps.sync-base.outputs.previous }}
         run: |
-          branch="standards-sync/$(date -u +%Y%m%d%H%M%S)"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git() { command git -c core.hooksPath=/dev/null -c core.fsmonitor=false -c commit.gpgsign=false "$@"; }
+          branch=standards-sync/update
           git config --local credential.helper "!f() { echo username=x-access-token; echo \"password=\$BRANCH_WRITER_TOKEN\"; }; f"
-          git switch -c "$branch"
+          trap 'git config --unset credential.helper' EXIT
           git add -A
-          git commit -m "chore: sync standards from upstream"
-          git push --set-upstream origin "$branch"
-          git config --unset credential.helper
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: sync standards from upstream"
+          fi
+          git push --force-with-lease="refs/heads/$branch:$EXPECTED_SYNC_HEAD" --set-upstream origin "$branch"
           echo "branch=$branch" >> "$GITHUB_OUTPUT"
 
       # `gh pr create` is left to default `--base` to the repository's default
@@ -251,6 +308,11 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.pr-token.outputs.token }}
         run: |
+          existing=$(gh pr list --head "standards-sync/update" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            echo "Updated existing standards sync PR #$existing"
+            exit 0
+          fi
           gh pr create \
             --head "${{ steps.sync-branch.outputs.branch }}" \
             --title "chore: sync standards from upstream" \

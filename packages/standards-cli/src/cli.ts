@@ -454,9 +454,9 @@ type PruneOutcome =
 
 // Two things the prune pass must never do: resolve through a symlink it (or an
 // older CLI's lock) put in the parent chain, and recursively delete a
-// destination the consumer turned into a directory. Every answer is decided
-// against the shape the mirror leaves behind, not the shape on disk right now,
-// so `--dry-run` predicts what the matching real run does.
+// destination the consumer turned into a directory. Ancestor inspection uses
+// planned canonical replacements so dry-run and application classify the same
+// stale lock entries.
 const pruneOutcome = async (
   consumer: string,
   rel: string,
@@ -768,7 +768,7 @@ const runSync = async (
 
 // Offline drift detection: every locked file must still match its hash. Catches
 // local edits or deletions of canonical files. Does NOT detect upstream moving
-// on — see the "known limitation" in the standards repository README.
+// on. Mirror preconditions reject those ancestor conflicts before any writes.
 const runCheck = async (consumer: string): Promise<boolean> => {
   const lock = await readLock(consumer);
   if (lock === null || Object.keys(lock.files).length === 0) {

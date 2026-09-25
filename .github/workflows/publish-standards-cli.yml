@@ -4,11 +4,9 @@ name: Publish standards CLI
 # for the canonical quality gate to finish so publishing is hard-gated on the
 # exact main-branch commit that is packaged and tagged.
 on:
-  workflow_run:
-    workflows:
-      - Standards
-    types:
-      - completed
+  push:
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -20,15 +18,45 @@ env:
 
 concurrency:
   group: publish-standards-cli
+  queue: max
   cancel-in-progress: false
 
 jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      actions: read
+    steps:
+      - name: Wait for the exact commit quality gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          for _attempt in $(seq 1 240); do
+            runs="$(gh api "repos/$GH_REPO/actions/workflows/standards.yml/runs?head_sha=$RELEASE_SHA&event=push&branch=main&per_page=100")"
+            run="$(jq -c --arg sha "$RELEASE_SHA" --arg repo "$GH_REPO" '
+              [.workflow_runs[] | select(
+                .head_sha == $sha and .event == "push" and
+                .head_branch == "main" and .head_repository.full_name == $repo and
+                .path == ".github/workflows/standards.yml"
+              )] | max_by(.id) // null' <<<"$runs")"
+            if [[ "$run" != "null" && "$(jq -r .status <<<"$run")" == "completed" ]]; then
+              if [[ "$(jq -r .conclusion <<<"$run")" == "success" ]]; then
+                echo "Standards passed for $RELEASE_SHA"
+                exit 0
+              fi
+              echo "::error::Standards did not pass for $RELEASE_SHA"
+              exit 1
+            fi
+            sleep 10
+          done
+          echo "::error::Timed out waiting for Standards at $RELEASE_SHA"
+          exit 1
+
   publish:
-    if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.head_branch == 'main' &&
-      github.event.workflow_run.head_repository.full_name == github.repository
+    needs: gate
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -37,18 +65,18 @@ jobs:
     outputs:
       declared: ${{ steps.declaration.outputs.declared }}
       tag: ${{ steps.release.outputs.tag }}
-      sha: ${{ github.event.workflow_run.head_sha }}
+      sha: ${{ github.sha }}
     steps:
       - name: Checkout tested commit
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: false
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.sha }}
 
       - name: Verify tested commit is on main
         env:
-          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+          RELEASE_SHA: ${{ github.sha }}
         run: |
           git fetch --no-tags origin main
           if ! git merge-base --is-ancestor "$RELEASE_SHA" origin/main; then
@@ -67,11 +95,11 @@ jobs:
       # commit that inherits or withdraws a version an earlier commit declared
       # releases nothing itself, so it publishes nothing and contacts no
       # registry; the guards below only check that the release it stands on
-      # actually completed, from tags this checkout already carries.
+      # actually completed, from tags and the read-only GitHub release API.
       - name: Determine release declaration
         id: declaration
         env:
-          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+          RELEASE_SHA: ${{ github.sha }}
         run: |
           version="$(jq -er '.version | select(type == "string")' "$PACKAGE_PATH")"
           parent="$(git rev-parse --verify "$RELEASE_SHA^" 2>/dev/null || true)"
@@ -114,15 +142,32 @@ jobs:
           } >>"$GITHUB_OUTPUT"
 
       # An inherited version whose own release never completed would otherwise
-      # be skipped in silence by every later commit. The tag is written last, so
-      # its absence is the durable evidence that the release is unfinished.
+      # be skipped in silence by every later commit. Both the tag and published
+      # Release must exist; a tag alone is the recoverable tag-only state.
       - name: Verify the inherited release completed
         if: steps.declaration.outputs.declared == 'false'
         env:
           VERSION: ${{ steps.declaration.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           if ! git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
             echo "::error::$PACKAGE_PATH declares $VERSION but tag v$VERSION does not exist, so that release never completed. If $VERSION reached npm, re-run the declaring commit's failed Publish standards CLI run: it verifies the published provenance and writes the tag. If it did not, that version is spent, so declare a new version on current main."
+            exit 1
+          fi
+
+          tag_sha="$(git rev-list -n 1 "v$VERSION")"
+          release_state=tag-only
+          if is_draft="$(gh release view "v$VERSION" --json isDraft --jq .isDraft)"; then
+            if [[ "$is_draft" == "false" ]]; then
+              release_state=published
+            else
+              release_state=draft
+            fi
+          fi
+          action="$(node packages/standards-cli/scripts/release-recovery.ts \
+            github-state "$release_state" "$tag_sha" "$tag_sha")"
+          if [[ "$action" != "none" ]]; then
+            echo "::error::Release v$VERSION is incomplete despite its tag. Re-run the declaring commit's failed Publish standards CLI run to reconcile the GitHub Release."
             exit 1
           fi
 
@@ -134,10 +179,27 @@ jobs:
         if: steps.declaration.outputs.withdrawn_version != ''
         env:
           WITHDRAWN_VERSION: ${{ steps.declaration.outputs.withdrawn_version }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           if ! git rev-parse -q --verify "refs/tags/v$WITHDRAWN_VERSION" \
             >/dev/null; then
             echo "::error::This commit withdraws $WITHDRAWN_VERSION but tag v$WITHDRAWN_VERSION does not exist, so that release never completed. Check the npm registry for $PACKAGE_NAME@$WITHDRAWN_VERSION: if it is published, re-run the failed Publish standards CLI run of the commit that declared $WITHDRAWN_VERSION, whose frozen GITHUB_SHA still names that commit, so it verifies the published provenance and reconciles both the tag and the Release; if it is not, $WITHDRAWN_VERSION is free to declare again."
+            exit 1
+          fi
+
+          tag_sha="$(git rev-list -n 1 "v$WITHDRAWN_VERSION")"
+          release_state=tag-only
+          if is_draft="$(gh release view "v$WITHDRAWN_VERSION" --json isDraft --jq .isDraft)"; then
+            if [[ "$is_draft" == "false" ]]; then
+              release_state=published
+            else
+              release_state=draft
+            fi
+          fi
+          action="$(node packages/standards-cli/scripts/release-recovery.ts \
+            github-state "$release_state" "$tag_sha" "$tag_sha")"
+          if [[ "$action" != "none" ]]; then
+            echo "::error::Release v$WITHDRAWN_VERSION is incomplete despite its tag. Re-run the declaring commit's failed Publish standards CLI run to reconcile the GitHub Release."
             exit 1
           fi
 
@@ -204,20 +266,18 @@ jobs:
             echo "publish=$publish"
           } >>"$GITHUB_OUTPUT"
 
-      # npm builds provenance from GITHUB_SHA, which for a workflow_run event is
-      # the tip of the default branch, not the commit this run checked out and
-      # packages. They agree only while the declaring commit is still that tip.
-      # Publishing when they diverge would attest a tree the tarball does not
-      # contain, so this gates the publish rather than the declaration: a run
-      # that publishes nothing produces no attestation to get wrong.
-      - name: Verify the declaring commit is still the tip of main
+      # The push event freezes GITHUB_SHA to the declaring commit even if main
+      # advances while its quality gate runs. Keep the provenance equality
+      # assertion as a final precondition before packing or publishing.
+      - name: Verify the declaring commit matches provenance
         if: steps.release.outputs.publish == 'true'
         env:
           PROVENANCE_SHA: ${{ github.sha }}
-          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+          RELEASE_SHA: ${{ github.sha }}
         run: |
-          if [[ "$PROVENANCE_SHA" != "$RELEASE_SHA" ]]; then
-            echo "::error::npm provenance would attest $PROVENANCE_SHA but this run packages $RELEASE_SHA. Main advanced past the declaring commit, so declare a new version on current main instead of re-running this one."
+          packaged_sha="$(git rev-parse HEAD)"
+          if [[ "$PROVENANCE_SHA" != "$RELEASE_SHA" || "$packaged_sha" != "$RELEASE_SHA" ]]; then
+            echo "::error::npm provenance would attest $PROVENANCE_SHA but checkout $packaged_sha does not match the tested release commit $RELEASE_SHA."
             exit 1
           fi
 
@@ -260,7 +320,7 @@ jobs:
       - name: Verify existing package provenance
         if: steps.release.outputs.publish == 'false'
         env:
-          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+          RELEASE_SHA: ${{ github.sha }}
           VERSION: ${{ steps.declaration.outputs.version }}
         run: |
           audit_dir="$RUNNER_TEMP/standards-cli-provenance-audit"

@@ -8,7 +8,8 @@ import type { PlannedAction } from './creds-plan-types';
 import { destinationWrites, s3AccessKeyPath, s3PairPaths } from './creds-r2';
 import { inspectSopsScalarDestination, setSopsValues } from './creds-sops';
 import { verifySopsStoredValue } from './creds-sops-value';
-import type { CloudflareBrokerAccount } from './creds-store';
+import { type CloudflareBrokerAccount, resolveBrokerPath } from './creds-store';
+import { withBrokerLock } from './creds-store-lock';
 import { resolveTargetRelResult } from './creds-target';
 import type { BrokeredRefreshEvidence } from './dev-env-brokered-refresh';
 
@@ -63,7 +64,7 @@ const inspectRenewDestinations = async (
     : null;
 };
 
-export const renewPlannedToken = async (
+const renewWhileLocked = async (
   consumer: string,
   account: CloudflareBrokerAccount,
   action: RenewAction,
@@ -151,3 +152,14 @@ export const renewPlannedToken = async (
     refreshEvidence(action, 'verified'),
   );
 };
+
+// Duplicate retirement uses this same lock. Hold it before minting until the
+// replacement is durably verified and the old token's deletion has finished.
+export const renewPlannedToken = (
+  consumer: string,
+  account: CloudflareBrokerAccount,
+  action: RenewAction,
+): Promise<RenewPlannedTokenResult> =>
+  withBrokerLock(resolveBrokerPath(), () =>
+    renewWhileLocked(consumer, account, action),
+  );

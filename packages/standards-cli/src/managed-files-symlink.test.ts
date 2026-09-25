@@ -74,9 +74,9 @@ describe('symlinks as managed paths', () => {
   });
 
   it('restores a link a consumer replaced with an empty directory', () => {
-    // An empty directory holds no consumer work, so the adoption guard has
-    // nothing to protect and the link is simply restored. A directory with
-    // anything in it is refused instead — see `managed-files-refusal.test.ts`.
+    // The guard tracks non-directory entries. An empty directory is restored
+    // to the link; unowned files or links are refused. See the adoption cases
+    // in `managed-files-adoption.test.ts`.
     const up = buildUpstream();
     const { consumer } = initConsumer(up);
     rmSync(join(consumer, LINK));

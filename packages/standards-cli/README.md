@@ -230,7 +230,13 @@ To delete one Cloudflare token outside normal reconciliation:
 bun standards creds revoke --account <account-id> --token-id <token-id>
 ```
 
-Bootstrap credentials and tokens still owned by an active repository are refused.
+For same-name brokered duplicates left by interrupted renewal, keep the stored key intact and select the unused token ID. `revoke` proves which credential is stored, refuses that token, and rechecks the destination before deleting the selected duplicate. Unreadable or unidentifiable stored credentials leave every token intact. A destination already missing its key can also be recovered after successful decryption.
+
+Bootstrap credentials and singular tokens still owned by an active repository are refused.
+
+### Prepare existing consumers for GitHub App client IDs
+
+`standards creds add github --dest ci:ci.broker_app` writes and verifies `app_id`, `client_id`, and `private_key` together. Run it in each existing consumer, mirror the new `client_id` key with a placeholder in its `secrets/ci.example.yaml`, and commit both files before adopting a workflow that resolves `broker_app.client_id` and passes `client-id` to `actions/create-github-app-token@v3`. The numeric `app_id` remains available while existing workflows are migrated. Do not remove it until every local and canonical caller has switched. Canonical workflows continue using `app-id` until consumer provisioning is complete.
 
 ## screenshots
 

@@ -88,7 +88,7 @@ describe('standards CLI release completion guards', () => {
     );
     expect(completion.if).toBe("steps.declaration.outputs.declared == 'false'");
     const environment = stepEnvironment(completion);
-    expect([...environment.keys()].sort()).toEqual(['VERSION']);
+    expect([...environment.keys()].sort()).toEqual(['GH_TOKEN', 'VERSION']);
     expect(environment.get('VERSION')).toBe(
       githubExpression('steps.declaration.outputs.version'),
     );
@@ -109,7 +109,10 @@ describe('standards CLI release completion guards', () => {
       "steps.declaration.outputs.withdrawn_version != ''",
     );
     const environment = stepEnvironment(withdrawal);
-    expect([...environment.keys()].sort()).toEqual(['WITHDRAWN_VERSION']);
+    expect([...environment.keys()].sort()).toEqual([
+      'GH_TOKEN',
+      'WITHDRAWN_VERSION',
+    ]);
     expect(environment.get('WITHDRAWN_VERSION')).toBe(
       githubExpression('steps.declaration.outputs.withdrawn_version'),
     );
@@ -126,17 +129,17 @@ describe('standards CLI release completion guards', () => {
     expect(withdrawal.run).toContain('exit 1');
   });
 
-  it('refuses to publish once main advanced past the declaring commit', () => {
+  it('binds publishing provenance to the frozen push commit', () => {
     const tip = workflowStep(
       publishJob(),
-      'Verify the declaring commit is still the tip of main',
+      'Verify the declaring commit matches provenance',
     );
     // The property protected is a precondition of publishing, not of declaring:
     // a run that only recovers provenance must not be failed by it.
     expect(tip.if).toBe("steps.release.outputs.publish == 'true'");
     const names = workflowStepNames(publishJob());
     const tipIndex = names.indexOf(
-      'Verify the declaring commit is still the tip of main',
+      'Verify the declaring commit matches provenance',
     );
     // It reads `steps.release.outputs.publish`, so it has to follow the step
     // that writes it; it is a cheap precondition of the pack and the publish, so
@@ -154,9 +157,7 @@ describe('standards CLI release completion guards', () => {
     expect(environment.get('PROVENANCE_SHA')).toBe(
       githubExpression('github.sha'),
     );
-    expect(environment.get('RELEASE_SHA')).toBe(
-      githubExpression('github.event.workflow_run.head_sha'),
-    );
+    expect(environment.get('RELEASE_SHA')).toBe(githubExpression('github.sha'));
     expect(tip.run).toContain('"$PROVENANCE_SHA" != "$RELEASE_SHA"');
     expect(tip.run).toContain('exit 1');
   });
