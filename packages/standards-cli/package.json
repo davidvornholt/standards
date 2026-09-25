@@ -52,7 +52,6 @@
     "src/creds-plan-report.ts",
     "src/creds-plan-run.ts",
     "src/creds-plan-revoke.ts",
-    "src/creds-plan-types.ts",
     "src/creds-plan-unmanaged.ts",
     "src/creds-prompt.ts",
     "src/creds-r2.ts",

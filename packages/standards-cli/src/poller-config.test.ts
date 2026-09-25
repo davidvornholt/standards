@@ -128,16 +128,20 @@ describe('parsePollerConfig', () => {
 });
 
 describe('parsePollerConfig problem aggregation', () => {
-  it('reports type and capacity problems for an oversized mixed array', () => {
+  it('reports every observable problem in an oversized mixed array', () => {
     const repos: ReadonlyArray<unknown> = [
       ...Array.from({ length: 12 }, (_, index) => `owner/repo-${index + 1}`),
       null,
+      'bad-repo',
+      'owner/repo-1',
     ];
     expect(
       parsePollerConfig({ ...validConfig(), repos }, CONFIG_DIR).problems,
     ).toEqual([
       'poller config "repos" supports at most 12 repositories at the one-minute polling cadence; reduce the list or split it across pollers with independent GitHub API budgets',
       'poller config "repos" must be a string array',
+      'poller config "repos" entries must be "owner/repo": bad-repo',
+      'poller config "repos" entries must be unique',
     ]);
   });
 });

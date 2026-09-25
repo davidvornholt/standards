@@ -6,11 +6,12 @@ import process from 'node:process';
 import { runCredsLoginGithub } from './creds-login-github';
 import { type GithubBrokerApp, readBrokerStore } from './creds-store';
 import { withBrokerLock } from './creds-store-lock';
+// biome-ignore lint/performance/noNamespaceImport: spyOn needs the module object to observe the real lock inspection without replacing its behavior.
+import * as lockInspection from './creds-store-lock-inspection';
 
 const dirs: Array<string> = [];
 const originalBroker = process.env.STANDARDS_BROKER_FILE;
 const CONVERTED_APP_ID = 41;
-const LOCK_ATTEMPT_MS = 25;
 const PAST_DEFAULT_TIMEOUT_MS = 11_000;
 
 const brokerPath = (): string => {
@@ -52,6 +53,7 @@ describe('GitHub App login with a live broker holder', () => {
     });
     await holderStarted.promise;
     const initialNow = Date.now();
+    const lockAttemptStarted = Promise.withResolvers<void>();
     let deadlineInitialized = false;
     const clock = spyOn(Date, 'now').mockImplementation(() => {
       if (!deadlineInitialized) {
@@ -59,6 +61,17 @@ describe('GitHub App login with a live broker holder', () => {
         return initialNow;
       }
       return initialNow + PAST_DEFAULT_TIMEOUT_MS;
+    });
+    const inspect = lockInspection.inspectBrokerLock;
+    const inspection = spyOn(
+      lockInspection,
+      'inspectBrokerLock',
+    ).mockImplementation(async (...args) => {
+      const availability = await inspect(...args);
+      if (availability === 'live') {
+        lockAttemptStarted.resolve();
+      }
+      return availability;
     });
     const log = spyOn(console, 'log').mockImplementation(() => undefined);
     try {
@@ -71,7 +84,7 @@ describe('GitHub App login with a live broker holder', () => {
           openInBrowser: () => undefined,
         },
       );
-      await new Promise((resolve) => setTimeout(resolve, LOCK_ATTEMPT_MS));
+      await lockAttemptStarted.promise;
 
       expect(deadlineInitialized).toBe(true);
       expect((await readBrokerStore(path)).github).toEqual([]);
@@ -82,6 +95,7 @@ describe('GitHub App login with a live broker holder', () => {
     } finally {
       holderRelease.resolve();
       await holder;
+      inspection.mockRestore();
       clock.mockRestore();
       log.mockRestore();
     }

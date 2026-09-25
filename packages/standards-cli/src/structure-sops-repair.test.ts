@@ -72,7 +72,7 @@ const withMetadata = (yaml: string, recipients: string): string =>
 
 describe('required SOPS scalar types', () => {
   it.each(REQUIRED_TYPE_CASES)(
-    'rejects complete type:%s envelope at %s when its type is %s',
+    'rejects complete envelope for key %s at %s when its scalar type is %s',
     async (key, path, type) => {
       const dir = buildSecrets();
       const typed = CI_SECRETS_YAML.replace(
