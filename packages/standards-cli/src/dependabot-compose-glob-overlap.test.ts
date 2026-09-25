@@ -196,3 +196,53 @@ describe('Dependabot Ruby glob compatibility', () => {
     expect(result.composed).not.toBeNull();
   });
 });
+
+describe('Dependabot FNM_DOTMATCH pseudo-entry aliases', () => {
+  // Differential corpus checked with Ruby Dir.glob(pattern, File::FNM_DOTMATCH).
+  it.each([
+    ['/packages/?', '/packages'],
+    ['/packages/*', '/packages'],
+    ['/packages/[.]', '/packages'],
+    ['/packages/?/nested', '/packages/nested'],
+    ['/packages/**/*', '/packages'],
+    ['/packages/**/?/nested', '/packages/nested'],
+    ['/*', '/'],
+  ])('rejects %s aliasing %s', (glob, concrete) => {
+    const result = composeDependabot(
+      baseWithTarget(`    directories: ['${glob}']`),
+      localWithTarget(`    directory: ${concrete}`),
+    );
+    expect(result.problems.join(' ')).toContain('overlaps');
+  });
+
+  it.each(['/packages/{a,b}/*', '/packages/{a,b}/?', '/packages/{a,b}/[x]'])(
+    'rejects unsupported activated brace expansion %s',
+    (glob) => {
+      const result = composeDependabot(
+        baseWithTarget(`    directories: ['${glob}']`),
+        localWithTarget('    directory: /packages/a/x'),
+      );
+      expect(result.problems.join(' ')).toContain(
+        'brace expansion is unsupported',
+      );
+      expect(result.composed).toBeNull();
+    },
+  );
+});
+
+it.each([
+  ['/packages/*/*', '/packages'],
+  ['/packages/[.]/nested/[.]', '/packages/nested'],
+  ['/packages/**/nested/*', '/packages/nested'],
+  ['/packages/[a]/nested/*', '/packages/a/nested'],
+])(
+  'does not reintroduce dot entries after the first scan: %s',
+  (glob, concrete) => {
+    const result = composeDependabot(
+      baseWithTarget(`    directories: ['${glob}']`),
+      localWithTarget(`    directory: ${concrete}`),
+    );
+    expect(result.problems).toEqual([]);
+    expect(result.composed).not.toBeNull();
+  },
+);

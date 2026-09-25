@@ -110,6 +110,17 @@ export const updateTarget = (
   const rawDirectories: ReadonlyArray<string> = hasDirectory
     ? [directory as string]
     : (directories as ReadonlyArray<string>);
+  if (
+    hasDirectories &&
+    rawDirectories.some(
+      (path) =>
+        isDependabotGlob(path) && (path.includes('{') || path.includes('}')),
+    )
+  ) {
+    problems.push(
+      `${label}.directories brace expansion is unsupported; list each alternative explicitly`,
+    );
+  }
   const normalized = [...new Set(rawDirectories)].sort();
   const normalizedDirectories = [
     ...new Set(normalized.map(normalizeDependabotDirectory)),

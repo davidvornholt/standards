@@ -15,7 +15,7 @@ type Automaton = {
   readonly edges: ReadonlyArray<Edge>;
 };
 
-const compileDirectory = (
+const compilePattern = (
   directory: string,
   supportsGlobs: boolean,
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Ruby glob tokens have distinct NFA transitions that are clearest in one ordered parser.
@@ -94,15 +94,11 @@ const compileDirectory = (
   return { accept: current, edges };
 };
 
-export const directoriesOverlap = (
-  leftDirectory: string,
-  leftSupportsGlobs: boolean,
-  rightDirectory: string,
-  rightSupportsGlobs: boolean,
+const automataOverlap = (
+  left: Automaton,
+  right: Automaton,
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: The product walk must process both automata's epsilon and consuming transitions together.
 ): boolean => {
-  const left = compileDirectory(leftDirectory, leftSupportsGlobs);
-  const right = compileDirectory(rightDirectory, rightSupportsGlobs);
   const pending: Array<readonly [number, number]> = [[0, 0]];
   const visited = new Set<string>();
   for (const [leftState, rightState] of pending) {
@@ -137,3 +133,99 @@ export const directoriesOverlap = (
   }
   return false;
 };
+
+const dotAliasScan = (segments: ReadonlyArray<string>) => {
+  const firstScan = segments.findIndex((segment) =>
+    compilePattern(segment, true).edges.some(
+      (edge) => edge.matcher === null || edge.matcher.kind !== 'literal',
+    ),
+  );
+  let aliasIndex = firstScan;
+  while (segments[aliasIndex] === '**' && aliasIndex < segments.length - 1) {
+    aliasIndex += 1;
+  }
+  return { firstScan, aliasIndex };
+};
+
+const compileDirectory = (
+  directory: string,
+  supportsGlobs: boolean,
+): Automaton => {
+  if (!supportsGlobs || directory === '/') {
+    return compilePattern(directory, supportsGlobs);
+  }
+  const edges: Array<Edge> = [];
+  let current = 0;
+  let states = 1;
+  const segments = directory.split('/').slice(1);
+  const { firstScan, aliasIndex } = dotAliasScan(segments);
+  let aliasStart = 0;
+  for (const [index, segment] of segments.entries()) {
+    if (index === firstScan) {
+      aliasStart = current;
+    }
+    if (segment === '**' && index < segments.length - 1) {
+      const loop = states;
+      states += 1;
+      edges.push({ from: current, to: loop, matcher: null });
+      current = loop;
+      const part = compilePattern('/*', true);
+      const offset = states;
+      states += part.accept + 1;
+      edges.push(
+        { from: current, to: offset, matcher: null },
+        ...part.edges.map((edge) => ({
+          ...edge,
+          from: edge.from + offset,
+          to: edge.to + offset,
+        })),
+        { from: offset + part.accept, to: current, matcher: null },
+      );
+    } else {
+      const part = compilePattern(`/${segment}`, true);
+      const offset = states;
+      states += part.accept + 1;
+      edges.push(
+        { from: current, to: offset, matcher: null },
+        ...part.edges.map((edge) => ({
+          ...edge,
+          from: edge.from + offset,
+          to: edge.to + offset,
+        })),
+      );
+      current = offset + part.accept;
+      if (
+        index === aliasIndex &&
+        automataOverlap(
+          compilePattern(segment, true),
+          compilePattern('.', false),
+        )
+      ) {
+        // Ruby sets FNM_GLOB_SKIPDOT after its first directory scan. A
+        // recursive prefix may match zero directories in that same scan;
+        // after consuming a child it cannot return to this alias start.
+        edges.push({ from: aliasStart, to: current, matcher: null });
+      }
+    }
+  }
+  const compiled = { accept: current, edges };
+  if (automataOverlap(compiled, { accept: 0, edges: [] })) {
+    edges.push({
+      from: 0,
+      to: current,
+      matcher: { kind: 'literal', value: '/'.codePointAt(0) ?? 0 },
+    });
+  }
+  return compiled;
+};
+
+export const directoriesOverlap = (
+  leftDirectory: string,
+  leftSupportsGlobs: boolean,
+  rightDirectory: string,
+  rightSupportsGlobs: boolean,
+): boolean =>
+  automataOverlap(
+    compileDirectory(leftDirectory, leftSupportsGlobs),
+    compileDirectory(rightDirectory, rightSupportsGlobs),
+  );
