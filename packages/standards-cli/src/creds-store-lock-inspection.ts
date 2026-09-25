@@ -1,4 +1,4 @@
-import { readdir, readFile, rmdir, stat, unlink } from 'node:fs/promises';
+import { lstat, readdir, readFile, rmdir, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isRecord } from './github-settings-parse';
 
@@ -51,7 +51,11 @@ const readExistingGeneration = async (
   const entryPath = join(lockPath, entryName);
   let modifiedAt: number;
   try {
-    modifiedAt = (await stat(entryPath)).mtimeMs;
+    const entry = await lstat(entryPath);
+    if (!entry.isFile()) {
+      return { kind: 'unknown' };
+    }
+    modifiedAt = entry.mtimeMs;
   } catch (error) {
     return missingOr(error, { kind: 'unknown' });
   }
@@ -65,8 +69,16 @@ const readExistingGeneration = async (
   ) {
     return incomplete;
   }
+  let raw: string;
   try {
-    const decoded: unknown = JSON.parse(await readFile(entryPath, 'utf8'));
+    raw = await readFile(entryPath, 'utf8');
+  } catch (error) {
+    // Only a vanished regular holder permits immediate retry. An I/O error
+    // cannot establish that a stale holder is malformed or safe to reclaim.
+    return missingOr(error, { kind: 'unknown' });
+  }
+  try {
+    const decoded: unknown = JSON.parse(raw);
     const generation = entryName.slice(
       HOLDER_PREFIX.length,
       -HOLDER_SUFFIX.length,
@@ -74,8 +86,8 @@ const readExistingGeneration = async (
     return isRecord(decoded) && decoded.generation === generation
       ? { entryPath, kind: 'valid', modifiedAt }
       : incomplete;
-  } catch (error) {
-    return missingOr(error, incomplete);
+  } catch {
+    return incomplete;
   }
 };
 
