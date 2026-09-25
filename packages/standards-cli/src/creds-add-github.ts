@@ -26,9 +26,11 @@ export const runCredsAddGithub = async (
     return false;
   }
   const appIdPath = `${context.dest.key}.app_id`;
+  const clientIdPath = `${context.dest.key}.client_id`;
   const privateKeyPath = `${context.dest.key}.private_key`;
   const blocked = await inspectDestinations(consumer, context.rel, [
     appIdPath,
+    clientIdPath,
     privateKeyPath,
   ]);
   if (blocked.problem !== null) {
@@ -54,7 +56,7 @@ export const runCredsAddGithub = async (
     console.error(`standards creds: ${installation.problem}`);
     return false;
   }
-  const { appId, privateKey, slug } = selected.value;
+  const { appId, clientId, privateKey, slug } = selected.value;
   let writeResult:
     | { readonly ok: true }
     | { readonly ok: false; readonly problem: string };
@@ -75,6 +77,7 @@ export const runCredsAddGithub = async (
       }
       return setSopsValues(consumer, context.rel, [
         { path: appIdPath, value: String(appId) },
+        { path: clientIdPath, value: clientId },
         { path: privateKeyPath, value: privateKey },
       ]);
     });
@@ -89,6 +92,7 @@ export const runCredsAddGithub = async (
   }
   const verified = [
     { path: appIdPath, value: String(appId) },
+    { path: clientIdPath, value: clientId },
     { path: privateKeyPath, value: privateKey },
   ].map(({ path, value }) => ({
     path,
@@ -109,7 +113,7 @@ export const runCredsAddGithub = async (
     return false;
   }
   console.log(
-    `standards creds: wrote App ${slug} credentials to ${context.rel} at ${context.dest.key}.{app_id,private_key}`,
+    `standards creds: wrote App ${slug} credentials to ${context.rel} at ${context.dest.key}.{app_id,client_id,private_key}`,
   );
   console.log(
     '  workflows mint short-lived installation tokens from these at runtime (actions/create-github-app-token), scoped per repository and permission',
