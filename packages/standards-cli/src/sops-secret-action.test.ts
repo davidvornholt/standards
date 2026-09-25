@@ -49,7 +49,7 @@ const UNAVAILABLE_SCENARIOS: ReadonlyArray<UnavailableScenario> = [
   {
     label: 'the SOPS download fails',
     options: { curlStatus: 22 },
-    reason: 'Downloading SOPS v3.13.2 for linux/amd64 failed',
+    reason: 'Downloading SOPS v3.13.3 for linux/amd64 failed',
     failsAt: 'install',
   },
   {

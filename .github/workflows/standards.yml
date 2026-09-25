@@ -150,7 +150,7 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v4
         with:
-          just-version: "1.57.0"
+          just-version: "1.58.0"
 
       - name: Detect browser a11y suite
         id: a11y
