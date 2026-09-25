@@ -206,7 +206,8 @@ const managedTargetExists = (
   const state: ManagedTargetTraversal = {
     pending: target.split('/'),
     resolved: [],
-    traversals: 0,
+    // The original managed symlink also consumes one kernel traversal.
+    traversals: 1,
   };
   while (state.pending.length > 0) {
     const component = state.pending.shift();

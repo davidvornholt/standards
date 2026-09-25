@@ -132,3 +132,32 @@ it.each([
     expect(result.stderr).toContain('missing from the managed payload');
   },
 );
+
+const TRAVERSABLE_TARGET_LINKS = 39;
+const EXCESSIVE_TARGET_LINKS = 40;
+const upstreamWithChain = (count: number): string => {
+  const up = buildUpstream({ target: '../.agents/skills/link0' });
+  for (let index = 0; index < count; index += 1) {
+    symlinkSync(
+      index === count - 1 ? '.' : `link${index + 1}`,
+      join(up, `.agents/skills/link${index}`),
+    );
+  }
+  return up;
+};
+
+it('accepts a chain at the operating system traversal limit', () => {
+  const { consumer, result } = initConsumer(
+    upstreamWithChain(TRAVERSABLE_TARGET_LINKS),
+  );
+  expect(result.status).toBe(0);
+  expect(
+    readFileSync(join(consumer, LINK, 'probe/SKILL.md'), 'utf8'),
+  ).toContain('name: probe');
+});
+
+it('counts the original symlink before following its target chain', () => {
+  const { result } = initConsumer(upstreamWithChain(EXCESSIVE_TARGET_LINKS));
+  expect(result.status).not.toBe(0);
+  expect(result.stderr).toContain('symlink cycle');
+});
