@@ -132,7 +132,9 @@ jobs:
       - name: Preserve trusted sync runtime
         run: |
           runtime=$(mktemp -d "$RUNNER_TEMP/standards-sync.XXXXXX")
-          cp -RL node_modules "$runtime/node_modules"
+          # Bun isolated packages resolve dependencies through their real store
+          # paths. Keep that internal symlink graph in the independent copy.
+          cp -a node_modules "$runtime/node_modules"
           cp sync-standards.json "$runtime/sync-standards.json"
           if [ -f sync-standards.local.json ]; then
             jq -cS . sync-standards.local.json > "$runtime/policy.json"

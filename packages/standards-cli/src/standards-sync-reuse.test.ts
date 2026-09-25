@@ -1,6 +1,12 @@
 import { afterEach, expect, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, readFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  symlinkSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
 import {
@@ -146,89 +152,136 @@ fi
   },
 );
 
-it('does not execute branch package scripts, Bun preloads, or Git hooks with writer credentials', () => {
-  const root = mkTmp('sync-runtime-');
-  const cwd = join(root, 'consumer');
-  const remote = join(root, 'remote.git');
-  git(root, 'init', '--bare', '--initial-branch=main', remote);
-  git(root, 'clone', remote, cwd);
-  git(cwd, 'config', 'user.name', 'fixture');
-  git(cwd, 'config', 'user.email', 'fixture@example.invalid');
-  git(cwd, 'config', 'commit.gpgsign', 'false');
-  write(cwd, '.gitignore', 'node_modules/\n');
-  write(cwd, 'sync-standards.json', '{"upstream":"owner/trusted"}\n');
+const seedSyncRuntime = (cwd: string, isolated: boolean): string => {
+  const cliPackage = isolated
+    ? 'node_modules/.bun/standards@0.27.0/node_modules/@davidvornholt/standards'
+    : 'node_modules/@davidvornholt/standards';
+  const dependency = isolated
+    ? 'node_modules/.bun/yaml@2.8.0/node_modules/yaml'
+    : 'node_modules/yaml';
   write(
     cwd,
-    'node_modules/@davidvornholt/standards/src/cli.ts',
+    `${dependency}/package.json`,
+    '{"name":"yaml","type":"module","exports":"./index.js"}',
+  );
+  write(
+    cwd,
+    `${dependency}/index.js`,
+    "export const value = 'trusted sync';\n",
+  );
+  if (isolated) {
+    mkdirSync(join(cwd, 'node_modules/@davidvornholt'), { recursive: true });
+    mkdirSync(join(cwd, 'node_modules/.bun/standards@0.27.0/node_modules'), {
+      recursive: true,
+    });
+    symlinkSync(
+      '../.bun/standards@0.27.0/node_modules/@davidvornholt/standards',
+      join(cwd, 'node_modules/@davidvornholt/standards'),
+    );
+    symlinkSync(
+      '../../yaml@2.8.0/node_modules/yaml',
+      join(cwd, 'node_modules/.bun/standards@0.27.0/node_modules/yaml'),
+    );
+  }
+  write(
+    cwd,
+    `${cliPackage}/src/cli.ts`,
     `import { writeFileSync } from 'node:fs';
-writeFileSync(process.argv[process.argv.indexOf('--dir') + 1] + '/canonical.txt', 'trusted sync');\n`,
+import { value } from 'yaml';
+writeFileSync(process.argv[process.argv.indexOf('--dir') + 1] + '/canonical.txt', value);\n`,
   );
-  git(cwd, 'add', '.gitignore');
-  git(cwd, 'commit', '-m', 'base');
-  git(cwd, 'push', 'origin', 'main');
-  const output = join(root, 'output');
-  const values = Object.fromEntries([
-    ['RUNNER_TEMP', root],
-    ['GITHUB_ENV', output],
-    ['GITHUB_OUTPUT', join(root, 'branch-output')],
-    ['GITHUB_WORKSPACE', cwd],
-    ['SYNC_BASE_REF', 'main'],
-    ['SYNC_READ_TOKEN', 'read-fixture'],
-    ['SYNC_POLICY_REF', ''],
-  ]);
-  expect(shell(cwd, 'Preserve trusted sync runtime', values).status).toBe(0);
-  const runtime = readFileSync(output, 'utf8').trim().split('=')[1] ?? '';
-  expect(shell(cwd, 'Prepare reusable sync branch', values).status).toBe(0);
-  write(
-    cwd,
-    'package.json',
-    '{"scripts":{"standards":"touch package-script-ran"}}\n',
-  );
-  write(cwd, 'bunfig.toml', 'preload = ["./evil.ts"]\n');
-  write(
-    cwd,
-    'evil.ts',
-    "import { writeFileSync } from 'node:fs'; writeFileSync('preload-ran', 'unsafe');\n",
-  );
-  const syncEnv = {
-    ...values,
-    [['STANDARDS', 'SYNC', 'RUNTIME'].join('_')]: runtime,
-  };
-  expect(shell(cwd, 'Sync canonical files from upstream', syncEnv).status).toBe(
-    0,
-  );
-  expect(readFileSync(join(cwd, 'canonical.txt'), 'utf8')).toBe('trusted sync');
-  write(cwd, 'sync-standards.json', '{"upstream":"owner/different"}\n');
-  expect(shell(cwd, 'Sync canonical files from upstream', syncEnv).status).toBe(
-    1,
-  );
-  write(cwd, 'sync-standards.json', '{"upstream":"owner/trusted"}\n');
-  write(cwd, 'sync-standards.local.json', '{"ref":"different"}\n');
-  expect(shell(cwd, 'Sync canonical files from upstream', syncEnv).status).toBe(
-    1,
-  );
-  write(cwd, 'sync-standards.local.json', '{}\n');
-  expect(existsSync(join(cwd, 'package-script-ran'))).toBe(false);
-  expect(existsSync(join(cwd, 'preload-ran'))).toBe(false);
-  write(
-    cwd,
-    '.git/hooks/pre-commit',
-    '#!/bin/sh\necho "$BRANCH_WRITER_TOKEN" > hook-leak\n',
-  );
-  chmodSync(join(cwd, '.git/hooks/pre-commit'), MODE);
-  write(
-    cwd,
-    '.git/hooks/pre-push',
-    '#!/bin/sh\necho "$BRANCH_WRITER_TOKEN" > push-leak\n',
-  );
-  chmodSync(join(cwd, '.git/hooks/pre-push'), MODE);
-  expect(
-    shell(cwd, 'Commit and push mirror changes', {
-      ...syncEnv,
-      [['BRANCH', 'WRITER', 'TOKEN'].join('_')]: 'synthetic-write-token',
-      [['EXPECTED', 'SYNC', 'HEAD'].join('_')]: '',
-    }).status,
-  ).toBe(0);
-  expect(existsSync(join(cwd, 'hook-leak'))).toBe(false);
-  expect(existsSync(join(cwd, 'push-leak'))).toBe(false);
-});
+  return dependency;
+};
+
+it.each([false, true])(
+  'does not execute branch package scripts, Bun preloads, or Git hooks with writer credentials (isolated linker: %s)',
+  (isolated) => {
+    const root = mkTmp('sync-runtime-');
+    const cwd = join(root, 'consumer');
+    const remote = join(root, 'remote.git');
+    git(root, 'init', '--bare', '--initial-branch=main', remote);
+    git(root, 'clone', remote, cwd);
+    git(cwd, 'config', 'user.name', 'fixture');
+    git(cwd, 'config', 'user.email', 'fixture@example.invalid');
+    git(cwd, 'config', 'commit.gpgsign', 'false');
+    write(cwd, '.gitignore', 'node_modules/\n');
+    write(cwd, 'sync-standards.json', '{"upstream":"owner/trusted"}\n');
+    const dependency = seedSyncRuntime(cwd, isolated);
+    git(cwd, 'add', '.gitignore');
+    git(cwd, 'commit', '-m', 'base');
+    git(cwd, 'push', 'origin', 'main');
+    const output = join(root, 'output');
+    const values = Object.fromEntries([
+      ['RUNNER_TEMP', root],
+      ['GITHUB_ENV', output],
+      ['GITHUB_OUTPUT', join(root, 'branch-output')],
+      ['GITHUB_WORKSPACE', cwd],
+      ['SYNC_BASE_REF', 'main'],
+      ['SYNC_READ_TOKEN', 'read-fixture'],
+      ['SYNC_POLICY_REF', ''],
+    ]);
+    expect(shell(cwd, 'Preserve trusted sync runtime', values).status).toBe(0);
+    const runtime = readFileSync(output, 'utf8').trim().split('=')[1] ?? '';
+    expect(shell(cwd, 'Prepare reusable sync branch', values).status).toBe(0);
+    // Changing the checkout after preservation must not change the trusted copy.
+    write(
+      cwd,
+      `${dependency}/index.js`,
+      "export const value = 'branch dependency';\n",
+    );
+    write(
+      cwd,
+      'package.json',
+      '{"scripts":{"standards":"touch package-script-ran"}}\n',
+    );
+    write(cwd, 'bunfig.toml', 'preload = ["./evil.ts"]\n');
+    write(
+      cwd,
+      'evil.ts',
+      "import { writeFileSync } from 'node:fs'; writeFileSync('preload-ran', 'unsafe');\n",
+    );
+    const syncEnv = {
+      ...values,
+      [['STANDARDS', 'SYNC', 'RUNTIME'].join('_')]: runtime,
+    };
+    expect(
+      shell(cwd, 'Sync canonical files from upstream', syncEnv).status,
+    ).toBe(0);
+    expect(readFileSync(join(cwd, 'canonical.txt'), 'utf8')).toBe(
+      'trusted sync',
+    );
+    write(cwd, 'sync-standards.json', '{"upstream":"owner/different"}\n');
+    expect(
+      shell(cwd, 'Sync canonical files from upstream', syncEnv).status,
+    ).toBe(1);
+    write(cwd, 'sync-standards.json', '{"upstream":"owner/trusted"}\n');
+    write(cwd, 'sync-standards.local.json', '{"ref":"different"}\n');
+    expect(
+      shell(cwd, 'Sync canonical files from upstream', syncEnv).status,
+    ).toBe(1);
+    write(cwd, 'sync-standards.local.json', '{}\n');
+    expect(existsSync(join(cwd, 'package-script-ran'))).toBe(false);
+    expect(existsSync(join(cwd, 'preload-ran'))).toBe(false);
+    write(
+      cwd,
+      '.git/hooks/pre-commit',
+      '#!/bin/sh\necho "$BRANCH_WRITER_TOKEN" > hook-leak\n',
+    );
+    chmodSync(join(cwd, '.git/hooks/pre-commit'), MODE);
+    write(
+      cwd,
+      '.git/hooks/pre-push',
+      '#!/bin/sh\necho "$BRANCH_WRITER_TOKEN" > push-leak\n',
+    );
+    chmodSync(join(cwd, '.git/hooks/pre-push'), MODE);
+    expect(
+      shell(cwd, 'Commit and push mirror changes', {
+        ...syncEnv,
+        [['BRANCH', 'WRITER', 'TOKEN'].join('_')]: 'synthetic-write-token',
+        [['EXPECTED', 'SYNC', 'HEAD'].join('_')]: '',
+      }).status,
+    ).toBe(0);
+    expect(existsSync(join(cwd, 'hook-leak'))).toBe(false);
+    expect(existsSync(join(cwd, 'push-leak'))).toBe(false);
+  },
+);
