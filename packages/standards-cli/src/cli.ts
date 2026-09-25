@@ -44,6 +44,7 @@ import {
 } from './managed-path-ownership';
 import { runPollerCommand } from './poller-commands';
 import { runScreenshotsCommand } from './screenshots-commands';
+import { collectSourceTextProblems } from './source-text';
 import { collectStructureProblems } from './structure-check';
 import type { StructureProfile } from './structure-profile';
 import { hasSafeCommand } from './structure-script';
@@ -92,6 +93,7 @@ type Command =
   | 'help'
   | 'init'
   | 'poller'
+  | 'source-text'
   | 'structure'
   | 'sync';
 
@@ -969,6 +971,7 @@ Commands:
   sync        Mirror canonical files from upstream, regenerate the composed Dependabot config, and rewrite the lock
   check       Verify canonical files, extension seams, monorepo structure, and GitHub settings
   doctor      Validate extension seams only
+  source-text Reject raw control characters in tracked source text
   structure   Validate monorepo structure rules only
   dependabot  Verify (--check) or regenerate (--write) the composed .github/dependabot.yml
   dev-env     Compose each workspace's generated .env.local from its three dev layers and authorized broker-owned S3 pair references
@@ -1002,6 +1005,7 @@ const commandFromArg = (arg: string): Command => {
     arg === 'help' ||
     arg === 'init' ||
     arg === 'poller' ||
+    arg === 'source-text' ||
     arg === 'structure' ||
     arg === 'sync'
   ) {
@@ -1209,10 +1213,24 @@ const runStructure = async (
   return true;
 };
 
+const runSourceTextCheck = (consumer: string): boolean => {
+  const problems = collectSourceTextProblems(consumer);
+  if (problems.length > 0) {
+    console.error(`standards source-text: ${problems.length} problem(s):`);
+    console.error(problems.map((problem) => `  - ${problem}`).join('\n'));
+    return false;
+  }
+  console.log(
+    'standards source-text: tracked source text contains no forbidden control characters',
+  );
+  return true;
+};
+
 const runCheckCommand = async (consumer: string): Promise<boolean> => {
   const driftIsClean = await runCheck(consumer);
   const integrationIsValid = await runDoctor(consumer);
   const structureIsValid = await runStructure(consumer, 'consumer');
+  const sourceTextIsValid = runSourceTextCheck(consumer);
   // The GitHub gate activates with the synced declaration and then fails
   // closed: once .github/settings.json exists, an unreachable API or an
   // unreadable origin is a failure, not a skip.
@@ -1220,7 +1238,11 @@ const runCheckCommand = async (consumer: string): Promise<boolean> => {
     ? await runGithubCheckGate(consumer)
     : true;
   return (
-    driftIsClean && integrationIsValid && structureIsValid && githubIsConverged
+    driftIsClean &&
+    integrationIsValid &&
+    structureIsValid &&
+    sourceTextIsValid &&
+    githubIsConverged
   );
 };
 
@@ -1296,6 +1318,7 @@ const runGateCommand = (
     | 'dev-env'
     | 'doctor'
     | 'github'
+    | 'source-text'
     | 'structure',
   consumer: string,
   apply: boolean,
@@ -1312,6 +1335,9 @@ const runGateCommand = (
   }
   if (command === 'doctor') {
     return runDoctor(consumer);
+  }
+  if (command === 'source-text') {
+    return Promise.resolve(runSourceTextCheck(consumer));
   }
   if (command === 'structure') {
     return runStructure(consumer, profile);

@@ -55,7 +55,8 @@ Read [Sync and ownership](docs/sync-and-ownership.md) before changing a path who
 | --- | --- |
 | `bun standards sync --dry-run` | Preview canonical creates, updates, and deletions. |
 | `bun standards sync` | Apply the selected upstream revision and update the lock. |
-| `bun standards check` | Verify drift, extension points, structure, generated files, and GitHub settings. |
+| `bun standards check` | Verify drift, extension points, structure, tracked source text, generated files, and GitHub settings. |
+| `bun standards source-text` | Reject raw control characters and invalid UTF-8 in tracked source files. |
 | `bun standards doctor` | Validate project-owned integration points without checking drift. |
 | `bun standards dev-env` | Generate workspace `.env.local` files. |
 | `bun standards github --apply` | Converge live GitHub settings from the declaration. |
@@ -86,7 +87,7 @@ Each release exposes a self-contained CLI package for `x86_64-linux` and `aarch6
 
 ```nix
 inputs.standards = {
-  url = "github:davidvornholt/standards/v0.26.3";
+  url = "github:davidvornholt/standards/v0.26.4";
   inputs.nixpkgs.follows = "nixpkgs";
 };
 ```
