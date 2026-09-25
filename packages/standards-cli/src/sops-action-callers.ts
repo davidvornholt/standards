@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, posix } from 'node:path';
 import { isRecord } from './github-settings-parse';
 import type { ManagedEntry } from './managed-files';
 import { parseYaml } from './yaml-parse';
@@ -35,7 +35,9 @@ const hasLegacyCaller = (value: unknown): boolean => {
     return false;
   }
   return (
-    (value.uses === LOCAL_ACTION &&
+    (typeof value.uses === 'string' &&
+      value.uses.startsWith('./') &&
+      posix.normalize(value.uses) === posix.normalize(LOCAL_ACTION) &&
       isRecord(value.with) &&
       Object.hasOwn(value.with, 'env-name')) ||
     Object.values(value).some(hasLegacyCaller)

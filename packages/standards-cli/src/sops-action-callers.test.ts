@@ -40,3 +40,19 @@ it.each(['.github/workflows/deploy.yml', '.github/actions/deploy/action.yml'])(
     ).toContain(path);
   },
 );
+
+it.each(['./.github/actions/sops-secret/', './.github/actions/./sops-secret'])(
+  'recognizes equivalent local action reference %s',
+  async (reference) => {
+    const { consumer } = initConsumer(buildUpstream());
+    write(consumer, ACTION, OUTPUT_ACTION);
+    write(
+      consumer,
+      '.github/workflows/custom.yml',
+      `jobs:\n  deploy:\n    steps:\n      - uses: ${reference}\n        with: { env-name: TOKEN }\n`,
+    );
+    expect(
+      (await collectSopsActionCallerProblems(consumer)).join(' '),
+    ).toContain('still passes env-name');
+  },
+);
