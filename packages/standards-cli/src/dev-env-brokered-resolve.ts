@@ -4,8 +4,9 @@
 // layer's reference, and a reference that lost the merge is never decrypted.
 
 import { lookupS3Pair } from './creds-r2';
-import { resolveTargetRelResult } from './creds-target';
 import type { BrokeredS3Reference } from './dev-env-brokered';
+import { prepareBrokeredSources } from './dev-env-brokered-preflight';
+import { brokeredReferenceIdentity } from './dev-env-brokered-source';
 import type { ComposedDevEnvTarget } from './dev-env-compose';
 import { encodePortableDotenvValue } from './dev-env-dotenv-value';
 import { decryptSopsJson, type SopsJsonResult } from './sops-exec';
@@ -55,39 +56,49 @@ export const resolveBrokeredReferences = (
 ): ResolvedDevEnv => {
   const problems: Array<string> = [];
   const documents = new Map<string, SopsJsonResult>();
-  const readDocument = (targetName: string): SopsJsonResult => {
-    const cached = documents.get(targetName);
+  const preflight = prepareBrokeredSources(
+    consumer,
+    targets,
+    allowedReferences,
+    preservedReferences,
+  );
+  if (preflight.problems.length > 0) {
+    return {
+      problems: preflight.problems,
+      targets: targets.map((target) => ({
+        ...target,
+        env: Object.fromEntries(
+          Object.entries(target.env).filter(
+            (entry): entry is [string, string] => typeof entry[1] === 'string',
+          ),
+        ),
+      })),
+    };
+  }
+  const { sources } = preflight;
+  const readDocument = (reference: BrokeredS3Reference): SopsJsonResult => {
+    const source = sources.get(reference);
+    if (source === undefined) {
+      return { ok: false, problem: 'unresolved source target' };
+    }
+    const documentKey = `${source.root}/${source.rel}`;
+    const cached = documents.get(documentKey);
     if (cached !== undefined) {
       return cached;
     }
-    const resolved = resolveTargetRelResult(consumer, targetName);
-    const result = resolved.ok
-      ? decryptSopsJson(consumer, resolved.rel)
-      : {
-          ok: false as const,
-          problem:
-            resolved.kind === 'ambiguous'
-              ? resolved.problem
-              : `secrets target "${targetName}" does not exist; create it and mint the pair with \`bun standards creds add cloudflare --s3\``,
-        };
-    documents.set(targetName, result);
+    const result = decryptSopsJson(source.root, source.rel);
+    documents.set(documentKey, result);
     return result;
   };
   const resolveValue = (
     label: string,
     reference: BrokeredS3Reference,
   ): { readonly value: string | null; readonly problem: string | null } => {
-    const allowlistEntry = `${reference.brokeredS3}:${reference.key}`;
-    if (!allowedReferences.has(allowlistEntry)) {
-      return {
-        value: null,
-        problem: `${label}: unauthorized brokered S3 pair; add "${allowlistEntry}" to the encrypted secrets/dev.yaml brokeredReferences allowlist`,
-      };
-    }
+    const allowlistEntry = brokeredReferenceIdentity(reference);
     if (preservedReferences.has(allowlistEntry)) {
       return { value: '', problem: null };
     }
-    const document = readDocument(reference.brokeredS3);
+    const document = readDocument(reference);
     if (!document.ok) {
       return { value: null, problem: `${label}: ${document.problem}` };
     }

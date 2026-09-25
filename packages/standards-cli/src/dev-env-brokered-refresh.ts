@@ -34,7 +34,7 @@ const layerReferenceTargets = (
   return {
     references: document.targets.flatMap((target) =>
       Object.values(target.env).flatMap((value) =>
-        typeof value === 'string'
+        typeof value === 'string' || value.source !== undefined
           ? []
           : [{ target: value.brokeredS3, key: value.key }],
       ),

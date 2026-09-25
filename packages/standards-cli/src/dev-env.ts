@@ -42,6 +42,21 @@ export type DevEnvPlan = {
   readonly problems: ReadonlyArray<string>;
 };
 
+const workspaceConfigurationProblems = (
+  consumer: string,
+  targets: ReadonlyArray<import('./dev-env-compose').ComposedDevEnvTarget>,
+): ReadonlyArray<string> =>
+  targets.flatMap((target) => {
+    const workspace = `${target.group}/${target.workspace}`;
+    if (!existsSync(join(consumer, workspace, 'package.json'))) {
+      return [
+        `${target.sources.join(' + ')} defines ${target.group}.${target.workspace}, but ${workspace}/package.json does not exist`,
+      ];
+    }
+    const problem = devEnvGitIgnoreProblem(consumer, `${workspace}/.env.local`);
+    return problem === null ? [] : [problem];
+  });
+
 export const planDevEnvChanges = (
   consumer: string,
   inputs: DevEnvInputs,
@@ -66,6 +81,13 @@ export const planDevEnvChanges = (
     },
     layer(DEV_LOCAL_FILE, inputs.local),
   );
+  const configurationProblems = [
+    ...composed.problems,
+    ...workspaceConfigurationProblems(consumer, composed.targets),
+  ];
+  if (configurationProblems.length > 0) {
+    return { writes: [], removals: [], problems: configurationProblems };
+  }
   const resolved = resolveBrokeredReferences(
     consumer,
     composed.targets,
