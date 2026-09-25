@@ -157,7 +157,7 @@ describe('source profile', () => {
       'source',
     );
     expect(problems).toContain(
-      'packages/standards-cli: script "test" must run bun test',
+      'packages/standards-cli: script "test" must run bun test or bun test --isolate',
     );
   });
 });

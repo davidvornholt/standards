@@ -70,7 +70,9 @@ describe('inspectWorkspace manifest rules', () => {
     expect(problems).toContain(
       'apps/web: script "lint:fix" must run biome check --write --error-on-warnings .',
     );
-    expect(problems).toContain('apps/web: script "test" must run bun test');
+    expect(problems).toContain(
+      'apps/web: script "test" must run bun test or bun test --isolate',
+    );
   });
 
   it('requires internal workspace version 0.0.0', async () => {
@@ -193,4 +195,33 @@ describe('inspectWorkspace tsconfig and a11y wiring', () => {
       hasA11ySuite: false,
     });
   });
+});
+
+describe('isolated workspace tests', () => {
+  it('accepts the native Bun isolation flag without changing test discovery', async () => {
+    const ws = makeWorkspace({
+      ...baseManifest(),
+      scripts: { ...CANONICAL_SCRIPTS, test: 'bun test --isolate' },
+    });
+    expect((await inspect(ws)).problems).toEqual([]);
+  });
+
+  for (const test of [
+    'bun test --isolate --help',
+    'bun test --isolate --only',
+    'bun test --isolate src/single.test.ts',
+    'bun test --isolate || true',
+    'bun test --isolate; true',
+    'echo bun test --isolate',
+  ]) {
+    it(`rejects an isolated test gate that skips coverage or execution: ${test}`, async () => {
+      const ws = makeWorkspace({
+        ...baseManifest(),
+        scripts: { ...CANONICAL_SCRIPTS, test },
+      });
+      expect((await inspect(ws)).problems).toContain(
+        'apps/web: script "test" must run bun test or bun test --isolate',
+      );
+    });
+  }
 });
