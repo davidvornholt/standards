@@ -45,6 +45,7 @@ jobs:
       - name: Checkout policy file
         uses: actions/checkout@v7
         with:
+          persist-credentials: false
           sparse-checkout: sync-standards.local.json
           sparse-checkout-cone-mode: false
 

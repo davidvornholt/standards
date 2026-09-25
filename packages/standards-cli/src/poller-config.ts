@@ -64,22 +64,22 @@ const parseRepos = (
   }
   if (!raw.every((repo): repo is string => typeof repo === 'string')) {
     problems.push('poller config "repos" must be a string array');
-    return [];
   }
+  const repos = raw.filter((repo): repo is string => typeof repo === 'string');
   if (raw.length === 0) {
     problems.push('poller config "repos" must list at least one repository');
   }
-  for (const repo of raw) {
+  for (const repo of repos) {
     if (!REPO_PATTERN.test(repo)) {
       problems.push(
         `poller config "repos" entries must be "owner/repo": ${repo}`,
       );
     }
   }
-  if (new Set(raw).size !== raw.length) {
+  if (new Set(repos).size !== repos.length) {
     problems.push('poller config "repos" entries must be unique');
   }
-  return raw;
+  return repos;
 };
 
 const parsePositiveInteger = (

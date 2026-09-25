@@ -24,7 +24,7 @@ export const findManagedDestinationCollision = async (
     return `account ${failed.accountId}: ${failed.listed.problem}; cannot prove the destination is unambiguous`;
   }
   const wanted = destinationFootprint(format, context.dest.key);
-  const collisions = listings.flatMap(({ accountId, listed }) =>
+  const collisions = listings.flatMap(({ listed }) =>
     listed.ok
       ? listed.value.flatMap((token) => {
           const ref = parseTokenName(token.name, context.repo);
@@ -35,7 +35,7 @@ export const findManagedDestinationCollision = async (
                 wanted,
                 inferredDestinationFootprint(keys, ref.key),
               ))
-            ? [`${accountId}/${token.id} (${ref.key})`]
+            ? [`${ref.target}:${ref.key}`]
             : [];
         })
       : [],

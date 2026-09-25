@@ -58,6 +58,12 @@ describe('creds add cloudflare', () => {
     });
     expect(ok).toBe(false);
     expect(methods).not.toContain('POST');
+    expect(methods).not.toContain('DELETE');
+    const diagnostic = JSON.stringify(error.mock.calls);
+    expect(diagnostic).toContain('ci:ci.token');
+    for (const identifier of [ACCOUNT_A, ACCOUNT_B, 'existing']) {
+      expect(diagnostic).not.toContain(identifier);
+    }
     expect(error).toHaveBeenCalledWith(
       expect.stringContaining(
         'one SOPS destination may be managed by only one account',

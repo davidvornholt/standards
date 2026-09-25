@@ -53,11 +53,9 @@ The machine carries the same identifier: `networking.hostName = "prod-1"`, with 
       inherit (nixpkgs) lib;
       pkgs = nixpkgs.legacyPackages.${system};
       treefmtEval = treefmt-nix.lib.evalModule pkgs ./treefmt.nix;
-      webImage = builtins.getEnv "WEB_IMAGE"; # empty only for non-deploy evaluation
     in {
       nixosConfigurations.prod-1 = lib.nixosSystem {
         inherit system;
-        specialArgs = { inherit webImage; };
         modules = [
           disko.nixosModules.disko
           sops-nix.nixosModules.sops
@@ -86,7 +84,7 @@ The machine carries the same identifier: `networking.hostName = "prod-1"`, with 
 }
 ```
 
-Build-time parameters (image digests, preview lists) enter via `specialArgs` from environment variables in the deploy workflow. Name the full-reference variable once per app (`WEB_IMAGE` above), let non-deploy evaluation use an empty fallback, and make the exact-main-SHA deploy gate reject an empty or non-`^ghcr\.io/...@sha256:[0-9a-f]{64}$` value before mutation. The workflow derives `WEB_IMAGE` only as `imageRepository@digest` from its gated checkout's enriched `images.json`; app modules consume the `webImage` argument and do not parse another manifest or define a fallback production digest. Cross-repo bumps and readback follow `image-promotion.md`.
+When `images.json` lives beside the flake in the same gated checkout, app modules read it directly with `builtins.fromJSON (builtins.readFile ./images.json)` using the correct relative path. Derive full references as `imageRepository@digest` and validate required pins during evaluation, so `nix flake check` checks the same service configuration that deploys. Do not replace those available pins with empty non-deploy fallbacks. Use `specialArgs` for parameters genuinely supplied from outside the repository, such as the host-local active preview set. For an external image input, name its full-reference variable once per app (`WEB_IMAGE`, for example) and have the exact-main-SHA deploy gate reject an empty or non-`^ghcr\.io/...@sha256:[0-9a-f]{64}$` value before mutation. Cross-repo bumps and readback follow `image-promotion.md`.
 
 ## Server profile
 

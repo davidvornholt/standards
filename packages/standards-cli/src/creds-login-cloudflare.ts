@@ -1,6 +1,6 @@
 // Cloudflare broker bootstrap. Cloudflare's API can create account-owned
 // tokens, but the very first token must come from the dashboard — this is the
-// one paste per account, ever. The flow tells the user exactly what to click
+// one paste per account per machine. The flow tells the user exactly what to click
 // and which single permission to grant, takes the token hidden, verifies it
 // against the API before storing, and from then on every real credential is a
 // scoped, expiring account token minted by `standards creds add`.
@@ -109,7 +109,9 @@ export const runCredsLoginCloudflare = async (options: {
     return false;
   }
   const tokensUrl = `https://dash.cloudflare.com/${accountId}/api-tokens`;
-  console.log('Create the bootstrap token (one time for this account):');
+  console.log(
+    'Create the bootstrap token (one time for this account on this machine):',
+  );
   console.log(`  1. Open ${tokensUrl}`);
   console.log('  2. Select Create Token');
   console.log('  3. Find Create additional tokens and select Use template');
@@ -118,6 +120,9 @@ export const runCredsLoginCloudflare = async (options: {
     '  5. Keep exactly one permission: Account / Account API Tokens / Edit',
   );
   console.log('  6. Continue to summary, create the token, and copy the value');
+  console.log(
+    `Each machine needs its own ${BROKER_IDENTITY_NAME} token. Cloudflare allows duplicate names; leave an existing token with that name alone, and never reuse, roll, or revoke another machine's token.`,
+  );
   openInBrowser(tokensUrl);
   const token = await promptHidden('Paste the token (input is hidden): ');
   if (token.length === 0) {
