@@ -16,12 +16,21 @@ export const inspectDestinations = async (
   consumer: string,
   rel: string,
   paths: ReadonlyArray<string>,
-): Promise<string | null> => {
+): Promise<{
+  readonly problem: string | null;
+  readonly occupied: ReadonlyArray<string>;
+}> => {
   const inspected = await Promise.all(
     paths.map((path) => inspectSopsScalarDestination(consumer, rel, path)),
   );
   const blocked = inspected.find((result) => !result.ok);
-  return blocked !== undefined && !blocked.ok ? blocked.problem : null;
+  return {
+    problem: blocked !== undefined && !blocked.ok ? blocked.problem : null,
+    occupied: paths.filter((_, index) => {
+      const result = inspected[index];
+      return result?.ok && result.state === 'scalar';
+    }),
+  };
 };
 
 export type ResolvedResourceFlags =

@@ -31,8 +31,8 @@ export const runCredsAddGithub = async (
     appIdPath,
     privateKeyPath,
   ]);
-  if (blocked !== null) {
-    console.error(`standards creds: ${blocked}`);
+  if (blocked.problem !== null) {
+    console.error(`standards creds: ${blocked.problem}`);
     return false;
   }
   const storePath = resolveBrokerPath();

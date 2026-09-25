@@ -76,7 +76,7 @@ jobs:
       - uses: ./.github/actions/sops-secret
         with: { age-key: "${{ secrets.SOPS_AGE_KEY }}", secret-file: secrets/ci.yaml, secret-key: broker_app.private_key, env-name: BROKER_APP_PRIVATE_KEY }
       - id: broker
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with: { app-id: "${{ env.BROKER_APP_ID }}", private-key: "${{ env.BROKER_APP_PRIVATE_KEY }}", owner: example, repositories: infra, permission-contents: write }
       - name: Announce image digest
         env:

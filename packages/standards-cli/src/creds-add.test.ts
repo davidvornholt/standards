@@ -115,6 +115,9 @@ describe('creds add cloudflare compensation', () => {
       s3: false,
     });
     expect(ok).toBe(false);
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining('ci:ci.token already holds a value'),
+    );
     expect(methods).toContain('POST');
     expect(methods).toContain('DELETE');
     expect(error).toHaveBeenCalledWith(

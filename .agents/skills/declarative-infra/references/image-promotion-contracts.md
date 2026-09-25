@@ -4,7 +4,7 @@ These copyable fragments are mechanically exercised by the standards CLI test su
 
 <!-- contract:source-token -->
 ```yaml
-uses: actions/create-github-app-token@v2
+uses: actions/create-github-app-token@v3
 with:
   owner: example
   repositories: app

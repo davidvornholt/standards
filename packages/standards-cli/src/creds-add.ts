@@ -69,6 +69,17 @@ const printSuccess = (input: {
   }
 };
 
+const warnOccupiedDestinations = (
+  target: string,
+  paths: ReadonlyArray<string>,
+): void => {
+  for (const path of paths) {
+    console.error(
+      `standards creds: warning — ${target}:${path} already holds a value and will be overwritten; the old provider credential is not revoked by this write. Run \`standards creds plan\` to inspect unmanaged token candidates before retiring it.`,
+    );
+  }
+};
+
 export const runCredsAddCloudflare = async (
   consumer: string,
   options: {
@@ -104,13 +115,9 @@ export const runCredsAddCloudflare = async (
   const format: DestinationFormat = options.s3 ? 's3' : 'bearer';
   const paths =
     format === 's3' ? s3PairPaths(context.dest.key) : [context.dest.key];
-  const destinationProblem = await inspectDestinations(
-    consumer,
-    context.rel,
-    paths,
-  );
-  if (destinationProblem !== null) {
-    console.error(`standards creds: ${destinationProblem}`);
+  const destinations = await inspectDestinations(consumer, context.rel, paths);
+  if (destinations.problem !== null) {
+    console.error(`standards creds: ${destinations.problem}`);
     return false;
   }
   const encryptedKeys = await readEncryptedKeys(consumer, context.rel);
@@ -137,6 +144,7 @@ export const runCredsAddCloudflare = async (
     console.error(`standards creds: ${collisionProblem}`);
     return false;
   }
+  warnOccupiedDestinations(context.dest.target, destinations.occupied);
   const ttlDays = options.ttlDays ?? DEFAULT_TTL_DAYS;
   const expiresOn = cloudflareExpiresOn(Date.now() + ttlDays * DAY_MS);
   const created = await createAccountToken(account.accountId, account.token, {
