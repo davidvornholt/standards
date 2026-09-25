@@ -7,6 +7,10 @@
 
 import { parseDestination } from './creds-dest';
 import { parseSopsKeyPath } from './creds-sops-structure';
+import {
+  type BrokeredS3Source,
+  parseBrokeredSource,
+} from './dev-env-brokered-source';
 import { isRecord } from './github-settings-parse';
 
 export const BROKERED_S3_PARTS = [
@@ -20,9 +24,10 @@ export type BrokeredS3Reference = {
   readonly brokeredS3: string;
   readonly key: string;
   readonly part: BrokeredS3Part;
+  readonly source?: BrokeredS3Source;
 };
 
-const REFERENCE_PROPERTIES = ['brokeredS3', 'key', 'part'] as const;
+const REFERENCE_PROPERTIES = ['brokeredS3', 'key', 'part', 'source'] as const;
 
 export const isBrokeredS3ReferenceShape = (
   value: unknown,
@@ -46,11 +51,18 @@ export const parseBrokeredS3Reference = (
   for (const property of Object.keys(raw)) {
     if (!REFERENCE_PROPERTIES.includes(property as 'brokeredS3')) {
       problems.push(
-        `${label} brokered S3 pair reference has unknown property ${JSON.stringify(property)}; allowed properties are brokeredS3, key, and part`,
+        `${label} brokered S3 pair reference has unknown property ${JSON.stringify(property)}; allowed properties are brokeredS3, key, part, and source`,
       );
     }
   }
   const { brokeredS3: target, key, part } = raw;
+  const source =
+    raw.source === undefined ? undefined : parseBrokeredSource(raw.source);
+  if (source === null) {
+    problems.push(
+      `${label} source must contain exactly a GitHub repository owner/name and a checkout path`,
+    );
+  }
   if (
     typeof target !== 'string' ||
     parseDestination(`${target}:reference_validation`) === null
@@ -78,6 +90,7 @@ export const parseBrokeredS3Reference = (
       brokeredS3: target as string,
       key: key as string,
       part: part as BrokeredS3Part,
+      ...(source === undefined || source === null ? {} : { source }),
     },
   };
 };

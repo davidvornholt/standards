@@ -148,6 +148,31 @@ brokeredReferences:
 
 The referenced target must contain both `access_key_id` and `secret_access_key`. Every generated `.env.local`, transaction artifact, and `config/dev.local.yaml` must be ignored by Git.
 
+A pair owned by another repository uses an explicit source descriptor. The checkout path is resolved relative to the consumer root; put machine-specific paths in ignored `config/dev.local.yaml`.
+
+```yaml
+apps:
+  web:
+    S3_ACCESS_KEY_ID:
+      brokeredS3: garage
+      key: garage.development
+      part: access_key_id
+      source:
+        repository: owner/source
+        checkout: ../source
+    S3_SECRET_ACCESS_KEY:
+      brokeredS3: garage
+      key: garage.development
+      part: secret_access_key
+      source:
+        repository: owner/source
+        checkout: ../source
+```
+
+The consumer's encrypted allowlist must authorize the exact repository, target, and key as `owner/source@garage:garage.development`. Local target authorization does not authorize an external source. The source must be a Git checkout root whose `origin` is that GitHub repository, with no symlinked checkout or target path. Targets remain contained regular SOPS files under the source repository. One source repository must resolve to one checkout per generation. This verifies a maintainer-managed checkout's identity; it does not attest untrusted local Git configuration.
+
+Run `bun standards dev-env` in the consumer after updating the source checkout or rotating its pair. Both values are read from the one encrypted owner and only written to ignored generated environments. Rotation in a separate source repository cannot discover or update other workstations automatically. All selected source references and configuration are validated before any source target is decrypted; a failed generation leaves previous environments intact.
+
 ## github
 
 ```sh

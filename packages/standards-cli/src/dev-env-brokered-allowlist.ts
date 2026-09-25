@@ -1,4 +1,4 @@
-import { parseDestination } from './creds-dest';
+import { validBrokeredIdentity } from './dev-env-brokered-source';
 import type { DevEnvLayerKind } from './dev-env-document';
 
 export const BROKERED_REFERENCES_KEY = 'brokeredReferences';
@@ -32,7 +32,7 @@ export const parseBrokeredAllowlist = (
   const entries = new Set<string>();
   const problems: Array<string> = [];
   for (const [index, entry] of raw.entries()) {
-    if (typeof entry !== 'string' || parseDestination(entry) === null) {
+    if (typeof entry !== 'string' || !validBrokeredIdentity(entry)) {
       problems.push(
         `${source} "${BROKERED_REFERENCES_KEY}" entry ${index + 1} must be an exact "<target>:<dotted.key>" string`,
       );

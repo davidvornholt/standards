@@ -66,9 +66,7 @@ describe('dev env plan', () => {
         'secrets/dev.yaml top-level key "infra" must be "apps" or "packages" or "brokeredReferences"',
         'secrets/dev.yaml defines apps.ghost, but apps/ghost/package.json does not exist',
       ]);
-      expect(plan.writes.map((write) => write.rel)).toEqual([
-        'apps/web/.env.local',
-      ]);
+      expect(plan.writes).toEqual([]);
     } finally {
       cleanup(consumer);
     }

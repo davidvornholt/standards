@@ -112,7 +112,7 @@ describe('brokered S3 pair references in dev env documents', () => {
     );
 
     expect(document.problems).toEqual([
-      'config/dev.yaml "apps.web".S3_ACCESS_KEY_ID brokered S3 pair reference has unknown property "extra"; allowed properties are brokeredS3, key, and part',
+      'config/dev.yaml "apps.web".S3_ACCESS_KEY_ID brokered S3 pair reference has unknown property "extra"; allowed properties are brokeredS3, key, part, and source',
       'config/dev.yaml "apps.web".S3_ACCESS_KEY_ID brokered S3 pair reference needs a valid "brokeredS3" secrets target name',
       'config/dev.yaml "apps.web".S3_ACCESS_KEY_ID brokered S3 pair reference needs a "key" naming the pair\'s dotted SOPS key',
       'config/dev.yaml "apps.web".S3_ACCESS_KEY_ID brokered S3 pair reference needs a "part" of either "access_key_id" or "secret_access_key"',

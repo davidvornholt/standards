@@ -354,6 +354,7 @@
         "packages/standards-cli/src/dev-env-document.test.ts",
         "packages/standards-cli/src/dev-env-brokered-refresh.test.ts",
         "packages/standards-cli/src/dev-env-brokered-resolve.test.ts",
+        "packages/standards-cli/src/dev-env-brokered-source.test.ts",
         "packages/standards-cli/src/dev-env-brokered.test.ts",
         "packages/standards-cli/src/dev-env-dotenv.test.ts",
         "packages/standards-cli/src/dev-env-layers.test.ts",

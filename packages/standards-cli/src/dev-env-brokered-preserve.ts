@@ -1,5 +1,6 @@
 import { lstatSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { brokeredReferenceIdentity } from './dev-env-brokered-source';
 import type { DevEnvValue } from './dev-env-document';
 import { preserveRenderedDotenvValues, renderDotenv } from './dev-env-dotenv';
 
@@ -27,7 +28,7 @@ const preservedKeys = (
 ): ReadonlyArray<string> =>
   Object.entries(env).flatMap(([key, value]) =>
     typeof value !== 'string' &&
-    references.has(`${value.brokeredS3}:${value.key}`)
+    references.has(brokeredReferenceIdentity(value))
       ? [key]
       : [],
   );
