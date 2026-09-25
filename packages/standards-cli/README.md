@@ -294,3 +294,14 @@ The poller timers use monotonic intervals: after boot, acknowledgement starts af
 ## Source text validation
 
 `bun standards source-text` checks tracked source, configuration, and documentation files as UTF-8 text, regardless of Git’s binary classification. `bun standards check` includes this gate. Raw Unicode control characters are rejected except tab and LF; write control characters in fixtures and composite keys using escaped representations such as `\0` or `\u0000`. Binary asset formats and untracked files are outside this gate. Missing tracked source files and source symlinks fail validation.
+
+### Prepare existing consumers for GitHub App client IDs
+
+`standards creds add github --dest ci:ci.broker_app` writes and verifies
+`app_id`, `client_id`, and `private_key` together. Run it in each existing
+consumer and commit the encrypted `secrets/ci.yaml` before adopting a workflow
+that resolves `broker_app.client_id` and passes `client-id` to
+`actions/create-github-app-token@v3`. The numeric `app_id` remains available
+while existing workflows are migrated. Do not remove it until every local and
+canonical caller has switched. Canonical workflows continue using `app-id`
+until consumer provisioning is complete.
