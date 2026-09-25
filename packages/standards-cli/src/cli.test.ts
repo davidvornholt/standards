@@ -2724,7 +2724,7 @@ describe('canonical standards workflow settings credential', () => {
   it('installs a version-pinned just for the canonical justfile gate tests', () => {
     const workflow = readFileSync(STANDARDS_WORKFLOW, 'utf8');
     expect(workflow).toContain('uses: extractions/setup-just@v4');
-    expect(workflow).toContain('just-version: "1.57.0"');
+    expect(workflow).toContain('just-version: "1.58.0"');
   });
 });
 
