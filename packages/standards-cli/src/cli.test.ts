@@ -203,10 +203,10 @@ const DATABASE_RESOLVER_ENV = {
 };
 const githubMatrixExpression = (property: string): string =>
   githubExpression(`matrix.${property}`);
-const TURBO_CACHE_KEY = `turbo-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-${githubExpression('github.sha')}`;
-const TURBO_CACHE_RESTORE_PREFIX = `turbo-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-`;
-const BUN_CACHE_KEY = `bun-packages-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-${githubExpression("hashFiles('bun.lock')")}`;
-const BUN_CACHE_RESTORE_PREFIX = `bun-packages-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-`;
+const TURBO_CACHE_KEY = `turbo-trusted-v2-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-${githubExpression('github.sha')}`;
+const TURBO_CACHE_RESTORE_PREFIX = `turbo-trusted-v2-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-`;
+const BUN_CACHE_KEY = `bun-packages-v2-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-${githubExpression("hashFiles('bun.lock')")}`;
+const BUN_CACHE_RESTORE_PREFIX = `bun-packages-v2-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-`;
 // Off-main runs may consume prefix-matched snapshots, but main must restore by
 // exact lock key so every snapshot it publishes is built from an empty store
 // and stays history-free. actions/cache filters empty strings out of
@@ -215,15 +215,15 @@ const BUN_CACHE_RESTORE_PREFIX = `bun-packages-${githubExpression('runner.os')}-
 // form would leak the fallback onto main because '' is falsy in Actions
 // expressions.
 const BUN_CACHE_RESTORE_KEYS = githubExpression(
-  "github.ref != 'refs/heads/main' && format('bun-packages-{0}-{1}-', runner.os, runner.arch) || ''",
+  "github.ref != 'refs/heads/main' && format('bun-packages-v2-{0}-{1}-', runner.os, runner.arch) || ''",
 );
 const BUN_CACHE_PATH = '~/.bun/install/cache';
 const BUN_CACHE_SAVE_CONDITION =
   "success() && github.ref == 'refs/heads/main' && steps.bun-cache.outputs.cache-hit != 'true'";
-const PLAYWRIGHT_CACHE_KEY = `playwright-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-${githubExpression("hashFiles('bun.lock')")}`;
-const PLAYWRIGHT_CACHE_RESTORE_PREFIX = `playwright-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-`;
+const PLAYWRIGHT_CACHE_KEY = `playwright-v2-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-${githubExpression("hashFiles('bun.lock')")}`;
+const PLAYWRIGHT_CACHE_RESTORE_PREFIX = `playwright-v2-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-`;
 const PLAYWRIGHT_CACHE_RESTORE_KEYS = githubExpression(
-  "github.ref != 'refs/heads/main' && format('playwright-{0}-{1}-', runner.os, runner.arch) || ''",
+  "github.ref != 'refs/heads/main' && format('playwright-v2-{0}-{1}-', runner.os, runner.arch) || ''",
 );
 const PLAYWRIGHT_CACHE_PATH = '~/.cache/ms-playwright';
 const PLAYWRIGHT_CACHE_SAVE_CONDITION =
@@ -419,6 +419,48 @@ const assertNoQualityLocalActions = (
   }
 };
 
+const assertExactMainCacheCleanup = (workflow: ParsedWorkflow): void => {
+  const steps = workflowSteps(workflow.jobs.quality, 'quality');
+  for (const [store, restore, consumer, condition, path] of [
+    [
+      'Bun',
+      'Restore the Bun package cache',
+      'Install dependencies',
+      "github.ref == 'refs/heads/main' && steps.bun-cache.outputs.cache-hit != 'true'",
+      '$HOME/.bun/install/cache',
+    ],
+    [
+      'Playwright',
+      'Restore the Playwright browser cache',
+      'Install Playwright Chromium',
+      "github.ref == 'refs/heads/main' && steps.a11y.outputs.present == 'true' && steps.playwright-cache.outputs.cache-hit != 'true'",
+      '$HOME/.cache/ms-playwright',
+    ],
+  ]) {
+    const cleanup = qualityStep(
+      workflow,
+      `Discard non-exact main ${store} restore`,
+    );
+    requireExactWorkflowValue(
+      cleanup,
+      {
+        name: `Discard non-exact main ${store} restore`,
+        if: condition,
+        run: `rm -rf -- "${path}"`,
+      },
+      'Main must discard non-exact executable cache restores',
+    );
+    if (
+      steps.indexOf(cleanup) <= steps.indexOf(qualityStep(workflow, restore)) ||
+      steps.indexOf(cleanup) >= steps.indexOf(qualityStep(workflow, consumer))
+    ) {
+      throw new Error(
+        'Main cache cleanup must run between restore and installation',
+      );
+    }
+  }
+};
+
 const assertQualityCacheContract = (workflow: ParsedWorkflow): void => {
   assertQualityWorkflowContract(workflow);
   const steps = workflowSteps(workflow.jobs.quality, 'quality');
@@ -428,6 +470,7 @@ const assertQualityCacheContract = (workflow: ParsedWorkflow): void => {
       step.uses.toLowerCase().startsWith('actions/cache'),
   );
   assertNoQualityLocalActions(steps);
+  assertExactMainCacheCleanup(workflow);
   const expectedCacheSteps = [
     {
       name: 'Restore the Turbo cache',
@@ -2853,21 +2896,21 @@ it('rejects stale and untrusted cache action mutations', () => {
     (workflow) => {
       qualityStep(workflow, 'Restore the Turbo cache').with = {
         path: '.turbo/cache',
-        key: `turbo-${githubExpression('runner.os')}-${githubExpression('runner.arch')}`,
+        key: `turbo-trusted-v2-${githubExpression('runner.os')}-${githubExpression('runner.arch')}`,
         'restore-keys': `${TURBO_CACHE_RESTORE_PREFIX}\n`,
       };
     },
     (workflow) => {
       qualityStep(workflow, 'Save the Turbo cache').with = {
         path: '.turbo/cache',
-        key: `turbo-${githubExpression('runner.os')}-${githubExpression('runner.arch')}`,
+        key: `turbo-trusted-v2-${githubExpression('runner.os')}-${githubExpression('runner.arch')}`,
       };
     },
     (workflow) => {
       qualityStep(workflow, 'Restore the Turbo cache').with = {
         path: '.turbo/cache',
         key: TURBO_CACHE_KEY,
-        'restore-keys': `turbo-${githubExpression('runner.os')}-`,
+        'restore-keys': `turbo-trusted-v2-${githubExpression('runner.os')}-`,
       };
     },
     (workflow) => {
@@ -2889,7 +2932,7 @@ it('rejects stale and untrusted cache action mutations', () => {
         path: BUN_CACHE_PATH,
         key: BUN_CACHE_KEY,
         'restore-keys': githubExpression(
-          "github.ref == 'refs/heads/main' && '' || format('bun-packages-{0}-{1}-', runner.os, runner.arch)",
+          "github.ref == 'refs/heads/main' && '' || format('bun-packages-v2-{0}-{1}-', runner.os, runner.arch)",
         ),
       };
     },
@@ -2909,7 +2952,7 @@ it('rejects stale and untrusted cache action mutations', () => {
         path: PLAYWRIGHT_CACHE_PATH,
         key: PLAYWRIGHT_CACHE_KEY,
         'restore-keys': githubExpression(
-          "github.ref == 'refs/heads/main' && '' || format('playwright-{0}-{1}-', runner.os, runner.arch)",
+          "github.ref == 'refs/heads/main' && '' || format('playwright-v2-{0}-{1}-', runner.os, runner.arch)",
         ),
       };
     },
@@ -4055,6 +4098,17 @@ it('rejects shell-local settings bypasses and repository-controlled execution', 
     );
     expect(() => assertSettingsTrustBoundary(workflow)).toThrow(
       'complete reviewed bodies',
+    );
+  }
+});
+
+it('rejects removal or weakening of non-exact main cache cleanup', () => {
+  for (const store of ['Bun', 'Playwright']) {
+    const workflow = structuredClone(parseWorkflow(STANDARDS_WORKFLOW));
+    qualityStep(workflow, `Discard non-exact main ${store} restore`).run =
+      'echo keep old cache';
+    expect(() => assertQualityCacheContract(workflow)).toThrow(
+      'discard non-exact',
     );
   }
 });
