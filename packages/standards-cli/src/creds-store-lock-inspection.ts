@@ -1,4 +1,4 @@
-import { readdir, readFile, rmdir, stat, unlink } from 'node:fs/promises';
+import { lstat, readdir, readFile, rmdir, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isRecord } from './github-settings-parse';
 
@@ -24,15 +24,11 @@ type ExistingGeneration =
       readonly modifiedAt: number;
     };
 
-const directoryModifiedAt = async (
-  lockPath: string,
-): Promise<number | null> => {
-  try {
-    return (await stat(lockPath)).mtimeMs;
-  } catch {
-    return null;
-  }
-};
+const missingOr = (
+  error: unknown,
+  fallback: ExistingGeneration,
+): ExistingGeneration =>
+  isErrorCode(error, 'ENOENT') ? { kind: 'missing' } : fallback;
 
 const readExistingGeneration = async (
   lockPath: string,
@@ -41,15 +37,12 @@ const readExistingGeneration = async (
   try {
     names = await readdir(lockPath);
   } catch (error) {
-    return isErrorCode(error, 'ENOENT')
-      ? { kind: 'missing' }
-      : { kind: 'unknown' };
+    return missingOr(error, { kind: 'unknown' });
   }
   if (names.length === 0) {
-    const modifiedAt = await directoryModifiedAt(lockPath);
-    return modifiedAt === null
-      ? { kind: 'missing' }
-      : { entryPath: null, kind: 'incomplete', modifiedAt };
+    // Empty directories are immediately replaceable by an initialized
+    // candidate's atomic rename, including the holder-unlink release gap.
+    return { kind: 'missing' };
   }
   const entryName = names.length === 1 ? names[0] : undefined;
   if (entryName === undefined) {
@@ -58,9 +51,13 @@ const readExistingGeneration = async (
   const entryPath = join(lockPath, entryName);
   let modifiedAt: number;
   try {
-    modifiedAt = (await stat(entryPath)).mtimeMs;
-  } catch {
-    return { kind: 'unknown' };
+    const entry = await lstat(entryPath);
+    if (!entry.isFile()) {
+      return { kind: 'unknown' };
+    }
+    modifiedAt = entry.mtimeMs;
+  } catch (error) {
+    return missingOr(error, { kind: 'unknown' });
   }
   const incomplete = {
     entryPath,
@@ -72,8 +69,16 @@ const readExistingGeneration = async (
   ) {
     return incomplete;
   }
+  let raw: string;
   try {
-    const decoded: unknown = JSON.parse(await readFile(entryPath, 'utf8'));
+    raw = await readFile(entryPath, 'utf8');
+  } catch (error) {
+    // Only a vanished regular holder permits immediate retry. An I/O error
+    // cannot establish that a stale holder is malformed or safe to reclaim.
+    return missingOr(error, { kind: 'unknown' });
+  }
+  try {
+    const decoded: unknown = JSON.parse(raw);
     const generation = entryName.slice(
       HOLDER_PREFIX.length,
       -HOLDER_SUFFIX.length,
