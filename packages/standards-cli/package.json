@@ -175,7 +175,8 @@
     "src/structure-workspace.ts",
     "src/sync-policy.ts",
     "src/yaml-emit.ts",
-    "src/yaml-parse.ts"
+    "src/yaml-parse.ts",
+    "src/sops-action-callers.ts"
   ],
   "scripts": {
     "lint": "biome check --error-on-warnings .",

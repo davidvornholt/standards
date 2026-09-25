@@ -44,6 +44,7 @@ import {
 } from './managed-path-ownership';
 import { runPollerCommand } from './poller-commands';
 import { runScreenshotsCommand } from './screenshots-commands';
+import { collectSopsActionCallerProblems } from './sops-action-callers';
 import { collectSourceTextProblems } from './source-text';
 import { collectStructureProblems } from './structure-check';
 import type { StructureProfile } from './structure-profile';
@@ -427,6 +428,7 @@ const mirrorPreconditionProblems = async (
   );
   return [
     ...symlinkTargetProblems(upstream, true),
+    ...(await collectSopsActionCallerProblems(consumer, upstream)),
     ...collisions.filter((problem): problem is string => problem !== null),
   ];
 };
