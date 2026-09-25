@@ -4,6 +4,7 @@ import { isAbsolute, join } from 'node:path';
 import { isContainedPath } from './contained-path';
 import { isRecord } from './github-settings-parse';
 import { readJsonFile } from './json-file';
+import { collectSopsActionCallerProblems } from './sops-action-callers';
 import { collectBunVersionProblems } from './structure-bun-version';
 import {
   missingPublishedCliProblems,
@@ -154,14 +155,16 @@ export const collectStructureProblems = async (
   consumer: string,
   profile: StructureProfile,
 ): Promise<ReadonlyArray<string>> => {
-  const [root, secretsProblems] = await Promise.all([
+  const [root, secretsProblems, callerProblems] = await Promise.all([
     readJsonFile(join(consumer, 'package.json')),
     collectCiSecretsProblems(consumer),
+    collectSopsActionCallerProblems(consumer),
   ]);
   if (root === null) {
     return [
       'package.json must exist and contain a JSON object',
       ...secretsProblems,
+      ...callerProblems,
     ];
   }
   const declaration = workspacePatternsOf(root);
@@ -193,5 +196,6 @@ export const collectStructureProblems = async (
     ...inspectRootScripts(root, profile, requireA11y),
     ...inspections.flatMap((i) => [...i.problems]),
     ...secretsProblems,
+    ...callerProblems,
   ];
 };
