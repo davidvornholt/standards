@@ -24,15 +24,11 @@ type ExistingGeneration =
       readonly modifiedAt: number;
     };
 
-const directoryModifiedAt = async (
-  lockPath: string,
-): Promise<number | null> => {
-  try {
-    return (await stat(lockPath)).mtimeMs;
-  } catch {
-    return null;
-  }
-};
+const missingOr = (
+  error: unknown,
+  fallback: ExistingGeneration,
+): ExistingGeneration =>
+  isErrorCode(error, 'ENOENT') ? { kind: 'missing' } : fallback;
 
 const readExistingGeneration = async (
   lockPath: string,
@@ -41,15 +37,12 @@ const readExistingGeneration = async (
   try {
     names = await readdir(lockPath);
   } catch (error) {
-    return isErrorCode(error, 'ENOENT')
-      ? { kind: 'missing' }
-      : { kind: 'unknown' };
+    return missingOr(error, { kind: 'unknown' });
   }
   if (names.length === 0) {
-    const modifiedAt = await directoryModifiedAt(lockPath);
-    return modifiedAt === null
-      ? { kind: 'missing' }
-      : { entryPath: null, kind: 'incomplete', modifiedAt };
+    // Empty directories are immediately replaceable by an initialized
+    // candidate's atomic rename, including the holder-unlink release gap.
+    return { kind: 'missing' };
   }
   const entryName = names.length === 1 ? names[0] : undefined;
   if (entryName === undefined) {
@@ -59,8 +52,8 @@ const readExistingGeneration = async (
   let modifiedAt: number;
   try {
     modifiedAt = (await stat(entryPath)).mtimeMs;
-  } catch {
-    return { kind: 'unknown' };
+  } catch (error) {
+    return missingOr(error, { kind: 'unknown' });
   }
   const incomplete = {
     entryPath,
@@ -81,8 +74,8 @@ const readExistingGeneration = async (
     return isRecord(decoded) && decoded.generation === generation
       ? { entryPath, kind: 'valid', modifiedAt }
       : incomplete;
-  } catch {
-    return incomplete;
+  } catch (error) {
+    return missingOr(error, incomplete);
   }
 };
 
