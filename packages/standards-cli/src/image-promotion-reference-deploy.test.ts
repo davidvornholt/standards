@@ -96,7 +96,9 @@ it('parses an exact-SHA gate dependency and production serialization', () => {
   });
   expect(deploy.needs).toBe('gate');
   expect(deploy.if).toContain("needs.gate.result == 'success'");
-  expect(deploy.if).toContain('needs.gate.outputs.gated-sha == github.sha');
+  expect(deploy.if).toBe(
+    ['$', "{{ needs.gate.result == 'success' }}"].join(''),
+  );
   expect(workflow.jobs.gate?.outputs?.['gated-sha']).toContain(
     'steps.gated.outputs.sha',
   );
@@ -119,6 +121,7 @@ it('mutates current main and gives every stale queued permutation zero writes', 
   for (const fixture of [
     { checkout: SHA_B },
     { gated: SHA_B },
+    { gated: '' },
     { event: SHA_B },
     { remote: SHA_B },
     { registryProof: 'fail' },
