@@ -197,6 +197,9 @@ jobs:
         with:
           node-version: "26"
 
+      # Increment cache namespace generations whenever publication trust or
+      # restore semantics change, so immutable legacy snapshots cannot survive
+      # the cutover through an exact key hit or an old restore prefix.
       # PRs may restore the latest default-branch Turbo snapshot but never
       # publish cache state. A successful default-branch run saves at most one
       # pruned snapshot per commit, so reruns cannot duplicate an upload and PR
@@ -206,9 +209,9 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: .turbo/cache
-          key: turbo-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
+          key: turbo-trusted-v2-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
           restore-keys: |
-            turbo-${{ runner.os }}-${{ runner.arch }}-
+            turbo-trusted-v2-${{ runner.os }}-${{ runner.arch }}-
 
       # Bun's package store and Playwright's browser store hold executable
       # content and live at their tool-default paths. The defaults matter
@@ -230,8 +233,9 @@ jobs:
       # cannot identify browser families introduced by a newer release. Main
       # therefore restores both stores by exact lock key only: each conditional
       # `restore-keys` resolves to an empty string on main, which actions/cache
-      # treats as no fallback keys. An unchanged lock still exact-hits. After a
-      # lock change, the cold install runs against an empty store and the
+      # treats as no fallback keys. Primary keys can still prefix-match, so
+      # main discards every restore without cache-hit=true before installation.
+      # An unchanged lock still exact-hits. The cold install runs against an empty store and the
       # successful run publishes only that result. Pull requests keep prefix
       # fallbacks because they consume trusted snapshots but never publish.
       - name: Restore the Bun package cache
@@ -239,8 +243,12 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: ~/.bun/install/cache
-          key: bun-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
-          restore-keys: ${{ github.ref != 'refs/heads/main' && format('bun-packages-{0}-{1}-', runner.os, runner.arch) || '' }}
+          key: bun-packages-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
+          restore-keys: ${{ github.ref != 'refs/heads/main' && format('bun-packages-v2-{0}-{1}-', runner.os, runner.arch) || '' }}
+
+      - name: Discard non-exact main Bun restore
+        if: github.ref == 'refs/heads/main' && steps.bun-cache.outputs.cache-hit != 'true'
+        run: rm -rf -- "$HOME/.bun/install/cache"
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -257,8 +265,12 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
-          restore-keys: ${{ github.ref != 'refs/heads/main' && format('playwright-{0}-{1}-', runner.os, runner.arch) || '' }}
+          key: playwright-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
+          restore-keys: ${{ github.ref != 'refs/heads/main' && format('playwright-v2-{0}-{1}-', runner.os, runner.arch) || '' }}
+
+      - name: Discard non-exact main Playwright restore
+        if: github.ref == 'refs/heads/main' && steps.a11y.outputs.present == 'true' && steps.playwright-cache.outputs.cache-hit != 'true'
+        run: rm -rf -- "$HOME/.cache/ms-playwright"
 
       - name: Install Playwright Chromium
         if: steps.a11y.outputs.present == 'true'
@@ -287,14 +299,14 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: ~/.bun/install/cache
-          key: bun-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
+          key: bun-packages-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
 
       - name: Save the Playwright browser cache
         if: success() && github.ref == 'refs/heads/main' && steps.a11y.outputs.present == 'true' && steps.playwright-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
+          key: playwright-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
 
       # Keep the newest artifacts within 2 GiB before the successful
       # default-branch save. Failed, cancelled, PR, and exact-key rerun jobs do
@@ -316,7 +328,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: .turbo/cache
-          key: turbo-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
+          key: turbo-trusted-v2-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
 
   nix-discovery:
     if: github.repository == 'davidvornholt/standards'
