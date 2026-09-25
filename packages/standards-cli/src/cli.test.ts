@@ -3540,12 +3540,33 @@ describe('standards sync workflow ordering', () => {
     const fixture = mkTmp('sync-clean-');
     const outputPath = join(mkTmp('sync-output-'), 'github-output');
     expect(runExecutable('git', fixture, ['init', '--quiet']).status).toBe(0);
+    expect(
+      runExecutable('git', fixture, [
+        '-c',
+        'commit.gpgsign=false',
+        '-c',
+        'user.name=fixture',
+        '-c',
+        'user.email=fixture@example.invalid',
+        'commit',
+        '--allow-empty',
+        '-m',
+        'base',
+      ]).status,
+    ).toBe(0);
+    expect(
+      runExecutable('git', fixture, [
+        'update-ref',
+        'refs/remotes/origin/main',
+        'HEAD',
+      ]).status,
+    ).toBe(0);
 
     const result = runExecutable(
       'bash',
       fixture,
       ['-euo', 'pipefail', '-c', workflowRunScript('Detect mirror changes')],
-      { GITHUB_OUTPUT: outputPath },
+      { GITHUB_OUTPUT: outputPath, SYNC_BASE_REF: 'main' },
     );
 
     expect(result.status).toBe(0);

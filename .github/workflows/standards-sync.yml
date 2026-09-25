@@ -96,6 +96,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Setup Bun
@@ -179,6 +180,30 @@ jobs:
             echo "BROKER_APP_PRIVATE_KEY="
           } >> "$GITHUB_ENV"
 
+      # Rebase the durable automation branch so maintainer seam edits survive.
+      # A concurrent push is guarded by the exact head lease in the writer step.
+      - name: Prepare reusable sync branch
+        id: sync-base
+        env:
+          SYNC_BASE_REF: ${{ github.ref_name }}
+          SYNC_READ_TOKEN: ${{ github.token }}
+        run: |
+          branch=standards-sync/update
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local credential.helper "!f() { echo username=x-access-token; echo \"password=\$SYNC_READ_TOKEN\"; }; f"
+          trap 'git config --unset credential.helper' EXIT
+          git fetch --no-tags origin "$SYNC_BASE_REF"
+          previous=$(git ls-remote --heads origin "refs/heads/$branch" | cut -f1)
+          if [ -n "$previous" ]; then
+            git fetch --no-tags origin "refs/heads/$branch"
+            git switch -c "$branch" "$previous"
+            git rebase "origin/$SYNC_BASE_REF"
+          else
+            git switch -c "$branch"
+          fi
+          echo "previous=$previous" >> "$GITHUB_OUTPUT"
+
       # Forward the validated policy pin explicitly as a second fail-closed
       # boundary. The CLI also reads and validates the same document, so local
       # init/sync commands and this workflow retain one policy owner. The
@@ -203,8 +228,10 @@ jobs:
 
       - name: Detect mirror changes
         id: mirror
+        env:
+          SYNC_BASE_REF: ${{ github.ref_name }}
         run: |
-          if [ -z "$(git status --porcelain)" ]; then
+          if [ -z "$(git status --porcelain)" ] && git diff --quiet "origin/$SYNC_BASE_REF"; then
             echo "Already in sync with upstream standards; nothing to open."
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
@@ -230,16 +257,16 @@ jobs:
         if: steps.mirror.outputs.changed == 'true'
         env:
           BRANCH_WRITER_TOKEN: ${{ steps.branch-writer-token.outputs.token }}
+          EXPECTED_SYNC_HEAD: ${{ steps.sync-base.outputs.previous }}
         run: |
-          branch="standards-sync/$(date -u +%Y%m%d%H%M%S)"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          branch=standards-sync/update
           git config --local credential.helper "!f() { echo username=x-access-token; echo \"password=\$BRANCH_WRITER_TOKEN\"; }; f"
-          git switch -c "$branch"
+          trap 'git config --unset credential.helper' EXIT
           git add -A
-          git commit -m "chore: sync standards from upstream"
-          git push --set-upstream origin "$branch"
-          git config --unset credential.helper
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: sync standards from upstream"
+          fi
+          git push --force-with-lease="refs/heads/$branch:$EXPECTED_SYNC_HEAD" --set-upstream origin "$branch"
           echo "branch=$branch" >> "$GITHUB_OUTPUT"
 
       # `gh pr create` is left to default `--base` to the repository's default
@@ -251,6 +278,11 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.pr-token.outputs.token }}
         run: |
+          existing=$(gh pr list --head "standards-sync/update" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            echo "Updated existing standards sync PR #$existing"
+            exit 0
+          fi
           gh pr create \
             --head "${{ steps.sync-branch.outputs.branch }}" \
             --title "chore: sync standards from upstream" \
