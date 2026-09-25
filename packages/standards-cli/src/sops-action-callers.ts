@@ -37,7 +37,7 @@ const hasLegacyCaller = (value: unknown): boolean => {
   return (
     (typeof value.uses === 'string' &&
       value.uses.startsWith('./') &&
-      posix.normalize(value.uses) === posix.normalize(LOCAL_ACTION) &&
+      posix.resolve('/', value.uses) === posix.resolve('/', LOCAL_ACTION) &&
       isRecord(value.with) &&
       Object.hasOwn(value.with, 'env-name')) ||
     Object.values(value).some(hasLegacyCaller)
