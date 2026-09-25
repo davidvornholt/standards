@@ -34,6 +34,8 @@ type WriterContract = {
   readonly superseding: {
     readonly candidates: 'same-app-open-promotions';
     readonly compareOutcome: 'descendant';
+    readonly readiness: 'draft-until-comparisons-and-required-retirements-succeed';
+    readonly retry: 'reuse-operation-and-reconcile-remaining-open-predecessors';
     readonly result: 'superseded';
     readonly trigger: 'promotion-opened-or-reused';
   };
@@ -53,6 +55,8 @@ export type Operation = {
     | 'superseded';
   readonly prNumber: number | null;
   readonly runEvidence: ReadonlyArray<string>;
+  readonly readyForReview?: boolean;
+  readonly rollbackAudit?: Readonly<Record<string, string | boolean>>;
 };
 export type PromotionState = {
   readonly app: AppState;

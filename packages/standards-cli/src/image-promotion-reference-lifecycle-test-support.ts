@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import { isValidAppState } from './image-promotion-reference-state-test-support';
 import {
   type Compare,
@@ -42,7 +43,8 @@ export const advance = (
   const valid = allowedTransitions[operation.phase].includes(phase);
   if (
     !valid ||
-    (phase === 'merged' && mergeSha === null) ||
+    (phase === 'merged' &&
+      (mergeSha === null || operation.readyForReview !== true)) ||
     (phase !== 'merged' && mergeSha !== null)
   ) {
     return { kind: 'rejected', state };
@@ -52,6 +54,13 @@ export const advance = (
     mergeSha: phase === 'merged' ? mergeSha : operation.mergeSha,
     phase,
     prNumber: phase === 'open' ? state.nextPrNumber : operation.prNumber,
+    readyForReview:
+      phase === 'open'
+        ? operation.kind === 'rollback' ||
+          !Object.values(state.operations).some(
+            (other) => other.kind === 'promotion' && other.phase === 'open',
+          )
+        : operation.readyForReview,
   };
   return {
     kind: 'advanced',
@@ -76,6 +85,7 @@ export const openPromotion = (
   state: PromotionState,
   identity: string,
   comparisons: Readonly<Record<string, Compare>>,
+  failedClosures: ReadonlySet<string> = new Set(),
 ): ModelResult => {
   if (!isValidAppState(state.app)) {
     return { kind: 'rejected', state };
@@ -93,30 +103,45 @@ export const openPromotion = (
   ) {
     return opened;
   }
+  const candidates = Object.entries(opened.state.operations).filter(
+    ([otherIdentity, other]) =>
+      otherIdentity !== identity &&
+      other.kind === 'promotion' &&
+      other.phase === 'open',
+  );
+  const pending = candidates.some(
+    ([otherIdentity]) =>
+      comparisons[otherIdentity] === undefined ||
+      comparisons[otherIdentity] === 'unprovable' ||
+      (comparisons[otherIdentity] === 'descendant' &&
+        failedClosures.has(otherIdentity)),
+  );
+  const retired = new Set(
+    candidates
+      .filter(
+        ([otherIdentity]) =>
+          comparisons[otherIdentity] === 'descendant' &&
+          !failedClosures.has(otherIdentity),
+      )
+      .map(([otherIdentity]) => otherIdentity),
+  );
   const operations = Object.fromEntries(
-    Object.entries(opened.state.operations).map(
-      ([otherIdentity, otherOperation]) => {
-        const superseded =
-          otherIdentity !== identity &&
-          otherOperation.kind === 'promotion' &&
-          otherOperation.phase === 'open' &&
-          comparisons[otherIdentity] ===
-            writerContract.superseding.compareOutcome;
-        return [
-          otherIdentity,
-          superseded
-            ? {
-                ...otherOperation,
-                phase: writerContract.superseding.result,
-              }
-            : otherOperation,
-        ];
-      },
-    ),
+    Object.entries(opened.state.operations).map(([otherIdentity, other]) => [
+      otherIdentity,
+      retired.has(otherIdentity)
+        ? { ...other, phase: writerContract.superseding.result }
+        : other,
+    ]),
   );
   return {
     kind: 'advanced',
-    state: { ...opened.state, operations },
+    state: {
+      ...opened.state,
+      operations: {
+        ...operations,
+        [identity]: { ...operation, readyForReview: !pending },
+      },
+    },
   };
 };
 
@@ -167,12 +192,38 @@ export const rollback = ({
     compare !== 'ancestor' ||
     JSON.stringify(target) !== JSON.stringify(proof) ||
     !evidencePasses(provenance, writerContract.requiredProvenance) ||
-    !evidencePasses(auditEvidence, writerContract.rollback.required) ||
-    state.operations[identity] !== undefined
+    !evidencePasses(auditEvidence, writerContract.rollback.required)
   ) {
     return { kind: 'rejected', state };
   }
+  const existing = state.operations[identity];
+  if (existing !== undefined) {
+    if (
+      !(
+        ['announced', 'branch', 'open'].includes(existing.phase) &&
+        isDeepStrictEqual(existing.rollbackAudit, audit)
+      )
+    ) {
+      return { kind: 'rejected', state };
+    }
+    return {
+      kind: 'attached',
+      state: {
+        ...state,
+        operations: {
+          ...state.operations,
+          [identity]: {
+            ...existing,
+            runEvidence: [
+              ...new Set([...existing.runEvidence, target.sourceRunId]),
+            ],
+          },
+        },
+      },
+    };
+  }
   const operation: Operation = {
+    rollbackAudit: { ...audit },
     candidate: target,
     identity,
     kind: 'rollback',
