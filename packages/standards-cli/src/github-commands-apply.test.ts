@@ -10,6 +10,7 @@ import {
   installApi,
   installNetworkFailure,
   liveRepository,
+  liveRulesetSummary,
   OPT_OUT_NOTICE,
 } from './github-commands-test-support';
 import { restoreProcessEnv } from './process-env-test-support';
@@ -153,4 +154,55 @@ describe('runGithubApply update verification', () => {
     expect(errors).toContain('allow_auto_merge');
     expect(errors).toContain('declare the ruleset-enforcement opt-out');
   });
+});
+
+it.each([0, 1])(
+  'compares hidden bypass actors before applying (count %s)',
+  async (count) => {
+    const ruleset = {
+      id: 7,
+      name: 'Protect main',
+      target: 'branch',
+      enforcement: 'active',
+      rules: [],
+    };
+    const calls = installApi([
+      { body: liveRepository(false, true) },
+      { body: [liveRulesetSummary()] },
+      { body: ruleset },
+      {
+        body: JSON.parse(
+          `{"data":{"repository":{"rulesets":{"nodes":[{"databaseId":7,"source":{"__typename":"Repository"},"bypassActors":{"totalCount":${count},"nodes":${count === 0 ? '[]' : '[null]'}}}]}}}}`,
+        ) as unknown,
+      },
+      { body: ruleset },
+    ]);
+    expect(
+      await runGithubApply(consumer({ optOut: false, bypassActors: [] })),
+    ).toBe(true);
+    expect(calls.filter(({ method }) => method === 'PUT')).toHaveLength(count);
+    expect(output.errors).toEqual([]);
+  },
+);
+
+it('fails unreadable ruleset identity without rewriting it', async () => {
+  const calls = installApi([
+    { body: liveRepository(false, true) },
+    { body: [liveRulesetSummary()] },
+    {
+      body: {
+        id: 7,
+        name: 'Protect main',
+        target: 'branch',
+        enforcement: 'active',
+        rules: [],
+      },
+    },
+    { body: { errors: [{ message: 'Forbidden' }] } },
+  ]);
+  expect(
+    await runGithubApply(consumer({ optOut: false, bypassActors: [] })),
+  ).toBe(false);
+  expect(calls.filter(({ method }) => method === 'PUT')).toHaveLength(0);
+  expect(output.errors.join(' ')).toContain('cannot verify ruleset fields');
 });
