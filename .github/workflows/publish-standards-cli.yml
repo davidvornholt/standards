@@ -34,7 +34,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RELEASE_SHA: ${{ github.sha }}
         run: |
-          for attempt in $(seq 1 240); do
+          for _attempt in $(seq 1 240); do
             runs="$(gh api "repos/$GH_REPO/actions/workflows/standards.yml/runs?head_sha=$RELEASE_SHA&event=push&branch=main&per_page=100")"
             run="$(jq -c --arg sha "$RELEASE_SHA" --arg repo "$GH_REPO" '
               [.workflow_runs[] | select(
