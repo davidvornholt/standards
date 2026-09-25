@@ -1047,6 +1047,7 @@ const buildUpstream = (paths: ReadonlyArray<string> = STD_PATHS): string => {
 // the fixture provisions the same shape with fake ciphertext.
 const initConsumer = (up: string): { consumer: string; result: RunResult } => {
   const consumer = mkTmp('sync-cons-');
+  git(consumer, ['init', '--quiet']);
   const result = run(consumer, ['init', '--from', up, '--dir', consumer]);
   write(consumer, 'secrets/ci.yaml', CI_SECRETS_YAML);
   return { consumer, result };
@@ -1270,6 +1271,15 @@ describe('init', () => {
 });
 
 describe('check', () => {
+  it('rejects a tracked NUL even when the other local gates pass', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    write(consumer, 'bad.ts', '// hidden\0');
+    git(consumer, ['add', '--', 'bad.ts']);
+    const check = run(consumer, ['check', '--dir', consumer]);
+    expect(check.status).toBe(1);
+    expect(check.stderr).toContain('raw control character U+0000');
+  });
+
   it('passes right after init', () => {
     const { consumer } = initConsumer(buildUpstream());
     const check = run(consumer, ['check', '--dir', consumer]);
@@ -2242,6 +2252,7 @@ describe('packed artifact distribution', () => {
     expect(installation.sourceProfile.stderr).toBe('');
     expect(installation.sourceProfile.status).toBe(0);
     const { consumer } = installation;
+    git(consumer, ['init', '--quiet']);
     const installedSettingsParser = runExecutable('bun', consumer, [
       '-e',
       [

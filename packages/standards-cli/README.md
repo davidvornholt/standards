@@ -265,3 +265,7 @@ The worker accepts only exact issue or draft-PR revisions approved by a user wit
 The [root README](../../README.md) gives the short overview. The [adoption guide](../../docs/adoption.md) and [sync guide](../../docs/sync-and-ownership.md) explain repository ownership and first use.
 
 The poller timers use monotonic intervals: after boot, acknowledgement starts after one minute and work starts after two minutes. Missed downtime intervals are not replayed; each tick reads the current queue. The service budget reserves thirty minutes for scanning and setup in addition to its configured agent budget, with at most twelve watched repositories per poller. Split larger lists across pollers with independent API budgets; unusually slow provider or clone operations can exhaust that overhead and require investigating the service timeout before retrying.
+
+## Source text validation
+
+`bun standards source-text` checks tracked source, configuration, and documentation files as UTF-8 text, regardless of Git’s binary classification. `bun standards check` includes this gate. Raw Unicode control characters are rejected except tab and LF; write control characters in fixtures and composite keys using escaped representations such as `\0` or `\u0000`. Binary asset formats and untracked files are outside this gate. Missing tracked source files and source symlinks fail validation.

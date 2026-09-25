@@ -15,12 +15,14 @@ const CLI = 'bun packages/standards-cli/src/cli.ts';
 const SOURCE_GATE_COMMANDS = {
   check: [
     `${CLI} structure --profile source`,
+    `${CLI} source-text`,
     `${CLI} dependabot --check`,
     `${CLI} github --check`,
     'turbo run lint check-types test --output-logs=errors-only',
   ],
   'check:fix': [
     `${CLI} structure --profile source`,
+    `${CLI} source-text`,
     `${CLI} dependabot --write`,
     `${CLI} github --check`,
     'turbo run lint:fix check-types test --output-logs=errors-only',
