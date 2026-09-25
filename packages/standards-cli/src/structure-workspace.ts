@@ -58,11 +58,15 @@ const containsA11ySuite = async (dir: string): Promise<boolean> => {
   return nested.includes(true);
 };
 const inspectScripts = (ws: Workspace): ReadonlyArray<string> =>
-  WORKSPACE_SCRIPTS.flatMap(([name, command]) =>
-    hasSafeCommand(scriptOf(ws.manifest, name), command)
-      ? []
-      : [`${ws.rel}: script "${name}" must run ${command}`],
-  );
+  WORKSPACE_SCRIPTS.flatMap(([name, command]) => {
+    const script = scriptOf(ws.manifest, name);
+    const accepted =
+      hasSafeCommand(script, command) ||
+      (name === 'test' && hasSafeCommand(script, 'bun test --isolate'));
+    const expected =
+      name === 'test' ? 'bun test or bun test --isolate' : command;
+    return accepted ? [] : [`${ws.rel}: script "${name}" must run ${expected}`];
+  });
 const declaredDependencies = (manifest: Record<string, unknown>) =>
   DEPENDENCY_FIELDS.flatMap((field) => {
     const deps = manifest[field];
