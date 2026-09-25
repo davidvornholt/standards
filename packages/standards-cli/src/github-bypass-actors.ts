@@ -10,8 +10,8 @@ import { BYPASS_ACTORS_KEY } from './github-ruleset-diff';
 // their content is never observed: subsetMatches short-circuits at the length
 // check, two empty lists compare no element, and a declared ruleset with no
 // bypass_actors array never reaches that comparison. Nothing else looks inside
-// them; bypassActorCountDetail reads only `.length`, and github-live-drift.ts
-// is the sole importer, so a stand-in cannot reach a PATCH body. The guarantee
+// them; bypassActorCountDetail reads only `.length`, and both check/apply only use these live records for comparison. Writes
+// always send the original declaration, so a stand-in cannot reach a PATCH body. The guarantee
 // is not local: it also relies on declared ruleset names being unique, which
 // github-settings-parse.ts and github-settings-merge.ts enforce.
 const unreadableBypassActors = (count: number): ReadonlyArray<unknown> =>

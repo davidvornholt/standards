@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it, spyOn } from 'bun:test';
 import {
   existsSync,
   mkdirSync,
@@ -10,6 +10,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import process from 'node:process';
 import { withBrokerLock } from './creds-store-lock';
 import { brokerStorePaths } from './creds-store-lock-test-support';
 
@@ -73,29 +74,36 @@ describe('broker store lock release', () => {
     expect(readdirSync(lock)).toEqual(['holder-replacement.json']);
   });
 
-  // Tolerating the two handover codes must not become tolerating everything.
-  // Replacing the lock directory with a symlink to itself lets the unlink pass
-  // through while the rmdir fails with ENOTDIR, which says the lock is still
-  // there and still this owner's, so it must surface. Permissions would be the
-  // obvious way to force this, but root ignores them and CI can be root.
-  it('propagates a removal failure that is not a handover', async () => {
-    const path = mkStorePath();
-    const lock = `${path}.lock`;
-    const attempt = withBrokerLock(
-      path,
-      () => {
-        renameSync(lock, `${lock}.real`);
-        symlinkSync(`${lock}.real`, lock);
-        return Promise.resolve();
-      },
-      SCALED,
-    );
-
-    const error = await attempt.then(
-      () => null,
-      (rejection: unknown) => rejection,
-    );
-    expect(error).toMatchObject({ code: 'ENOTDIR', syscall: 'rmdir' });
-    expect(existsSync(`${lock}.real`)).toBe(true);
-  });
+  it.each([false, true])(
+    'preserves the operation result when cleanup fails (operation failed: %s)',
+    async (fails) => {
+      const path = mkStorePath();
+      const lock = `${path}.lock`;
+      const warning = spyOn(process.stderr, 'write').mockReturnValue(true);
+      try {
+        const result = await withBrokerLock(
+          path,
+          () => {
+            renameSync(lock, `${lock}.real`);
+            symlinkSync(`${lock}.real`, lock);
+            return fails
+              ? Promise.reject(new Error('original write failure'))
+              : Promise.resolve('durable credential');
+          },
+          SCALED,
+        ).catch((error: unknown) =>
+          error instanceof Error ? error.message : String(error),
+        );
+        expect(result).toBe(
+          fails ? 'original write failure' : 'durable credential',
+        );
+        expect(warning).toHaveBeenCalledWith(
+          expect.stringContaining(`lock cleanup failed for ${lock}`),
+        );
+        expect(existsSync(`${lock}.real`)).toBe(true);
+      } finally {
+        warning.mockRestore();
+      }
+    },
+  );
 });

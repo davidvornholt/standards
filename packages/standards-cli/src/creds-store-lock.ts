@@ -7,6 +7,7 @@
 
 import { mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import process from 'node:process';
 import {
   type HeldBrokerLock,
   releaseBrokerLock,
@@ -74,6 +75,18 @@ export const withBrokerLock = async <T>(
   try {
     return await operation();
   } finally {
-    await releaseBrokerLock(held);
+    try {
+      await releaseBrokerLock(held);
+    } catch (error) {
+      // Cleanup must preserve either the durable operation result or its
+      // original failure. The stopped lease makes abandoned holders stale.
+      try {
+        process.stderr.write(
+          `standards creds: warning: lock cleanup failed for ${lockPath}: ${error instanceof Error ? error.message : String(error)}; the operation result is unchanged; retry after the stale-lock window\n`,
+        );
+      } catch {
+        // Even an unavailable diagnostic stream cannot change that result.
+      }
+    }
   }
 };

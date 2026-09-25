@@ -9,9 +9,12 @@ import {
   HTTP_OK,
   request,
 } from './github-api';
+import { resolveHiddenBypassActors } from './github-bypass-actors';
 import { diffRepositorySettings } from './github-diff';
+import { fetchBypassActorCountsViaGraphql } from './github-graphql';
 import { fetchLiveRulesets } from './github-ruleset-api';
-import { diffRuleset } from './github-ruleset-diff';
+import { diffRuleset, diffRulesets } from './github-ruleset-diff';
+import { isHiddenBypassActors } from './github-ruleset-visibility';
 import { type GithubSettings, isRecord } from './github-settings-parse';
 
 // GitHub answers a PATCH containing a plan-unavailable setting with HTTP 200
@@ -123,7 +126,28 @@ export const applyRulesets = async (
   if (live.rulesets === null) {
     throw new Error(live.problem ?? 'unable to read rulesets');
   }
-  const liveByName = new Map(live.rulesets.map((r) => [String(r.name), r]));
+  let comparable = live.rulesets;
+  const initialDiff = diffRulesets(declared.rulesets, comparable);
+  if (initialDiff.unverifiable.some(isHiddenBypassActors)) {
+    const answered = await fetchBypassActorCountsViaGraphql(token, repo);
+    comparable = resolveHiddenBypassActors(
+      declared.rulesets,
+      comparable,
+      answered.counts,
+    );
+  }
+  const invisible = diffRulesets(declared.rulesets, comparable).unverifiable;
+  if (invisible.length > 0) {
+    throw new Error(
+      `cannot verify ruleset fields before applying: ${invisible.map(({ name, key }) => `${name}: ${key}`).join('; ')}; use a credential that can read the declared fields`,
+    );
+  }
+  const liveByName = new Map(comparable.map((r) => [String(r.name), r]));
+  if (liveByName.size !== comparable.length) {
+    throw new Error(
+      'duplicate live ruleset names prevent safe reconciliation; remove or rename the duplicate rulesets explicitly',
+    );
+  }
   const declaredNames = new Set(declared.rulesets.map((r) => String(r.name)));
   const actions: Array<string> = [];
   for (const ruleset of declared.rulesets) {
