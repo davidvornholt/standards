@@ -18,6 +18,7 @@ env:
 
 concurrency:
   group: publish-standards-cli
+  queue: max
   cancel-in-progress: false
 
 jobs:
@@ -178,10 +179,27 @@ jobs:
         if: steps.declaration.outputs.withdrawn_version != ''
         env:
           WITHDRAWN_VERSION: ${{ steps.declaration.outputs.withdrawn_version }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           if ! git rev-parse -q --verify "refs/tags/v$WITHDRAWN_VERSION" \
             >/dev/null; then
             echo "::error::This commit withdraws $WITHDRAWN_VERSION but tag v$WITHDRAWN_VERSION does not exist, so that release never completed. Check the npm registry for $PACKAGE_NAME@$WITHDRAWN_VERSION: if it is published, re-run the failed Publish standards CLI run of the commit that declared $WITHDRAWN_VERSION, whose frozen GITHUB_SHA still names that commit, so it verifies the published provenance and reconciles both the tag and the Release; if it is not, $WITHDRAWN_VERSION is free to declare again."
+            exit 1
+          fi
+
+          tag_sha="$(git rev-list -n 1 "v$WITHDRAWN_VERSION")"
+          release_state=tag-only
+          if is_draft="$(gh release view "v$WITHDRAWN_VERSION" --json isDraft --jq .isDraft)"; then
+            if [[ "$is_draft" == "false" ]]; then
+              release_state=published
+            else
+              release_state=draft
+            fi
+          fi
+          action="$(node packages/standards-cli/scripts/release-recovery.ts \
+            github-state "$release_state" "$tag_sha" "$tag_sha")"
+          if [[ "$action" != "none" ]]; then
+            echo "::error::Release v$WITHDRAWN_VERSION is incomplete despite its tag. Re-run the declaring commit's failed Publish standards CLI run to reconcile the GitHub Release."
             exit 1
           fi
 

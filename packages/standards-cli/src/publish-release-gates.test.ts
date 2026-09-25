@@ -1,5 +1,5 @@
 import { afterEach, expect, it } from 'bun:test';
-import { chmodSync } from 'node:fs';
+import { chmodSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
 import {
@@ -128,9 +128,13 @@ it('waits past unrelated successful runs before accepting this commit', () => {
   expect(result.stdout).toContain(`Standards passed for ${SHA}`);
 });
 
-it.each(['missing', 'true', 'false'])(
-  'checks inherited GitHub Release state %s without npm lookups',
-  (releaseState) => {
+it.each(
+  ['missing', 'true', 'false'].flatMap((releaseState) =>
+    ['inherited', 'withdrawn'].map((kind) => ({ releaseState, kind })),
+  ),
+)(
+  'checks GitHub Release state %j without npm lookups',
+  ({ releaseState, kind }) => {
     const root = mkTmp('publish-inherited-');
     stub(root, 'git', `echo ${SHA}`);
     stub(
@@ -149,14 +153,15 @@ it.each(['missing', 'true', 'false'])(
         '-c',
         workflowStep(
           publishWorkflowJobs().publish,
-          'Verify the inherited release completed',
+          `Verify the ${kind} release completed`,
         ).run ?? 'exit 99',
       ],
       {
         ...process.env,
         ...Object.fromEntries([
           ['PATH', `${join(root, 'bin')}:${process.env.PATH ?? ''}`],
-          ['VERSION', '0.26.4'],
+          ['VERSION', '0.26.3'],
+          ['WITHDRAWN_VERSION', '0.26.4'],
           ['PACKAGE_PATH', 'packages/standards-cli/package.json'],
         ]),
       },
@@ -164,3 +169,21 @@ it.each(['missing', 'true', 'false'])(
     expect(result.status).toBe(releaseState === 'false' ? 0 : 1);
   },
 );
+
+it('preserves queued release pushes and gives every pushed SHA its own quality gate group', () => {
+  const publish = readFileSync(
+    join(ACTUAL_UPSTREAM, '.github/workflows/publish-standards-cli.yml'),
+    'utf8',
+  );
+  const standards = readFileSync(
+    join(ACTUAL_UPSTREAM, '.github/workflows/standards.yml'),
+    'utf8',
+  );
+  expect(publish).toContain(
+    'group: publish-standards-cli\n  queue: max\n  cancel-in-progress: false',
+  );
+  expect(standards).toContain(
+    "github.event_name == 'pull_request' && github.ref || github.sha",
+  );
+  expect(publishWorkflowJobs().publish.needs).toBe('gate');
+});

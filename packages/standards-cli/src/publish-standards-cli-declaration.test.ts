@@ -109,7 +109,10 @@ describe('standards CLI release completion guards', () => {
       "steps.declaration.outputs.withdrawn_version != ''",
     );
     const environment = stepEnvironment(withdrawal);
-    expect([...environment.keys()].sort()).toEqual(['WITHDRAWN_VERSION']);
+    expect([...environment.keys()].sort()).toEqual([
+      'GH_TOKEN',
+      'WITHDRAWN_VERSION',
+    ]);
     expect(environment.get('WITHDRAWN_VERSION')).toBe(
       githubExpression('steps.declaration.outputs.withdrawn_version'),
     );
