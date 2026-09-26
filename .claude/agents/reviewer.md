@@ -2,8 +2,8 @@
 name: reviewer
 description: Read-only reviewer for one narrow lens over a full workspace diff.
 tools: Read, Glob, Grep, Bash
-model: claude-opus-5
-effort: high
+model: claude-opus-5-5
+effort: xhigh
 skills:
   - review
 ---

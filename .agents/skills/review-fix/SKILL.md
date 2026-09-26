@@ -9,7 +9,7 @@ Run one bounded cycle: establish the baseline, review the initial diff, fix merg
 
 ## Model
 
-An explicit user choice wins. Otherwise use Claude Opus 5 at high effort in Claude Code, GPT-5.6 Luna at max effort in a GPT-capable harness, or the current model when neither is available. Use the same model for every lens. Never silently replace an explicitly requested model; report an execution blocker if it cannot run.
+An explicit user choice wins. Otherwise use Claude Opus 5.5 at xhigh effort in Claude Code, GPT-6 Astra at high effort in Codex, or the current model when neither is available. Use the same model for every lens. Never silently replace an explicitly requested model; report an execution blocker if it cannot run.
 
 ## Scope
 
