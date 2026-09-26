@@ -4,8 +4,14 @@ on:
   # Every pull request runs the gate regardless of its base branch: stacked
   # pull requests need check runs on each layer's own commits, both as review
   # signal before an atomic stack merge and because required-check rulesets
-  # refuse commits that carry no runs.
+  # refuse commits that carry no runs. Draft revisions skip every gate, so
+  # marking a pull request ready for review runs them on its current head.
   pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
   push:
     branches:
       - main
@@ -20,6 +26,125 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # A squash merge of an up-to-date pull request pushes exactly the tree that
+  # its last pull-request run validated, so repeating the gate on main proves
+  # nothing new. Each pull-request quality job records the tree it validated;
+  # this preflight lets a main push reuse that result only when a successful
+  # same-repository pull-request run of this workflow, for the head that was
+  # merged, recorded the pushed tree. The record is output of that run, so
+  # reuse trusts same-repository authors as far as the pull-request run itself
+  # already does; fork runs never qualify. It runs no repository code. Any miss
+  # leaves `proven` unset and any error fails only this step, so the full gate
+  # runs. Reuse also skips cache publication, so it additionally requires
+  # trusted Bun and Playwright snapshots for the current lock and a Turbo
+  # snapshot younger than a day, which bounds how stale pull-request restores
+  # can become.
+  reuse:
+    if: github.event_name == 'push'
+    runs-on: ${{ vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-small', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      checks: read
+      contents: read
+      pull-requests: read
+    outputs:
+      proven: ${{ steps.proof.outputs.proven }}
+    steps:
+      - name: Checkout the lockfile
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: bun.lock
+          sparse-checkout-cone-mode: false
+
+      - name: Prove a validated pull request result
+        id: proof
+        continue-on-error: true
+        env:
+          BUN_CACHE_PREFIX: bun-packages-v2-
+          GH_TOKEN: ${{ github.token }}
+          LOCK_HASH: ${{ hashFiles('bun.lock') }}
+          PLAYWRIGHT_CACHE_PREFIX: playwright-v2-
+          REF: ${{ github.ref }}
+          REPOSITORY: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          TURBO_CACHE_PREFIX: turbo-trusted-v2-
+          TURBO_SNAPSHOT_MAX_AGE_SECONDS: "86400"
+        run: |
+          set -euo pipefail
+          miss() {
+            echo "::notice::Running the full gate: $1"
+            exit 0
+          }
+
+          # A re-run may follow an attempt whose full gate ran and failed on
+          # this tree; only live state would change, so it must not reuse.
+          [ "${GITHUB_RUN_ATTEMPT:-}" = 1 ] || miss "a re-run repeats the full gate"
+
+          tree=$(gh api "repos/$REPOSITORY/git/commits/$SHA" | jq -er .tree.sha)
+          head=$(gh api "repos/$REPOSITORY/commits/$SHA/pulls" | jq -r \
+            --arg repo "$REPOSITORY" --arg sha "$SHA" '
+              [.[] | select(
+                .merge_commit_sha == $sha and .merged_at != null and
+                .base.repo.full_name == $repo and .head.repo.full_name == $repo
+              ) | .head.sha]
+              | if length == 1 then .[0] else "" end')
+          [ -n "$head" ] || miss "no single same-repository pull request was merged as $SHA"
+
+          runs=$(gh api "repos/$REPOSITORY/actions/workflows/standards.yml/runs?head_sha=$head&event=pull_request&status=success&per_page=100" \
+            | jq -r --arg repo "$REPOSITORY" --arg head "$head" '
+              .workflow_runs[] | select(
+                .head_sha == $head and .event == "pull_request" and
+                .conclusion == "success" and
+                .path == ".github/workflows/standards.yml" and
+                .repository.full_name == $repo and
+                .head_repository.full_name == $repo
+              ) | .id')
+          validated=false
+          for run_id in $runs; do
+            quality_check_run=$(gh api "repos/$REPOSITORY/actions/runs/$run_id/jobs?filter=latest&per_page=100" | jq -r '
+              [.jobs[] | select(.name == "check" or .name == "quality")] as $gates
+              | if ($gates | length) == 2 and all($gates[]; .conclusion == "success")
+                then $gates[] | select(.name == "quality") | .check_run_url | split("/") | last
+                else "" end')
+            [ -n "$quality_check_run" ] || continue
+            if gh api "repos/$REPOSITORY/check-runs/$quality_check_run/annotations?per_page=100" \
+              | jq -e --arg tree "$tree" 'any(.[];
+                  .annotation_level == "notice" and
+                  .title == "Standards validated tree" and
+                  .message == $tree)' >/dev/null; then
+              validated=true
+              echo "::notice::Pull request run $run_id validated tree $tree at head $head"
+              break
+            fi
+          done
+          [ "$validated" = true ] || miss "no successful pull request run of $head recorded tree $tree"
+
+          [ -n "$LOCK_HASH" ] || miss "bun.lock is missing"
+          main_caches() {
+            gh api --paginate "repos/$REPOSITORY/actions/caches?ref=$REF&key=$1&per_page=100" \
+              | jq -r '.actions_caches[] | [.key, .created_at] | @tsv'
+          }
+          bun_caches=$(main_caches "$BUN_CACHE_PREFIX")
+          playwright_caches=$(main_caches "$PLAYWRIGHT_CACHE_PREFIX")
+          turbo_caches=$(main_caches "$TURBO_CACHE_PREFIX")
+          current_lock() {
+            awk -F'\t' -v suffix="-$LOCK_HASH" \
+              'substr($1, length($1) - length(suffix) + 1) == suffix { found = 1 } END { exit !found }'
+          }
+          current_lock <<<"$bun_caches" || miss "main has no Bun snapshot for the current lock"
+          if [ -n "$playwright_caches" ] && ! current_lock <<<"$playwright_caches"; then
+            miss "main has no Playwright snapshot for the current lock"
+          fi
+          newest_turbo=$(cut -f2 <<<"$turbo_caches" | sort | tail -n 1)
+          [ -n "$newest_turbo" ] || miss "main has no Turbo snapshot"
+          turbo_age=$(( $(date -u +%s) - $(date -u -d "$newest_turbo" +%s) ))
+          [ "$turbo_age" -le "$TURBO_SNAPSHOT_MAX_AGE_SECONDS" ] \
+            || miss "the newest main Turbo snapshot is $turbo_age seconds old"
+
+          echo "proven=true" >> "$GITHUB_OUTPUT"
+
   # Canonical quality gate synced from davidvornholt/standards. `bun run check`
   # runs the sync drift-check first, then lint, types, tests, build, and the
   # browser a11y suite. This is meant to be a consumer's WHOLE quality gate; a
@@ -54,7 +179,16 @@ jobs:
   # per-run download rather than an idle service container, and a step can carry
   # an `if:` whereas a service cannot. So gating it keeps one uniform file while
   # skipping a pointless download in repos with nothing to render.
+  #
+  # Draft revisions skip the gate, and a main push skips it only when the reuse
+  # job proved that a pull-request run already validated the exact tree.
+  # `!cancelled()` keeps the gate running when the reuse job is skipped or fails.
   quality:
+    needs: reuse
+    if: >-
+      !cancelled() &&
+      !github.event.pull_request.draft &&
+      needs.reuse.outputs.proven != 'true'
     runs-on: ${{ vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-{3}', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt, vars.CI_CODEBUILD_QUALITY_SIZE || 'medium') || 'ubuntu-latest' }}
     timeout-minutes: 30
     services:
@@ -76,6 +210,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+
+      # The reuse job matches this record against a later main push. Emit it as
+      # the job's first annotation, before any tool can exhaust the per-job
+      # annotation limit; it counts only when the whole job succeeds.
+      - name: Record the validated tree
+        if: github.event_name == 'pull_request'
+        run: echo "::notice title=Standards validated tree::$(git rev-parse 'HEAD^{tree}')"
 
       # Workflows are the one file class the rest of the gate never exercises —
       # a broken workflow only fails when its trigger fires, after merge. Lint
@@ -330,7 +471,12 @@ jobs:
           key: turbo-trusted-v2-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
 
   nix-discovery:
-    if: github.repository == 'davidvornholt/standards'
+    needs: reuse
+    if: >-
+      github.repository == 'davidvornholt/standards' &&
+      !cancelled() &&
+      !github.event.pull_request.draft &&
+      needs.reuse.outputs.proven != 'true'
     runs-on: ${{ vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-small', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || 'ubuntu-latest' }}
     timeout-minutes: 30
     outputs:
@@ -348,9 +494,15 @@ jobs:
           matrix=$(jq -cer -f nix/bun-system-matrix.jq nix/bun-system-metadata.json)
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
+  # A job's implicit `success()` fails when any ancestor was skipped, and
+  # `reuse` is skipped on every pull request, so this job gates on its
+  # discovery result explicitly.
   nix:
     name: Nix (${{ matrix.system }})
-    if: github.repository == 'davidvornholt/standards'
+    if: >-
+      github.repository == 'davidvornholt/standards' &&
+      !cancelled() &&
+      needs.nix-discovery.result == 'success'
     needs: nix-discovery
     strategy:
       fail-fast: false
@@ -393,9 +545,19 @@ jobs:
   # same permissionless runner with only the workflow token and no repository
   # executable code, and a per-run job below sixty seconds of work still bills
   # a full runner minute in every consumer.
-  check:
-    if: always()
+  #
+  # Draft runs skip every gate, and GitHub reports a skipped job as a passing
+  # required check. The draft run therefore reports this job under another
+  # name: the required `check` stays missing, and merge stays blocked, until
+  # the ready-for-review run reports it. GitHub does not evaluate the name of a
+  # skipped job, so drafts show this expression's text. The job id differs
+  # from `check` as well, so no naming of a skipped job can report the
+  # required check.
+  required-check:
+    name: ${{ github.event.pull_request.draft && 'check (runs when ready for review)' || 'check' }}
+    if: always() && !github.event.pull_request.draft
     needs:
+      - reuse
       - quality
       - nix-discovery
       - nix
@@ -479,10 +641,13 @@ jobs:
 
       - name: Require all standards gates
         env:
+          EVENT_NAME: ${{ github.event_name }}
           IS_SOURCE_REPOSITORY: ${{ github.repository == 'davidvornholt/standards' }}
           NIX_DISCOVERY_RESULT: ${{ needs.nix-discovery.result }}
           NIX_RESULT: ${{ needs.nix.result }}
           QUALITY_RESULT: ${{ needs.quality.result }}
+          REUSE_PROVEN: ${{ needs.reuse.outputs.proven }}
+          REUSE_RESULT: ${{ needs.reuse.result }}
         run: |
           case "$IS_SOURCE_REPOSITORY" in
             true)
@@ -496,8 +661,12 @@ jobs:
               exit 1
               ;;
           esac
-          if [ "$QUALITY_RESULT" != success ]; then
-            echo "::error::Standards gates did not all succeed (quality=$QUALITY_RESULT, nix-discovery=$NIX_DISCOVERY_RESULT, nix=$NIX_RESULT)"
+          if [ "$QUALITY_RESULT" = skipped ] && [ "$EVENT_NAME" = push ] &&
+            [ "$REUSE_RESULT" = success ] && [ "$REUSE_PROVEN" = true ]; then
+            echo "::notice::Reused the successful pull request run that validated this exact tree"
+            expected_nix_result=skipped
+          elif [ "$QUALITY_RESULT" != success ]; then
+            echo "::error::Standards gates did not all succeed (quality=$QUALITY_RESULT, nix-discovery=$NIX_DISCOVERY_RESULT, nix=$NIX_RESULT, reuse=$REUSE_RESULT, proven=$REUSE_PROVEN)"
             exit 1
           fi
           if [ "$NIX_DISCOVERY_RESULT" != "$expected_nix_result" ] || [ "$NIX_RESULT" != "$expected_nix_result" ]; then

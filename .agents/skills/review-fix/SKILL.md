@@ -33,7 +33,7 @@ Add a specialized lens only when a material risk such as authorization, persiste
 
 ## Baseline and review
 
-Reuse a successful equivalent exact-head gate. Otherwise run the repository gate once. Repair only PR-introduced mechanical failures before review and record pre-existing failures.
+Reuse a successful equivalent exact-head gate that has already finished. Otherwise run the repository gate locally once; do not wait for CI. Repair only PR-introduced mechanical failures before review and record pre-existing failures.
 
 For every required review or verification lens, spawn a separate read-only subagent using the [review skill](../review/SKILL.md). `review-pass` is an optional workflow helper. If delegation is unavailable, report incomplete coverage and stop.
 
@@ -60,11 +60,11 @@ Review only the fix commits. Skip fresh review for prose or static-copy changes 
 
 Only an unresolved original blocker or a defect introduced by the fix may trigger one repair round; pre-existing defects are deferred or discarded. Fresh-review the repair only when it touches secrets or authorization, persistence or migrations, recovery, concurrency, retries, transaction boundaries, cache identity, artifact provenance, or untrusted output crossing an authoritative or persisted boundary. Use one targeted lens, or two only for two independent invariant families.
 
-If repair verification finds a material defect, make one final repair, verify it mechanically only, and stop. Run the full deterministic gate once after the last change. Fix cycle-introduced gate failures mechanically without starting another review pass, then resolve blocker threads after verification and the final gate pass.
+If repair verification finds a material defect, make one final repair, verify it mechanically only, and stop. Run the full deterministic gate locally once after the last change. Fix cycle-introduced gate failures mechanically without starting another review pass, then resolve blocker threads after verification and the final gate pass.
 
 ## Report and stop
 
-Post the report and mark the PR ready unless an `ask` remains. Include every phase, including skipped phases, and open with:
+Post the report and mark the PR ready unless an `ask` remains. Marking it ready starts its CI run; report that run as pending instead of waiting for it. Include every phase, including skipped phases, and open with:
 
 | Phase | Scope | Model / lenses | Findings | Outcome | Duration |
 | --- | --- | --- | --- | --- | ---: |

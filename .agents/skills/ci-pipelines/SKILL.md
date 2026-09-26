@@ -19,10 +19,13 @@ Canonical workflows use maintained major-version tags for external actions.
 - A run that concludes "nothing to do" must first prove its precondition — the artifacts it relies on exist and were published for a proven parent — before cancelling itself.
 - When a trusted publisher already signed an output, verify the signature instead of rebuilding. Verify per output, rebuild only the misses, and treat every evaluation, signature, or query failure as a miss.
 - Proofs only hit when identities are stable: pin each check's inputs to exactly the files it reads. An input that folds in the whole repository invalidates on every commit and makes the proof permanently useless.
+- Skip expensive gates on draft pull requests and run them on `ready_for_review`. GitHub reports a skipped job as a passing required check, so a draft run must report the required check under another name instead of skipping it.
+- A default-branch push may reuse a pull-request result instead of repeating the gate only when that run recorded the exact tree it validated and the pushed tree matches. Verify the recording run's workflow, event, same-repository head, and job conclusions.
 
 ## Caches
 
 - Restore on every run; publish only from a successful default-branch run; bound the size before saving.
+- A default-branch run that reuses a result publishes nothing, so bound the staleness it causes: reuse only while trusted snapshots exist for the current lock and per-commit snapshots are recent.
 - Publishable snapshots must not accumulate history: build them from an empty store so they contain only what the current lockfile reaches. Do not rely on a tool's own garbage collection — it is version-asymmetric; an older tool cannot recognize a newer release's artifacts.
 - Large caches such as container layers belong in owned object storage behind a purpose-scoped credential, not in the shared Actions quota, where eviction churn costs more than the cache saves.
 - Executable stores stay at their tool-default paths; strict-env task runners hide relocated paths from exactly the subprocesses that need them.

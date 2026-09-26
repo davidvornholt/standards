@@ -22,11 +22,14 @@
   {
     "name": "Require all standards gates",
     "env": {
+      "EVENT_NAME": "${{ github.event_name }}",
       "IS_SOURCE_REPOSITORY": "${{ github.repository == 'davidvornholt/standards' }}",
       "NIX_DISCOVERY_RESULT": "${{ needs.nix-discovery.result }}",
       "NIX_RESULT": "${{ needs.nix.result }}",
-      "QUALITY_RESULT": "${{ needs.quality.result }}"
+      "QUALITY_RESULT": "${{ needs.quality.result }}",
+      "REUSE_PROVEN": "${{ needs.reuse.outputs.proven }}",
+      "REUSE_RESULT": "${{ needs.reuse.result }}"
     },
-    "run": "case \"$IS_SOURCE_REPOSITORY\" in\n  true)\n    expected_nix_result=success\n    ;;\n  false)\n    expected_nix_result=skipped\n    ;;\n  *)\n    echo \"::error::Unexpected source-repository mode (is-source-repository=$IS_SOURCE_REPOSITORY)\"\n    exit 1\n    ;;\nesac\nif [ \"$QUALITY_RESULT\" != success ]; then\n  echo \"::error::Standards gates did not all succeed (quality=$QUALITY_RESULT, nix-discovery=$NIX_DISCOVERY_RESULT, nix=$NIX_RESULT)\"\n  exit 1\nfi\nif [ \"$NIX_DISCOVERY_RESULT\" != \"$expected_nix_result\" ] || [ \"$NIX_RESULT\" != \"$expected_nix_result\" ]; then\n  echo \"::error::Nix gates did not match the repository mode (is-source-repository=$IS_SOURCE_REPOSITORY, expected=$expected_nix_result, nix-discovery=$NIX_DISCOVERY_RESULT, nix=$NIX_RESULT)\"\n  exit 1\nfi\n"
+    "run": "case \"$IS_SOURCE_REPOSITORY\" in\n  true)\n    expected_nix_result=success\n    ;;\n  false)\n    expected_nix_result=skipped\n    ;;\n  *)\n    echo \"::error::Unexpected source-repository mode (is-source-repository=$IS_SOURCE_REPOSITORY)\"\n    exit 1\n    ;;\nesac\nif [ \"$QUALITY_RESULT\" = skipped ] && [ \"$EVENT_NAME\" = push ] &&\n  [ \"$REUSE_RESULT\" = success ] && [ \"$REUSE_PROVEN\" = true ]; then\n  echo \"::notice::Reused the successful pull request run that validated this exact tree\"\n  expected_nix_result=skipped\nelif [ \"$QUALITY_RESULT\" != success ]; then\n  echo \"::error::Standards gates did not all succeed (quality=$QUALITY_RESULT, nix-discovery=$NIX_DISCOVERY_RESULT, nix=$NIX_RESULT, reuse=$REUSE_RESULT, proven=$REUSE_PROVEN)\"\n  exit 1\nfi\nif [ \"$NIX_DISCOVERY_RESULT\" != \"$expected_nix_result\" ] || [ \"$NIX_RESULT\" != \"$expected_nix_result\" ]; then\n  echo \"::error::Nix gates did not match the repository mode (is-source-repository=$IS_SOURCE_REPOSITORY, expected=$expected_nix_result, nix-discovery=$NIX_DISCOVERY_RESULT, nix=$NIX_RESULT)\"\n  exit 1\nfi\n"
   }
 ]
