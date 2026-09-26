@@ -4,6 +4,8 @@
 
 Do not weaken quality gates to make a change pass. Explain inline suppressions. Use configuration exceptions only where a rule cannot apply, scoped to the affected path and rule.
 
+Run the repository gate locally before pushing; CI confirms that result. Keep a pull request in draft while it is still changing, because the canonical CI gate skips drafts and runs when the pull request is marked ready. Do not wait for or poll CI after pushing; report the pending checks instead. Before a merge you were asked to perform, confirm that every required check passed on the exact head.
+
 ## Change policy
 
 - Do not build backwards compatibility by default. Migrate every call site and delete the old shape in the same change. Do not add deprecated aliases, versioned copies, or compatibility-only optional parameters.

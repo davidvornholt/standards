@@ -68,6 +68,8 @@ const MAJOR_ACTION_REF = /^[^@\s]+@v\d+$/u;
 const WRITE_PERMISSION_INPUT = /permission-\S+: write/u;
 const SOURCE_REPOSITORY_CONDITION =
   "github.repository == 'davidvornholt/standards'";
+const GATE_RUN_CONDITION =
+  "!cancelled() && !github.event.pull_request.draft && needs.reuse.outputs.proven != 'true'";
 const TURBO_CACHE_SAVE_CONDITION =
   "success() && github.ref == 'refs/heads/main' && steps.turbo-cache.outputs.cache-hit != 'true'";
 const TURBO_CACHE_PRUNE_RUN = `set -euo pipefail
@@ -753,10 +755,11 @@ const canonicalWorkflowPaths = (
 // This merge-time ratchet keeps configurable routing on the exact compatible
 // canonical jobs. It catches accidental workflow drift after review; it does
 // not authorize a request before CodeBuild starts a runner for the queued job.
-const CONFIGURABLE_RUNNER_VARIABLE_OCCURRENCES = 13;
+const CONFIGURABLE_RUNNER_VARIABLE_OCCURRENCES = 15;
 const QUALITY_JOB_NAME = 'quality';
 const CODEBUILD_JOB_TIMEOUT_MINUTES = 30;
 const NOTIFY_JOB_TIMEOUT_MINUTES = 5;
+const REUSE_JOB_TIMEOUT_MINUTES = 5;
 const WORKFLOW_JOB_HEADER_PATTERN = /^ {2}[a-z0-9-]+:\s*$/mu;
 const CODEBUILD_RUNNER = githubExpression(
   "vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-small', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || 'ubuntu-latest'",
@@ -789,6 +792,10 @@ const CONFIGURABLE_RUNNER_CONTRACTS = {
   '.github/workflows/standards.yml:quality': {
     runner: QUALITY_RUNNER,
     timeoutMinutes: QUALITY_TIMEOUT_MINUTES,
+  },
+  '.github/workflows/standards.yml:reuse': {
+    runner: CODEBUILD_RUNNER,
+    timeoutMinutes: REUSE_JOB_TIMEOUT_MINUTES,
   },
 } as const;
 const GITHUB_DEFAULT_JOB_TIMEOUT_MINUTES = 360;
@@ -2610,7 +2617,18 @@ describe('canonical standards workflow settings security', () => {
     // The job holds no durable credential, so it needs no executable file from
     // the repository at all: declarative settings inputs and nothing else.
     expect(settingsJobSource).not.toContain('GITHUB_ENV');
-    expect(workflowSource).not.toContain('GH_TOKEN:');
+    // Only the reuse proof binds a GitHub CLI token: the read-only workflow
+    // token, in a job that runs no repository code.
+    expect(workflowSource.match(/GH_TOKEN:.*/gu)).toEqual([
+      `GH_TOKEN: ${githubExpression('github.token')}`,
+    ]);
+    expect(
+      workflowSteps(workflow.jobs.reuse, 'reuse').find(
+        (step) => step.name === 'Prove a validated pull request result',
+      )?.env,
+    ).toEqual(
+      expect.objectContaining({ GH_TOKEN: githubExpression('github.token') }),
+    );
     expect(settingsRun).not.toContain('GITHUB_OUTPUT');
     expect(settingsRun).toContain('GH_TOKEN="$SETTINGS_TOKEN"');
     // An empty or multi-line token must stop the job rather than reach the CLI,
@@ -3194,7 +3212,10 @@ describe('canonical standards workflow Nix gate', () => {
       (step) => step.name === 'Require all standards gates',
     );
 
-    expect(discoveryJob.if).toBe(SOURCE_REPOSITORY_CONDITION);
+    expect(discoveryJob.if).toBe(
+      `${SOURCE_REPOSITORY_CONDITION} && ${GATE_RUN_CONDITION}`,
+    );
+    expect(discoveryJob.needs).toBe('reuse');
     expect(nixJob.if).toBe(SOURCE_REPOSITORY_CONDITION);
     expect(aggregateStep?.env).toEqual(
       expect.objectContaining({
@@ -3288,6 +3309,8 @@ describe('canonical standards workflow Nix gate', () => {
 
 describe('canonical standards workflow Nix aggregation', () => {
   const needsResults = ['success', 'failure', 'cancelled', 'skipped'] as const;
+  // These cases cover runs that did not reuse a pull-request result; the reuse
+  // suite owns the reuse inputs.
   const runAggregate = (
     aggregateScript: string,
     results: Readonly<Record<string, string>>,
@@ -3296,7 +3319,12 @@ describe('canonical standards workflow Nix aggregation', () => {
       'bash',
       ACTUAL_UPSTREAM,
       ['-euo', 'pipefail', '-c', aggregateScript],
-      results,
+      {
+        EVENT_NAME: 'pull_request',
+        REUSE_PROVEN: '',
+        REUSE_RESULT: 'skipped',
+        ...results,
+      },
     ).status;
 
   it('requires the exact repository-mode result across every Nix needs outcome', () => {
@@ -3306,8 +3334,13 @@ describe('canonical standards workflow Nix aggregation', () => {
       'Require all standards gates',
     );
 
-    expect(jobs.check.if).toBe('always()');
-    expect(jobs.check.needs).toEqual(['quality', 'nix-discovery', 'nix']);
+    expect(jobs.check.if).toBe('always() && !github.event.pull_request.draft');
+    expect(jobs.check.needs).toEqual([
+      'reuse',
+      'quality',
+      'nix-discovery',
+      'nix',
+    ]);
 
     for (const [isSourceRepository, expectedNixResult] of [
       ['true', 'success'],

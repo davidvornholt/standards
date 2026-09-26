@@ -16,6 +16,12 @@ CodeBuild is supported only when the maintainer and their agents are trusted to 
 
 Quality jobs require an ephemeral runner: leave `CI_CODEBUILD_PROJECT` unset for GitHub-hosted Ubuntu, or configure a fresh CodeBuild runner for each run. Arbitrary `CI_RUNNER` labels are unsupported because persistent Bun and browser stores let one pull-request revision alter executable inputs for a later one. Remove an old `CI_RUNNER` variable before adopting this workflow; configure CodeBuild if GitHub-hosted resources are insufficient.
 
+## Quality gate runs
+
+Draft pull requests skip the `Standards` gates; marking a pull request ready for review runs them on its current head. A draft run reports its aggregator as `check (runs when ready for review)`, so a required `check` stays missing, and merge stays blocked, until the ready run finishes.
+
+A push to `main` reuses the pull request's result instead of repeating the gate when a successful same-repository pull-request run recorded the pushed tree, which is the usual outcome of squash-merging an up-to-date branch. Reuse also requires trusted Bun and Playwright snapshots for the current lock and a Turbo snapshot younger than a day; otherwise the push runs the full gate and refreshes those caches.
+
 ## Local PostgreSQL
 
 Repositories with a local PostgreSQL database get:

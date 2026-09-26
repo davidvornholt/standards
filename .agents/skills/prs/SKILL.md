@@ -7,6 +7,10 @@ description: Use when opening a pull request or changing its title or descriptio
 
 One pull request delivers one coherent outcome, including its required migrations, tests, documentation, and supporting changes. If the changes contain independent outcomes, propose separate pull requests.
 
+## Draft and ready
+
+Open a pull request as a draft while its work continues, and mark it ready with `gh pr ready` once the local gate passes on its final commit. Before pushing further changes to a ready pull request, convert it back with `gh pr ready --undo`. Each move to ready starts one full CI run.
+
 ## Title
 
 Pull requests squash into main. Use a Conventional Commit title (`<type>(scope): <imperative description>`); the title and description become the commit subject and body.
