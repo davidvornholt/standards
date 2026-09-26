@@ -537,7 +537,9 @@ jobs:
   # Draft runs skip every gate, and GitHub reports a skipped job as a passing
   # required check. The draft run therefore reports this job under another
   # name: the required `check` stays missing, and merge stays blocked, until
-  # the ready-for-review run reports it.
+  # the ready-for-review run reports it. GitHub does not evaluate the name of a
+  # skipped job, so drafts show this expression's text; it never equals
+  # `check`.
   check:
     name: ${{ github.event.pull_request.draft && 'check (runs when ready for review)' || 'check' }}
     if: always() && !github.event.pull_request.draft
