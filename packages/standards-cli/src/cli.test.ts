@@ -3216,7 +3216,9 @@ describe('canonical standards workflow Nix gate', () => {
       `${SOURCE_REPOSITORY_CONDITION} && ${GATE_RUN_CONDITION}`,
     );
     expect(discoveryJob.needs).toBe('reuse');
-    expect(nixJob.if).toBe(SOURCE_REPOSITORY_CONDITION);
+    expect(nixJob.if).toBe(
+      `${SOURCE_REPOSITORY_CONDITION} && !cancelled() && needs.nix-discovery.result == 'success'`,
+    );
     expect(aggregateStep?.env).toEqual(
       expect.objectContaining({
         IS_SOURCE_REPOSITORY: githubExpression(SOURCE_REPOSITORY_CONDITION),

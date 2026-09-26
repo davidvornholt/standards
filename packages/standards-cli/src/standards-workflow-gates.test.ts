@@ -10,6 +10,7 @@ const AGGREGATE_STEP = 'Require all standards gates';
 const PROOF_STEP = 'Prove a validated pull request result';
 const GATE_RUN_CONDITION =
   "!cancelled() && !github.event.pull_request.draft && needs.reuse.outputs.proven != 'true'";
+const STATUS_FUNCTION = /(?:^|\W)(?:!cancelled|always)\(\)/u;
 const CACHE_PREFIX_ENVIRONMENT = [
   'BUN_CACHE_PREFIX',
   'PLAYWRIGHT_CACHE_PREFIX',
@@ -105,6 +106,30 @@ describe('main-push reuse wiring', () => {
     expect(jobs.quality?.needs).toBe('reuse');
     expect(jobs['nix-discovery']?.needs).toBe('reuse');
     expect(jobs['required-check']?.needs).toContain('reuse');
+  });
+
+  // `reuse` is skipped on every pull request, and GitHub's implicit `success()`
+  // skips any job with a skipped ancestor. Every job downstream of `reuse`
+  // must therefore state its own status condition.
+  it('keeps every job downstream of the proof on an explicit status condition', () => {
+    const { jobs } = workflow();
+    const needsOf = (id: string): ReadonlyArray<string> => {
+      const needs = jobs[id]?.needs ?? [];
+      return typeof needs === 'string' ? [needs] : needs;
+    };
+    const dependsOnReuse = (id: string): boolean =>
+      needsOf(id).some((need) => need === 'reuse' || dependsOnReuse(need));
+    const downstream = Object.keys(jobs).filter(dependsOnReuse);
+
+    expect(downstream.toSorted()).toEqual([
+      'nix',
+      'nix-discovery',
+      'quality',
+      'required-check',
+    ]);
+    for (const id of downstream) {
+      expect(jobs[id]?.if ?? '').toMatch(STATUS_FUNCTION);
+    }
   });
 
   it('records the validated tree first, and only for pull request runs', () => {

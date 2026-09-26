@@ -494,9 +494,15 @@ jobs:
           matrix=$(jq -cer -f nix/bun-system-matrix.jq nix/bun-system-metadata.json)
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
+  # A job's implicit `success()` fails when any ancestor was skipped, and
+  # `reuse` is skipped on every pull request, so this job gates on its
+  # discovery result explicitly.
   nix:
     name: Nix (${{ matrix.system }})
-    if: github.repository == 'davidvornholt/standards'
+    if: >-
+      github.repository == 'davidvornholt/standards' &&
+      !cancelled() &&
+      needs.nix-discovery.result == 'success'
     needs: nix-discovery
     strategy:
       fail-fast: false
