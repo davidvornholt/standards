@@ -781,7 +781,7 @@ const CONFIGURABLE_RUNNER_CONTRACTS = {
     runner: CODEBUILD_RUNNER,
     timeoutMinutes: CODEBUILD_JOB_TIMEOUT_MINUTES,
   },
-  '.github/workflows/standards.yml:check': {
+  '.github/workflows/standards.yml:required-check': {
     runner: CODEBUILD_RUNNER,
     timeoutMinutes: CODEBUILD_JOB_TIMEOUT_MINUTES,
   },
@@ -2555,7 +2555,7 @@ const settingsSkipBindings = (
 const assertSettingsTrustBoundary = (
   workflow: ParsedWorkflow,
 ): ReadonlyArray<WorkflowStep> => {
-  const checkSteps = workflowSteps(workflow.jobs.check, 'check');
+  const checkSteps = workflowSteps(workflow.jobs['required-check'], 'check');
   requireExactWorkflowValue(
     checkSteps.map((step) => step.name),
     SETTINGS_CHECK_STEP_NAMES,
@@ -2609,7 +2609,7 @@ describe('canonical standards workflow settings security', () => {
   it('isolates the settings comparison from repository-controlled executable code', () => {
     const workflowSource = readFileSync(STANDARDS_WORKFLOW, 'utf8');
     const workflow = parseWorkflow(STANDARDS_WORKFLOW);
-    const settingsJobSource = JSON.stringify(workflow.jobs.check);
+    const settingsJobSource = JSON.stringify(workflow.jobs['required-check']);
     const [, installStep, settingsStep] = assertSettingsTrustBoundary(workflow);
     const installRun = String(installStep?.run);
     const settingsRun = String(settingsStep?.run);
@@ -2655,7 +2655,7 @@ describe('canonical standards workflow settings security', () => {
       parseWorkflow(STANDARDS_WORKFLOW),
     );
     const [fullCheckoutStep] = workflowSteps(
-      fullCheckoutWorkflow.jobs.check,
+      fullCheckoutWorkflow.jobs['required-check'],
       'check',
     );
     if (fullCheckoutStep !== undefined) {
@@ -2722,7 +2722,7 @@ describe('canonical standards workflow settings credential', () => {
 
     expect(parsedWorkflow.permissions).toEqual({ contents: 'read' });
     expect(jobs.quality.permissions).toBeUndefined();
-    expect(jobs.check.permissions).toEqual({
+    expect(jobs['required-check'].permissions).toEqual({
       contents: 'read',
       issues: 'read',
     });
@@ -3205,7 +3205,7 @@ describe('canonical standards workflow Nix gate', () => {
     const jobs = yamlJobs(STANDARDS_WORKFLOW);
     const discoveryJob = jobs['nix-discovery'];
     const nixJob = jobs.nix;
-    const checkSteps = jobs.check.steps as ReadonlyArray<
+    const checkSteps = jobs['required-check'].steps as ReadonlyArray<
       Readonly<Record<string, unknown>>
     >;
     const aggregateStep = checkSteps.find(
@@ -3334,8 +3334,10 @@ describe('canonical standards workflow Nix aggregation', () => {
       'Require all standards gates',
     );
 
-    expect(jobs.check.if).toBe('always() && !github.event.pull_request.draft');
-    expect(jobs.check.needs).toEqual([
+    expect(jobs['required-check'].if).toBe(
+      'always() && !github.event.pull_request.draft',
+    );
+    expect(jobs['required-check'].needs).toEqual([
       'reuse',
       'quality',
       'nix-discovery',
@@ -4144,8 +4146,8 @@ it('rejects shell-local settings bypasses and repository-controlled execution', 
     'eval "$(cat .github/settings.local.json)"; ',
   ]) {
     const workflow = structuredClone(parseWorkflow(STANDARDS_WORKFLOW));
-    const steps = workflowSteps(workflow.jobs.check, 'check');
-    workflow.jobs.check.steps = steps.map((step) =>
+    const steps = workflowSteps(workflow.jobs['required-check'], 'check');
+    workflow.jobs['required-check'].steps = steps.map((step) =>
       step.name === 'Check GitHub settings'
         ? { ...step, run: prefix + step.run }
         : step,

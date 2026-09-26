@@ -31,7 +31,9 @@ jobs:
   # nothing new. Each pull-request quality job records the tree it validated;
   # this preflight lets a main push reuse that result only when a successful
   # same-repository pull-request run of this workflow, for the head that was
-  # merged, recorded the pushed tree. It runs no repository code. Any miss
+  # merged, recorded the pushed tree. The record is output of that run, so
+  # reuse trusts same-repository authors as far as the pull-request run itself
+  # already does; fork runs never qualify. It runs no repository code. Any miss
   # leaves `proven` unset and any error fails only this step, so the full gate
   # runs. Reuse also skips cache publication, so it additionally requires
   # trusted Bun and Playwright snapshots for the current lock and a Turbo
@@ -75,6 +77,10 @@ jobs:
             echo "::notice::Running the full gate: $1"
             exit 0
           }
+
+          # A re-run may follow an attempt whose full gate ran and failed on
+          # this tree; only live state would change, so it must not reuse.
+          [ "${GITHUB_RUN_ATTEMPT:-}" = 1 ] || miss "a re-run repeats the full gate"
 
           tree=$(gh api "repos/$REPOSITORY/git/commits/$SHA" | jq -er .tree.sha)
           head=$(gh api "repos/$REPOSITORY/commits/$SHA/pulls" | jq -r \
@@ -538,9 +544,10 @@ jobs:
   # required check. The draft run therefore reports this job under another
   # name: the required `check` stays missing, and merge stays blocked, until
   # the ready-for-review run reports it. GitHub does not evaluate the name of a
-  # skipped job, so drafts show this expression's text; it never equals
-  # `check`.
-  check:
+  # skipped job, so drafts show this expression's text. The job id differs
+  # from `check` as well, so no naming of a skipped job can report the
+  # required check.
+  required-check:
     name: ${{ github.event.pull_request.draft && 'check (runs when ready for review)' || 'check' }}
     if: always() && !github.event.pull_request.draft
     needs:

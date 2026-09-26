@@ -61,7 +61,10 @@ describe('draft pull requests', () => {
   // GitHub reports a skipped job as a passing required check. A draft run must
   // therefore never report `check` itself, or it would satisfy the ruleset.
   it('report the aggregator under a name that cannot satisfy the required check', () => {
-    const { check } = workflow().jobs;
+    const { jobs } = workflow();
+    const check = jobs['required-check'];
+    // Whatever name GitHub gives a skipped job, it is never the job id `check`.
+    expect(Object.keys(jobs)).not.toContain('check');
     expect(check?.if).toBe('always() && !github.event.pull_request.draft');
     expect(check?.name).toBe(
       expression(
@@ -101,7 +104,7 @@ describe('main-push reuse wiring', () => {
     const { jobs } = workflow();
     expect(jobs.quality?.needs).toBe('reuse');
     expect(jobs['nix-discovery']?.needs).toBe('reuse');
-    expect(jobs.check?.needs).toContain('reuse');
+    expect(jobs['required-check']?.needs).toContain('reuse');
   });
 
   it('records the validated tree first, and only for pull request runs', () => {

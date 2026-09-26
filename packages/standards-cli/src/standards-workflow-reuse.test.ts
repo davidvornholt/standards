@@ -171,7 +171,11 @@ file="$FIXTURE/api/$(printf '%s' "$endpoint" | tr -c 'A-Za-z0-9' '_').json"
 cat "$file"
 `;
 
-const prove = (api: Record<string, Json>, lockHash = LOCK_HASH) => {
+const prove = (
+  api: Record<string, Json>,
+  lockHash = LOCK_HASH,
+  runAttempt = '1',
+) => {
   const fixture = mkTmp('standards-reuse-proof-');
   for (const [endpoint, body] of Object.entries(api)) {
     write(
@@ -193,6 +197,7 @@ const prove = (api: Record<string, Json>, lockHash = LOCK_HASH) => {
       ...Object.fromEntries([
         ['FIXTURE', fixture],
         ['GITHUB_OUTPUT', outputPath],
+        ['GITHUB_RUN_ATTEMPT', runAttempt],
         ['LOCK_HASH', lockHash],
         ['PATH', `${join(fixture, 'bin')}:${process.env.PATH ?? ''}`],
         ['REF', REF],
@@ -337,6 +342,14 @@ describe('main-push reuse proof', () => {
 });
 
 describe('main-push reuse proof edge cases', () => {
+  // A re-run can follow an attempt whose full gate failed on this tree.
+  it('runs the full gate on a re-run', () => {
+    expect(prove(provenApi(), LOCK_HASH, '2')).toEqual({
+      proven: false,
+      status: 0,
+    });
+  });
+
   it('runs the full gate without a lockfile hash', () => {
     expect(prove(provenApi(), '')).toEqual({ proven: false, status: 0 });
   });
