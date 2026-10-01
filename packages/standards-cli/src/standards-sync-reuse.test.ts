@@ -9,18 +9,19 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
+import { cleanupTmpDirs, mkTmp, runProcess, write } from './cli-test-support';
 import {
-  ACTUAL_UPSTREAM,
-  cleanupTmpDirs,
-  mkTmp,
-  runProcess,
-  write,
-  yamlRunScript,
-} from './cli-test-support';
+  namedStep,
+  parsedWorkflow,
+} from './standards-sync-broker-workflow-contract';
+import {
+  SYNC_BRANCH as BRANCH,
+  fakeGitHub,
+  RECONCILE_STEP,
+  runSyncStep,
+} from './standards-sync-workflow-test-support';
 
 const MODE = 0o755;
-const WORKFLOW = join(ACTUAL_UPSTREAM, '.github/workflows/standards-sync.yml');
-const BRANCH = 'standards-sync/update';
 const git = (cwd: string, ...args: Array<string>): string =>
   execFileSync('git', args, {
     cwd,
@@ -31,20 +32,7 @@ const env = (
   values: Record<string, string>,
 ): Record<string, string | undefined> => ({ ...process.env, ...values });
 const shell = (cwd: string, name: string, values: Record<string, string>) =>
-  runProcess(
-    'bash',
-    cwd,
-    [
-      '-euo',
-      'pipefail',
-      '-c',
-      yamlRunScript(WORKFLOW, name).replace(
-        ['$', '{{ steps.sync-branch.outputs.branch }}'].join(''),
-        BRANCH,
-      ),
-    ],
-    env(values),
-  );
+  runSyncStep(cwd, name, env(values));
 afterEach(cleanupTmpDirs);
 
 it.each([false, true])(
@@ -68,32 +56,15 @@ it.each([false, true])(
       'base',
     );
     git(first, 'push', 'origin', 'main');
-    write(
-      root,
-      'bin/gh',
-      `#!/usr/bin/env bash
-set -euo pipefail
-if [ "$2" = list ]; then
-  if [ -f "$PR_STATE" ]; then cat "$PR_STATE"; fi
-elif [ "$2" = create ]; then
-  if [ "$FAIL_CREATE" = true ]; then exit 1; fi
-  echo 7 > "$PR_STATE"
-  echo created >> "$PR_CREATIONS"
-else
-  exit 1
-fi
-`,
-    );
-    chmodSync(join(root, 'bin/gh'), MODE);
-    const values: Record<string, string> = Object.fromEntries([
-      ['SYNC_BASE_REF', 'main'],
-      ['SYNC_READ_TOKEN', 'read-fixture'],
-      ['BRANCH_WRITER_TOKEN', 'write-fixture'],
-      ['GH_TOKEN', 'pr-fixture'],
-      ['PATH', `${join(root, 'bin')}:${process.env.PATH ?? ''}`],
-      ['PR_STATE', join(root, 'pr-state')],
-      ['PR_CREATIONS', join(root, 'pr-creations')],
-    ]);
+    const values: Record<string, string> = {
+      ...fakeGitHub(root, process.env.PATH ?? ''),
+      ...Object.fromEntries([
+        ['SYNC_BASE_REF', 'main'],
+        ['SYNC_READ_TOKEN', 'read-fixture'],
+        ['BRANCH_WRITER_TOKEN', 'write-fixture'],
+        ['MIRROR_CHANGED', 'true'],
+      ]),
+    };
     for (const [index, cwd] of [first, join(root, 'second')].entries()) {
       if (index > 0) {
         git(root, 'clone', remote, cwd);
@@ -114,7 +85,7 @@ fi
       ).toBe(0);
       const fail = failFirst && index === 0;
       expect(
-        shell(cwd, 'Open a pull request if the mirror changed', {
+        shell(cwd, RECONCILE_STEP, {
           ...runEnv,
           [['FAIL', 'CREATE'].join('_')]: String(fail),
         }).status,
@@ -147,8 +118,11 @@ fi
     expect(
       git(root, '--git-dir', remote, 'show', `${BRANCH}:base-update.txt`),
     ).toBe('new main');
-    expect(existsSync(join(root, 'pr-state'))).toBe(true);
+    expect(JSON.parse(readFileSync(join(root, 'pr-state'), 'utf8'))).toEqual([
+      { number: 7, headRefName: BRANCH, isCrossRepository: false },
+    ]);
     expect(readFileSync(join(root, 'pr-creations'), 'utf8')).toBe('created\n');
+    expect(existsSync(join(root, 'pr-closures'))).toBe(false);
   },
 );
 
@@ -285,3 +259,23 @@ it.each([false, true])(
     expect(existsSync(join(cwd, 'push-leak'))).toBe(false);
   },
 );
+
+it('refreshes the lockfile with the trusted Bun config instead of the branch config', () => {
+  const root = mkTmp('sync-lockfile-');
+  const cwd = join(root, 'consumer');
+  const runtime = join(root, 'runtime');
+  write(cwd, 'package.json', '{"name":"fixture"}\n');
+  // Bun refuses to start with a malformed bunfig.toml, so success shows that
+  // the step never loaded the branch's configuration.
+  write(cwd, 'bunfig.toml', 'not [valid toml\n');
+  write(runtime, 'bunfig.toml', '');
+  const script = namedStep(parsedWorkflow, 'Refresh consumer lockfile').run;
+  expect(
+    runProcess(
+      'bash',
+      cwd,
+      ['-euo', 'pipefail', '-c', script ?? 'false'],
+      env({ [['STANDARDS', 'SYNC', 'RUNTIME'].join('_')]: runtime }),
+    ).status,
+  ).toBe(0);
+});
