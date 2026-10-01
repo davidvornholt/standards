@@ -3666,9 +3666,7 @@ describe('standards sync workflow ordering', () => {
   });
 
   it('orders generated migration guidance before merge', () => {
-    const openPullRequest = workflowRunScript(
-      'Open a pull request if the mirror changed',
-    );
+    const openPullRequest = workflowRunScript('Reconcile sync pull requests');
     const applyIndex = openPullRequest.indexOf('bun standards github --apply');
     const mergeIndex = openPullRequest.indexOf(
       'Merge only after every required check passes',
