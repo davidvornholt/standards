@@ -8,9 +8,11 @@ import {
   installApi,
   installNetworkFailure,
   liveRepository,
+  liveRulesetConditions,
   liveRulesetSummary,
   OPT_OUT_NOTICE,
 } from './github-commands-test-support';
+import { BYPASS_ACTORS_KEY } from './github-settings-parse';
 import { restoreProcessEnv } from './process-env-test-support';
 
 const originalFetch = globalThis.fetch;
@@ -81,6 +83,8 @@ describe('runGithubCheck', () => {
           name: 'Protect main',
           target: 'branch',
           enforcement: 'active',
+          conditions: liveRulesetConditions,
+          [BYPASS_ACTORS_KEY]: [],
           rules: [],
         },
       },
@@ -114,6 +118,8 @@ describe('runGithubCheck', () => {
           enforcement: 'active',
           id: 7,
           name: 'Protect main',
+          conditions: liveRulesetConditions,
+          [BYPASS_ACTORS_KEY]: [],
           rules: [],
           target: 'branch',
         },

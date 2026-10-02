@@ -8,8 +8,10 @@ import {
   createConsumer,
   installApi,
   liveRepository,
+  liveRulesetConditions,
   liveRulesetSummary,
 } from './github-commands-test-support';
+import { BYPASS_ACTORS_KEY } from './github-settings-parse';
 import { restoreProcessEnv } from './process-env-test-support';
 
 const originalFetch = globalThis.fetch;
@@ -138,6 +140,8 @@ describe('runGithubCheck fail-closed visibility', () => {
           name: 'Protect main',
           target: 'branch',
           enforcement: 'active',
+          conditions: liveRulesetConditions,
+          [BYPASS_ACTORS_KEY]: [],
           rules: [],
         },
       },
@@ -156,12 +160,23 @@ describe('runGithubCheck fail-closed visibility', () => {
     expect(errors).toContain('re-run the check');
     expect(errors).not.toContain('widening what CI reads with is not the fix');
   });
+});
 
+describe('runGithubCheck ruleset visibility', () => {
   it('fails when a declared ruleset field is invisible to the token', async () => {
     installApi([
       { body: liveRepository(false, true) },
       { body: [liveRulesetSummary()] },
-      { body: { id: 7, name: 'Protect main', target: 'branch', rules: [] } },
+      {
+        body: {
+          id: 7,
+          name: 'Protect main',
+          target: 'branch',
+          conditions: liveRulesetConditions,
+          [BYPASS_ACTORS_KEY]: [],
+          rules: [],
+        },
+      },
     ]);
 
     expect(await runGithubCheck(consumer({ optOut: false }))).toBe(false);

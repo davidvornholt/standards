@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { resolveHiddenBypassActors } from './github-bypass-actors';
-import { BYPASS_ACTORS_KEY, diffRulesets } from './github-ruleset-diff';
+import { diffRulesets } from './github-ruleset-diff';
+import { BYPASS_ACTORS_KEY } from './github-settings-parse';
 
 // The GitHub wire format is snake_case; fixtures come through JSON.parse and
 // the computed BYPASS_ACTORS_KEY so those literals never become identifiers.
@@ -19,12 +20,15 @@ const BYPASS_COUNT = 3;
 
 // What a token without repository Administration access sees, and the only
 // thing a GitHub App installation token ever sees: no `bypass_actors` key.
-const hidden = { id: RULESET_ID, name: 'Protect main', enforcement: 'active' };
+const declaredBase = JSON.parse(
+  '{"name":"Protect main","target":"branch","enforcement":"active","conditions":{"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}},"rules":[]}',
+) as Readonly<Record<string, unknown>>;
+const hidden = { ...declaredBase, id: RULESET_ID };
 
 const declaredWith = (
   actors: ReadonlyArray<unknown>,
 ): Readonly<Record<string, unknown>> => ({
-  name: 'Protect main',
+  ...declaredBase,
   [BYPASS_ACTORS_KEY]: actors,
 });
 

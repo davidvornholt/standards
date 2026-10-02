@@ -8,10 +8,8 @@ import {
   ADMIN_VISIBILITY_ADVICE,
   unverifiableProblem,
 } from './github-command-shared';
-import {
-  BYPASS_ACTORS_KEY,
-  type UnverifiableRulesetField,
-} from './github-ruleset-diff';
+import type { UnverifiableRulesetField } from './github-ruleset-diff';
+import { BYPASS_ACTORS_KEY } from './github-settings-parse';
 
 const SCOPE = 'ruleset field(s)';
 

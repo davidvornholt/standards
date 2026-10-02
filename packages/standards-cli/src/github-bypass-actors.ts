@@ -2,7 +2,7 @@
 // answers for tokens that cannot read the actors themselves. Pure logic; the
 // GraphQL call lives in github-graphql.ts.
 
-import { BYPASS_ACTORS_KEY } from './github-ruleset-diff';
+import { BYPASS_ACTORS_KEY } from './github-settings-parse';
 
 // Stand-ins for bypass actors GraphQL counted but would not name. They exist
 // only to carry the count into the ordinary length comparison, and are attached

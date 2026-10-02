@@ -10,9 +10,11 @@
 // differently and still report the same boolean.
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import process from 'node:process';
 import { HTTP_UNAUTHORIZED } from './github-api';
-import { runGithubCheck } from './github-commands';
+import { runGithubApply, runGithubCheck } from './github-commands';
 import {
   type ApiCall,
   captureConsole,
@@ -21,8 +23,10 @@ import {
   graphqlQuery,
   installApi,
   liveRepository,
+  liveRulesetConditions,
   liveRulesetSummary,
 } from './github-commands-test-support';
+import { BYPASS_ACTORS_KEY } from './github-settings-parse';
 import { restoreProcessEnv } from './process-env-test-support';
 
 const originalFetch = globalThis.fetch;
@@ -63,6 +67,7 @@ const liveRuleset = {
   name: 'Protect main',
   target: 'branch',
   enforcement: 'active',
+  conditions: liveRulesetConditions,
   rules: [],
 };
 
@@ -114,6 +119,43 @@ const declaredActor = JSON.parse(
 
 const HIDDEN_LIST_PROBLEM =
   'ruleset field(s) not visible to this token, so the gate cannot verify: ruleset "Protect main": bypass_actors';
+
+it.each([
+  ['check', runGithubCheck],
+  ['apply', runGithubApply],
+] as const)(
+  'rejects a local omitted bypass list before %s contacts GitHub',
+  async (_command, run) => {
+    const path = consumer([]);
+    const canonicalPath = join(path, '.github/settings.json');
+    const canonical = JSON.parse(readFileSync(canonicalPath, 'utf8')) as {
+      readonly rulesets: ReadonlyArray<Readonly<Record<string, unknown>>>;
+    };
+    const localRulesets = canonical.rulesets.map((ruleset) =>
+      Object.fromEntries(
+        Object.entries(ruleset).filter(([key]) => key !== BYPASS_ACTORS_KEY),
+      ),
+    );
+    writeFileSync(
+      canonicalPath,
+      JSON.stringify({ ...canonical, rulesets: [] }),
+    );
+    writeFileSync(
+      join(path, '.github/settings.local.json'),
+      JSON.stringify({ repository: {}, rulesets: localRulesets }),
+    );
+    const calls = installApi([
+      { body: liveRepository(false, true) },
+      { body: [liveRulesetSummary()] },
+      { body: { ...liveRuleset, [BYPASS_ACTORS_KEY]: [declaredActor] } },
+    ]);
+    expect(await run(path)).toBe(false);
+    expect(calls).toEqual([]);
+    expect(output.errors.join('\n')).toContain(
+      '.github/settings.local.json ruleset "Protect main" must declare "bypass_actors"; use [] if nobody may bypass',
+    );
+  },
+);
 
 describe('runGithubCheck GraphQL bypass-actor fallback', () => {
   it('verifies a declared-empty bypass list from the GraphQL count', async () => {

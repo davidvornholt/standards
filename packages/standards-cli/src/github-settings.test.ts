@@ -1,16 +1,23 @@
 import { describe, expect, it } from 'bun:test';
 import { loadGithubSettings } from './github-settings';
 
+const ruleset = (name: string): Readonly<Record<string, unknown>> => ({
+  ...JSON.parse(
+    '{"target":"branch","enforcement":"active","conditions":{"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}},"bypass_actors":[]}',
+  ),
+  name,
+});
+
 const canonical = JSON.stringify({
   repository: { allow_auto_merge: true },
-  rulesets: [{ name: 'Protect main', target: 'branch' }],
+  rulesets: [ruleset('Protect main')],
 });
 const emptySeam = JSON.stringify({ repository: {}, rulesets: [] });
 describe('loadGithubSettings', () => {
   it('merges an additive seam', () => {
     const local = JSON.stringify({
       repository: { has_wiki: false },
-      rulesets: [{ name: 'Protect releases', target: 'branch' }],
+      rulesets: [ruleset('Protect releases')],
     });
     const loaded = loadGithubSettings(canonical, local);
     expect(loaded.problems).toEqual([]);
@@ -35,7 +42,7 @@ describe('loadGithubSettings', () => {
   it('rejects overriding a canonical repository key and redefining a canonical ruleset together', () => {
     const local = JSON.stringify({
       repository: { allow_auto_merge: false },
-      rulesets: [{ name: 'Protect main' }],
+      rulesets: [ruleset('Protect main')],
     });
     const loaded = loadGithubSettings(canonical, local);
     expect(loaded.merged).toBeNull();
@@ -49,7 +56,7 @@ describe('loadGithubSettings validation aggregation', () => {
   it('gathers structural problems from both files', () => {
     const badCanonical = JSON.stringify({
       repositories: {},
-      rulesets: [{ target: 'branch' }, { name: 'Dup' }, { name: 'Dup' }],
+      rulesets: [{ target: 'branch' }, ruleset('Dup'), ruleset('Dup')],
     });
     const badLocal = JSON.stringify({ rulesets: 'nope' });
     const loaded = loadGithubSettings(badCanonical, badLocal);
@@ -70,7 +77,7 @@ describe('loadGithubSettings validation aggregation', () => {
     });
     const badLocal = JSON.stringify({
       repository: {},
-      rulesets: [{ name: 'Protect releases' }],
+      rulesets: [ruleset('Protect releases')],
       rulesetEnforcement: 'unavailable-on-plan',
     });
     const loaded = loadGithubSettings(badCanonical, badLocal);
@@ -84,11 +91,11 @@ describe('loadGithubSettings validation aggregation', () => {
   it('gathers merge problems independent of malformed sibling fields', () => {
     const badCanonical = JSON.stringify({
       repository: { allow_auto_merge: true },
-      rulesets: [{ name: 'Protect main' }, { target: 'branch' }],
+      rulesets: [ruleset('Protect main'), { target: 'branch' }],
     });
     const badLocal = JSON.stringify({
       repository: { allow_auto_merge: false },
-      rulesets: [{ name: 'Protect main' }, null],
+      rulesets: [ruleset('Protect main'), null],
       rulesetEnforcement: 'unavailable-on-plan',
     });
     const loaded = loadGithubSettings(badCanonical, badLocal);
@@ -188,7 +195,7 @@ describe('loadGithubSettings rulesetEnforcement', () => {
   it('rejects local rulesets combined with the opt-out', () => {
     const local = JSON.stringify({
       repository: {},
-      rulesets: [{ name: 'Protect releases' }],
+      rulesets: [ruleset('Protect releases')],
       rulesetEnforcement: 'unavailable-on-plan',
     });
     const loaded = loadGithubSettings(canonical, local);

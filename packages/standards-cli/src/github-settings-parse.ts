@@ -45,6 +45,89 @@ export const isNamedRuleset = (
 ): value is Readonly<Record<string, unknown>> & { readonly name: string } =>
   isRecord(value) && typeof value.name === 'string' && value.name.length > 0;
 
+export const BYPASS_ACTORS_KEY = 'bypass_actors';
+const RULESET_COMPARED_KEYS = [
+  'target',
+  'enforcement',
+  'conditions',
+  BYPASS_ACTORS_KEY,
+] as const;
+
+// Push rules cover every push to the repository and have no ref-name scope.
+// The parser and comparison share the same field contract.
+export const rulesetComparedKeys = (target: unknown) =>
+  target === 'push'
+    ? RULESET_COMPARED_KEYS.filter((key) => key !== 'conditions')
+    : RULESET_COMPARED_KEYS;
+
+const isStringList = (value: unknown): value is ReadonlyArray<string> =>
+  Array.isArray(value) && value.every((item) => typeof item === 'string');
+
+const isOneOf = (value: unknown, choices: ReadonlyArray<string>): boolean =>
+  typeof value === 'string' && choices.includes(value);
+
+const rulesetConditionsProblem = (
+  ruleset: Readonly<Record<string, unknown>>,
+  prefix: string,
+): string | null => {
+  if (ruleset.conditions === undefined) {
+    return null;
+  }
+  if (ruleset.target === 'push') {
+    return `${prefix} must omit "conditions" for target "push", which applies to every push`;
+  }
+  const refName = isRecord(ruleset.conditions)
+    ? ruleset.conditions.ref_name
+    : undefined;
+  return isRecord(refName) &&
+    isStringList(refName.include) &&
+    isStringList(refName.exclude)
+    ? null
+    : `${prefix} "conditions" must declare "ref_name.include" and "ref_name.exclude" as arrays of strings`;
+};
+
+const rulesetFieldProblems = (
+  ruleset: Readonly<Record<string, unknown>>,
+  label: string,
+): ReadonlyArray<string> => {
+  const problems: Array<string> = [];
+  const prefix = `${label} ruleset "${String(ruleset.name)}"`;
+  for (const key of rulesetComparedKeys(ruleset.target)) {
+    if (ruleset[key] === undefined) {
+      const advice =
+        key === BYPASS_ACTORS_KEY ? '; use [] if nobody may bypass' : '';
+      problems.push(`${prefix} must declare "${key}"${advice}`);
+    }
+  }
+  if (
+    ruleset.target !== undefined &&
+    !isOneOf(ruleset.target, ['branch', 'tag', 'push'])
+  ) {
+    problems.push(`${prefix} "target" must be "branch", "tag", or "push"`);
+  }
+  if (
+    ruleset.enforcement !== undefined &&
+    !isOneOf(ruleset.enforcement, ['active', 'disabled', 'evaluate'])
+  ) {
+    problems.push(
+      `${prefix} "enforcement" must be "active", "disabled", or "evaluate"`,
+    );
+  }
+  if (
+    ruleset[BYPASS_ACTORS_KEY] !== undefined &&
+    !Array.isArray(ruleset[BYPASS_ACTORS_KEY])
+  ) {
+    problems.push(
+      `${prefix} "${BYPASS_ACTORS_KEY}" must be an array; use [] if nobody may bypass`,
+    );
+  }
+  const conditionsProblem = rulesetConditionsProblem(ruleset, prefix);
+  if (conditionsProblem !== null) {
+    problems.push(conditionsProblem);
+  }
+  return problems;
+};
+
 const LABEL_COLOR = /^[0-9a-f]{6}$/u;
 const LABEL_DECLARATION_KEY_COUNT = 3;
 
@@ -97,6 +180,9 @@ const rulesetListProblems = (
       );
     } else {
       names.add(ruleset.name);
+    }
+    if (isNamedRuleset(ruleset)) {
+      problems.push(...rulesetFieldProblems(ruleset, label));
     }
   }
   return problems;

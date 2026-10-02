@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import {
-  BYPASS_ACTORS_KEY,
-  diffRuleset,
-  diffRulesets,
-} from './github-ruleset-diff';
+import { diffRuleset, diffRulesets } from './github-ruleset-diff';
+import { BYPASS_ACTORS_KEY } from './github-settings-parse';
 
 // Fixtures come through JSON.parse so the snake_case keys the GitHub API uses
 // stay literal payloads rather than identifiers.
@@ -98,6 +95,40 @@ describe('diffRuleset', () => {
 });
 
 describe('diffRulesets', () => {
+  it('cannot silently pass an incomplete declaration against ineffective protection', () => {
+    const { drifted } = diffRulesets(
+      [
+        {
+          name: 'Protect main',
+          target: 'branch',
+          rules: declaredRuleset.rules,
+        },
+      ],
+      [
+        liveRuleset({
+          enforcement: 'disabled',
+          conditions: {},
+          [BYPASS_ACTORS_KEY]: [actor],
+        }),
+      ],
+    );
+    expect(drifted.join('\n')).toContain('enforcement differs');
+    expect(drifted.join('\n')).toContain('conditions differs');
+    expect(drifted.join('\n')).toContain('bypass_actors differs');
+  });
+
+  it('compares push rules without requesting branch conditions from the API', () => {
+    const declared = {
+      name: 'Protect pushes',
+      target: 'push',
+      enforcement: 'active',
+      [BYPASS_ACTORS_KEY]: [],
+      rules: [],
+    };
+    expect(
+      diffRulesets([declared], [{ ...declared, conditions: null }]),
+    ).toEqual({ drifted: [], unverifiable: [] });
+  });
   it('flags declared-but-missing and live-but-undeclared rulesets', () => {
     const { drifted } = diffRulesets(
       [declaredRuleset],
