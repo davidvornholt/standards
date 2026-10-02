@@ -38,8 +38,6 @@ const STANDARDS_WORKFLOW = join(
   ACTUAL_UPSTREAM,
   '.github/workflows/standards.yml',
 );
-const QUALITY_POSTGRES_IMAGE =
-  'public.ecr.aws/docker/library/postgres:18-alpine';
 const NOTIFY_WORKFLOW = join(
   ACTUAL_UPSTREAM,
   '.github/workflows/notify-pause.yml',
@@ -755,7 +753,7 @@ const canonicalWorkflowPaths = (
 // This merge-time ratchet keeps configurable routing on the exact compatible
 // canonical jobs. It catches accidental workflow drift after review; it does
 // not authorize a request before CodeBuild starts a runner for the queued job.
-const CONFIGURABLE_RUNNER_VARIABLE_OCCURRENCES = 15;
+const CONFIGURABLE_RUNNER_VARIABLE_OCCURRENCES = 16;
 const QUALITY_JOB_NAME = 'quality';
 const CODEBUILD_JOB_TIMEOUT_MINUTES = 30;
 const NOTIFY_JOB_TIMEOUT_MINUTES = 5;
@@ -768,6 +766,14 @@ const QUALITY_RUNNER = githubExpression(
   "vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-{3}', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt, vars.CI_CODEBUILD_QUALITY_SIZE || 'medium') || 'ubuntu-latest'",
 );
 const QUALITY_TIMEOUT_MINUTES = 30;
+const DOCKER_HUB_POSTGRES_IMAGE = 'postgres:18-alpine';
+const PUBLIC_ECR_POSTGRES_IMAGE =
+  'public.ecr.aws/docker/library/postgres:18-alpine';
+// CodeBuild pulls the Docker Library image from public ECR, and GitHub-hosted
+// runners pull it from Docker Hub, which exempts them from its rate limit.
+const QUALITY_POSTGRES_IMAGE = githubExpression(
+  `vars.CI_CODEBUILD_PROJECT != '' && '${PUBLIC_ECR_POSTGRES_IMAGE}' || '${DOCKER_HUB_POSTGRES_IMAGE}'`,
+);
 const CONFIGURABLE_RUNNER_CONTRACTS = {
   '.github/workflows/notify-pause.yml:notify': {
     runner: CODEBUILD_RUNNER,
@@ -2484,22 +2490,25 @@ describe('canonical standards workflow security boundaries', () => {
 });
 
 describe('canonical standards workflow Postgres service', () => {
-  it('requires the public ECR Docker Library image', () => {
+  it('picks the Docker Library registry by runner', () => {
     expect(() =>
       assertQualityPostgresImage(parseWorkflow(STANDARDS_WORKFLOW)),
     ).not.toThrow();
 
-    const dockerHubWorkflow = structuredClone(
-      parseWorkflow(STANDARDS_WORKFLOW),
-    );
-    const { services } = dockerHubWorkflow.jobs.quality as {
-      readonly services: Record<string, Record<string, unknown>>;
-    };
-    services.postgres = { ...services.postgres, image: 'postgres:18-alpine' };
+    for (const image of [
+      DOCKER_HUB_POSTGRES_IMAGE,
+      PUBLIC_ECR_POSTGRES_IMAGE,
+    ]) {
+      const workflow = structuredClone(parseWorkflow(STANDARDS_WORKFLOW));
+      const { services } = workflow.jobs.quality as {
+        readonly services: Record<string, Record<string, unknown>>;
+      };
+      services.postgres = { ...services.postgres, image };
 
-    expect(() => assertQualityPostgresImage(dockerHubWorkflow)).toThrow(
-      `Quality Postgres service must use ${QUALITY_POSTGRES_IMAGE}`,
-    );
+      expect(() => assertQualityPostgresImage(workflow)).toThrow(
+        `Quality Postgres service must use ${QUALITY_POSTGRES_IMAGE}`,
+      );
+    }
   });
 });
 
@@ -3657,9 +3666,7 @@ describe('standards sync workflow ordering', () => {
   });
 
   it('orders generated migration guidance before merge', () => {
-    const openPullRequest = workflowRunScript(
-      'Open a pull request if the mirror changed',
-    );
+    const openPullRequest = workflowRunScript('Reconcile sync pull requests');
     const applyIndex = openPullRequest.indexOf('bun standards github --apply');
     const mergeIndex = openPullRequest.indexOf(
       'Merge only after every required check passes',

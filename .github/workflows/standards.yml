@@ -193,9 +193,12 @@ jobs:
     timeout-minutes: 30
     services:
       postgres:
-        # CodeBuild runners share an outbound address, so anonymous Docker Hub
-        # pulls can exhaust the shared limit before the job reaches checkout.
-        image: public.ecr.aws/docker/library/postgres:18-alpine
+        # Both registries serve the same Docker Library image. Docker Hub
+        # rate-limits CodeBuild like any self-hosted runner but exempts
+        # GitHub-hosted runners pulling public images. Public ECR's anonymous
+        # allowance is 500 GB a month per outbound address, which GitHub-hosted
+        # runners share with other tenants, so only CodeBuild pulls from it.
+        image: ${{ vars.CI_CODEBUILD_PROJECT != '' && 'public.ecr.aws/docker/library/postgres:18-alpine' || 'postgres:18-alpine' }}
         env:
           POSTGRES_USER: ${{ vars.CI_POSTGRES_USER || 'app' }}
           POSTGRES_PASSWORD: ${{ vars.CI_POSTGRES_PASSWORD || 'app' }}

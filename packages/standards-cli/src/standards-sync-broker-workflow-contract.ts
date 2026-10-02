@@ -69,7 +69,7 @@ export const prMintName = 'Mint current-repository PR token';
 export const clearName = 'Clear broker App credentials';
 export const syncName = 'Sync canonical files from upstream';
 const writerConsumerName = 'Commit and push mirror changes';
-const prConsumerName = 'Open a pull request if the mirror changed';
+const prConsumerName = 'Reconcile sync pull requests';
 export const syncPolicyRefName = ['SYNC', 'POLICY', 'REF'].join('_');
 
 // Any new field can change execution or failure semantics. Even safe metadata
