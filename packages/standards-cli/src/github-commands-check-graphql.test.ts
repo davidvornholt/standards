@@ -17,8 +17,10 @@ import {
   createConsumer,
   graphqlQuery,
   installApi,
+  liveRulesetConditions,
   liveRulesetSummary,
 } from './github-commands-test-support';
+import { BYPASS_ACTORS_KEY } from './github-settings-parse';
 import { restoreProcessEnv } from './process-env-test-support';
 
 const originalFetch = globalThis.fetch;
@@ -57,12 +59,14 @@ const liveRuleset = {
   name: 'Protect main',
   target: 'branch',
   enforcement: 'active',
+  conditions: liveRulesetConditions,
+  [BYPASS_ACTORS_KEY]: [],
   rules: [],
 };
 
 // The merge-settings retry is the second request and happens once: the
 // repository read, the GraphQL retry for the keys REST hid, then the ruleset
-// reads. Nothing declares a bypass list here, so no ruleset query follows.
+// reads. REST answers the bypass list here, so no ruleset query follows.
 const EXPECTED_SEQUENCE = [
   'GET /repos/owner/repo',
   'POST /graphql',

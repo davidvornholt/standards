@@ -3,8 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { HTTP_OK } from './github-api';
-import { BYPASS_ACTORS_KEY } from './github-ruleset-diff';
-import { isRecord } from './github-settings-parse';
+import { BYPASS_ACTORS_KEY, isRecord } from './github-settings-parse';
 
 export const OPT_OUT_NOTICE =
   'standards github: rulesets are declared unenforceable on this GitHub plan (.github/settings.local.json "rulesetEnforcement"); the default branch is NOT protected, and plan-gated repository settings ("allow_auto_merge") are skipped. After upgrading the plan, remove the declaration, then run `bun standards github --apply`.';
@@ -13,7 +12,7 @@ export const OPT_OUT_NOTICE =
 // this declaration distinguishes plan-gated stripping from skipping all
 // repository settings.
 const canonical = JSON.parse(
-  '{"repository":{"allow_auto_merge":true,"allow_merge_commit":false,"allow_rebase_merge":false,"allow_squash_merge":true,"delete_branch_on_merge":true},"rulesets":[{"name":"Protect main","target":"branch","enforcement":"active","rules":[]}]}',
+  '{"repository":{"allow_auto_merge":true,"allow_merge_commit":false,"allow_rebase_merge":false,"allow_squash_merge":true,"delete_branch_on_merge":true},"rulesets":[{"name":"Protect main","target":"branch","enforcement":"active","conditions":{"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}},"bypass_actors":[],"rules":[]}]}',
 ) as Readonly<Record<string, unknown>>;
 
 export const createConsumer = (
@@ -100,6 +99,10 @@ export const declaredPatchBody = (
       ? '{"allow_auto_merge":true,"allow_merge_commit":false,"allow_rebase_merge":false,"allow_squash_merge":true,"delete_branch_on_merge":true}'
       : '{"allow_merge_commit":false,"allow_rebase_merge":false,"allow_squash_merge":true,"delete_branch_on_merge":true}',
   ) as Readonly<Record<string, unknown>>;
+
+export const liveRulesetConditions = JSON.parse(
+  '{"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}}',
+) as Readonly<Record<string, unknown>>;
 
 export const liveRulesetSummary = (): Readonly<Record<string, unknown>> =>
   JSON.parse(

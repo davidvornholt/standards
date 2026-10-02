@@ -10,6 +10,7 @@ import {
   installApi,
   installNetworkFailure,
   liveRepository,
+  liveRulesetConditions,
   liveRulesetSummary,
   OPT_OUT_NOTICE,
 } from './github-commands-test-support';
@@ -164,6 +165,7 @@ it.each([0, 1])(
       name: 'Protect main',
       target: 'branch',
       enforcement: 'active',
+      conditions: liveRulesetConditions,
       rules: [],
     };
     const calls = installApi([
@@ -195,6 +197,7 @@ it('fails unreadable ruleset identity without rewriting it', async () => {
         name: 'Protect main',
         target: 'branch',
         enforcement: 'active',
+        conditions: liveRulesetConditions,
         rules: [],
       },
     },

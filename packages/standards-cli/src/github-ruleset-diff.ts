@@ -3,9 +3,11 @@
 // general value comparison lives in github-diff.ts.
 
 import { subsetMatches } from './github-diff';
-import { isRecord } from './github-settings-parse';
-
-export const BYPASS_ACTORS_KEY = 'bypass_actors';
+import {
+  BYPASS_ACTORS_KEY,
+  isRecord,
+  rulesetComparedKeys,
+} from './github-settings-parse';
 
 // A declared ruleset field the live side did not carry. It stays structured so
 // the caller owns both the wording and the test for *which* field it is;
@@ -20,13 +22,6 @@ export type RulesetDiff = {
   readonly drifted: ReadonlyArray<string>;
   readonly unverifiable: ReadonlyArray<UnverifiableRulesetField>;
 };
-
-const RULESET_COMPARED_KEYS = [
-  'target',
-  'enforcement',
-  'conditions',
-  BYPASS_ACTORS_KEY,
-] as const;
 
 const diffRules = (
   name: string,
@@ -99,15 +94,13 @@ export const diffRuleset = (
   const name = String(declared.name);
   const drifted: Array<string> = [];
   const unverifiable: Array<UnverifiableRulesetField> = [];
-  for (const key of RULESET_COMPARED_KEYS) {
-    if (declared[key] !== undefined) {
-      if (live[key] === undefined) {
-        unverifiable.push({ key, name });
-      } else if (!subsetMatches(declared[key], live[key])) {
-        drifted.push(
-          `ruleset "${name}": ${key} differs from the declared configuration${bypassActorCountDetail(key, declared[key], live[key])}`,
-        );
-      }
+  for (const key of rulesetComparedKeys(declared.target)) {
+    if (live[key] === undefined) {
+      unverifiable.push({ key, name });
+    } else if (!subsetMatches(declared[key], live[key])) {
+      drifted.push(
+        `ruleset "${name}": ${key} differs from the declared configuration${bypassActorCountDetail(key, declared[key], live[key])}`,
+      );
     }
   }
   drifted.push(...diffRules(name, declared, live));

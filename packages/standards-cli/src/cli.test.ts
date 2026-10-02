@@ -3830,7 +3830,11 @@ describe('github', () => {
   const EmptySeam = JSON.stringify({ repository: {}, rulesets: [] });
   const Canonical = JSON.stringify({
     repository: { allow_auto_merge: true },
-    rulesets: [{ name: 'Protect main', target: 'branch' }],
+    rulesets: [
+      JSON.parse(
+        '{"name":"Protect main","target":"branch","enforcement":"active","conditions":{"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}},"bypass_actors":[]}',
+      ) as Readonly<Record<string, unknown>>,
+    ],
   });
 
   it('fails when the canonical declaration is missing', () => {
@@ -3878,7 +3882,11 @@ describe('github workflow skip seam', () => {
   const EmptySeam = JSON.stringify({ repository: {}, rulesets: [] });
   const Canonical = JSON.stringify({
     repository: { allow_auto_merge: true },
-    rulesets: [{ name: 'Protect main', target: 'branch' }],
+    rulesets: [
+      JSON.parse(
+        '{"name":"Protect main","target":"branch","enforcement":"active","conditions":{"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}},"bypass_actors":[]}',
+      ) as Readonly<Record<string, unknown>>,
+    ],
   });
 
   it('skips the duplicated live check only for the canonical workflow value', () => {
@@ -3928,7 +3936,11 @@ describe('github configuration validation', () => {
   const EmptySeam = JSON.stringify({ repository: {}, rulesets: [] });
   const Canonical = JSON.stringify({
     repository: { allow_auto_merge: true },
-    rulesets: [{ name: 'Protect main', target: 'branch' }],
+    rulesets: [
+      JSON.parse(
+        '{"name":"Protect main","target":"branch","enforcement":"active","conditions":{"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}},"bypass_actors":[]}',
+      ) as Readonly<Record<string, unknown>>,
+    ],
   });
 
   it('does not skip for a truthy-looking value other than exact true', () => {

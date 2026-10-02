@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'bun:test';
-import { BYPASS_ACTORS_KEY } from './github-ruleset-diff';
 import {
   GRAPHQL_NOT_CONSULTED,
   isHiddenBypassActors,
   rulesetVisibilityProblems,
 } from './github-ruleset-visibility';
+import { BYPASS_ACTORS_KEY } from './github-settings-parse';
 
 const hiddenList = { key: BYPASS_ACTORS_KEY, name: 'Protect main' };
 const hiddenEnforcement = { key: 'enforcement', name: 'Protect main' };

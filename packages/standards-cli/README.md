@@ -182,6 +182,10 @@ bun standards github --apply
 
 The command merges `.github/settings.json` with `.github/settings.local.json`, then compares or converges repository settings, declared rulesets, and canonical labels. Undeclared live labels are left alone. Undeclared repository-owned rulesets are removed by `--apply`.
 
+Starting with 0.28.0, every declared ruleset must explicitly state `target`, `enforcement`, and `bypass_actors`; branch and tag rulesets must also state `conditions.ref_name.include` and `conditions.ref_name.exclude`. Use `"bypass_actors": []` when nobody may bypass. Incomplete declarations fail before GitHub is contacted, with an error naming each missing field. Add the intended values to existing local rulesets before upgrading; no defaults or warning period apply.
+
+Push rulesets apply to every push and must omit `conditions`, as described in [GitHub's push-ruleset documentation](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets#push-rulesets).
+
 `--apply` needs admin authentication and rechecks the API response instead of treating an accepted request as success. A repository whose plan cannot enforce rulesets may declare `"rulesetEnforcement": "unavailable-on-plan"` in the local settings file.
 
 ## creds
