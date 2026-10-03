@@ -34,4 +34,4 @@ Canonical workflows use maintained major-version tags for external actions.
 
 - Deployment requires a passing quality gate for the exact commit deployed. A missing or failed lookup fails the deployment.
 - Serialize deployments with FIFO queueing (`concurrency.queue: max`) so a late-finishing run for an older commit cannot evict the pending run for the newest one, and guard the deployment itself against stale commits, so ordering mistakes cost latency, never correctness.
-- Every shortcut above obeys the root fail-closed rule: a skip, self-cancel, or proof that errors selects the full path or fails the run — never a green.
+- Every shortcut above fails closed: a skip, self-cancel, or proof that errors selects the full path or fails the run — never a green.
