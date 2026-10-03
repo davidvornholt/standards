@@ -143,4 +143,4 @@ bun standards dependabot --check
 
 ## Source repository
 
-This repository is the source, not a recursive consumer. Its root scripts run the local CLI with `structure --profile source`, verify generated Dependabot output and live GitHub settings, then run the workspace gate.
+This repository is the source, not a recursive consumer. Its root scripts run the local CLI with `structure --profile source`, check tracked source text, verify generated Dependabot output and live GitHub settings, then run the workspace gate.
