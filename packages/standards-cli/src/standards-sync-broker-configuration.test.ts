@@ -63,7 +63,9 @@ describe('Standards sync broker configuration', () => {
     expect(source).not.toContain(OBSOLETE_SYNC_KEY);
     expect(source).not.toContain(OBSOLETE_SETTINGS_KEY);
     expect(template).not.toContain(OBSOLETE_SETTINGS_KEY);
-    expect(Object.keys(brokerApp).sort()).toEqual(['app_id', 'private_key']);
+    expect(
+      Object.keys(brokerApp).sort((left, right) => left.localeCompare(right)),
+    ).toEqual(['app_id', 'private_key']);
     expect(
       Object.values(brokerApp).every((value) => typeof value === 'string'),
     ).toBe(true);
@@ -75,7 +77,9 @@ describe('Standards sync broker configuration', () => {
     ) as Readonly<Record<string, unknown>>;
     const brokerApp = brokerAppMapping(encrypted);
 
-    expect(Object.keys(brokerApp).sort()).toEqual(['app_id', 'private_key']);
+    expect(
+      Object.keys(brokerApp).sort((left, right) => left.localeCompare(right)),
+    ).toEqual(['app_id', 'private_key']);
     expect(
       Object.values(brokerApp).every(
         (value) =>

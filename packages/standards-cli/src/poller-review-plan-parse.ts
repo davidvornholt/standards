@@ -22,8 +22,10 @@ const hasExactKeys = (
   value: Readonly<Record<string, unknown>>,
   keys: ReadonlyArray<string>,
 ): boolean => {
-  const actual = Object.keys(value).sort();
-  const expected = [...keys].sort();
+  const actual = Object.keys(value).sort((left, right) =>
+    left.localeCompare(right),
+  );
+  const expected = [...keys].sort((left, right) => left.localeCompare(right));
   return (
     actual.length === expected.length &&
     actual.every((key, index) => key === expected[index])

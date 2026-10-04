@@ -12,8 +12,8 @@
     "check:fix": "bun packages/standards-cli/src/cli.ts structure --profile source && bun packages/standards-cli/src/cli.ts source-text && bun packages/standards-cli/src/cli.ts dependabot --write && bun packages/standards-cli/src/cli.ts github --check && turbo run lint:fix check-types test --output-logs=errors-only"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.14",
-    "turbo": "^2.11.4",
+    "@biomejs/biome": "2.5.15",
+    "turbo": "^2.11.7",
     "typescript": "7.0.2"
   },
   "engines": {

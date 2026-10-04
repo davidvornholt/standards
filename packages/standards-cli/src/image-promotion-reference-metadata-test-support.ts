@@ -67,7 +67,12 @@ const allAppsValid = (images: Images): boolean =>
 
 const validAccessMigration = (before: Images, after: Images): boolean => {
   const names = Object.keys(before);
-  if (!equal([...names].sort(), Object.keys(after).sort())) {
+  if (
+    !equal(
+      [...names].sort((left, right) => left.localeCompare(right)),
+      Object.keys(after).sort((left, right) => left.localeCompare(right)),
+    )
+  ) {
     return false;
   }
   let migrated = false;

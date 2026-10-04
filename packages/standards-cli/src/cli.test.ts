@@ -2419,7 +2419,7 @@ describe('canonical standards workflow security boundaries', () => {
     expect(
       productionWorkflowPaths()
         .map((path) => relative(ACTUAL_UPSTREAM, path))
-        .toSorted(),
+        .toSorted((left, right) => left.localeCompare(right)),
       'The production workflow inventory no longer matches this list. If you added a workflow, add its path to the expected list below. If a path went missing, the shared workflow-file predicate stopped matching it and the workflow has fallen out of these security checks — restore the predicate instead of editing the list.',
     ).toEqual([
       '.github/workflows/notify-pause.yml',
@@ -2685,10 +2685,10 @@ describe('canonical standards workflow settings security', () => {
     );
     const installRun = String(installStep?.run);
     const syncWorkflow = readFileSync(SYNC_WORKFLOW, 'utf8');
-    const pinnedVersion = installRun.match(PINNED_STANDARDS_VERSION_PATTERN)
-      ?.groups?.version;
-    const minimumVersion = syncWorkflow.match(MINIMUM_STANDARDS_VERSION_PATTERN)
-      ?.groups?.version;
+    const pinnedVersion =
+      PINNED_STANDARDS_VERSION_PATTERN.exec(installRun)?.groups?.version;
+    const minimumVersion =
+      MINIMUM_STANDARDS_VERSION_PATTERN.exec(syncWorkflow)?.groups?.version;
 
     expect(pinnedVersion).toBeDefined();
     expect(minimumVersion).toBeDefined();

@@ -14,9 +14,9 @@
     "check:fix": "standards check && turbo run lint:fix check-types test build test:a11y --output-logs=errors-only"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.14",
+    "@biomejs/biome": "2.5.15",
     "@davidvornholt/standards": "0.28.0",
-    "turbo": "^2.11.4",
+    "turbo": "^2.11.7",
     "typescript": "7.0.2"
   },
   "engines": {

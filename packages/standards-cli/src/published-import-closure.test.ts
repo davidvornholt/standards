@@ -37,13 +37,15 @@ const importClosure = (): Array<string> => {
       }
     }
   }
-  return [...visited].sort();
+  return [...visited].sort((left, right) => left.localeCompare(right));
 };
 
 describe('published CLI import closure', () => {
   it('ships every reachable runtime module and no unreachable source files', () => {
     expect(
-      manifest.files.filter((file) => file.startsWith('src/')).sort(),
+      manifest.files
+        .filter((file) => file.startsWith('src/'))
+        .sort((left, right) => left.localeCompare(right)),
     ).toEqual(importClosure());
   });
 });
