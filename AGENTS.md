@@ -31,7 +31,8 @@ Do not weaken quality gates to make a change pass. Explain inline suppressions. 
 ## Effect standards
 
 - Use Effect extensively where it makes code more robust. Keep simple synchronous logic and UI components plain, integrating Effect at boundaries.
-- Service contracts expose typed errors and requirements. Represent expected failures with `Data.TaggedError`, a stable `_tag`, and an actionable `message` instead of throwing.
+- Service contracts expose typed errors and requirements. Represent expected failures with `Schema.TaggedError`, a stable `_tag`, and an actionable `message` instead of throwing.
+- In an Effect v4 workspace, follow the agent guide that ships with the package at `node_modules/effect/AGENTS.md` for idioms this section does not cover.
 - Workspace-wide exceptions require an architectural reason in `AGENTS.local.md`; keep each workspace consistent.
 
 ## Writing style

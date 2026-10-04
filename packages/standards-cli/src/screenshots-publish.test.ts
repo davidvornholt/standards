@@ -45,7 +45,9 @@ describe('screenshots publish', () => {
       `![detail](<https://assets.example.com/screenshots/${digest}/detail.png>)`,
     ]);
     expect(error).not.toHaveBeenCalled();
-    const paths = stub.uploads.map((upload) => upload.pathname).sort();
+    const paths = stub.uploads
+      .map((upload) => upload.pathname)
+      .sort((left, right) => left.localeCompare(right));
     expect(paths).toEqual([
       `/assets/screenshots/${digest}/detail.png`,
       `/assets/screenshots/${digest}/home.png`,

@@ -138,7 +138,11 @@ describe('canonical SOPS secret action script behavior', () => {
       readonly outputs?: Record<string, unknown>;
     };
 
-    expect(Object.keys(action.inputs).sort()).toEqual([
+    expect(
+      Object.keys(action.inputs).sort((left, right) =>
+        left.localeCompare(right),
+      ),
+    ).toEqual([
       'age-key',
       'env-name',
       'secret-file',

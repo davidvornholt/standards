@@ -12,6 +12,11 @@ updates:
       - dependency-name: "typescript"
         versions:
           - ">7.0.2"
+    groups:
+      effect:
+        patterns:
+          - "effect"
+          - "@effect/*"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

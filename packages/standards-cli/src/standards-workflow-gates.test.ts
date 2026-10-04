@@ -121,12 +121,9 @@ describe('main-push reuse wiring', () => {
       needsOf(id).some((need) => need === 'reuse' || dependsOnReuse(need));
     const downstream = Object.keys(jobs).filter(dependsOnReuse);
 
-    expect(downstream.toSorted()).toEqual([
-      'nix',
-      'nix-discovery',
-      'quality',
-      'required-check',
-    ]);
+    expect(
+      downstream.toSorted((left, right) => left.localeCompare(right)),
+    ).toEqual(['nix', 'nix-discovery', 'quality', 'required-check']);
     for (const id of downstream) {
       expect(jobs[id]?.if ?? '').toMatch(STATUS_FUNCTION);
     }

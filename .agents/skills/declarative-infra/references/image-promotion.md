@@ -50,7 +50,7 @@ jobs:
     outputs: { digest: "${{ steps.build.outputs.digest }}" }
     steps:
       - id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with: { push: true, tags: "ghcr.io/example/app/web:main" }
       - name: Emit immutable promotion record
         env:

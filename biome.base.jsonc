@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.5.14/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
   // Canonical strict Biome base, synced from davidvornholt/standards. Do NOT
   // edit locally: repos extend this from their own `biome.jsonc` wrapper and add
   // project-specific overrides there. The baseline turns every applicable rule
@@ -72,6 +72,16 @@
             }
           },
           "correctness": {
+            // Qwik and Solid rules. Their domains are "none" above, but since
+            // Biome 2.5.15 a group setting in an override re-enables the
+            // group's rules from disabled domains, so each is turned off by
+            // name. These rules reject idiomatic React, such as `className`.
+            "noQwikUseVisibleTask": "off",
+            "noSolidDestructuredProps": "off",
+            "useImageSize": "off",
+            "useQwikClasslist": "off",
+            "useQwikMethodUsage": "off",
+            "useQwikValidLexicalScope": "off",
             // Module resolution is handled by Bun and the Next.js bundler;
             // tsc rejects `.ts` import extensions without
             // `allowImportingTsExtensions`.
@@ -155,6 +165,10 @@
             // Cross-file inference can classify imported async functions as
             // synchronous, including React act() and Next server actions.
             "useAwaitThenable": "off",
+            // Type inference ignores destructuring defaults, so a defaulted
+            // optional prop such as `({ disabled = false })` is reported as a
+            // nullable boolean wherever it is used as a condition.
+            "useStrictBooleanExpressions": "off",
             // This experimental rule enforces React Compiler constraints even
             // in projects that do not use the compiler and still reports known
             // unsupported patterns.
@@ -162,10 +176,14 @@
             // Rejects assertions even when a runtime check or controlled test
             // fixture has already established the asserted fact.
             "noUnsafeTypeAssertion": "off",
-            // React Native rule: requires raw text to be wrapped in <Text>.
-            // This is a DOM application (reactNative domain is "none"); the
-            // group-level "error" above would otherwise force it on.
+            // React Native and Qwik rules. This is a DOM application stack
+            // (both domains are "none"); the group-level "error" above would
+            // otherwise force them on.
+            "noReactNativeDeepImports": "off",
+            "noReactNativeLiteralColors": "off",
             "noReactNativeRawText": "off",
+            "useQwikLoaderLocation": "off",
+            "useReactNativePlatformComponents": "off",
             // Sort Tailwind classes inside cn()/cva() calls too, not only in
             // the className attribute.
             "useSortedClasses": {
@@ -195,12 +213,17 @@
             "useReactFunctionComponentDefinition": "off"
           },
           "performance": {
+            // Solid rule; see the disabled-domain note under correctness.
+            "useSolidForComponent": "off",
             // Inline handlers are idiomatic React 19; the hoist-every-callback
             // pattern this rule demands targets memoization-sensitive React
             // Native trees and makes components strictly harder to read.
             "noJsxPropsBind": "off"
           },
           "suspicious": {
+            // Solid and Qwik rule that rejects React's `className`; see the
+            // disabled-domain note under correctness.
+            "noReactSpecificProps": "off",
             // Biome's type analysis treats mutable refs as their initial
             // literals and can collapse annotated async result unions.
             "noUnnecessaryConditions": "off"
@@ -259,7 +282,7 @@
     },
     {
       // Domain error catalogs: the Effect standard requires one specific
-      // Data.TaggedError class per failure mode, and colocating a domain's
+      // Schema.TaggedError class per failure mode, and colocating a domain's
       // failure modes in its errors module is the repository default shape.
       "includes": ["**/errors/*.ts"],
       "linter": {

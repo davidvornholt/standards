@@ -12,13 +12,22 @@ updates:
       interval: "weekly"
     ignore:
       # Not a temporary hold: biome.base.jsonc is authored against the exact
-      # Biome 2.5.14 pin, so consumers never self-bump it. Upgrades happen
+      # Biome 2.5.15 pin, so consumers never self-bump it. Upgrades happen
       # in the standards template and roll out through sync.
       - dependency-name: "@biomejs/biome"
       # Temporary hold: Next.js does not support TypeScript releases above
       # 7.0.x. Lift here when Next declares support.
       - dependency-name: "typescript"
         versions: [">7.0.2"]
+    groups:
+      # Effect packages release in lockstep and peer-depend on the matching
+      # `effect` version, so update them in one pull request. A major update
+      # arrives the same way and fails CI until someone migrates the
+      # repository; that open pull request is the reminder to do it.
+      effect:
+        patterns:
+          - "effect"
+          - "@effect/*"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
