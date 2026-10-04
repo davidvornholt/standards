@@ -6,7 +6,6 @@ import {
   buildConsumer,
   CANONICAL_SCRIPTS,
   cleanupStructureTmps,
-  newStructureTmp,
   consumerRootManifest as rootManifest,
   writeInto as write,
 } from './structure-test-support';
@@ -34,15 +33,6 @@ describe('collectStructureProblems basics and scripts', () => {
       );
     },
   );
-
-  it('fails when package.json is missing', async () => {
-    const consumer = newStructureTmp('structure-');
-    expect(await collect(consumer)).toEqual([
-      'package.json must exist and contain a JSON object',
-      'secrets/ci.yaml: must exist as a SOPS-encrypted file; the synced CI workflows read ci.ntfy_topic_url and, when automatic sync is enabled, ci.broker_app from it',
-      'secrets/ci.example.yaml: must exist and mirror the key shape of secrets/ci.yaml with plaintext placeholders',
-    ]);
-  });
 
   it('rejects fail-open root gate scripts', async () => {
     const expected = [

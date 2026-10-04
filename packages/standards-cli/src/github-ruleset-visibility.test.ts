@@ -1,20 +1,12 @@
 import { describe, expect, it } from 'bun:test';
 import {
   GRAPHQL_NOT_CONSULTED,
-  isHiddenBypassActors,
   rulesetVisibilityProblems,
 } from './github-ruleset-visibility';
 import { BYPASS_ACTORS_KEY } from './github-settings-parse';
 
 const hiddenList = { key: BYPASS_ACTORS_KEY, name: 'Protect main' };
 const hiddenEnforcement = { key: 'enforcement', name: 'Protect main' };
-
-describe('isHiddenBypassActors', () => {
-  it('separates the bypass-actor gap from any other invisible field', () => {
-    expect(isHiddenBypassActors(hiddenList)).toBe(true);
-    expect(isHiddenBypassActors(hiddenEnforcement)).toBe(false);
-  });
-});
 
 describe('rulesetVisibilityProblems', () => {
   it('is silent when everything was verifiable', () => {

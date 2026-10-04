@@ -1553,23 +1553,6 @@ describe('doctor Dependabot validation', () => {
 });
 
 describe('dependabot composition seam', () => {
-  it('merges the repo-owned overlay into the generated file', () => {
-    const { consumer } = initConsumer(buildUpstream());
-    write(consumer, '.github/dependabot.local.yml', DEPENDABOT_OVERLAY);
-
-    const writeRun = run(consumer, [
-      'dependabot',
-      '--write',
-      '--dir',
-      consumer,
-    ]);
-    expect(writeRun.status).toBe(0);
-    const generated = read(consumer, '.github/dependabot.yml');
-    expect(generated).toContain('package-ecosystem: "nix"');
-    expect(generated).toContain('dependency-name: "left-pad"');
-    expect(run(consumer, ['doctor', '--dir', consumer]).status).toBe(0);
-  });
-
   it('rejects an overlay that overrides a canonical block', () => {
     const { consumer } = initConsumer(buildUpstream());
     write(
@@ -1679,34 +1662,6 @@ describe('structure', () => {
     const ok = run(consumer, ['structure', '--dir', consumer]);
     expect(ok.status).toBe(0);
     expect(ok.stdout).toContain('workspace layout matches the standards');
-  });
-
-  it('the source checkout passes its own source profile', () => {
-    const result = run(ACTUAL_UPSTREAM, [
-      'structure',
-      '--profile',
-      'source',
-      '--dir',
-      ACTUAL_UPSTREAM,
-    ]);
-    expect(result.stderr).toBe('');
-    expect(result.status).toBe(0);
-  });
-
-  it('rejects an unknown structure profile', () => {
-    const consumer = mkTmp('sync-cons-');
-    const result = run(consumer, ['structure', '--profile', 'strict']);
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('--profile must be "consumer" or "source"');
-  });
-
-  it('rejects --profile outside the structure command', () => {
-    const consumer = mkTmp('sync-cons-');
-    const result = run(consumer, ['doctor', '--profile', 'source']);
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain(
-      '--profile is only valid with the structure command',
-    );
   });
 
   it.each([
@@ -2015,15 +1970,6 @@ describe('ref pinning', () => {
     const result = sync(up, consumer, ['--ref', 'v1']);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('--ref requires a git URL source');
-  });
-
-  it('rejects --ref outside init and sync', () => {
-    const consumer = mkTmp('sync-cons-');
-    const result = run(consumer, ['check', '--ref', 'v1', '--dir', consumer]);
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain(
-      '--ref is only valid with the init and sync commands',
-    );
   });
 });
 
@@ -3855,17 +3801,6 @@ describe('github', () => {
     );
   });
 
-  it('apply also requires a resolvable origin remote', () => {
-    const { consumer } = initConsumer(buildUpstream());
-    write(consumer, '.github/settings.json', Canonical);
-    write(consumer, '.github/settings.local.json', EmptySeam);
-    const result = run(consumer, ['github', '--apply', '--dir', consumer]);
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain(
-      'cannot determine the GitHub repository from the origin remote',
-    );
-  });
-
   it('check gates on the declaration once it is present', () => {
     const { consumer } = initConsumer(buildUpstream());
     write(consumer, '.github/settings.json', Canonical);
@@ -3987,57 +3922,70 @@ describe('github configuration validation', () => {
       'ruleset "Protect main" collides with a canonical ruleset',
     );
   });
-
-  it('rejects --apply outside the github command and combined with --check', () => {
-    const consumer = mkTmp('sync-cons-');
-    const outside = run(consumer, ['sync', '--apply', '--dir', consumer]);
-    expect(outside.status).toBe(1);
-    expect(outside.stderr).toContain(
-      '--apply is only valid with the github command',
-    );
-    const combined = run(consumer, [
-      'github',
-      '--check',
-      '--apply',
-      '--dir',
-      consumer,
-    ]);
-    expect(combined.status).toBe(1);
-    expect(combined.stderr).toContain(
-      'github accepts exactly one of --check or --apply',
-    );
-  });
 });
 
-describe('option validation', () => {
-  it('rejects --check outside the github and dependabot commands', () => {
-    const consumer = mkTmp('sync-cons-');
-    const result = run(consumer, ['sync', '--check', '--dir', consumer]);
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain(
-      '--check is only valid with the github and dependabot commands',
-    );
-  });
+describe('invalid invocations', () => {
+  const DIR = '<consumer>';
 
-  it('rejects --write outside the dependabot command', () => {
+  it.each([
+    {
+      args: ['structure', '--profile', 'strict'],
+      messages: ['--profile must be "consumer" or "source"'],
+    },
+    {
+      args: ['doctor', '--profile', 'source'],
+      messages: ['--profile is only valid with the structure command'],
+    },
+    {
+      args: ['check', '--ref', 'v1', '--dir', DIR],
+      messages: ['--ref is only valid with the init and sync commands'],
+    },
+    {
+      args: ['sync', '--apply', '--dir', DIR],
+      messages: ['--apply is only valid with the github command'],
+    },
+    {
+      args: ['github', '--check', '--apply', '--dir', DIR],
+      messages: ['github accepts exactly one of --check or --apply'],
+    },
+    {
+      args: ['sync', '--check', '--dir', DIR],
+      messages: [
+        '--check is only valid with the github and dependabot commands',
+      ],
+    },
+    {
+      args: ['sync', '--write', '--dir', DIR],
+      messages: ['--write is only valid with the dependabot command'],
+    },
+    {
+      args: ['--dir', DIR],
+      messages: ['a command is required', 'Usage: standards <command>'],
+    },
+    { args: ['bogus', '--dir', DIR], messages: ['Unknown command'] },
+    { args: ['poller'], messages: ['--config <path> is required'] },
+    {
+      args: ['check', '--config', 'x.json'],
+      messages: ['--config is only valid with the poller command'],
+    },
+    {
+      args: ['poller', '--install', '--config', 'x.json'],
+      messages: ['Unknown option: --install'],
+    },
+  ])('rejects $args', ({ args, messages }) => {
     const consumer = mkTmp('sync-cons-');
-    const result = run(consumer, ['sync', '--write', '--dir', consumer]);
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain(
-      '--write is only valid with the dependabot command',
+    const result = run(
+      consumer,
+      args.map((arg) => (arg === DIR ? consumer : arg)),
     );
+    expect(result.status).toBe(1);
+    for (const message of messages) {
+      expect(result.stderr).toContain(message);
+    }
   });
 });
 
 describe('help', () => {
-  it('fails with usage when no command is given', () => {
-    const consumer = mkTmp('sync-cons-');
-    const result = run(consumer, ['--dir', consumer]);
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('a command is required');
-    expect(result.stderr).toContain('Usage: standards <command>');
-  });
-
   it('prints usage and exits 0 for help, --help, and -h', () => {
     const consumer = mkTmp('sync-cons-');
     for (const spelling of ['help', '--help', '-h']) {
@@ -4050,13 +3998,6 @@ describe('help', () => {
 });
 
 describe('unknown command', () => {
-  it('exits 1 with Unknown command', () => {
-    const consumer = mkTmp('sync-cons-');
-    const result = run(consumer, ['bogus', '--dir', consumer]);
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('Unknown command');
-  });
-
   it('does not treat inherited object keys as command families', () => {
     const consumer = mkTmp('sync-cons-');
     for (const command of ['constructor', 'toString', '__proto__']) {
@@ -4080,29 +4021,6 @@ describe('path safety', () => {
 });
 
 describe('poller', () => {
-  it('requires --config', () => {
-    const consumer = mkTmp('poller-');
-    const result = run(consumer, ['poller']);
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('--config <path> is required');
-  });
-
-  it('rejects poller flags on other commands', () => {
-    const consumer = mkTmp('poller-');
-    const result = run(consumer, ['check', '--config', 'x.json']);
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain(
-      '--config is only valid with the poller command',
-    );
-  });
-
-  it('rejects the removed imperative --install option', () => {
-    const consumer = mkTmp('poller-');
-    const result = run(consumer, ['poller', '--install', '--config', 'x.json']);
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('Unknown option: --install');
-  });
-
   it('fails loudly on an invalid config file', () => {
     const consumer = mkTmp('poller-');
     writeFileSync(

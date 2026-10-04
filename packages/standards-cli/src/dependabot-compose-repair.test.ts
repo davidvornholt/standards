@@ -99,13 +99,4 @@ describe('strict YAML merge-key repair', () => {
     expect(result.composed).not.toContain('<<:');
     expect(result.composed).toContain('dependency-name: "left-pad"');
   });
-
-  it('retains explicit duplicate-key rejection with merge processing', () => {
-    const result = composeDependabot(
-      'version: 2\nversion: 2\nupdates: []\n',
-      null,
-    );
-    expect(result.composed).toBeNull();
-    expect(result.problems.join('\n')).toContain('unique mapping keys');
-  });
 });

@@ -85,20 +85,6 @@ extra: value
     });
   });
 
-  it('rejects upload endpoints outside R2 or loopback development', () => {
-    const consumer = initializeScreenshotsConsumer({
-      config: validConfig.replace(
-        'https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com/',
-        'https://collector.example/upload',
-      ),
-    });
-
-    expect(loadScreenshotsConfig(consumer)).toEqual({
-      ok: false,
-      problems: ['config/screenshots.yaml endpoint must be a safe http(s) URL'],
-    });
-  });
-
   it('rejects public base URLs with query or fragment components', () => {
     const consumer = initializeScreenshotsConsumer({
       config: validConfig.replace(

@@ -71,36 +71,6 @@ describe('runGithubCheck', () => {
     );
   });
 
-  it('preserves the enforced ruleset request path', async () => {
-    const calls = installApi([
-      { body: liveRepository(false, true) },
-      {
-        body: [liveRulesetSummary()],
-      },
-      {
-        body: {
-          id: 7,
-          name: 'Protect main',
-          target: 'branch',
-          enforcement: 'active',
-          conditions: liveRulesetConditions,
-          [BYPASS_ACTORS_KEY]: [],
-          rules: [],
-        },
-      },
-    ]);
-
-    expect(await runGithubCheck(consumer({ optOut: false }))).toBe(true);
-    expect(calls.map(({ method, path }) => ({ method, path }))).toEqual([
-      { method: 'GET', path: '/repos/owner/repo' },
-      { method: 'GET', path: '/repos/owner/repo/rulesets' },
-      { method: 'GET', path: '/repos/owner/repo/rulesets/7' },
-    ]);
-    expect(output.logs).toEqual([
-      'standards github: live GitHub settings match the declared configuration',
-    ]);
-  });
-
   it('checks repository settings, rulesets, and labels in one run', async () => {
     const labels = [
       {
@@ -134,6 +104,9 @@ describe('runGithubCheck', () => {
       { method: 'GET', path: '/repos/owner/repo' },
       { method: 'GET', path: '/repos/owner/repo/rulesets' },
       { method: 'GET', path: '/repos/owner/repo/rulesets/7' },
+    ]);
+    expect(output.logs).toEqual([
+      'standards github: live GitHub settings match the declared configuration',
     ]);
     expect(output.errors).toEqual([]);
   });

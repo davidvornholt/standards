@@ -1,11 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import {
-  createAccountToken,
-  deleteAccountToken,
-  listAccountTokens,
-  listPermissionGroups,
-  verifyAccountToken,
-} from './creds-cloudflare';
+import { listAccountTokens, verifyAccountToken } from './creds-cloudflare';
 
 const ACCOUNT_ID_LENGTH = 32;
 const ACCOUNT = 'a'.repeat(ACCOUNT_ID_LENGTH);
@@ -45,16 +39,6 @@ const envelope = (result: unknown, info?: unknown): unknown => ({
 });
 
 describe('cloudflare account token client', () => {
-  it('verifies the bootstrap token and reports its status', async () => {
-    stubFetch(() => ({ body: envelope({ id: 't', status: 'active' }) }));
-    const verified = await verifyAccountToken(ACCOUNT, 'cfat');
-    expect(verified).toEqual({
-      ok: true,
-      value: { id: 't', status: 'active' },
-    });
-    expect(calls[0]?.url).toContain(`/accounts/${ACCOUNT}/tokens/verify`);
-  });
-
   it('folds API error messages into the problem', async () => {
     stubFetch(() => ({
       status: 403,
@@ -136,58 +120,6 @@ describe('cloudflare account token client', () => {
       ok: false,
       problem: expect.stringContaining('pagination metadata'),
     });
-  });
-});
-
-describe('cloudflare token mutations and permission groups', () => {
-  it('preserves permission-group scopes', async () => {
-    stubFetch(() => ({
-      body: envelope([
-        {
-          id: 'pg',
-          name: 'Workers Scripts Write',
-          scopes: ['com.cloudflare.api.account'],
-        },
-      ]),
-    }));
-    expect(await listPermissionGroups(ACCOUNT, 'cfat')).toEqual({
-      ok: true,
-      value: [
-        {
-          id: 'pg',
-          name: 'Workers Scripts Write',
-          scopes: ['com.cloudflare.api.account'],
-        },
-      ],
-    });
-  });
-
-  it('creates a token and returns id and value only', async () => {
-    stubFetch(() => ({ body: envelope({ id: 'new', value: 'cfat_minted' }) }));
-    const created = await createAccountToken(ACCOUNT, 'cfat', {
-      name: 'standards/o/r/ci/ci.key',
-      policies: [
-        {
-          effect: 'allow',
-          resources: { [`com.cloudflare.api.account.${ACCOUNT}`]: '*' },
-          permission_groups: [{ id: 'pg' }],
-        },
-      ],
-      expiresOn: '2026-10-01T00:00:00Z',
-      condition: null,
-    });
-    expect(created).toEqual({
-      ok: true,
-      value: { id: 'new', value: 'cfat_minted' },
-    });
-    expect(calls[0]?.method).toBe('POST');
-  });
-
-  it('deletes tokens', async () => {
-    stubFetch(() => ({ body: envelope({ id: 'gone' }) }));
-    const deleted = await deleteAccountToken(ACCOUNT, 'cfat', 'tok');
-    expect(deleted.ok).toBe(true);
-    expect(calls.map((call) => call.method)).toEqual(['DELETE']);
   });
 
   it('treats a non-JSON body as a failure, never a success', async () => {

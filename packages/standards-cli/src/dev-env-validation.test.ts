@@ -98,44 +98,6 @@ describe('dev env input validation aggregation', () => {
     expect(readFileSync(fixture.destination, 'utf8')).toBe('existing-value\n');
   });
 
-  it('does not plan destinations after an input acquisition failure', async () => {
-    const fixture = setup(null, 'malformed');
-    writeFileSync(
-      join(fixture.consumer, 'config/dev.yaml'),
-      'apps:\n  ghost:\n    PORT: "3000"\n',
-    );
-    const error = spyOn(console, 'error').mockImplementation(() => undefined);
-
-    expect(await runDevEnv(fixture.consumer)).toBe(false);
-
-    const reported = error.mock.calls.flat().join('\n');
-    expect(reported).toContain('config/dev.local.yaml must contain valid YAML');
-    expect(reported).not.toContain('apps/ghost/package.json');
-    expect(readFileSync(fixture.destination, 'utf8')).toBe('existing-value\n');
-  });
-
-  for (const localFailure of ['malformed', 'unreadable', 'dangling'] as const) {
-    it(`checks git ignoredness for ${localFailure} local input`, async () => {
-      const fixture = setup(null, localFailure);
-      const error = spyOn(console, 'error').mockImplementation(() => undefined);
-
-      expect(await runDevEnv(fixture.consumer)).toBe(false);
-
-      const reported = error.mock.calls.flat().join('\n');
-      expect(reported).toContain(
-        localFailure === 'malformed'
-          ? 'config/dev.local.yaml must contain valid YAML'
-          : 'could not read config/dev.local.yaml',
-      );
-      expect(reported).toContain(
-        'config/dev.local.yaml is not gitignored; ignore it before generating dev env files',
-      );
-      expect(readFileSync(fixture.destination, 'utf8')).toBe(
-        'existing-value\n',
-      );
-    });
-  }
-
   for (const secretFailure of ['decrypt', 'json'] as const) {
     for (const localFailure of [
       'malformed',

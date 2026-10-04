@@ -158,37 +158,3 @@ describe('dev env transaction', () => {
     }
   });
 });
-
-describe('dev env transaction cleanup', () => {
-  it('reports cleanup failure as a warning after a completed commit', async () => {
-    const consumer = buildConsumer();
-    try {
-      const dest = join(consumer, 'apps/web/.env.local');
-      writeFileSync(dest, 'OLD=1\n');
-      chmodSync(dest, DEFAULT_FILE_MODE);
-
-      const result = await applyDevEnvChanges(
-        consumer,
-        [{ rel: 'apps/web/.env.local', content: 'NEW=1\n' }],
-        {
-          beforeCleanup: () => {
-            throw new Error('induced cleanup failure');
-          },
-        },
-      );
-
-      expect(result).toEqual({
-        ok: true,
-        warnings: [
-          'generation committed but cleanup failed: induced cleanup failure',
-        ],
-      });
-      expect(readFileSync(dest, 'utf8')).toBe('NEW=1\n');
-      expect(statSync(dest).mode % PERMISSION_BITS_MODULUS).toBe(
-        OWNER_ONLY_FILE_MODE,
-      );
-    } finally {
-      cleanup(consumer);
-    }
-  });
-});

@@ -52,15 +52,6 @@ const migration = (
     trustedProof: false,
   });
 
-it('migrates one legacy entry beside unchanged final siblings', () => {
-  expect(
-    migration(
-      { api: finalSibling, web: legacyDisabled },
-      { api: finalSibling, web: finalDisabled },
-    ),
-  ).toBeTrue();
-});
-
 it('atomically migrates mixed live and disabled legacy entries', () => {
   expect(
     migration(

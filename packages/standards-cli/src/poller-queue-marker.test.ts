@@ -45,6 +45,7 @@ it.each([
     comments: [queueComment],
     role: 'admin',
     target: issueRevision(item),
+    approvalEventId: APPROVAL_EVENT_ID,
     expected: true,
   },
   {
@@ -52,6 +53,7 @@ it.each([
     comments: [queueComment],
     role: 'admin',
     target: 'issue:different',
+    approvalEventId: APPROVAL_EVENT_ID,
     expected: false,
   },
   {
@@ -59,17 +61,26 @@ it.each([
     comments: [queueComment],
     role: 'write',
     target: issueRevision(item),
+    approvalEventId: APPROVAL_EVENT_ID,
+    expected: false,
+  },
+  {
+    description: 'new approval generation the old marker must not hide',
+    comments: [queueComment],
+    role: 'admin',
+    target: issueRevision(item),
+    approvalEventId: APPROVAL_EVENT_ID + 1,
     expected: false,
   },
 ] as const)(
   'evaluates a checkpoint with $description',
-  async ({ comments, role, target, expected }) => {
+  async ({ comments, role, target, approvalEventId, expected }) => {
     const responses: ReadonlyArray<unknown> = [
       comments,
       Object.fromEntries([['role_name', role]]),
       [
         {
-          id: APPROVAL_EVENT_ID,
+          id: approvalEventId,
           event: 'labeled',
           label: { name: 'approved-for-fix' },
           actor: { login: 'maintainer' },
@@ -98,38 +109,3 @@ it.each([
     ).toBe(expected);
   },
 );
-
-it('does not let an old marker hide a new approval generation', async () => {
-  let requestIndex = 0;
-  const bodies = [
-    [queueComment],
-    Object.fromEntries([['role_name', 'admin']]),
-    [
-      {
-        id: APPROVAL_EVENT_ID + 1,
-        event: 'labeled',
-        label: { name: 'approved-for-fix' },
-        actor: { login: 'maintainer' },
-        ...Object.fromEntries([['created_at', APPROVED_AT]]),
-      },
-    ],
-  ];
-  globalThis.fetch = (() => {
-    const body = bodies[requestIndex];
-    requestIndex += 1;
-    return Promise.resolve(Response.json(body));
-  }) as unknown as typeof fetch;
-  expect(
-    await inspectQueuedAcknowledgement({
-      deps: {
-        config: {} as PollerConfig,
-        token: 'test-token',
-        repo: REPO,
-        roleCache: new Map(),
-      },
-      item,
-      kind: 'fix',
-      target: issueRevision(item),
-    }),
-  ).toBe(false);
-});

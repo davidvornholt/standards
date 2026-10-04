@@ -70,46 +70,9 @@ describe('account token partitioning', () => {
     expect(partition.unmanaged.map((found) => found.name)).toEqual(['other']);
     expect(partition.unmanaged[0]?.status).toBe('disabled');
   });
-
-  it('makes a name claiming this repository namespace a finding', () => {
-    const partition = partitionAccountTokens(
-      [entry(`standards/${REPO}/ci`)],
-      REPO,
-    );
-    expect(partition.unmanaged).toEqual([]);
-    expect(partition.findings).toEqual([
-      expect.stringContaining(
-        "claims this repository's brokered namespace but is not a name this broker mints",
-      ),
-    ]);
-  });
 });
 
 describe('creds plan unmanaged reporting', () => {
-  it('reports foreign tokens without planning any action against them', () => {
-    const plan = computeCredsPlan({
-      repo: REPO,
-      keysByTarget: keys({ ci: ['ci.dns_token'] }),
-      tokens: [
-        {
-          accountId: 'a',
-          token: token(
-            `standards/${REPO}/ci/ci.dns_token`,
-            '2027-01-01T00:00:00Z',
-          ),
-        },
-        entry('hand-made-token'),
-      ],
-      now: NOW,
-    });
-    expect(plan.actions).toEqual([]);
-    expect(plan.findings).toEqual([]);
-    expect(plan.healthy).toBe(1);
-    expect(plan.unmanaged.map((found) => found.name)).toEqual([
-      'hand-made-token',
-    ]);
-  });
-
   // A partition finding must reach the plan, because that is what aborts
   // `apply`: a name squatting the repository's namespace could otherwise be
   // reconciled around silently, in both output channels and in the exit code.

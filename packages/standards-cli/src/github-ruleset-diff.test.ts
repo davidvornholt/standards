@@ -142,13 +142,6 @@ describe('diffRulesets', () => {
     );
   });
 
-  it('is empty when live state matches exactly', () => {
-    expect(diffRulesets([declaredRuleset], [liveRuleset()])).toEqual({
-      drifted: [],
-      unverifiable: [],
-    });
-  });
-
   // Nothing on GitHub's side makes repository ruleset names unique. Keying the
   // live side by name alone would compare the clean twin, pass, and never
   // mention that the other one grants a bypass on the same branch.

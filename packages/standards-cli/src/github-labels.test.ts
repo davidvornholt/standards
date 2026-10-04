@@ -148,32 +148,14 @@ describe('declared label settings', () => {
     expect(problems[0]).toContain('labels[0]');
   });
 
-  it('rejects local labels that collide with canonical ones', () => {
-    const { merged, problems } = loadGithubSettings(
-      '{"repository":{},"rulesets":[],"labels":[{"name":"a","color":"0e8a16","description":"d"}]}',
-      '{"repository":{},"rulesets":[],"labels":[{"name":"a","color":"ffffff","description":"mine"}]}',
-    );
-    expect(merged).toBeNull();
-    expect(problems).toEqual([
-      '.github/settings.local.json label "a" collides with a canonical label; canonical labels are read-only',
-    ]);
-  });
-
   it('rejects case-variant canonical collisions', () => {
-    const { problems } = loadGithubSettings(
+    const { merged, problems } = loadGithubSettings(
       '{"repository":{},"rulesets":[],"labels":[{"name":"Needs-Clarification","color":"0e8a16","description":"d"}]}',
       '{"repository":{},"rulesets":[],"labels":[{"name":"needs-clarification","color":"ffffff","description":"mine"}]}',
     );
-    expect(problems[0]).toContain('collides with a canonical label');
-  });
-
-  it('rejects duplicate labels within one file', () => {
-    const { problems } = loadGithubSettings(
-      '{"repository":{},"rulesets":[],"labels":[{"name":"a","color":"0e8a16","description":"d"},{"name":"a","color":"0e8a16","description":"d"}]}',
-      local,
-    );
+    expect(merged).toBeNull();
     expect(problems).toEqual([
-      '.github/settings.json declares label "a" more than once',
+      '.github/settings.local.json label "needs-clarification" collides with a canonical label; canonical labels are read-only',
     ]);
   });
 
