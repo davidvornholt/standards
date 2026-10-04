@@ -19,18 +19,11 @@ updates:
       # 7.0.x. Lift here when Next declares support.
       - dependency-name: "typescript"
         versions: [">7.0.2"]
-      # Temporary hold: an Effect major is a code migration, not a version
-      # bump. Effect v4 moves @effect/platform, @effect/cli, and @effect/sql
-      # into `effect`, and @effect/sql-drizzle has no v4 release, so migrate a
-      # repository deliberately in one change. Lift when no consumer remains
-      # on Effect v3.
-      - dependency-name: "effect"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "@effect/*"
-        update-types: ["version-update:semver-major"]
     groups:
       # Effect packages release in lockstep and peer-depend on the matching
-      # `effect` version, so update them in one pull request.
+      # `effect` version, so update them in one pull request. A major update
+      # arrives the same way and fails CI until someone migrates the
+      # repository; that open pull request is the reminder to do it.
       effect:
         patterns:
           - "effect"

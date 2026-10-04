@@ -12,12 +12,6 @@ updates:
       - dependency-name: "typescript"
         versions:
           - ">7.0.2"
-      - dependency-name: "effect"
-        update-types:
-          - "version-update:semver-major"
-      - dependency-name: "@effect/*"
-        update-types:
-          - "version-update:semver-major"
     groups:
       effect:
         patterns:
