@@ -101,83 +101,51 @@ describe('public creds zone routing', () => {
 });
 
 describe('public creds zone rejections', () => {
-  it('rejects --bucket with --zone before provider or SOPS mutation', async () => {
-    const consumer = initializeConsumer([ACCOUNT_A]);
-    const methods = refuseProviderCalls();
-    installSops('touch "$PWD/sops-called"\nexit 1');
-    const error = spyOn(console, 'error').mockImplementation(() => undefined);
-    expect(
-      await runCredsCommand([
-        'add',
-        'cloudflare',
-        '--dir',
-        consumer,
-        '--dest',
-        'ci:ci.dns',
-        '--bucket',
-        'assets',
-        '--zone',
-        ZONE_A,
-        '--permissions',
-        'DNS Write',
-      ]),
-    ).toBe(false);
-    expect(methods).toEqual([]);
-    expect(existsSync(join(consumer, 'sops-called'))).toBe(false);
-    expect(error).toHaveBeenCalledWith(
-      expect.stringContaining('--bucket and --zone cannot be combined'),
-    );
-  });
-
-  it('rejects an invalid bucket name before provider or SOPS mutation', async () => {
-    const consumer = initializeConsumer([ACCOUNT_A]);
-    const methods = refuseProviderCalls();
-    installSops('touch "$PWD/sops-called"\nexit 1');
-    const error = spyOn(console, 'error').mockImplementation(() => undefined);
-    expect(
-      await runCredsCommand([
-        'add',
-        'cloudflare',
-        '--dir',
-        consumer,
-        '--dest',
-        'ci:ci.r2',
-        '--bucket',
-        'Bad_Bucket',
-        '--permissions',
-        'Workers R2 Storage Bucket Item Read',
-      ]),
-    ).toBe(false);
-    expect(methods).toEqual([]);
-    expect(existsSync(join(consumer, 'sops-called'))).toBe(false);
-    expect(error).toHaveBeenCalledWith(
-      expect.stringContaining('invalid R2 bucket name: Bad_Bucket'),
-    );
-  });
-
-  it('rejects a zone named by domain before provider or SOPS mutation', async () => {
-    const consumer = initializeConsumer([ACCOUNT_A]);
-    const methods = refuseProviderCalls();
-    installSops('touch "$PWD/sops-called"\nexit 1');
-    const error = spyOn(console, 'error').mockImplementation(() => undefined);
-    expect(
-      await runCredsCommand([
-        'add',
-        'cloudflare',
-        '--dir',
-        consumer,
-        '--dest',
-        'ci:ci.dns',
-        '--zone',
-        'example.test',
-        '--permissions',
-        'DNS Write',
-      ]),
-    ).toBe(false);
-    expect(methods).toEqual([]);
-    expect(existsSync(join(consumer, 'sops-called'))).toBe(false);
-    expect(error).toHaveBeenCalledWith(
-      expect.stringContaining('not a zone ID: example.test'),
-    );
-  });
+  it.each([
+    {
+      label: '--bucket with --zone',
+      dest: 'ci:ci.dns',
+      flags: ['--bucket', 'assets', '--zone', ZONE_A],
+      permissions: 'DNS Write',
+      problem: '--bucket and --zone cannot be combined',
+    },
+    {
+      label: 'an invalid bucket name',
+      dest: 'ci:ci.r2',
+      flags: ['--bucket', 'Bad_Bucket'],
+      permissions: 'Workers R2 Storage Bucket Item Read',
+      problem: 'invalid R2 bucket name: Bad_Bucket',
+    },
+    {
+      label: 'a zone named by domain',
+      dest: 'ci:ci.dns',
+      flags: ['--zone', 'example.test'],
+      permissions: 'DNS Write',
+      problem: 'not a zone ID: example.test',
+    },
+  ])(
+    'rejects $label before provider or SOPS mutation',
+    async ({ dest, flags, permissions, problem }) => {
+      const consumer = initializeConsumer([ACCOUNT_A]);
+      const methods = refuseProviderCalls();
+      installSops('touch "$PWD/sops-called"\nexit 1');
+      const error = spyOn(console, 'error').mockImplementation(() => undefined);
+      expect(
+        await runCredsCommand([
+          'add',
+          'cloudflare',
+          '--dir',
+          consumer,
+          '--dest',
+          dest,
+          ...flags,
+          '--permissions',
+          permissions,
+        ]),
+      ).toBe(false);
+      expect(methods).toEqual([]);
+      expect(existsSync(join(consumer, 'sops-called'))).toBe(false);
+      expect(error).toHaveBeenCalledWith(expect.stringContaining(problem));
+    },
+  );
 });

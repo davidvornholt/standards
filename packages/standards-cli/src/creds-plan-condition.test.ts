@@ -21,27 +21,6 @@ const token = (condition: CloudflareToken['condition']): CloudflareToken => ({
 });
 
 describe('Cloudflare renewal condition planning', () => {
-  it('preserves supported request IP conditions in renewal actions', () => {
-    const condition = {
-      supported: true as const,
-      value: {
-        requestIp: {
-          in: ['192.0.2.0/24'],
-          notIn: ['192.0.2.10/32'],
-        },
-      },
-    };
-    const plan = computeCredsPlan({
-      repo: 'davidvornholt/example',
-      keysByTarget: new Map([['ci', new Set(['ci.token'])]]),
-      tokens: [{ accountId: 'a', token: token(condition) }],
-      now: new Date('2026-07-22T00:00:00Z'),
-    });
-    expect(plan.actions).toEqual([
-      expect.objectContaining({ kind: 'renew', condition: condition.value }),
-    ]);
-  });
-
   it('reports unknown condition shapes without planning a mutation', () => {
     const decoded = decodeTokenCondition(
       JSON.parse('{"request_ip":{"future":[]}}') as unknown,

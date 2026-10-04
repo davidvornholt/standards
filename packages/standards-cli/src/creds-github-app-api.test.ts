@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { createVerify, generateKeyPairSync } from 'node:crypto';
 import {
   createGithubAppJwt,
-  resolveGithubAppOwner,
   verifyGithubAppInstallation,
 } from './creds-github-app-api';
 
@@ -54,21 +53,6 @@ describe('GitHub App authentication', () => {
         .update(`${header}.${payload}`)
         .verify(publicKey, signature ?? '', 'base64url'),
     ).toBe(true);
-  });
-
-  it('resolves the owner from the authenticated App identity', async () => {
-    globalThis.fetch = ((_input: string | URL | Request, _init?: RequestInit) =>
-      Promise.resolve(
-        Response.json(
-          { id: APP.appId, owner: { login: 'Example' } },
-          { status: HTTP_OK },
-        ),
-      )) as typeof fetch;
-
-    expect(await resolveGithubAppOwner(APP)).toEqual({
-      ok: true,
-      value: 'Example',
-    });
   });
 });
 

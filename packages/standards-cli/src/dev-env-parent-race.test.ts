@@ -50,71 +50,41 @@ const readExternal = (external: string) => ({
 });
 
 describe('dev env parent identity', () => {
-  it('detects a parent swap after the staging hook without external writes', async () => {
-    const consumer = buildConsumer();
-    const swaps: Array<SwappedParent> = [];
-    let external = '';
-    try {
-      const result = await applyDevEnvChanges(
-        consumer,
-        [{ rel: 'apps/web/.env.local', content: 'SECRET=1\n' }],
-        {
-          beforeStage: () => {
-            const swapped = swapWorkspaceParent(consumer);
-            swaps.push(swapped);
-            ({ external } = swapped);
-          },
-        },
-      );
+  it.each(['beforeStage', 'beforeCommit'] as const)(
+    'detects a parent swap in the %s hook without external writes',
+    async (hook) => {
+      const consumer = buildConsumer();
+      const swaps: Array<SwappedParent> = [];
+      let external = '';
+      const swap = () => {
+        const swapped = swapWorkspaceParent(consumer);
+        swaps.push(swapped);
+        ({ external } = swapped);
+      };
+      try {
+        const result = await applyDevEnvChanges(
+          consumer,
+          [{ rel: 'apps/web/.env.local', content: 'SECRET=1\n' }],
+          hook === 'beforeStage'
+            ? { beforeStage: swap }
+            : { beforeCommit: swap },
+        );
 
-      expect(result).toEqual({
-        ok: false,
-        problems: [
-          'apps/web/.env.local destination directory changed after preflight',
-          'cleanup failed: apps/web/.env.local destination directory changed after preflight',
-        ],
-      });
-      expect(readExternal(external)).toEqual({
-        entries: ['marker'],
-        marker: 'UNTOUCHED\n',
-      });
-    } finally {
-      swaps[0]?.restore();
-      rmSync(consumer, { recursive: true, force: true });
-    }
-  });
-
-  it('detects a parent swap after staging and before commit', async () => {
-    const consumer = buildConsumer();
-    const swaps: Array<SwappedParent> = [];
-    let external = '';
-    try {
-      const result = await applyDevEnvChanges(
-        consumer,
-        [{ rel: 'apps/web/.env.local', content: 'SECRET=1\n' }],
-        {
-          beforeCommit: () => {
-            const swapped = swapWorkspaceParent(consumer);
-            swaps.push(swapped);
-            ({ external } = swapped);
-          },
-        },
-      );
-
-      expect(result).toEqual({
-        ok: false,
-        problems: [
-          'apps/web/.env.local destination directory changed after preflight',
-          'cleanup failed: apps/web/.env.local destination directory changed after preflight',
-        ],
-      });
-      expect(readExternal(external)).toEqual({
-        entries: ['marker'],
-        marker: 'UNTOUCHED\n',
-      });
-    } finally {
-      swaps[0]?.restore();
-      rmSync(consumer, { recursive: true, force: true });
-    }
-  });
+        expect(result).toEqual({
+          ok: false,
+          problems: [
+            'apps/web/.env.local destination directory changed after preflight',
+            'cleanup failed: apps/web/.env.local destination directory changed after preflight',
+          ],
+        });
+        expect(readExternal(external)).toEqual({
+          entries: ['marker'],
+          marker: 'UNTOUCHED\n',
+        });
+      } finally {
+        swaps[0]?.restore();
+        rmSync(consumer, { recursive: true, force: true });
+      }
+    },
+  );
 });

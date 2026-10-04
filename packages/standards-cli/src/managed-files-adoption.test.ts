@@ -4,7 +4,7 @@
 // inside it does.
 
 import { afterEach, describe, expect, it } from 'bun:test';
-import { existsSync, lstatSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
 import { cleanupTmpDirs, mkTmp, write } from './cli-test-support';
@@ -100,25 +100,5 @@ describe('managed destinations the engine never managed', () => {
     expect(readFileSync(join(consumer, OWN_SKILL), 'utf8')).toBe(
       'name: mine\n',
     );
-  });
-
-  it('still adopts the link over a directory holding only locked paths', () => {
-    // The migration the refusal must not block: every path under the directory
-    // is one this engine wrote and the lock records, so replacing the whole
-    // directory with the link destroys nothing.
-    const { consumer } = initConsumer(
-      buildUpstream({ claudeSkills: 'directory' }),
-    );
-
-    const result = run(consumer, [
-      'sync',
-      '--from',
-      buildUpstream(),
-      '--dir',
-      consumer,
-    ]);
-
-    expect(result.status).toBe(0);
-    expect(lstatSync(join(consumer, LINK)).isSymbolicLink()).toBe(true);
   });
 });

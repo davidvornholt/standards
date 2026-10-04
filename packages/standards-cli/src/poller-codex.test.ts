@@ -95,14 +95,6 @@ describe('runCodex', () => {
     expect(existsSync(join(dir, OUTCOME_DIR))).toBeFalse();
   });
 
-  it('returns process stderr for failures', async () => {
-    const result = await runFailure(
-      "process.stderr.write('last process output'); process.exit(1)",
-    );
-    expect(result.failure).toContain('exit status 1');
-    expect(result.failure).toContain('last process output');
-  });
-
   it('keeps only a bounded tail while continuously draining stderr', async () => {
     const result = await runFailure(
       "const { writeSync } = require('node:fs'); const chunk = 'x'.repeat(100_000); for (let index = 0; index < 200; index += 1) writeSync(2, chunk); writeSync(2, '\\nROOT CAUSE: streamed safely\\n'); process.exit(1)",

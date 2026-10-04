@@ -35,90 +35,51 @@ describe('unsupportedResourceScopes', () => {
 });
 
 describe('resolveTokenPolicy', () => {
-  it('targets the account resource for account-scoped groups', async () => {
-    stubGroups([
-      {
-        id: 'pg',
-        name: 'Workers Scripts Write',
-        scopes: ['com.cloudflare.api.account'],
-      },
-    ]);
-    expect(
-      await resolveTokenPolicy(BROKER_ACCOUNT, {
-        permissions: 'Workers Scripts Write',
-        resource: { kind: 'account' },
-      }),
-    ).toEqual({
-      ok: true,
-      wanted: ['Workers Scripts Write'],
-      policies: [
-        {
-          effect: 'allow',
-          resources: { [`com.cloudflare.api.account.${ACCOUNT}`]: '*' },
-          // biome-ignore lint/style/useNamingConvention: Cloudflare's policy wire field is snake_case.
-          permission_groups: [{ id: 'pg' }],
-        },
-      ],
-    });
-  });
-
-  it('targets the bucket resource for bucket-item groups', async () => {
-    stubGroups([
-      {
-        id: 'r2',
-        name: 'Workers R2 Storage Bucket Item Write',
-        scopes: ['com.cloudflare.edge.r2.bucket'],
-      },
-    ]);
-    expect(
-      await resolveTokenPolicy(BROKER_ACCOUNT, {
-        permissions: 'Workers R2 Storage Bucket Item Write',
-        resource: { kind: 'bucket', bucket: 'assets', jurisdiction: 'default' },
-      }),
-    ).toEqual({
-      ok: true,
-      wanted: ['Workers R2 Storage Bucket Item Write'],
-      policies: [
-        {
-          effect: 'allow',
-          resources: {
-            [`com.cloudflare.edge.r2.bucket.${ACCOUNT}_default_assets`]: '*',
+  it.each([
+    {
+      label: 'the account resource for account-scoped groups',
+      group: 'Workers Scripts Write',
+      scope: 'com.cloudflare.api.account',
+      resource: { kind: 'account' },
+      resourceKey: `com.cloudflare.api.account.${ACCOUNT}`,
+    },
+    {
+      label: 'the bucket resource for bucket-item groups',
+      group: 'Workers R2 Storage Bucket Item Write',
+      scope: 'com.cloudflare.edge.r2.bucket',
+      resource: { kind: 'bucket', bucket: 'assets', jurisdiction: 'default' },
+      resourceKey: `com.cloudflare.edge.r2.bucket.${ACCOUNT}_default_assets`,
+    },
+    {
+      label: 'an EU-jurisdiction bucket resource',
+      group: 'Workers R2 Storage Bucket Item Read',
+      scope: 'com.cloudflare.edge.r2.bucket',
+      resource: { kind: 'bucket', bucket: 'assets', jurisdiction: 'eu' },
+      resourceKey: `com.cloudflare.edge.r2.bucket.${ACCOUNT}_eu_assets`,
+    },
+  ] as const)(
+    'targets $label',
+    async ({ group, scope, resource, resourceKey }) => {
+      stubGroups([{ id: 'pg', name: group, scopes: [scope] }]);
+      expect(
+        await resolveTokenPolicy(BROKER_ACCOUNT, {
+          permissions: group,
+          resource,
+        }),
+      ).toEqual({
+        ok: true,
+        wanted: [group],
+        policies: [
+          {
+            effect: 'allow',
+            resources: { [resourceKey]: '*' },
+            // biome-ignore lint/style/useNamingConvention: Cloudflare's policy wire field is snake_case.
+            permission_groups: [{ id: 'pg' }],
           },
-          // biome-ignore lint/style/useNamingConvention: Cloudflare's policy wire field is snake_case.
-          permission_groups: [{ id: 'r2' }],
-        },
-      ],
-    });
-  });
-
-  it('targets an EU-jurisdiction bucket resource', async () => {
-    stubGroups([
-      {
-        id: 'r2',
-        name: 'Workers R2 Storage Bucket Item Read',
-        scopes: ['com.cloudflare.edge.r2.bucket'],
-      },
-    ]);
-    expect(
-      await resolveTokenPolicy(BROKER_ACCOUNT, {
-        permissions: 'Workers R2 Storage Bucket Item Read',
-        resource: { kind: 'bucket', bucket: 'assets', jurisdiction: 'eu' },
-      }),
-    ).toEqual({
-      ok: true,
-      wanted: ['Workers R2 Storage Bucket Item Read'],
-      policies: [
-        {
-          effect: 'allow',
-          resources: {
-            [`com.cloudflare.edge.r2.bucket.${ACCOUNT}_eu_assets`]: '*',
-          },
-          // biome-ignore lint/style/useNamingConvention: Cloudflare's policy wire field is snake_case.
-          permission_groups: [{ id: 'r2' }],
-        },
-      ],
-    });
-  });
+        ],
+      });
+    },
+  );
 
   it('rejects bucket-item groups without --bucket', async () => {
     stubGroups([

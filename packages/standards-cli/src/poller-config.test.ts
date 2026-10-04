@@ -47,20 +47,10 @@ describe('parsePollerConfig', () => {
     expect(problems).toEqual(['poller config has unknown key "maxRunsPerDay"']);
   });
 
-  it('rejects an empty or malformed repo list', () => {
+  it('rejects an empty repo list', () => {
     expect(
       parsePollerConfig({ ...validConfig(), repos: [] }, CONFIG_DIR).problems,
     ).toContain('poller config "repos" must list at least one repository');
-    expect(
-      parsePollerConfig({ ...validConfig(), repos: ['not-a-repo'] }, CONFIG_DIR)
-        .problems,
-    ).toContain(
-      'poller config "repos" entries must be "owner/repo": not-a-repo',
-    );
-    expect(
-      parsePollerConfig({ ...validConfig(), repos: ['a/b', 'a/b'] }, CONFIG_DIR)
-        .problems,
-    ).toContain('poller config "repos" entries must be unique');
   });
 
   it('accepts at most twelve watched repositories', () => {

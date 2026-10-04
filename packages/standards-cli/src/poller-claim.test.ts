@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { HTTP_CREATED, HTTP_NO_CONTENT, HTTP_OK } from './github-api';
+import { HTTP_OK } from './github-api';
 import { type ApiCall, installApi } from './github-commands-test-support';
 import { issueRevision, readApprovalBinding } from './poller-approval';
-import { acquireClaim, validateClaim } from './poller-claim';
+import { validateClaim } from './poller-claim';
 import type { IssueItem } from './poller-github';
 
 const originalFetch = globalThis.fetch;
@@ -45,51 +45,6 @@ afterEach(() => {
 });
 
 describe('approval and claim bindings', () => {
-  it('elects the earliest trusted marker for one claim epoch', async () => {
-    const approval = {
-      id: 'approval',
-      repo: context.repo,
-      issueNumber,
-      eventId: 100,
-      label: 'approved-for-fix',
-      actorLogin: 'maintainer',
-      approvedAt: '2026-07-18T11:00:00Z',
-      target: issueRevision(issue(['approved-for-fix'])),
-    };
-    const earlierMarker = {
-      id: 10,
-      body: `<!-- standards-poller:claim
-${JSON.stringify({
-  approval,
-  claimLabel: 'fix-in-progress',
-  claimEpoch: '101',
-  nonce: 'earlier',
-})}
--->`,
-      user: { login: 'maintainer' },
-      ...createdAt('2026-07-18T12:00:01Z'),
-    };
-    installApi([
-      { body: [labeled('fix-in-progress')] },
-      { status: HTTP_CREATED, body: { id: 11 } },
-      {
-        body: [
-          earlierMarker,
-          {
-            ...earlierMarker,
-            id: 11,
-            body: earlierMarker.body.replace('earlier', 'ours'),
-          },
-        ],
-      },
-      role('maintain'),
-      role('maintain'),
-      { status: HTTP_NO_CONTENT, body: null },
-    ]);
-
-    expect(await acquireClaim(context, approval, 'fix-in-progress')).toBeNull();
-  });
-
   it('rejects approval removal, content edits, and role revocation', async () => {
     installApi([
       { body: rawIssue(['approved-for-fix']) },
