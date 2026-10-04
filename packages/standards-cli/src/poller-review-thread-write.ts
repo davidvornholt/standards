@@ -2,7 +2,6 @@ import { apiError, HTTP_OK, request } from './github-api';
 import { isRecord } from './github-settings-parse';
 
 const REPLY_MUTATION =
-  // biome-ignore lint/security/noSecrets: a GraphQL mutation string, not a credential.
   'mutation($id: ID!, $body: String!) { addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $id, body: $body }) { comment { id } } }';
 
 const RESOLVE_MUTATION =

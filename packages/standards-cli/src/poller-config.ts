@@ -14,7 +14,6 @@ const CONFIG_KEYS: ReadonlySet<string> = new Set([
   'repos',
   'model',
   'reasoningEffort',
-  // biome-ignore lint/security/noSecrets: a config key name, not a credential.
   'maxJobsPerTick',
   'staleClaimHours',
   'runTimeoutMinutes',
@@ -167,7 +166,6 @@ export const parsePollerConfig = (
     ),
     maxJobsPerTick: parsePositiveInteger(
       raw.maxJobsPerTick,
-      // biome-ignore lint/security/noSecrets: a config key name, not a credential.
       'maxJobsPerTick',
       DEFAULT_MAX_JOBS_PER_TICK,
       problems,

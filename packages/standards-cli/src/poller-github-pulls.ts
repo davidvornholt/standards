@@ -175,7 +175,6 @@ export const markPullRequestReady = async (
 ): Promise<void> => {
   const response = await request(token, 'POST', '/graphql', {
     query:
-      // biome-ignore lint/security/noSecrets: a GraphQL mutation string, not a credential.
       'mutation($id: ID!) { markPullRequestReadyForReview(input: {pullRequestId: $id}) { pullRequest { isDraft } } }',
     variables: { id: pullRequestNodeId },
   });
