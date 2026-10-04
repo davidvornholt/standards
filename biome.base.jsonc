@@ -212,6 +212,12 @@
             // one-off React style exception.
             "useReactFunctionComponentDefinition": "off"
           },
+          "security": {
+            // An entropy heuristic over string literals. Across consumers it
+            // reported Effect error tags, route paths, SQL, and German prose,
+            // and no real credential, so every hit was a suppression.
+            "noSecrets": "off"
+          },
           "performance": {
             // Solid rule; see the disabled-domain note under correctness.
             "useSolidForComponent": "off",
@@ -250,10 +256,9 @@
     },
     {
       // Tests legitimately manipulate process.env to exercise
-      // configuration-dependent behavior, and fixtures contain literal dummy
-      // tokens that trip entropy-based secret detection. Biome also does not
-      // resolve Bun's virtual `bun:test` module. These tests and helpers run
-      // under Bun, so its built-ins are available.
+      // configuration-dependent behavior. Biome also does not resolve Bun's
+      // virtual `bun:test` module. These tests and helpers run under Bun, so
+      // its built-ins are available.
       "includes": [
         "**/*.test.ts",
         "**/*.test.tsx",
@@ -271,11 +276,37 @@
           "nursery": {
             "noBunModules": "off"
           },
-          "security": {
-            "noSecrets": "off"
-          },
           "style": {
             "noProcessEnv": "off"
+          }
+        }
+      }
+    },
+    {
+      // Test inputs and expected values are literal by nature. Naming each
+      // one moves it away from the assertion that explains it.
+      "includes": [
+        "**/*.test.ts",
+        "**/*.test.tsx",
+        "**/*.integration.ts",
+        "**/a11y/**"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noMagicNumbers": "off"
+          }
+        }
+      }
+    },
+    {
+      // Browser tests drive one page, where each step depends on the state
+      // the previous one left: key presses, navigation, and polling.
+      "includes": ["**/a11y/**"],
+      "linter": {
+        "rules": {
+          "performance": {
+            "noAwaitInLoops": "off"
           }
         }
       }
