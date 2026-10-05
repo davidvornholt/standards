@@ -116,12 +116,14 @@ describe('unresolvable secrets', () => {
 });
 
 describe('canonical SOPS secret action script behavior', () => {
-  it('exports a decrypted non-empty single-line string', () => {
+  // The value reaches only steps that name the output, so the action must
+  // never widen it to every later step through the job environment.
+  it('outputs a decrypted non-empty single-line string without exporting it', () => {
     const actionRun = runSopsAction();
 
     expect(actionRun.result.status).toBe(0);
-    expect(actionRun.environment).toBe('GH_TOKEN=resolved-token\n');
-    expect(actionRun.output).toBe('');
+    expect(actionRun.output).toBe('value=resolved-token\n');
+    expect(actionRun.environment).toBe('');
     expect(actionRun.result.stdout).toBe('::add-mask::resolved-token\n');
     expect(actionRun.result.stderr).toBe('');
     expect(actionRun.curlCalled).toBe(true);
@@ -135,42 +137,23 @@ describe('canonical SOPS secret action script behavior', () => {
   it('offers no interface for substituting an unresolvable secret', () => {
     const action = parseYaml(readFileSync(SOPS_ACTION, 'utf8')) as {
       readonly inputs: Record<string, { readonly default?: unknown }>;
-      readonly outputs?: Record<string, unknown>;
+      readonly outputs: Record<string, { readonly value?: unknown }>;
     };
 
     expect(
       Object.keys(action.inputs).sort((left, right) =>
         left.localeCompare(right),
       ),
-    ).toEqual([
-      'age-key',
-      'env-name',
-      'secret-file',
-      'secret-key',
-      'secret-root',
-    ]);
+    ).toEqual(['age-key', 'secret-file', 'secret-key', 'secret-root']);
     expect(action.inputs['secret-root'].default).toBe('ci');
-    expect(action.outputs).toBeUndefined();
+    expect(Object.keys(action.outputs)).toEqual(['value']);
+    expect(action.outputs.value.value).toBe(
+      ['$', '{{ steps.resolve.outputs.value }}'].join(''),
+    );
   });
 });
 
 describe('caller configuration errors', () => {
-  it('rejects an env-name that is not a valid variable name', () => {
-    const options: SopsActionOptions = { envName: 'GH TOKEN' };
-    const actionRun = runSopsAction(options);
-
-    expect(actionRun.result.status).toBe(1);
-    expect(actionRun.environment).toBe('');
-    expect(actionRun.output).toBe('');
-    expect(actionRun.result.stdout).toBe(
-      '::error::env-name must be a valid environment variable name\n',
-    );
-    expect(actionRun.result.stderr).toBe('');
-    // Rejected before any network or decrypt work happens.
-    expect(actionRun.curlCalled).toBe(false);
-    expect(actionRun.sopsExecuted).toBe(false);
-  });
-
   it.each(['', 'root', '.ci', 'production\n'])(
     'rejects invalid secret-root %j before network or decrypt work',
     (secretRoot) => {

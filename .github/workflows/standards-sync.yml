@@ -146,22 +146,23 @@ jobs:
 
       # Resolve through the action from the trusted pre-sync checkout. Sync
       # replaces managed files, including this action, so no local action may
-      # execute after the mirror changes.
+      # execute after the mirror changes. The App credentials are step outputs
+      # passed only to the two mint steps, never job environment variables.
       - name: Resolve broker App ID
+        id: broker-app-id
         uses: ./.github/actions/sops-secret
         with:
           age-key: ${{ secrets.SOPS_AGE_KEY }}
           secret-file: secrets/ci.yaml
           secret-key: broker_app.app_id
-          env-name: BROKER_APP_ID
 
       - name: Resolve broker App private key
+        id: broker-app-private-key
         uses: ./.github/actions/sops-secret
         with:
           age-key: ${{ secrets.SOPS_AGE_KEY }}
           secret-file: secrets/ci.yaml
           secret-key: broker_app.private_key
-          env-name: BROKER_APP_PRIVATE_KEY
 
       # Mint both tokens before sync as a cheap, fail-closed permission check,
       # but expose them only to the post-sync operation that needs each one.
@@ -172,8 +173,8 @@ jobs:
         id: branch-writer-token
         uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ env.BROKER_APP_ID }}
-          private-key: ${{ env.BROKER_APP_PRIVATE_KEY }}
+          app-id: ${{ steps.broker-app-id.outputs.value }}
+          private-key: ${{ steps.broker-app-private-key.outputs.value }}
           # Omitting owner and repositories is the action's exact
           # current-repository scope; never derive either from event payload.
           permission-contents: write
@@ -183,19 +184,12 @@ jobs:
         id: pr-token
         uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ env.BROKER_APP_ID }}
-          private-key: ${{ env.BROKER_APP_PRIVATE_KEY }}
+          app-id: ${{ steps.broker-app-id.outputs.value }}
+          private-key: ${{ steps.broker-app-private-key.outputs.value }}
           # Omitting owner and repositories is the action's exact
           # current-repository scope; never derive either from event payload.
           permission-contents: read
           permission-pull-requests: write
-
-      - name: Clear broker App credentials
-        run: |
-          {
-            echo "BROKER_APP_ID="
-            echo "BROKER_APP_PRIVATE_KEY="
-          } >> "$GITHUB_ENV"
 
       # Rebase the durable automation branch so maintainer seam edits survive.
       # A concurrent push is guarded by the exact head lease in the writer step.

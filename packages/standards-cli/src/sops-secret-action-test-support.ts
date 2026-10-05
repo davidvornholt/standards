@@ -19,7 +19,6 @@ export type SopsActionOptions = {
   readonly ageKey?: string;
   readonly createSecretFile?: boolean;
   readonly curlStatus?: number;
-  readonly envName?: string;
   readonly script?: string;
   readonly secretKey?: string;
   readonly secretRoot?: string;
@@ -47,7 +46,6 @@ const DEFAULT_OPTIONS = {
   ageKey: 'age-secret-key',
   createSecretFile: true,
   curlStatus: 0,
-  envName: 'GH_TOKEN',
   script: yamlRunScript(SOPS_ACTION, 'Resolve and validate secret'),
   secretKey: 'example_token',
   secretRoot: 'ci',
@@ -131,7 +129,6 @@ export const createSopsActionRunner =
         PATH: `${bin}:${basePath}`,
         RUNNER_TEMP: runnerTemp,
         SOPS_AGE_KEY: resolved.ageKey,
-        SOPS_ENV_NAME: resolved.envName,
         SOPS_MARKER: sopsMarker,
         SOPS_SECRET_FILE: 'secrets/ci.yaml',
         SOPS_SECRET_KEY: resolved.secretKey,

@@ -62,11 +62,14 @@ export const writerToken = expression(
   'steps.branch-writer-token.outputs.token',
 );
 export const prToken = expression('steps.pr-token.outputs.token');
-const resolveIdName = 'Resolve broker App ID';
+export const appIdOutput = expression('steps.broker-app-id.outputs.value');
+export const privateKeyOutput = expression(
+  'steps.broker-app-private-key.outputs.value',
+);
+export const resolveIdName = 'Resolve broker App ID';
 const resolveKeyName = 'Resolve broker App private key';
 export const writerMintName = 'Mint current-repository branch writer token';
 export const prMintName = 'Mint current-repository PR token';
-export const clearName = 'Clear broker App credentials';
 export const syncName = 'Sync canonical files from upstream';
 const writerConsumerName = 'Commit and push mirror changes';
 const prConsumerName = 'Reconcile sync pull requests';
@@ -85,16 +88,16 @@ const assertExactStep = (
 };
 const resolvedSecretStep = (
   name: string,
+  id: string,
   secretKey: string,
-  envName: string,
 ): WorkflowStep => ({
   name,
+  id,
   uses: './.github/actions/sops-secret',
   with: {
     'age-key': expression('secrets.SOPS_AGE_KEY'),
     'secret-file': 'secrets/ci.yaml',
     'secret-key': secretKey,
-    'env-name': envName,
   },
 });
 const mintedTokenStep = (
@@ -107,28 +110,31 @@ const mintedTokenStep = (
   id,
   uses: 'actions/create-github-app-token@v3',
   with: {
-    'app-id': expression('env.BROKER_APP_ID'),
-    'private-key': expression('env.BROKER_APP_PRIVATE_KEY'),
+    'app-id': appIdOutput,
+    'private-key': privateKeyOutput,
     'permission-contents': contents,
     [permission]: 'write',
   },
 });
-const assertSoleTokenConsumer = (
+// Matching the bare step id also catches bracket and spacing variants of the
+// output expression, so a step can only read a value by being listed here.
+const assertOnlyConsumers = (
   workflow: ParsedWorkflow,
   producerName: string,
   producerId: string,
-  consumerName: string,
+  consumerNames: ReadonlyArray<string>,
 ): void => {
-  const producerIndex = stepIndex(workflow, producerName);
-  const consumerIndex = stepIndex(workflow, consumerName);
+  const allowed = new Set(
+    [producerName, ...consumerNames].map((name) => stepIndex(workflow, name)),
+  );
   const hasExtraConsumer = workflow.jobs.sync.steps.some(
     (step, index) =>
-      index !== producerIndex &&
-      index !== consumerIndex &&
-      JSON.stringify(step).includes(producerId),
+      !allowed.has(index) && JSON.stringify(step).includes(producerId),
   );
   if (hasExtraConsumer) {
-    throw new Error(`${producerName} must have exactly one workflow consumer`);
+    throw new Error(
+      `${producerName} must be read only by ${consumerNames.join(' and ')}`,
+    );
   }
 };
 
@@ -139,15 +145,15 @@ export const assertSecuritySensitiveSteps = (
   assertExactStep(
     workflow,
     resolveIdName,
-    resolvedSecretStep(resolveIdName, 'broker_app.app_id', 'BROKER_APP_ID'),
+    resolvedSecretStep(resolveIdName, 'broker-app-id', 'broker_app.app_id'),
   );
   assertExactStep(
     workflow,
     resolveKeyName,
     resolvedSecretStep(
       resolveKeyName,
+      'broker-app-private-key',
       'broker_app.private_key',
-      'BROKER_APP_PRIVATE_KEY',
     ),
   );
   assertExactStep(
@@ -165,14 +171,6 @@ export const assertSecuritySensitiveSteps = (
     prMintName,
     mintedTokenStep(prMintName, 'pr-token', 'read', 'permission-pull-requests'),
   );
-  assertExactStep(workflow, clearName, {
-    name: clearName,
-    run: `{
-  echo "BROKER_APP_ID="
-  echo "BROKER_APP_PRIVATE_KEY="
-} >> "$GITHUB_ENV"
-`,
-  });
   assertExactStep(workflow, writerConsumerName, consumers.writer);
   assertExactStep(workflow, prConsumerName, consumers.pullRequest);
 
@@ -181,21 +179,24 @@ export const assertSecuritySensitiveSteps = (
   const resolveKeyIndex = stepIndex(workflow, resolveKeyName);
   const writerIndex = stepIndex(workflow, writerMintName);
   const prIndex = stepIndex(workflow, prMintName);
-  const clearIndex = stepIndex(workflow, clearName);
   if (
     resolveKeyIndex !== resolveIdIndex + 1 ||
     writerIndex !== resolveKeyIndex + 1 ||
     prIndex !== writerIndex + 1 ||
-    clearIndex !== prIndex + 1 ||
-    clearIndex >= syncIndex
+    prIndex >= syncIndex
   ) {
     throw new Error('Broker credentials must form a contiguous pre-sync block');
   }
-  assertSoleTokenConsumer(
+  const mintNames = [writerMintName, prMintName];
+  assertOnlyConsumers(workflow, resolveIdName, 'broker-app-id', mintNames);
+  assertOnlyConsumers(
     workflow,
-    writerMintName,
-    'branch-writer-token',
-    writerConsumerName,
+    resolveKeyName,
+    'broker-app-private-key',
+    mintNames,
   );
-  assertSoleTokenConsumer(workflow, prMintName, 'pr-token', prConsumerName);
+  assertOnlyConsumers(workflow, writerMintName, 'branch-writer-token', [
+    writerConsumerName,
+  ]);
+  assertOnlyConsumers(workflow, prMintName, 'pr-token', [prConsumerName]);
 };

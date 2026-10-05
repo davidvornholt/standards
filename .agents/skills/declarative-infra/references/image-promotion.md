@@ -39,7 +39,7 @@ When multiple images must be released together, use the [coordinated release ext
 
 The trusted build job publishes an image under its source-owned tag, obtains the registry digest, and emits exactly one single-line JSON record to its immutable job log. The marker is assembled from fragments so the full marker cannot appear in the runner's echoed shell source. A separate announcement job runs only after build success. Its fallback token is read-only; its one-infra-repository App token has only Contents write.
 
-The App credentials live at `ci.broker_app.app_id` and `ci.broker_app.private_key` in `secrets/ci.yaml`. Resolve both with the canonical action, which transports nested multiline values through `GITHUB_ENV`, never outputs.
+The App credentials live at `ci.broker_app.app_id` and `ci.broker_app.private_key` in `secrets/ci.yaml`. Resolve both with the canonical action and pass its `value` step outputs only to the token-minting step, so no other step in the job can read them.
 
 <!-- contract:source-workflow -->
 ```yaml
@@ -71,13 +71,15 @@ jobs:
     permissions: { contents: read }
     steps:
       - uses: actions/checkout@v7
-      - uses: ./.github/actions/sops-secret
-        with: { age-key: "${{ secrets.SOPS_AGE_KEY }}", secret-file: secrets/ci.yaml, secret-key: broker_app.app_id, env-name: BROKER_APP_ID }
-      - uses: ./.github/actions/sops-secret
-        with: { age-key: "${{ secrets.SOPS_AGE_KEY }}", secret-file: secrets/ci.yaml, secret-key: broker_app.private_key, env-name: BROKER_APP_PRIVATE_KEY }
+      - id: broker-app-id
+        uses: ./.github/actions/sops-secret
+        with: { age-key: "${{ secrets.SOPS_AGE_KEY }}", secret-file: secrets/ci.yaml, secret-key: broker_app.app_id }
+      - id: broker-app-private-key
+        uses: ./.github/actions/sops-secret
+        with: { age-key: "${{ secrets.SOPS_AGE_KEY }}", secret-file: secrets/ci.yaml, secret-key: broker_app.private_key }
       - id: broker
         uses: actions/create-github-app-token@v3
-        with: { app-id: "${{ env.BROKER_APP_ID }}", private-key: "${{ env.BROKER_APP_PRIVATE_KEY }}", owner: example, repositories: infra, permission-contents: write }
+        with: { app-id: "${{ steps.broker-app-id.outputs.value }}", private-key: "${{ steps.broker-app-private-key.outputs.value }}", owner: example, repositories: infra, permission-contents: write }
       - name: Announce image digest
         env:
           BUILD_DIGEST: "${{ needs.build.outputs.digest }}"
