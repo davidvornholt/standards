@@ -223,6 +223,15 @@ describe('Standards sync broker credential contract', () => {
       dropMintInput(writerMintName, 'client-id'),
       dropMintInput(prMintName, 'app-id'),
     );
+    for (const name of [writerMintName, prMintName]) {
+      mutations.push((workflow) => {
+        const inputs = mutableStep(workflow, name).with as Record<
+          string,
+          string
+        >;
+        inputs['app-id'] = appIdOutput;
+      });
+    }
     const rejected = mutations.map(rejectsMutation);
     expect(rejected).toEqual(rejected.map(() => true));
   });

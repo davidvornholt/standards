@@ -117,7 +117,9 @@ const mintedTokenStep = (
   uses: 'actions/create-github-app-token@v3',
   with: {
     'client-id': clientIdOutput,
-    'app-id': appIdOutput,
+    'app-id': expression(
+      `${clientIdPresence} == 'false' && steps.broker-app-id.outputs.value || ''`,
+    ),
     'private-key': privateKeyOutput,
     'permission-contents': contents,
     [permission]: 'write',
@@ -229,6 +231,7 @@ export const assertSecuritySensitiveSteps = (
   assertOnlyConsumers(workflow, resolveIdName, 'broker-app-id', mintNames);
   assertOnlyConsumers(workflow, detectClientIdName, 'client-id-presence', [
     resolveClientIdName,
+    ...mintNames,
   ]);
   assertOnlyConsumers(
     workflow,

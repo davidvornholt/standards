@@ -197,16 +197,16 @@ jobs:
       # but expose them only to the post-sync operation that needs each one.
       # The writer needs GitHub's separate Workflows grant because canonical
       # files include .github/workflows/**; Contents write alone cannot push
-      # those files. The action uses client-id when it is non-empty and the
-      # deprecated app-id otherwise, so a repository without
-      # ci.broker_app.client_id keeps minting with its App ID. A later release
-      # drops app-id once every consumer has the client ID.
+      # those files. Supply the deprecated app-id only when client_id is
+      # absent. The action trims inputs, so a present whitespace-only client
+      # ID must fail without falling back to the App ID. A later release drops
+      # app-id once every consumer has the client ID.
       - name: Mint current-repository branch writer token
         id: branch-writer-token
         uses: actions/create-github-app-token@v3
         with:
           client-id: ${{ steps.broker-app-client-id.outputs.value }}
-          app-id: ${{ steps.broker-app-id.outputs.value }}
+          app-id: ${{ steps.client-id-presence.outputs.present == 'false' && steps.broker-app-id.outputs.value || '' }}
           private-key: ${{ steps.broker-app-private-key.outputs.value }}
           # Omitting owner and repositories is the action's exact
           # current-repository scope; never derive either from event payload.
@@ -218,7 +218,7 @@ jobs:
         uses: actions/create-github-app-token@v3
         with:
           client-id: ${{ steps.broker-app-client-id.outputs.value }}
-          app-id: ${{ steps.broker-app-id.outputs.value }}
+          app-id: ${{ steps.client-id-presence.outputs.present == 'false' && steps.broker-app-id.outputs.value || '' }}
           private-key: ${{ steps.broker-app-private-key.outputs.value }}
           # Omitting owner and repositories is the action's exact
           # current-repository scope; never derive either from event payload.
