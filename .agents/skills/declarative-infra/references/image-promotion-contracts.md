@@ -37,6 +37,7 @@ compareOutcomes:
   ancestor: stale
   diverged: reject
   unprovable: reject
+paused: ignore-announcement
 canonical:
   branch: image-bump/<app>/<sha-prefix>-<digest-prefix>
   marker: "promotion-source: <repository>@<sha> digest=<digest>"
@@ -48,6 +49,7 @@ requiredProvenance:
   - exactRunProof
   - exactRegistryAccessProof
   - exactResultingObject
+  - appNotPaused
   - currentMainAncestry
   - mergeGroupRevalidation
   - imagesJsonOnly
@@ -67,11 +69,14 @@ imagesPath: infra/images.json
 metadataFields: [sourceRepository, sourceRef, sourceWorkflow, imageRepository, registryAccess]
 pinFields: [promotionEnabled, digest, promotedSourceSha]
 disabledPin: { promotionEnabled: false, digest: null, promotedSourceSha: null }
+pausedField: { promotionPaused: true }
 operations:
   bootstrap: absent-to-disabled
   accessMigration: legacy-document-to-explicit-access-only
   disable: live-to-disabled-with-metadata-unchanged
   metadata: disabled-to-disabled
+  pause: live-to-paused-with-pins-and-metadata-unchanged
+  unpause: paused-to-live-with-pins-and-metadata-unchanged
   remove: disabled-to-absent
   trustedPromotion: disabled-to-enabled-with-exact-proof
 ```

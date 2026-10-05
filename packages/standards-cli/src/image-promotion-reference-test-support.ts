@@ -12,6 +12,7 @@ export type AppState = Metadata & {
   readonly digest: string | null;
   readonly promotedSourceSha: string | null;
   readonly promotionEnabled: boolean;
+  readonly promotionPaused?: true;
 };
 export type Promotion = {
   readonly digest: string;
@@ -29,6 +30,7 @@ export type Compare =
   | 'unprovable';
 type WriterContract = {
   readonly lifecycle: ReadonlyArray<Operation['phase']>;
+  readonly paused: 'ignore-announcement';
   readonly requiredProvenance: ReadonlyArray<string>;
   readonly superseding: {
     readonly candidates: 'same-app-open-promotions';
@@ -61,7 +63,13 @@ export type PromotionState = {
   readonly operations: Readonly<Record<string, Operation>>;
 };
 export type ModelResult = {
-  readonly kind: 'started' | 'attached' | 'stale' | 'rejected' | 'advanced';
+  readonly kind:
+    | 'started'
+    | 'attached'
+    | 'stale'
+    | 'rejected'
+    | 'advanced'
+    | 'paused';
   readonly state: PromotionState;
 };
 
@@ -132,6 +140,9 @@ export const announce = ({
     )
   ) {
     return { kind: 'rejected', state };
+  }
+  if (state.app.promotionPaused === true) {
+    return { kind: 'paused', state };
   }
   const identity = canonicalIdentity(candidate);
   const existing = state.operations[identity];

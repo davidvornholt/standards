@@ -54,9 +54,12 @@ const transition = (
 it('validates the exact final desired-state shape at runtime', () => {
   expect(isValidAppState(disabled)).toBeTrue();
   expect(isValidAppState(live)).toBeTrue();
+  expect(isValidAppState({ ...live, promotionPaused: true })).toBeTrue();
   const { registryAccess: _registryAccess, ...missingAccess } = disabled;
   for (const invalid of [
     missingAccess,
+    { ...live, promotionPaused: false },
+    { ...disabled, promotionPaused: true },
     { ...disabled, registryAccess: 'legacy' },
     { ...disabled, credential: 'secret' },
     { ...disabled, unexpected: true },

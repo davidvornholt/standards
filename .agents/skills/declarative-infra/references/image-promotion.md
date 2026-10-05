@@ -29,7 +29,7 @@ The home repo owns one `images.json` (`infra/images.json`, or root `images.json`
 }
 ```
 
-`sourceWorkflow.path` and `sourceWorkflow.id` bind the immutable authorized Actions workflow; a different successful workflow with a job named `build` is not evidence. `registryAccess` is required metadata with exactly two values: `public` requires anonymous manifest access, while `private` requires exact provider visibility `private`, anonymous denial, and authenticated workflow and host access. Every reader first requires a plain object document root, then validates each complete object at runtime: the exact metadata and pin key sets, a GHCR repository, the access enum, and valid paired pins. Arrays, primitives, prototype-bearing objects, unknown fields, and authentication material fail closed. Derive production references only as `imageRepository@digest`. `images.json` is the single declarative state owner being converged, not a third credential ledger of the kind rejected by `CREDS-CLOUDFLARE-001`; it never contains a credential, secret path, username, or authentication-file path.
+`sourceWorkflow.path` and `sourceWorkflow.id` bind the immutable authorized Actions workflow; a different successful workflow with a job named `build` is not evidence. `registryAccess` is required metadata with exactly two values: `public` requires anonymous manifest access, while `private` requires exact provider visibility `private`, anonymous denial, and authenticated workflow and host access. Every reader first requires a plain object document root, then validates each complete object at runtime: the exact metadata and pin key sets plus the optional pause key, a GHCR repository, the access enum, and valid paired pins. Arrays, primitives, prototype-bearing objects, unknown fields, and authentication material fail closed. Derive production references only as `imageRepository@digest`. `images.json` is the single declarative state owner being converged, not a third credential ledger of the kind rejected by `CREDS-CLOUDFLARE-001`; it never contains a credential, secret path, username, or authentication-file path.
 
 ## Coordinated releases
 
@@ -114,7 +114,7 @@ There is no rollback operation, because the trusted writer only moves a pin forw
 
 Before branch creation, the writer runs the shared registry-access proof against the exact `imageRepository@digest`. Public proof resolves that digest anonymously. Private proof queries the exact GHCR package path and requires provider visibility `private`, denies anonymous resolution, and resolves the same digest with the job token. Missing package grants, inaccessible provider visibility, `internal` visibility, and any path or digest mismatch fail before a branch exists.
 
-The trusted provenance check revalidates App-bot author, canonical same-repository branch, marker and payload, exact run proof, exact registry-access proof, exact resulting object, current-main ancestry, merge-group execution, and an `images.json`-only diff. It runs on the merge candidate and every condition fails closed.
+The trusted provenance check revalidates App-bot author, canonical same-repository branch, marker and payload, exact run proof, exact registry-access proof, exact resulting object, an unpaused app, current-main ancestry, merge-group execution, and an `images.json`-only diff. It runs on the merge candidate and every condition fails closed.
 
 ## Bootstrap and metadata transitions
 
@@ -123,6 +123,10 @@ Reviewed metadata changes operate on full `images.json` state. Adoption adds onl
 The `registryAccess` hard cutover has one document-wide migration operation for an existing legacy `images.json`. Its before-state decoder accepts exact legacy entries only for this operation. In one atomic change, every legacy entry gains `registryAccess: public|private`, already-final entries remain semantically unchanged, and no pin, existing metadata value, app membership, or other file may change; object-key order is irrelevant. The complete after document must pass the strict final decoder, and every other operation rejects the legacy shape. This is a one-time durable-config migration, not an optional field or compatibility alias.
 
 Private host adoption has a separate two-stage boundary that runs before private metadata or promotion can require a pull. First deploy the SOPS secret, login unit, explicit auth files, and container-unit environment while a new app remains disabled or the existing app remains public. Read back the decrypted secret presence, successful login unit, and root-only private auth file. Only a later reviewed metadata change and trusted promotion may select `private` and require private pre-pull. The same sequence applies to a new private app and a public-to-private migration; an old host never has to pull a private image to install the credential plumbing needed for that pull.
+
+## Pause promotion
+
+To keep a live app on its current image while new builds keep arriving, a reviewed change adds `"promotionPaused": true` to its entry and changes nothing else. The pins stay deployed. The trusted writer ignores announcements for a paused app, and the provenance check refuses any promotion of it, so an open or auto-merging promotion cannot land either. `true` is the only value, and only a live app can be paused. To unpause, remove the key in another reviewed change; the next successful source build then promotes as usual. Disabling a paused app drops the key with its pins.
 
 ## Deploy and completion
 
