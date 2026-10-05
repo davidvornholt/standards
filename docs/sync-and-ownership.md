@@ -78,6 +78,8 @@ Canonical symlinks are mirrored as links and never followed. Their lock digest c
 
 `.claude/skills -> ../.agents/skills` exposes the same skill directories to Claude Code and Codex. Project skills live at `.agents/skills/<name>` beside the canonical ones and remain outside the lock.
 
+Copy and zip tools that follow links can turn `.claude/skills` into a real directory, and sync then refuses. Move any of your own files out of it, then run `rm -rf .claude/skills && bun standards sync`.
+
 On Windows, clone with `core.symlinks=true` under Developer Mode or elevation, or use WSL.
 
 ## Lock and drift

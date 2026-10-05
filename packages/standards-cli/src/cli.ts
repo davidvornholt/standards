@@ -389,11 +389,31 @@ type MirrorResult = {
   readonly stale: ReadonlyArray<string>;
 };
 
+type MirrorCommand = 'init' | 'sync';
+
 type MirrorOptions = {
   readonly upstream: ReadonlyMap<string, ManagedEntry>;
   readonly consumer: string;
   readonly previous: Record<string, string>;
   readonly dryRun: boolean;
+  readonly command: MirrorCommand;
+};
+
+// A copy or zip tool that follows links turns a managed link into a directory of
+// copies. Those copies are not in the lock, so the run refuses; for a link the
+// message names what the path should be and the exact way back to it.
+const directoryCollision = (
+  rel: string,
+  entry: ManagedEntry,
+  unlocked: ReadonlyArray<string>,
+  command: MirrorCommand,
+): string => {
+  const holding = `${unlocked.length} path(s) this repository does not manage (${unlocked.slice(0, COLLISION_SAMPLE).join(', ')})`;
+  if (entry.kind !== 'symlink') {
+    return `${rel} is a directory holding ${holding}; move or delete them, then re-run`;
+  }
+  const canonical = posix.join(posix.dirname(rel), entry.target);
+  return `${rel} should be a symlink to the canonical ${canonical}, but it is a directory holding ${holding}; copy and zip tools that follow links can cause this. First move any of your own files out of ${rel}, then run \`rm -rf ${rel} && bun standards ${command}\``;
 };
 
 // Two things init/sync must settle before their first write: an escaping
@@ -408,10 +428,11 @@ const mirrorPreconditionProblems = async (
   consumer: string,
   upstream: ReadonlyMap<string, ManagedEntry>,
   previous: Record<string, string>,
+  command: MirrorCommand,
 ): Promise<ReadonlyArray<string>> => {
   const locked = new Set(Object.keys(previous));
   const collisions = await Promise.all(
-    [...upstream.keys()].map(async (rel) => {
+    [...upstream].map(async ([rel, entry]) => {
       const ancestor = await interposedAncestor(consumer, rel, upstream);
       if (ancestor !== null) {
         return `${rel} is below the ${ancestor.kind} ${ancestor.rel}; refusing to write through an existing file or symlink ancestor; move it aside before syncing this payload`;
@@ -423,7 +444,7 @@ const mirrorPreconditionProblems = async (
       const unlocked = await unlockedPathsUnder(consumer, rel, locked);
       return unlocked.length === 0
         ? null
-        : `${rel} is a directory holding ${unlocked.length} path(s) this repository does not manage (${unlocked.slice(0, COLLISION_SAMPLE).join(', ')}); move or delete them, then re-run`;
+        : directoryCollision(rel, entry, unlocked, command);
     }),
   );
   return [
@@ -545,12 +566,13 @@ const mirror = async ({
   consumer,
   previous,
   dryRun,
+  command,
 }: MirrorOptions): Promise<MirrorResult> => {
   for (const rel of Object.keys(previous)) {
     assertSafeRelativePath(rel, 'sync-standards.lock file');
   }
   assertNoProblems(
-    await mirrorPreconditionProblems(consumer, upstream, previous),
+    await mirrorPreconditionProblems(consumer, upstream, previous, command),
     'cannot mirror canonical files',
   );
   const next: Record<string, string> = {};
@@ -682,7 +704,7 @@ const runInit = async (
   assertNoProblems(
     [
       ...symlinkTargetProblems(seeds),
-      ...(await mirrorPreconditionProblems(consumer, upstream, {})),
+      ...(await mirrorPreconditionProblems(consumer, upstream, {}, 'init')),
     ],
     'cannot initialize from this source',
   );
@@ -712,6 +734,7 @@ const runInit = async (
     consumer,
     previous: {},
     dryRun: false,
+    command: 'init',
   });
   reportMirror(result, false);
   await applyProspectiveDependabot(consumer, prospectiveDependabot, false);
@@ -745,6 +768,7 @@ const runSync = async (
     consumer,
     previous: lock?.files ?? {},
     dryRun,
+    command: 'sync',
   });
   reportMirror(result, dryRun);
   const generated = await applyProspectiveDependabot(
