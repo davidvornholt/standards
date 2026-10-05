@@ -2,6 +2,9 @@ import { describe, expect, it } from 'bun:test';
 import {
   appIdOutput,
   assertSecuritySensitiveSteps,
+  clientIdOutput,
+  clientIdPresence,
+  detectClientIdName,
   expression,
   type MutableWorkflow,
   namedStep,
@@ -9,6 +12,7 @@ import {
   privateKeyOutput,
   prMintName,
   prToken,
+  resolveClientIdName,
   resolveIdName,
   syncName,
   syncPolicyRefName,
@@ -112,6 +116,14 @@ const addTokenConsumer =
       run: 'true',
     });
   };
+const dropMintInput =
+  (mintName: string, input: string) =>
+  (workflow: MutableWorkflow): void => {
+    Reflect.deleteProperty(
+      mutableStep(workflow, mintName).with as Record<string, string>,
+      input,
+    );
+  };
 const insertBeforeWriterMint = (
   workflow: MutableWorkflow,
   step: MutableWorkflow['jobs']['sync']['steps'][number],
@@ -139,6 +151,8 @@ describe('Standards sync broker credential contract', () => {
 
   it('rejects softened mappings, token reuse, and unsafe ordering', () => {
     const sensitiveNames = [
+      detectClientIdName,
+      resolveClientIdName,
       writerMintName,
       prMintName,
       'Commit and push mirror changes',
@@ -168,6 +182,8 @@ describe('Standards sync broker credential contract', () => {
       addTokenConsumer(compactExpression('steps.pr-token.outputs.token')),
       addTokenConsumer(expression("steps['pr-token'].outputs['token']")),
       addTokenConsumer(appIdOutput),
+      addTokenConsumer(clientIdOutput),
+      addTokenConsumer(expression(clientIdPresence)),
       addTokenConsumer(privateKeyOutput),
       addTokenConsumer(
         compactExpression('steps.broker-app-private-key.outputs.value'),
@@ -194,6 +210,18 @@ describe('Standards sync broker credential contract', () => {
           uses: 'example/action@v1',
         }),
       (workflow) => moveStepAfterSync(workflow, resolveIdName),
+      (workflow) => moveStepAfterSync(workflow, resolveClientIdName),
+      (workflow) => {
+        Reflect.deleteProperty(
+          mutableStep(workflow, resolveClientIdName),
+          'if',
+        );
+      },
+      (workflow) => {
+        mutableStep(workflow, detectClientIdName).env = { secretsFile: 'x' };
+      },
+      dropMintInput(writerMintName, 'client-id'),
+      dropMintInput(prMintName, 'app-id'),
     );
     const rejected = mutations.map(rejectsMutation);
     expect(rejected).toEqual(rejected.map(() => true));

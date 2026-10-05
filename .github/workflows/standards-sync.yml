@@ -156,6 +156,35 @@ jobs:
           secret-file: secrets/ci.yaml
           secret-key: broker_app.app_id
 
+      # Repositories provisioned before the client ID was stored hold only
+      # app_id and private_key, and the resolver fails on a missing key. SOPS
+      # keeps key names in plaintext, so this reads the encrypted file's shape
+      # without decrypting anything. A present client_id always goes through
+      # the strict resolver, so an empty or unreadable value still fails.
+      - name: Detect broker App client ID
+        id: client-id-presence
+        run: |
+          secrets_file="$GITHUB_WORKSPACE/secrets/ci.yaml"
+          cd "$STANDARDS_SYNC_RUNTIME"
+          present=$(SECRETS_FILE="$secrets_file" bun --no-env-file -e '
+            const isMapping = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+            const document = Bun.YAML.parse(await Bun.file(process.env.SECRETS_FILE).text());
+            const ci = isMapping(document) ? document.ci : undefined;
+            const direct = isMapping(ci) && Object.hasOwn(ci, "broker_app.client_id");
+            const nested = isMapping(ci) && isMapping(ci.broker_app) && Object.hasOwn(ci.broker_app, "client_id");
+            console.log(direct || nested);
+          ')
+          echo "present=$present" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve broker App client ID
+        id: broker-app-client-id
+        if: steps.client-id-presence.outputs.present == 'true'
+        uses: ./.github/actions/sops-secret
+        with:
+          age-key: ${{ secrets.SOPS_AGE_KEY }}
+          secret-file: secrets/ci.yaml
+          secret-key: broker_app.client_id
+
       - name: Resolve broker App private key
         id: broker-app-private-key
         uses: ./.github/actions/sops-secret
@@ -168,11 +197,15 @@ jobs:
       # but expose them only to the post-sync operation that needs each one.
       # The writer needs GitHub's separate Workflows grant because canonical
       # files include .github/workflows/**; Contents write alone cannot push
-      # those files.
+      # those files. The action uses client-id when it is non-empty and the
+      # deprecated app-id otherwise, so a repository without
+      # ci.broker_app.client_id keeps minting with its App ID. A later release
+      # drops app-id once every consumer has the client ID.
       - name: Mint current-repository branch writer token
         id: branch-writer-token
         uses: actions/create-github-app-token@v3
         with:
+          client-id: ${{ steps.broker-app-client-id.outputs.value }}
           app-id: ${{ steps.broker-app-id.outputs.value }}
           private-key: ${{ steps.broker-app-private-key.outputs.value }}
           # Omitting owner and repositories is the action's exact
@@ -184,6 +217,7 @@ jobs:
         id: pr-token
         uses: actions/create-github-app-token@v3
         with:
+          client-id: ${{ steps.broker-app-client-id.outputs.value }}
           app-id: ${{ steps.broker-app-id.outputs.value }}
           private-key: ${{ steps.broker-app-private-key.outputs.value }}
           # Omitting owner and repositories is the action's exact
@@ -268,8 +302,9 @@ jobs:
       # The branch-writer and PR-opening tokens are short-lived installation
       # tokens for only this repository. Their App credentials come from
       # ci.broker_app in the SOPS-encrypted secrets/ci.yaml, resolved through
-      # the trusted pre-sync action. Missing credentials, an unapproved App
-      # permission update, or failed token minting stops the job.
+      # the trusted pre-sync action. A missing client ID falls back to the App
+      # ID. Any other missing credential, an unapproved App permission update,
+      # or failed token minting stops the job.
 
       # This workflow deliberately runs no inline `bun run check`: the synced
       # result is validated by the required Standards gate on the PR it opens,

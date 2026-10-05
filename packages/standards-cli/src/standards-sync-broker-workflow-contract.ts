@@ -63,10 +63,16 @@ export const writerToken = expression(
 );
 export const prToken = expression('steps.pr-token.outputs.token');
 export const appIdOutput = expression('steps.broker-app-id.outputs.value');
+export const clientIdOutput = expression(
+  'steps.broker-app-client-id.outputs.value',
+);
+export const clientIdPresence = 'steps.client-id-presence.outputs.present';
 export const privateKeyOutput = expression(
   'steps.broker-app-private-key.outputs.value',
 );
 export const resolveIdName = 'Resolve broker App ID';
+export const detectClientIdName = 'Detect broker App client ID';
+export const resolveClientIdName = 'Resolve broker App client ID';
 const resolveKeyName = 'Resolve broker App private key';
 export const writerMintName = 'Mint current-repository branch writer token';
 export const prMintName = 'Mint current-repository PR token';
@@ -110,6 +116,7 @@ const mintedTokenStep = (
   id,
   uses: 'actions/create-github-app-token@v3',
   with: {
+    'client-id': clientIdOutput,
     'app-id': appIdOutput,
     'private-key': privateKeyOutput,
     'permission-contents': contents,
@@ -138,6 +145,24 @@ const assertOnlyConsumers = (
   }
 };
 
+// The presence check reads only key names, so its script is covered by
+// behavior tests. Its shape is pinned here: an added `continue-on-error`,
+// `if`, or `env` would change when the client ID resolver runs.
+const assertPresenceStep = (workflow: ParsedWorkflow): void => {
+  const step = namedStep(workflow, detectClientIdName);
+  const keys = Object.keys(step).sort((left, right) =>
+    left.localeCompare(right),
+  );
+  if (
+    !isDeepStrictEqual(keys, ['id', 'name', 'run']) ||
+    step.id !== 'client-id-presence'
+  ) {
+    throw new Error(
+      `${detectClientIdName} must be a plain run step with id client-id-presence`,
+    );
+  }
+};
+
 export const assertSecuritySensitiveSteps = (
   workflow: ParsedWorkflow,
   consumers: TokenConsumerContracts,
@@ -147,6 +172,15 @@ export const assertSecuritySensitiveSteps = (
     resolveIdName,
     resolvedSecretStep(resolveIdName, 'broker-app-id', 'broker_app.app_id'),
   );
+  assertPresenceStep(workflow);
+  assertExactStep(workflow, resolveClientIdName, {
+    ...resolvedSecretStep(
+      resolveClientIdName,
+      'broker-app-client-id',
+      'broker_app.client_id',
+    ),
+    if: `${clientIdPresence} == 'true'`,
+  });
   assertExactStep(
     workflow,
     resolveKeyName,
@@ -175,20 +209,33 @@ export const assertSecuritySensitiveSteps = (
   assertExactStep(workflow, prConsumerName, consumers.pullRequest);
 
   const syncIndex = stepIndex(workflow, syncName);
-  const resolveIdIndex = stepIndex(workflow, resolveIdName);
-  const resolveKeyIndex = stepIndex(workflow, resolveKeyName);
-  const writerIndex = stepIndex(workflow, writerMintName);
-  const prIndex = stepIndex(workflow, prMintName);
+  const block = [
+    resolveIdName,
+    detectClientIdName,
+    resolveClientIdName,
+    resolveKeyName,
+    writerMintName,
+    prMintName,
+  ].map((name) => stepIndex(workflow, name));
+  const [firstIndex = 0] = block;
+  const prIndex = block.at(-1) ?? syncIndex;
   if (
-    resolveKeyIndex !== resolveIdIndex + 1 ||
-    writerIndex !== resolveKeyIndex + 1 ||
-    prIndex !== writerIndex + 1 ||
+    block.some((index, position) => index !== firstIndex + position) ||
     prIndex >= syncIndex
   ) {
     throw new Error('Broker credentials must form a contiguous pre-sync block');
   }
   const mintNames = [writerMintName, prMintName];
   assertOnlyConsumers(workflow, resolveIdName, 'broker-app-id', mintNames);
+  assertOnlyConsumers(workflow, detectClientIdName, 'client-id-presence', [
+    resolveClientIdName,
+  ]);
+  assertOnlyConsumers(
+    workflow,
+    resolveClientIdName,
+    'broker-app-client-id',
+    mintNames,
+  );
   assertOnlyConsumers(
     workflow,
     resolveKeyName,
