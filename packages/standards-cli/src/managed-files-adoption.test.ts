@@ -4,7 +4,7 @@
 // inside it does.
 
 import { afterEach, describe, expect, it } from 'bun:test';
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
 import { cleanupTmpDirs, mkTmp, write } from './cli-test-support';
@@ -12,6 +12,7 @@ import {
   buildUpstream,
   engineFor,
   LINK,
+  SKILL,
 } from './managed-files-symlink-test-support';
 
 const { initConsumer, run } = engineFor({ ...process.env });
@@ -44,9 +45,9 @@ describe('managed destinations the engine never managed', () => {
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain(
-      `${LINK} is a directory holding 1 path(s) this repository does not manage`,
+      `${LINK} should be a symlink to the canonical .agents/skills, but it is a directory holding 1 path(s) this repository does not manage (${OWN_SKILL})`,
     );
-    expect(result.stderr).toContain(OWN_SKILL);
+    expect(result.stderr).toContain(`rm -rf ${LINK} && bun standards init`);
     expect(existsSync(join(consumer, OWN_SKILL))).toBe(true);
     expect(untouched(consumer)).toBe(true);
   });
@@ -74,10 +75,32 @@ describe('managed destinations the engine never managed', () => {
     expect(dryRun.status).not.toBe(0);
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain(
-      `${LINK} is a directory holding 2 path(s) this repository does not manage`,
+      'directory holding 2 path(s) this repository does not manage',
     );
     expect(existsSync(join(consumer, OWN_SKILL))).toBe(true);
     expect(existsSync(join(consumer, `${LINK}/notes.md`))).toBe(true);
+  });
+
+  it('names the fix when a copy tool flattened the link into a directory', () => {
+    // `zip` without `-y` and copies that follow links materialize the link as a
+    // directory of byte-identical copies. The lock records only the link, so the
+    // copies are refused like any other unowned work, with the exact way back.
+    const up = buildUpstream();
+    const { consumer } = initConsumer(up);
+    rmSync(join(consumer, LINK));
+    cpSync(join(consumer, '.agents/skills'), join(consumer, LINK), {
+      recursive: true,
+    });
+
+    const result = run(consumer, ['sync', '--from', up, '--dir', consumer]);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      `${LINK} should be a symlink to the canonical .agents/skills, but it is a directory holding 1 path(s) this repository does not manage (${LINK}/probe/SKILL.md); copy and zip tools that follow links can cause this. First move any of your own files out of ${LINK}, then run \`rm -rf ${LINK} && bun standards sync\``,
+    );
+    expect(readFileSync(join(consumer, `${LINK}/probe/SKILL.md`), 'utf8')).toBe(
+      readFileSync(join(consumer, SKILL), 'utf8'),
+    );
   });
 
   it('refuses when the offending directory sits at a path the lock records', () => {
@@ -95,7 +118,7 @@ describe('managed destinations the engine never managed', () => {
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain(
-      `${LINK} is a directory holding 1 path(s) this repository does not manage`,
+      'directory holding 1 path(s) this repository does not manage',
     );
     expect(readFileSync(join(consumer, OWN_SKILL), 'utf8')).toBe(
       'name: mine\n',
