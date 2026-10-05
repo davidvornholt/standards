@@ -8,7 +8,6 @@ import {
   advance,
   deploy,
   openPromotion,
-  rollback,
 } from './image-promotion-reference-lifecycle-test-support';
 import {
   type AppState,
@@ -21,7 +20,6 @@ import {
   type Promotion,
   type PromotionState,
   validEvidence,
-  writerContract,
 } from './image-promotion-reference-test-support';
 
 const MERGE_SHA = 'c'.repeat(SHA_LENGTH);
@@ -57,7 +55,6 @@ const operation = (
 ): Operation => ({
   candidate,
   identity,
-  kind: 'promotion',
   mergeSha,
   phase,
   prNumber: phase === 'open' ? 1 : null,
@@ -125,21 +122,4 @@ it('guards open and deploy with otherwise valid operation fixtures', () => {
       deploy(state, identity, MERGE_SHA, true),
     ),
   ).toEqual(expectedResults('advanced'));
-});
-
-it('guards rollback with an otherwise valid live desired state', () => {
-  expect(
-    operationResults(stateWith(liveApp), (state) =>
-      rollback({
-        audit: Object.fromEntries(
-          writerContract.rollback.required.map((name) => [name, true]),
-        ),
-        compare: 'ancestor',
-        proof: candidate,
-        provenance: validEvidence(),
-        state,
-        target: candidate,
-      }),
-    ),
-  ).toEqual(expectedResults('started'));
 });

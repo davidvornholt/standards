@@ -51,11 +51,6 @@ requiredProvenance:
   - currentMainAncestry
   - mergeGroupRevalidation
   - imagesJsonOnly
-rollback:
-  identity: rollback:<current-identity>-><target-identity>
-  retry: reuse-announced-branch-or-open-with-identical-audit
-  terminal: never-reopen
-  required: [protectedApproval, nonEmptyReason, operator, exactAncestorDigestProof]
 superseding:
   trigger: promotion-opened-or-reused
   candidates: same-app-open-promotions
