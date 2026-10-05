@@ -3582,7 +3582,6 @@ describe('standards sync workflow ordering', () => {
       'Resolve broker App private key',
     );
     const mintIndex = stepNames.indexOf('Mint current-repository PR token');
-    const clearIndex = stepNames.indexOf('Clear broker App credentials');
     const syncIndex = stepNames.indexOf('Sync canonical files from upstream');
     const lockIndex = stepNames.indexOf('Refresh consumer lockfile');
     const detectIndex = stepNames.indexOf('Detect mirror changes');
@@ -3597,8 +3596,7 @@ describe('standards sync workflow ordering', () => {
     expect(resolveAppIdIndex).toBeGreaterThan(-1);
     expect(resolvePrivateKeyIndex).toBeGreaterThan(resolveAppIdIndex);
     expect(mintIndex).toBeGreaterThan(resolvePrivateKeyIndex);
-    expect(clearIndex).toBeGreaterThan(mintIndex);
-    expect(syncIndex).toBeGreaterThan(clearIndex);
+    expect(syncIndex).toBeGreaterThan(mintIndex);
     expect(lockIndex).toBeGreaterThan(syncIndex);
     expect(detectIndex).toBeGreaterThan(lockIndex);
     expect(yamlStep(SYNC_WORKFLOW, 'Refresh consumer lockfile')).toContain(

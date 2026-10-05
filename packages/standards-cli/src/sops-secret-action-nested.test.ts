@@ -16,7 +16,7 @@ describe('nested SOPS secret action values', () => {
     });
 
     expect(actionRun.result.status).toBe(0);
-    expect(actionRun.environment).toBe('GH_TOKEN=ci-value\n');
+    expect(actionRun.output).toBe('value=ci-value\n');
   });
 
   it('resolves a purpose-shaped path from the decrypted document root', () => {
@@ -28,10 +28,10 @@ describe('nested SOPS secret action values', () => {
     });
 
     expect(actionRun.result.status).toBe(0);
-    expect(actionRun.environment).toBe('GH_TOKEN=purpose-app-id\n');
+    expect(actionRun.output).toBe('value=purpose-app-id\n');
   });
 
-  it('transports and masks a multiline broker private key without a secret output', () => {
+  it('outputs and masks a multiline broker private key without exporting it', () => {
     const privateKey =
       '-----BEGIN RSA PRIVATE KEY-----\nkey\n-----END RSA PRIVATE KEY-----\n';
     const actionRun = runSopsAction({
@@ -40,8 +40,8 @@ describe('nested SOPS secret action values', () => {
     });
 
     expect(actionRun.result.status).toBe(0);
-    expect(actionRun.environment).toBe(
-      `GH_TOKEN<<SOPS_SECRET_EOF\n${privateKey}\nSOPS_SECRET_EOF\n`,
+    expect(actionRun.output).toBe(
+      `value<<SOPS_SECRET_EOF\n${privateKey}\nSOPS_SECRET_EOF\n`,
     );
     expect(actionRun.result.stdout).toBe(
       [
@@ -51,8 +51,7 @@ describe('nested SOPS secret action values', () => {
         '',
       ].join('\n'),
     );
-    expect(actionRun.output).toBe('');
-    expect(actionRun.environment).not.toBe('');
+    expect(actionRun.environment).toBe('');
   });
 
   it.each([

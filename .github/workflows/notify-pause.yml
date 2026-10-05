@@ -55,15 +55,16 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - name: Resolve notification topic URL
+        id: ntfy-topic-url
         uses: ./.github/actions/sops-secret
         with:
           age-key: ${{ secrets.SOPS_AGE_KEY }}
           secret-file: secrets/ci.yaml
           secret-key: ntfy_topic_url
-          env-name: NTFY_TOPIC_URL
 
       - name: Push a notification
         env:
+          NTFY_TOPIC_URL: ${{ steps.ntfy-topic-url.outputs.value }}
           PAUSE_TITLE: ${{ github.event.pull_request.title || github.event.issue.title }}
           PAUSE_URL: ${{ github.event.pull_request.html_url || github.event.issue.html_url }}
           REPO: ${{ github.repository }}

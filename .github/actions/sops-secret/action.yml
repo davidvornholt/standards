@@ -1,5 +1,5 @@
 name: Resolve SOPS secret
-description: Install pinned SOPS and export one validated secret value
+description: Install pinned SOPS and output one validated secret value
 
 inputs:
   age-key:
@@ -15,9 +15,14 @@ inputs:
   secret-key:
     description: Direct key or dotted path to resolve from the selected mapping
     required: true
-  env-name:
-    description: Environment variable to export for later workflow steps
-    required: true
+
+# The value is a step output, never an environment variable: only a step that
+# names steps.<id>.outputs.value in its env or inputs receives it, so unrelated
+# later steps in the job cannot read it.
+outputs:
+  value:
+    description: Resolved secret value; pass it only to the step that consumes it
+    value: ${{ steps.resolve.outputs.value }}
 
 runs:
   using: composite
@@ -30,14 +35,9 @@ runs:
         SOPS_SECRET_FILE: ${{ inputs.secret-file }}
         SOPS_SECRET_ROOT: ${{ inputs.secret-root }}
         SOPS_SECRET_KEY: ${{ inputs.secret-key }}
-        SOPS_ENV_NAME: ${{ inputs.env-name }}
       run: |
         set -euo pipefail
 
-        if [[ ! "$SOPS_ENV_NAME" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
-          echo "::error::env-name must be a valid environment variable name"
-          exit 1
-        fi
         case "$SOPS_SECRET_ROOT" in
           ci) secret_path="ci.$SOPS_SECRET_KEY" ;;
           document) secret_path="$SOPS_SECRET_KEY" ;;
@@ -149,8 +149,8 @@ runs:
           exit 1
         fi
         # Unreachable through the resolve statuses above, which reject an empty
-        # value with a precise message. Kept as a last guard on the GITHUB_ENV
-        # boundary so a future filter change cannot export an empty credential.
+        # value with a precise message. Kept as a last guard on the output
+        # boundary so a future filter change cannot output an empty credential.
         if [ ! -s "$value_file" ]; then
           echo "::error::Resolved secret value must be non-empty"
           exit 1
@@ -165,7 +165,7 @@ runs:
         if [ "$line_break_count" -eq 0 ]; then
           value=$(< "$value_file")
           mask_value "$value"
-          printf '%s=%s\n' "$SOPS_ENV_NAME" "$value" >> "$GITHUB_ENV"
+          printf 'value=%s\n' "$value" >> "$GITHUB_OUTPUT"
         else
           while IFS= read -r line || [ -n "$line" ]; do
             if [ -n "$line" ]; then
@@ -179,7 +179,7 @@ runs:
             delimiter_suffix=$((delimiter_suffix + 1))
             delimiter="SOPS_SECRET_EOF_$delimiter_suffix"
           done
-          printf '%s<<%s\n' "$SOPS_ENV_NAME" "$delimiter" >> "$GITHUB_ENV"
-          cat "$value_file" >> "$GITHUB_ENV"
-          printf '\n%s\n' "$delimiter" >> "$GITHUB_ENV"
+          printf 'value<<%s\n' "$delimiter" >> "$GITHUB_OUTPUT"
+          cat "$value_file" >> "$GITHUB_OUTPUT"
+          printf '\n%s\n' "$delimiter" >> "$GITHUB_OUTPUT"
         fi

@@ -24,16 +24,14 @@ describe('SOPS secret action masks', () => {
         .trimEnd()
         .slice(MASK_COMMAND_PREFIX.length);
       const registeredMask = unescapeRunnerCommandData(commandData);
-      const exportedValue = actionRun.environment
-        .trimEnd()
-        .slice('GH_TOKEN='.length);
+      const outputValue = actionRun.output.trimEnd().slice('value='.length);
 
       expect(actionRun.result.status).toBe(0);
       expect(actionRun.result.stdout).toBe(
         `${MASK_COMMAND_PREFIX}${secret.replaceAll('%', '%25')}\n`,
       );
-      expect(exportedValue).toBe(secret);
-      expect(exportedValue.replaceAll(registeredMask, '***')).toBe('***');
+      expect(outputValue).toBe(secret);
+      expect(outputValue.replaceAll(registeredMask, '***')).toBe('***');
     },
   );
 });

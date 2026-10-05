@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  appIdOutput,
   assertSecuritySensitiveSteps,
-  clearName,
   expression,
   type MutableWorkflow,
   namedStep,
   parsedWorkflow,
+  privateKeyOutput,
   prMintName,
   prToken,
+  resolveIdName,
   syncName,
   syncPolicyRefName,
   type TokenConsumerContracts,
@@ -110,14 +112,14 @@ const addTokenConsumer =
       run: 'true',
     });
   };
-const insertBeforeClear = (
+const insertBeforeWriterMint = (
   workflow: MutableWorkflow,
   step: MutableWorkflow['jobs']['sync']['steps'][number],
 ): void => {
-  const clearIndex = workflow.jobs.sync.steps.findIndex(
-    (candidate) => candidate.name === clearName,
+  const writerIndex = workflow.jobs.sync.steps.findIndex(
+    (candidate) => candidate.name === writerMintName,
   );
-  workflow.jobs.sync.steps.splice(clearIndex, 0, step);
+  workflow.jobs.sync.steps.splice(writerIndex, 0, step);
 };
 
 describe('Standards sync broker credential contract', () => {
@@ -165,17 +167,33 @@ describe('Standards sync broker credential contract', () => {
       ),
       addTokenConsumer(compactExpression('steps.pr-token.outputs.token')),
       addTokenConsumer(expression("steps['pr-token'].outputs['token']")),
+      addTokenConsumer(appIdOutput),
+      addTokenConsumer(privateKeyOutput),
+      addTokenConsumer(
+        compactExpression('steps.broker-app-private-key.outputs.value'),
+      ),
+      addTokenConsumer(
+        expression("steps['broker-app-private-key'].outputs['value']"),
+      ),
+      (workflow) => {
+        mutableStep(workflow, syncName).env = {
+          [syncPolicyRefName]: expression('needs.policy.outputs.ref'),
+          leakedKey: privateKeyOutput,
+        };
+      },
+      (workflow) => {
+        const resolver = mutableStep(workflow, resolveIdName);
+        resolver.with = {
+          ...(resolver.with as Record<string, string>),
+          'env-name': 'BROKER_APP_ID',
+        };
+      },
       (workflow) =>
-        insertBeforeClear(workflow, {
-          name: 'Run an action before credentials clear',
+        insertBeforeWriterMint(workflow, {
+          name: 'Run an action between resolving and minting',
           uses: 'example/action@v1',
         }),
-      (workflow) =>
-        insertBeforeClear(workflow, {
-          name: 'Run sync before credentials clear',
-          run: ['bun standards \\', 'sync'].join('\n'),
-        }),
-      (workflow) => moveStepAfterSync(workflow, clearName),
+      (workflow) => moveStepAfterSync(workflow, resolveIdName),
     );
     const rejected = mutations.map(rejectsMutation);
     expect(rejected).toEqual(rejected.map(() => true));
