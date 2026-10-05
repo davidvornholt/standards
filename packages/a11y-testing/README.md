@@ -24,6 +24,8 @@ Axe covers only criteria with an automated rule. Semantic and interaction requir
 
 `createA11yPlaywrightConfig({ baseUrl, webServerCommand })` creates the shared accessibility-test configuration with the `a11y/` test directory, desktop and mobile Chromium projects, and a managed web server.
 
+The run always starts its own web server and fails if something already answers at `baseUrl`, so it can never scan a dev server or another app by mistake. Give each app an accessibility port that no dev server or other app's suite uses.
+
 ```ts
 import { createA11yPlaywrightConfig } from '@davidvornholt/a11y-testing/playwright-config';
 
@@ -43,6 +45,6 @@ Keep app-local `a11y/*.a11y.ts` files as route and state coverage. Test every re
 
 | Variable | Required | Effect |
 | --- | --- | --- |
-| `CI` | No | Enables `forbidOnly`, one retry, the `dot` reporter, and a fresh web server. |
+| `CI` | No | Enables `forbidOnly`, one retry, and the `dot` reporter. |
 
 This package consumes no secrets.

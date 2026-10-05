@@ -48,7 +48,7 @@ describe('createA11yPlaywrightConfig', () => {
     expect(config.webServer).toMatchObject({
       command: 'bun run start',
       url: 'http://127.0.0.1:3000',
-      reuseExistingServer: true,
+      reuseExistingServer: false,
       timeout: 120_000,
     });
     expect(config.projects?.map((project) => project.name)).toEqual([
@@ -68,8 +68,5 @@ describe('createA11yPlaywrightConfig', () => {
     expect(config.forbidOnly).toBe(true);
     expect(config.retries).toBe(1);
     expect(config.reporter).toBe('dot');
-    expect(config.webServer).toMatchObject({
-      reuseExistingServer: false,
-    });
   });
 });
