@@ -1,19 +1,11 @@
-import { isDeepStrictEqual } from 'node:util';
 import { isValidAppState } from './image-promotion-reference-state-test-support';
 import {
   type Compare,
-  canonicalIdentity,
   type ModelResult,
   type Operation,
-  type Promotion,
   type PromotionState,
   writerContract,
 } from './image-promotion-reference-test-support';
-
-const evidencePasses = (
-  evidence: Readonly<Record<string, boolean>>,
-  required: ReadonlyArray<string>,
-): boolean => required.every((name) => evidence[name] === true);
 
 const allowedTransitions: Readonly<
   Record<Operation['phase'], ReadonlyArray<Operation['phase']>>
@@ -56,9 +48,8 @@ export const advance = (
     prNumber: phase === 'open' ? state.nextPrNumber : operation.prNumber,
     readyForReview:
       phase === 'open'
-        ? operation.kind === 'rollback' ||
-          !Object.values(state.operations).some(
-            (other) => other.kind === 'promotion' && other.phase === 'open',
+        ? !Object.values(state.operations).some(
+            (other) => other.phase === 'open',
           )
         : operation.readyForReview,
   };
@@ -98,16 +89,14 @@ export const openPromotion = (
   const operation = opened.state.operations[identity];
   if (
     opened.kind !== 'advanced' ||
-    operation?.kind !== 'promotion' ||
+    operation === undefined ||
     writerContract.superseding.trigger !== 'promotion-opened-or-reused'
   ) {
     return opened;
   }
   const candidates = Object.entries(opened.state.operations).filter(
     ([otherIdentity, other]) =>
-      otherIdentity !== identity &&
-      other.kind === 'promotion' &&
-      other.phase === 'open',
+      otherIdentity !== identity && other.phase === 'open',
   );
   const pending = candidates.some(
     ([otherIdentity]) =>
@@ -163,80 +152,4 @@ export const deploy = (
     return { kind: 'rejected', state };
   }
   return advance(state, identity, success ? 'completed' : 'deploy-failed');
-};
-
-export const rollback = ({
-  audit,
-  compare,
-  proof,
-  provenance,
-  state,
-  target,
-}: {
-  readonly audit: Readonly<Record<string, string | boolean>>;
-  readonly compare: Compare;
-  readonly proof: Promotion;
-  readonly provenance: Readonly<Record<string, boolean>>;
-  readonly state: PromotionState;
-  readonly target: Promotion;
-}): ModelResult => {
-  if (!isValidAppState(state.app)) {
-    return { kind: 'rejected', state };
-  }
-  const current = `${state.app.sourceRepository}@${state.app.promotedSourceSha} digest=${state.app.digest}`;
-  const identity = `rollback:${current}->${canonicalIdentity(target)}`;
-  const auditEvidence = Object.fromEntries(
-    Object.entries(audit).map(([key, value]) => [key, Boolean(value)]),
-  );
-  if (
-    compare !== 'ancestor' ||
-    JSON.stringify(target) !== JSON.stringify(proof) ||
-    !evidencePasses(provenance, writerContract.requiredProvenance) ||
-    !evidencePasses(auditEvidence, writerContract.rollback.required)
-  ) {
-    return { kind: 'rejected', state };
-  }
-  const existing = state.operations[identity];
-  if (existing !== undefined) {
-    if (
-      !(
-        ['announced', 'branch', 'open'].includes(existing.phase) &&
-        isDeepStrictEqual(existing.rollbackAudit, audit)
-      )
-    ) {
-      return { kind: 'rejected', state };
-    }
-    return {
-      kind: 'attached',
-      state: {
-        ...state,
-        operations: {
-          ...state.operations,
-          [identity]: {
-            ...existing,
-            runEvidence: [
-              ...new Set([...existing.runEvidence, target.sourceRunId]),
-            ],
-          },
-        },
-      },
-    };
-  }
-  const operation: Operation = {
-    rollbackAudit: { ...audit },
-    candidate: target,
-    identity,
-    kind: 'rollback',
-    mergeSha: null,
-    phase: 'announced',
-    prNumber: null,
-    runEvidence: [target.sourceRunId],
-  };
-  return {
-    kind: 'started',
-    state: {
-      ...state,
-      operations: { ...state.operations, [identity]: operation },
-    },
-  };
 };

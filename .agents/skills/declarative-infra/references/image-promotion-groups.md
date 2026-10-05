@@ -16,7 +16,7 @@ The primary announcement supplies the existing scalar payload. Companion digests
 
 The trusted writer updates every member's digest and source SHA in one infrastructure PR. An unchanged member digest is allowed, but its source SHA must still record the new coordinated release. The provenance gate compares the whole group against the exact proof and rejects partial transitions, unrelated app changes, or metadata edits. The PR changes only `images.json`.
 
-Apply duplicate detection, branch reuse, terminal supersession, current-main ancestry, and rollback to the whole group. Comparing only the primary pin cannot prove a duplicate. Reusing an existing branch requires its complete group map to match. A superseded group operation cannot be reopened through a companion announcement. A rollback selects and verifies the whole previous release as a new approved operation.
+Apply duplicate detection, branch reuse, terminal supersession, and current-main ancestry to the whole group. Comparing only the primary pin cannot prove a duplicate. Reusing an existing branch requires its complete group map to match. A superseded group operation cannot be reopened through a companion announcement. A bad group release rolls forward like a single app: revert in the source repository and promote the new group build.
 
 ## Deployment boundary
 

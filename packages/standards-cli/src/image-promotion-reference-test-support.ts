@@ -30,7 +30,6 @@ export type Compare =
 type WriterContract = {
   readonly lifecycle: ReadonlyArray<Operation['phase']>;
   readonly requiredProvenance: ReadonlyArray<string>;
-  readonly rollback: { readonly required: ReadonlyArray<string> };
   readonly superseding: {
     readonly candidates: 'same-app-open-promotions';
     readonly compareOutcome: 'descendant';
@@ -43,7 +42,6 @@ type WriterContract = {
 export type Operation = {
   readonly candidate: Promotion;
   readonly identity: string;
-  readonly kind: 'promotion' | 'rollback';
   readonly mergeSha: string | null;
   readonly phase:
     | 'announced'
@@ -56,7 +54,6 @@ export type Operation = {
   readonly prNumber: number | null;
   readonly runEvidence: ReadonlyArray<string>;
   readonly readyForReview?: boolean;
-  readonly rollbackAudit?: Readonly<Record<string, string | boolean>>;
 };
 export type PromotionState = {
   readonly app: AppState;
@@ -142,7 +139,7 @@ export const announce = ({
     state.app.promotedSourceSha === candidate.sourceSha &&
     state.app.digest === candidate.digest;
   if (
-    existing?.kind === 'promotion' &&
+    existing !== undefined &&
     (existing.phase !== 'completed' ||
       currentMatches ||
       compare === 'descendant')
@@ -168,7 +165,6 @@ export const announce = ({
   const operation: Operation = {
     candidate,
     identity,
-    kind: 'promotion',
     mergeSha: null,
     phase: 'announced',
     prNumber: null,
