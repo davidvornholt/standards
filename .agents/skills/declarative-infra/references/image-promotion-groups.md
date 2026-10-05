@@ -4,7 +4,7 @@ Use a release group when images from one source repository share a release bound
 
 ## Declaration and proof
 
-Keep group membership in a reviewed infrastructure-owned manifest alongside `images.json`. A group has one primary app and a nonempty set of unique members that includes that primary. Every member exists in `images.json`, belongs to at most one group, and has a distinct image repository. All members share the source repository, ref, authorized workflow, enablement state, and promoted source SHA. Validate the whole document before using any member. Membership and source metadata changes use the disabled metadata transition for the whole group.
+Keep group membership in a reviewed infrastructure-owned manifest alongside `images.json`. A group has one primary app and a nonempty set of unique members that includes that primary. Every member exists in `images.json`, belongs to at most one group, and has a distinct image repository. All members share the source repository, ref, authorized workflow, enablement state, pause state, and promoted source SHA. Validate the whole document before using any member. Membership and source metadata changes use the disabled metadata transition for the whole group.
 
 For example, `{"mail-ui":["mail-ui","mail-worker"]}` declares `mail-ui` as the announcement entrypoint. A companion cannot independently request promotion. The trusted writer reads membership from its trusted base, never from an announcement or candidate branch.
 

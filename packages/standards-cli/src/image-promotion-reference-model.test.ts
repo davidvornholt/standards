@@ -82,6 +82,7 @@ it('parses compare outcomes and makes every provenance condition fail closed', (
     'completed',
     'superseded',
   ]);
+  expect(writerContract.paused).toBe('ignore-announcement');
   expect(writerContract.superseding).toEqual({
     candidates: 'same-app-open-promotions',
     compareOutcome: 'descendant',
@@ -134,4 +135,22 @@ it('executes same, descendant, ancestor, diverged, and unprovable outcomes', () 
   }
   const conflict = { ...a, digest: DIGEST_B, sourceRunId: '44' };
   expect(announceCandidate(state, conflict, 'same').kind).toBe('rejected');
+});
+
+it('ignores announcements while paused and promotes again after unpause', () => {
+  const a = candidate(SHA_A, DIGEST_A, '41');
+  const live = progress(
+    requireState(announceCandidate(initialState(), a, 'descendant'), 'started'),
+    canonicalIdentity(a),
+    MERGE_A,
+  );
+  const paused = {
+    ...live,
+    app: { ...live.app, promotionPaused: true as const },
+  };
+  const b = candidate(SHA_B, DIGEST_B, '43');
+  const ignored = announceCandidate(paused, b, 'descendant');
+  expect(ignored.kind).toBe('paused');
+  expect(ignored.state).toEqual(paused);
+  expect(announceCandidate(live, b, 'descendant').kind).toBe('started');
 });

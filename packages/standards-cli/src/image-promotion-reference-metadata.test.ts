@@ -1,10 +1,12 @@
 import { expect, it } from 'bun:test';
 import {
   DIGEST_A,
+  DIGEST_B,
   SHA_A,
 } from './image-promotion-reference-contract-test-support';
 import {
   type Images,
+  type MetadataOperation,
   metadataContract,
   validMetadataTransition,
 } from './image-promotion-reference-metadata-test-support';
@@ -44,13 +46,7 @@ const transition = ({
   readonly after: Images;
   readonly before: Images;
   readonly changedFiles?: ReadonlyArray<string>;
-  readonly operation:
-    | 'bootstrap'
-    | 'accessMigration'
-    | 'disable'
-    | 'metadata'
-    | 'remove'
-    | 'trustedPromotion';
+  readonly operation: MetadataOperation;
   readonly trustedProof?: boolean;
 }) =>
   validMetadataTransition({
@@ -164,6 +160,58 @@ it('rejects unrelated app and file edits from full before/after state', () => {
       before: { other, web: live },
       changedFiles: ['infra/images.json', 'backdoor.sh'],
       operation: 'disable',
+    }),
+  ).toBeFalse();
+});
+
+it('pauses and unpauses a live app without moving its pins', () => {
+  const paused: AppState = { ...live, promotionPaused: true };
+  expect(
+    transition({
+      after: { other, web: paused },
+      before: { other, web: live },
+      operation: 'pause',
+    }),
+  ).toBeTrue();
+  expect(
+    transition({
+      after: { other, web: live },
+      before: { other, web: paused },
+      operation: 'unpause',
+    }),
+  ).toBeTrue();
+  expect(
+    transition({
+      after: { other, web: disabled },
+      before: { other, web: paused },
+      operation: 'disable',
+    }),
+  ).toBeTrue();
+  for (const after of [
+    { ...paused, digest: DIGEST_B },
+    { ...paused, sourceRef: 'refs/heads/production' },
+  ]) {
+    expect(
+      transition({
+        after: { other, web: after },
+        before: { other, web: live },
+        operation: 'pause',
+      }),
+    ).toBeFalse();
+  }
+  expect(
+    transition({
+      after: { other, web: { ...disabled, promotionPaused: true } },
+      before: { other, web: disabled },
+      operation: 'pause',
+    }),
+  ).toBeFalse();
+  expect(
+    transition({
+      after: { other, web: paused },
+      before: { other, web: disabled },
+      operation: 'trustedPromotion',
+      trustedProof: true,
     }),
   ).toBeFalse();
 });

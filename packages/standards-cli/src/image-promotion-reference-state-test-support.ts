@@ -18,6 +18,7 @@ const metadataKeys = [
   'sourceWorkflow',
 ] as const;
 const pinKeys = ['digest', 'promotedSourceSha', 'promotionEnabled'] as const;
+const PAUSE_KEY = 'promotionPaused';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -80,10 +81,17 @@ const validAppState = (
   const expectedMetadata = allowMissingRegistryAccess
     ? metadataKeys.filter((key) => key !== 'registryAccess')
     : metadataKeys;
+  // Only a live app in the final shape may be paused, and only with true.
+  const paused = !allowMissingRegistryAccess && Object.hasOwn(value, PAUSE_KEY);
   return (
-    hasExactKeys(value, [...expectedMetadata, ...pinKeys]) &&
+    hasExactKeys(value, [
+      ...expectedMetadata,
+      ...pinKeys,
+      ...(paused ? [PAUSE_KEY] : []),
+    ]) &&
     hasValidMetadataValues(value, allowMissingRegistryAccess) &&
-    hasValidPins(value)
+    hasValidPins(value) &&
+    (!paused || (value[PAUSE_KEY] === true && value.promotionEnabled === true))
   );
 };
 

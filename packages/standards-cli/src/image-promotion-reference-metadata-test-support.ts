@@ -23,11 +23,14 @@ type MetadataContract = {
       | 'bootstrap'
       | 'disable'
       | 'metadata'
+      | 'pause'
       | 'remove'
-      | 'trustedPromotion',
+      | 'trustedPromotion'
+      | 'unpause',
       string
     >
   >;
+  readonly pausedField: { readonly promotionPaused: true };
 };
 export type Images = Readonly<Record<string, unknown>>;
 export type MetadataOperation = keyof MetadataContract['operations'];
@@ -41,6 +44,12 @@ const metadataOf = (app: AppState): Metadata =>
   Object.fromEntries(
     metadataContract.metadataFields.map((field) => [field, app[field]]),
   ) as Metadata;
+const live = (app: unknown): app is AppState =>
+  isValidAppState(app) && app.promotionEnabled;
+const withoutPause = ({
+  promotionPaused: _promotionPaused,
+  ...app
+}: AppState): AppState => app;
 const disabled = (app: unknown): app is AppState =>
   isValidAppState(app) &&
   app.promotionEnabled === metadataContract.disabledPin.promotionEnabled &&
@@ -95,6 +104,45 @@ const validAccessMigration = (before: Images, after: Images): boolean => {
   return migrated;
 };
 
+type AppTransition = (
+  current: unknown,
+  next: unknown,
+  trustedProof: boolean,
+) => boolean;
+
+const appTransitions: Readonly<
+  Record<Exclude<MetadataOperation, 'accessMigration'>, AppTransition>
+> = {
+  bootstrap: (current, next) => current === undefined && disabled(next),
+  disable: (current, next) =>
+    live(current) &&
+    disabled(next) &&
+    equal(metadataOf(current), metadataOf(next)),
+  metadata: (current, next) =>
+    disabled(current) &&
+    disabled(next) &&
+    !equal(metadataOf(current), metadataOf(next)),
+  pause: (current, next) =>
+    live(current) &&
+    current.promotionPaused === undefined &&
+    live(next) &&
+    equal(next, { ...current, ...metadataContract.pausedField }),
+  remove: (current, next) => disabled(current) && next === undefined,
+  trustedPromotion: (current, next, trustedProof) =>
+    trustedProof &&
+    disabled(current) &&
+    live(next) &&
+    next.promotionPaused === undefined &&
+    typeof next.digest === 'string' &&
+    typeof next.promotedSourceSha === 'string' &&
+    equal(metadataOf(current), metadataOf(next)),
+  unpause: (current, next) =>
+    live(current) &&
+    current.promotionPaused === true &&
+    live(next) &&
+    equal(next, withoutPause(current)),
+};
+
 export const validMetadataTransition = ({
   after,
   app,
@@ -122,43 +170,10 @@ export const validMetadataTransition = ({
   if (operation === 'accessMigration') {
     return validAccessMigration(before, after);
   }
-  if (!otherAppsUnchanged(before, after, app)) {
-    return false;
-  }
-  if (!(allAppsValid(before) && allAppsValid(after))) {
-    return false;
-  }
-  const current = before[app];
-  const next = after[app];
-  if (operation === 'bootstrap') {
-    return current === undefined && disabled(next);
-  }
-  if (operation === 'disable') {
-    return (
-      isValidAppState(current) &&
-      current.promotionEnabled === true &&
-      disabled(next) &&
-      equal(metadataOf(current), metadataOf(next))
-    );
-  }
-  if (operation === 'metadata') {
-    return (
-      disabled(current) &&
-      disabled(next) &&
-      !equal(metadataOf(current), metadataOf(next))
-    );
-  }
-  if (operation === 'remove') {
-    return disabled(current) && next === undefined;
-  }
   return (
-    operation === 'trustedPromotion' &&
-    trustedProof &&
-    disabled(current) &&
-    isValidAppState(next) &&
-    next.promotionEnabled === true &&
-    typeof next.digest === 'string' &&
-    typeof next.promotedSourceSha === 'string' &&
-    equal(metadataOf(current), metadataOf(next))
+    otherAppsUnchanged(before, after, app) &&
+    allAppsValid(before) &&
+    allAppsValid(after) &&
+    appTransitions[operation](before[app], after[app], trustedProof)
   );
 };
