@@ -36,7 +36,9 @@ export const advance = (
   if (
     !valid ||
     (phase === 'merged' &&
-      (mergeSha === null || operation.readyForReview !== true)) ||
+      (state.app.promotionPaused === true ||
+        mergeSha === null ||
+        operation.readyForReview !== true)) ||
     (phase !== 'merged' && mergeSha !== null)
   ) {
     return { kind: 'rejected', state };

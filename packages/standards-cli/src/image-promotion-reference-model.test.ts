@@ -137,20 +137,54 @@ it('executes same, descendant, ancestor, diverged, and unprovable outcomes', () 
   expect(announceCandidate(state, conflict, 'same').kind).toBe('rejected');
 });
 
-it('ignores announcements while paused and promotes again after unpause', () => {
+it('blocks announcements and merges while paused, then resumes promotion', () => {
   const a = candidate(SHA_A, DIGEST_A, '41');
   const live = progress(
     requireState(announceCandidate(initialState(), a, 'descendant'), 'started'),
     canonicalIdentity(a),
     MERGE_A,
   );
-  const paused = {
-    ...live,
-    app: { ...live.app, promotionPaused: true as const },
-  };
   const b = candidate(SHA_B, DIGEST_B, '43');
+  const identity = canonicalIdentity(b);
+  const announced = requireState(
+    announceCandidate(live, b, 'descendant'),
+    'started',
+  );
+  const branched = requireState(
+    advance(announced, identity, 'branch'),
+    'advanced',
+  );
+  const opened = requireState(
+    openPromotion(branched, identity, {}),
+    'advanced',
+  );
+  const paused = {
+    ...opened,
+    app: { ...opened.app, promotionPaused: true as const },
+  };
   const ignored = announceCandidate(paused, b, 'descendant');
   expect(ignored.kind).toBe('paused');
   expect(ignored.state).toEqual(paused);
-  expect(announceCandidate(live, b, 'descendant').kind).toBe('started');
+  const mergeSha = 'd'.repeat(SHA_LENGTH);
+  const blocked = advance(paused, identity, 'merged', mergeSha);
+  expect(blocked.kind).toBe('rejected');
+  expect(blocked.state).toEqual(paused);
+
+  const resumed = { ...paused, app: opened.app };
+  const merged = requireState(
+    advance(resumed, identity, 'merged', mergeSha),
+    'advanced',
+  );
+  expect(merged.app.digest).toBe(DIGEST_B);
+  expect(merged.app.promotedSourceSha).toBe(SHA_B);
+  const pausedAfterMerge = {
+    ...merged,
+    app: { ...merged.app, promotionPaused: true as const },
+  };
+  const completed = requireState(
+    deploy(pausedAfterMerge, identity, mergeSha, true),
+    'advanced',
+  );
+  expect(completed.operations[identity]?.phase).toBe('completed');
+  expect(completed.app).toEqual(pausedAfterMerge.app);
 });
