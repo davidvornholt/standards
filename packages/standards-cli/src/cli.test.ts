@@ -27,7 +27,11 @@ import {
   yamlRunScript,
   yamlStep,
 } from './cli-test-support';
-import { CI_EXAMPLE_YAML, CI_SECRETS_YAML } from './structure-test-support';
+import {
+  CI_EXAMPLE_YAML,
+  CI_SECRETS_YAML,
+  TEMPLATE_CI_SECRETS_YAML,
+} from './structure-test-support';
 
 const ENGINE = join(import.meta.dir, 'cli.ts');
 const SYNC_WORKFLOW = join(
@@ -1105,7 +1109,11 @@ const initConsumer = (up: string): { consumer: string; result: RunResult } => {
   const consumer = mkTmp('sync-cons-');
   git(consumer, ['init', '--quiet']);
   const result = run(consumer, ['init', '--from', up, '--dir', consumer]);
-  write(consumer, 'secrets/ci.yaml', CI_SECRETS_YAML);
+  write(
+    consumer,
+    'secrets/ci.yaml',
+    up === ACTUAL_UPSTREAM ? TEMPLATE_CI_SECRETS_YAML : CI_SECRETS_YAML,
+  );
   return { consumer, result };
 };
 const sync = (

@@ -65,13 +65,13 @@ describe('Standards sync broker configuration', () => {
     expect(template).not.toContain(OBSOLETE_SETTINGS_KEY);
     expect(
       Object.keys(brokerApp).sort((left, right) => left.localeCompare(right)),
-    ).toEqual(['app_id', 'private_key']);
+    ).toEqual(['app_id', 'client_id', 'private_key']);
     expect(
       Object.values(brokerApp).every((value) => typeof value === 'string'),
     ).toBe(true);
   });
 
-  it('tracks both broker App leaves as encrypted source secrets', () => {
+  it('tracks every broker App leaf as an encrypted source secret', () => {
     const encrypted = parseYaml(
       readFileSync(SOURCE_SECRETS_PATH, 'utf8'),
     ) as Readonly<Record<string, unknown>>;
@@ -79,7 +79,7 @@ describe('Standards sync broker configuration', () => {
 
     expect(
       Object.keys(brokerApp).sort((left, right) => left.localeCompare(right)),
-    ).toEqual(['app_id', 'private_key']);
+    ).toEqual(['app_id', 'client_id', 'private_key']);
     expect(
       Object.values(brokerApp).every(
         (value) =>

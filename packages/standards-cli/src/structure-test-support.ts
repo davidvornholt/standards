@@ -49,6 +49,12 @@ export const CI_SECRETS_YAML = [
   `        private_key: ${fakeEnc('a2V5')}`,
   CI_SOPS_METADATA_YAML,
 ].join('\n');
+// The real template example also documents the broker App's client ID, which
+// `bun standards creds add github` writes with the other two leaves.
+export const TEMPLATE_CI_SECRETS_YAML = CI_SECRETS_YAML.replace(
+  '    broker_app:\n',
+  `    broker_app:\n        client_id: ${fakeEnc('Y2xp')}\n`,
+);
 export const CI_EXAMPLE_YAML = [
   'ci:',
   '  ntfy_topic_url: https://ntfy.sh/replace-with-a-random-unguessable-topic',
