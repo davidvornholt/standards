@@ -62,6 +62,7 @@ const SOPS_CHECKSUM_ASSIGNMENT = /sha=[a-f0-9]{64}/gu;
 const SOPS_RELEASE_URL = /github\.com\/getsops\/sops\/releases\/download\//gu;
 const ACTIONLINT_ASSET_PATTERN =
   /actionlint_\$\{version\}_linux_\$\{arch\}\.tar\.gz/u;
+const CLIENT_ID_LINT_IGNORE = String.raw`-ignore '^input "client-id" is not defined in action "actions/create-github-app-token@v3"\. '`;
 const PINNED_STANDARDS_VERSION_PATTERN =
   /standards_version=(?<version>\d+\.\d+\.\d+)/u;
 const MINIMUM_STANDARDS_VERSION_PATTERN =
@@ -2670,7 +2671,11 @@ describe('canonical standards workflow settings credential', () => {
     expect(workflow).not.toContain('sops-secret');
     expect(workflow).not.toContain('secrets/ci.yaml');
     expect(workflow).not.toContain('SOPS_AGE_KEY');
-    expect(workflow).not.toContain('create-github-app-token');
+    // The pinned client-id lint ignore is the one place the gate may name the
+    // App token action.
+    expect(workflow.replace(CLIENT_ID_LINT_IGNORE, '')).not.toContain(
+      'create-github-app-token',
+    );
     // No silent degradation path: there is one credential, so a green result
     // never means "verified with something weaker than intended".
     expect(settingsRun).not.toContain('::warning::');
@@ -2700,6 +2705,11 @@ describe('canonical standards workflow settings credential', () => {
     expect(lintStep).toContain('sha256sum --check --quiet');
     expect(lintStep).not.toContain('download-actionlint.bash');
     expect(lintStep).not.toContain(' latest ');
+  });
+
+  it('ignores only the known client-id false positive in workflow lint', () => {
+    const lintStep = yamlStep(STANDARDS_WORKFLOW, 'Lint workflows');
+    expect(lintStep.match(/-ignore\b.*$/gmu)).toEqual([CLIENT_ID_LINT_IGNORE]);
   });
 
   it('installs a version-pinned just for the canonical justfile gate tests', () => {
@@ -3586,6 +3596,9 @@ describe('standards sync workflow ordering', () => {
         : null,
     );
     const resolveAppIdIndex = stepNames.indexOf('Resolve broker App ID');
+    const resolveClientIdIndex = stepNames.indexOf(
+      'Resolve broker App client ID',
+    );
     const resolvePrivateKeyIndex = stepNames.indexOf(
       'Resolve broker App private key',
     );
@@ -3602,7 +3615,8 @@ describe('standards sync workflow ordering', () => {
         : [],
     );
     expect(resolveAppIdIndex).toBeGreaterThan(-1);
-    expect(resolvePrivateKeyIndex).toBeGreaterThan(resolveAppIdIndex);
+    expect(resolveClientIdIndex).toBeGreaterThan(resolveAppIdIndex);
+    expect(resolvePrivateKeyIndex).toBeGreaterThan(resolveClientIdIndex);
     expect(mintIndex).toBeGreaterThan(resolvePrivateKeyIndex);
     expect(syncIndex).toBeGreaterThan(mintIndex);
     expect(lockIndex).toBeGreaterThan(syncIndex);
@@ -3612,6 +3626,7 @@ describe('standards sync workflow ordering', () => {
     );
     expect(localActionIndexes).toEqual([
       resolveAppIdIndex,
+      resolveClientIdIndex,
       resolvePrivateKeyIndex,
     ]);
     expect(localActionIndexes.every((index) => index < syncIndex)).toBe(true);

@@ -240,7 +240,7 @@ Bootstrap credentials and singular tokens still owned by an active repository ar
 
 ### Prepare existing consumers for GitHub App client IDs
 
-`standards creds add github --dest ci:ci.broker_app` writes and verifies `app_id`, `client_id`, and `private_key` together. Run it in each existing consumer, mirror the new `client_id` key with a placeholder in its `secrets/ci.example.yaml`, and commit both files before adopting a workflow that resolves `broker_app.client_id` and passes `client-id` to `actions/create-github-app-token@v3`. The numeric `app_id` remains available while existing workflows are migrated. Do not remove it until every local and canonical caller has switched. Canonical workflows continue using `app-id` until consumer provisioning is complete.
+`standards creds add github --dest ci:ci.broker_app` writes and verifies `app_id`, `client_id`, and `private_key` together. The canonical Standards sync workflow passes `client-id` to `actions/create-github-app-token@v3` when `ci.broker_app.client_id` exists and falls back to the deprecated `app-id` when it does not. Provision `client_id` in each existing consumer before a future release drops that fallback: re-run `bun standards creds add github --dest ci:ci.broker_app`, or add the App's public client ID at `ci.broker_app.client_id` with `sops`. Mirror the new key with a placeholder in `secrets/ci.example.yaml` and commit both files. Keep the numeric `app_id` until every local and canonical caller has switched to `client-id`.
 
 ## screenshots
 

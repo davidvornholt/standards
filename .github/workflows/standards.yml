@@ -240,7 +240,14 @@ jobs:
           curl -sfLo "$archive" "https://github.com/rhysd/actionlint/releases/download/v${version}/actionlint_${version}_linux_${arch}.tar.gz"
           echo "$sha  $archive" | sha256sum --check --quiet
           tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
-          "$RUNNER_TEMP/actionlint" -color
+          # The v3 GitHub App token action accepts client-id, but actionlint
+          # 1.7.12 still lists only the deprecated app-id. The synced
+          # standards-sync.yml passes client-id, and consumers own their
+          # actionlint config, so the canonical gate carries this one ignore.
+          # Remove it once a pinned release knows the input:
+          # https://github.com/rhysd/actionlint/issues/669
+          "$RUNNER_TEMP/actionlint" -color \
+            -ignore '^input "client-id" is not defined in action "actions/create-github-app-token@v3"\. '
 
       # A fixed 127.0.0.1 database URL only works where the job shares the
       # service's published loopback — true on GitHub-hosted runners, false on
