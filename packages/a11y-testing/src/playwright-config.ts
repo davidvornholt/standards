@@ -23,7 +23,9 @@ export const createA11yPlaywrightConfig = (options: {
     webServer: {
       command: options.webServerCommand,
       url: options.baseUrl,
-      reuseExistingServer: !isCi,
+      // Always start this app's own server. Reusing whatever already answers on
+      // the port could scan a dev server or another app and pass.
+      reuseExistingServer: false,
       timeout: 120_000,
     },
     projects: [
