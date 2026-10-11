@@ -35,9 +35,7 @@ describe('GitHub App manifest flow', () => {
     // added grant has to be argued for in review rather than slipping past a
     // partial match.
     expect(manifest.default_permissions).toEqual({
-      actions: 'read',
       contents: 'write',
-      issues: 'write',
       metadata: 'read',
       pull_requests: 'write',
       workflows: 'write',
