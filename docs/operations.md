@@ -14,6 +14,8 @@ The quality gate requests a `medium` instance. Smaller canonical jobs request `s
 
 CodeBuild is supported only when the maintainer and their agents are trusted to edit workflows before merge. The project must be ephemeral, support Docker service containers, hold no useful service-role permissions or project secrets, use no persistent local cache or trusted network route, and have external concurrency and budget limits.
 
+Use an Ubuntu-based image such as `aws/codebuild/standard:8.0`. CodeBuild's standard images lack `zstd`, so on CodeBuild the quality gate extracts a pinned Ubuntu `zstd` package before its first cache step; without it, `actions/cache` falls back to gzip, which is much slower to save and restore.
+
 Quality jobs require an ephemeral runner: leave `CI_CODEBUILD_PROJECT` unset for GitHub-hosted Ubuntu, or configure a fresh CodeBuild runner for each run. Arbitrary `CI_RUNNER` labels are unsupported because persistent Bun and browser stores let one pull-request revision alter executable inputs for a later one. Remove an old `CI_RUNNER` variable before adopting this workflow; configure CodeBuild if GitHub-hosted resources are insufficient.
 
 ## Quality gate runs
