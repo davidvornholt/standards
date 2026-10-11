@@ -396,11 +396,13 @@
     },
     {
       // GitHub API wire format is snake_case; these tests declare literals
-      // that mirror real API payloads and declared-settings JSON. The SOPS
-      // action harness additionally composes UPPER_SNAKE process environment
-      // variables and snake_case decrypted-secret keys, and the dev-env tests
-      // declare UPPER_SNAKE dotenv keys.
+      // that mirror real API payloads and declared-settings JSON. The SOPS and
+      // app-release action harnesses additionally compose UPPER_SNAKE process
+      // environment variables, the SOPS harness also snake_case
+      // decrypted-secret keys, and the dev-env tests declare UPPER_SNAKE
+      // dotenv keys.
       "includes": [
+        "packages/standards-cli/src/app-release-action-test-support.ts",
         "packages/standards-cli/src/cli.test.ts",
         "packages/standards-cli/src/creds-cloudflare.test.ts",
         "packages/standards-cli/src/creds-login-github.test.ts",

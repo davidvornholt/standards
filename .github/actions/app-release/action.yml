@@ -1,0 +1,99 @@
+name: App release
+description: Release, roll back, or report the apps of an app-release unit on its host, then move the production tags
+
+# The calling job needs `permissions: { contents: read, id-token: write,
+# packages: write }` and a checkout that contains secrets/ci.yaml, whose
+# ssh-key-path (by default ci.app_release.ssh_private_key) holds the unit's SSH
+# key. Serialize every job that calls this action for one unit with
+# `concurrency: { group: app-release-<unit>, cancel-in-progress: false, queue: max }`.
+# actionlint 1.7.12 rejects the documented `queue` key, so consumers add a
+# per-file ignore for each such workflow to .github/actionlint.yaml, like this
+# repository's entry for publish-standards-cli.yml:
+# https://github.com/rhysd/actionlint/issues/657
+#
+# The action is self-contained on purpose: a relative `uses:` inside a
+# composite action resolves against the caller's workspace, not this directory.
+
+inputs:
+  command:
+    description: release, rollback, or status
+    required: false
+    default: release
+  images:
+    description: Newline-separated <app>@sha256:<digest> lines naming every app of the unit; release only
+    required: false
+    default: ''
+  unit:
+    description: app-release unit name on the host
+    required: true
+  host:
+    description: DNS name of the host; the action connects as root over SSH
+    required: true
+  known-host:
+    description: One known_hosts line for the host, starting with the host name
+    required: true
+  age-key:
+    description: Age identity that decrypts secrets/ci.yaml
+    required: true
+  ssh-key-path:
+    description: Dotted path of the unit's SSH private key inside secrets/ci.yaml; give each unit of one repository its own key
+    required: false
+    default: ci.app_release.ssh_private_key
+  audience:
+    description: OIDC audience the host expects
+    required: false
+    default: app-release
+  tag-production:
+    description: Point <repository>:production at each live digest after a release, unchanged result, or rollback
+    required: false
+    default: 'true'
+  registry-token:
+    description: Token that can push tags to the GHCR repositories of the unit
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  result:
+    description: released, unchanged, superseded, rolled-back, status, or failed
+    value: ${{ steps.release.outputs.result }}
+  apps-json:
+    description: The host's JSON object of live apps with repository, digest, previousDigest, and slot
+    value: ${{ steps.release.outputs.apps-json }}
+  live-images:
+    description: Newline-separated <repository>@<digest> of every live app
+    value: ${{ steps.release.outputs.live-images }}
+
+runs:
+  using: composite
+  steps:
+    - name: Create the private work directory
+      id: work
+      shell: bash
+      run: printf 'path=%s\n' "$(mktemp -d "$RUNNER_TEMP/app-release.XXXXXXXX")" >> "$GITHUB_OUTPUT"
+
+    - name: Run the app-release operation
+      id: release
+      shell: bash
+      env:
+        APP_RELEASE_COMMAND: ${{ inputs.command }}
+        APP_RELEASE_IMAGES: ${{ inputs.images }}
+        APP_RELEASE_UNIT: ${{ inputs.unit }}
+        APP_RELEASE_HOST: ${{ inputs.host }}
+        APP_RELEASE_KNOWN_HOST: ${{ inputs.known-host }}
+        APP_RELEASE_AGE_KEY: ${{ inputs.age-key }}
+        APP_RELEASE_SSH_KEY_PATH: ${{ inputs.ssh-key-path }}
+        APP_RELEASE_AUDIENCE: ${{ inputs.audience }}
+        APP_RELEASE_TAG_PRODUCTION: ${{ inputs.tag-production }}
+        APP_RELEASE_REGISTRY_TOKEN: ${{ inputs.registry-token }}
+        APP_RELEASE_WORK_DIR: ${{ steps.work.outputs.path }}
+      run: bash "$GITHUB_ACTION_PATH/release.sh"
+
+    - name: Remove the SSH key and temporary files
+      if: always()
+      shell: bash
+      env:
+        APP_RELEASE_WORK_DIR: ${{ steps.work.outputs.path }}
+      run: |
+        case "$APP_RELEASE_WORK_DIR" in
+          "$RUNNER_TEMP"/app-release.*) rm -rf -- "$APP_RELEASE_WORK_DIR" ;;
+        esac

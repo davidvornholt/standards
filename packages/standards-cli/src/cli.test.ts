@@ -56,6 +56,8 @@ const NIX_SYSTEM_MATRIX_FILTER = join(
 );
 const SOPS_VERSION_ASSIGNMENT = /version=v\d+\.\d+\.\d+/gu;
 const SOPS_CHECKSUM_ASSIGNMENT = /sha=[a-f0-9]{64}/gu;
+const SOPS_ARCHITECTURE_PIN =
+  /(?:x86_64|aarch64)\) arch=[a-z0-9]+ sha=[a-f0-9]{64}/gu;
 // `sha=`/`version=` alone also match the Bun, CLI, and actionlint pins that
 // legitimately live in the canonical workflow, so ownership is asked of the one
 // string only a SOPS installer has.
@@ -3519,10 +3521,15 @@ describe('canonical SOPS secret action wiring', () => {
   it('serves workflows that can safely execute the checked-out local action', () => {
     const action = readFileSync(SOPS_ACTION, 'utf8');
     const canonicalActionPath = '.github/actions/sops-secret/action.yml';
+    const appReleasePath = '.github/actions/app-release/release.sh';
     const productionFiles = readProductionGithubFiles();
     const sopsInstallers = productionFiles
       .filter(({ content }) => content.match(SOPS_RELEASE_URL) !== null)
-      .map(({ path }) => path);
+      .map(({ path }) => path)
+      .sort((left, right) => left.localeCompare(right));
+    const appRelease =
+      productionFiles.find(({ path }) => path === appReleasePath)?.content ??
+      '';
     // The settings gate is deliberately absent: it resolves no SOPS secret, so
     // it must not check out or execute the resolver either.
     const localActionWorkflows = [
@@ -3531,10 +3538,21 @@ describe('canonical SOPS secret action wiring', () => {
     ];
     expect(action.match(SOPS_VERSION_ASSIGNMENT)).toHaveLength(1);
     expect(action.match(SOPS_CHECKSUM_ASSIGNMENT)).toHaveLength(2);
-    // The action is the only owner of the SOPS pin. A workflow that installs
-    // SOPS itself is a second copy of this file's release URL and checksums,
-    // which is exactly the drift the resolver exists to prevent.
-    expect(sopsInstallers).toEqual([canonicalActionPath]);
+    // The action owns the SOPS pin. A workflow that installs SOPS itself is a
+    // second copy of this file's release URL and checksums, which is exactly
+    // the drift the resolver exists to prevent. The one exception is the
+    // app-release action: it must stay self-contained, because a relative
+    // `uses:` inside a composite action resolves against the caller's
+    // workspace, where a consumer may keep a different sops-secret. So its
+    // copy must carry exactly this pin.
+    expect(sopsInstallers).toEqual([appReleasePath, canonicalActionPath]);
+    expect(appRelease.match(SOPS_VERSION_ASSIGNMENT)).toEqual(
+      action.match(SOPS_VERSION_ASSIGNMENT),
+    );
+    expect(appRelease.match(SOPS_ARCHITECTURE_PIN)).toEqual(
+      action.match(SOPS_ARCHITECTURE_PIN),
+    );
+    expect(action.match(SOPS_ARCHITECTURE_PIN)).toHaveLength(2);
     for (const workflow of localActionWorkflows) {
       expect(workflow).toContain('uses: ./.github/actions/sops-secret');
     }
