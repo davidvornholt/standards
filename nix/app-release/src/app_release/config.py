@@ -105,7 +105,6 @@ class UnitConfig:
     drain_seconds: int
     refresh_unit: str
     oidc: Oidc
-    caddy_reload_unit: str
     apps: dict[str, AppConfig]
 
     @property
@@ -253,7 +252,6 @@ def parse_unit(value: object) -> UnitConfig:
             jwks_url=_string(oidc, "jwksUrl", f"{name}.oidc"),
             audience=_string(oidc, "audience", f"{name}.oidc"),
         ),
-        caddy_reload_unit=_string(data, "caddyReloadUnit", name),
         apps=apps,
     )
 

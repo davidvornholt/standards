@@ -16,7 +16,7 @@ class BootstrapTest(HostTestCase):
         self.world.store.path.unlink()
         self.world.local.clear()
         self.world.names.clear()
-        self.world.states = {"caddy.service": "active"}
+        self.world.states.clear()
         self.world.running.clear()
 
     def test_bootstrap_from_the_production_tag(self) -> None:
@@ -35,7 +35,7 @@ class BootstrapTest(HostTestCase):
         self.assertEqual(self.world.running["podman-web-blue.service"], self.v1["web"].id)
         self.assertEqual(self.world.running["podman-worker-blue.service"], self.v1["worker"].id)
         self.assertEqual(self.world.running["podman-jobs.service"], self.v1["jobs"].id)
-        self.assertEqual(self.upstream.read_text(), "to 127.0.0.1:8001\n")
+        self.assertEqual(self.upstream.read_text(), "127.0.0.1:8001\n")
 
     def test_missing_production_tag_names_the_app_and_tag(self) -> None:
         del self.world.registry["ghcr.io/owner/worker:production"]
@@ -53,30 +53,39 @@ class ReconcileTest(HostTestCase):
         self.assertFalse([call for call in self.world.calls if call[0].startswith("stop")])
 
     def test_boot_starts_the_active_slots(self) -> None:
-        self.world.states = {"caddy.service": "active"}
+        self.world.states.clear()
         self.world.running.clear()
         self.state_with_web_on_green()
         reconcile(self.world.context())
         self.assertEqual(self.world.running["podman-web-green.service"], self.v1["web"].id)
         self.assertEqual(self.world.active_state("podman-web-blue.service"), "inactive")
-        self.assertEqual(self.upstream.read_text(), "to 127.0.0.1:8002\n")
-        self.assertIn(("reload", "caddy.service"), self.world.calls)
+        self.assertEqual(self.upstream.read_text(), "127.0.0.1:8002\n")
 
-    def test_upstream_is_reloaded_before_the_old_slot_stops(self) -> None:
+    def test_a_started_slot_gets_traffic_only_once_healthy(self) -> None:
+        self.world.states.clear()
+        self.world.running.clear()
         self.state_with_web_on_green()
-        self.world.run_unit("podman-web-green.service", self.v1["web"])
-        self.world.reload_errors = ["temporary reload failure"]
+        self.world.unhealthy.add(self.v1["web"].id)
         with self.assertRaises(FailedError):
             reconcile(self.world.context())
-        self.assertEqual(self.world.active_state("podman-web-blue.service"), "active")
-        self.assertEqual(self.upstream.read_text(), "to 127.0.0.1:8002\n")
-        self.world.calls.clear()
+        self.assertEqual(self.upstream.read_text(), "127.0.0.1:8001\n")
+        self.world.unhealthy.clear()
         reconcile(self.world.context())
-        calls = self.world.calls
-        self.assertLess(
-            calls.index(("reload", "caddy.service")),
-            calls.index(("stop", "podman-web-blue.service")),
-        )
+        self.assertEqual(self.upstream.read_text(), "127.0.0.1:8002\n")
+
+    def test_traffic_moves_to_the_active_slot_before_the_other_slot_drains_and_stops(
+        self,
+    ) -> None:
+        # A release that died between the switch and the state commit leaves the
+        # upstream on the slot the state does not record as active.
+        self.state_with_web_on_green()
+        self.world.run_unit("podman-web-green.service", self.v1["web"])
+        stops = self.watch_stops()
+        reconcile(self.world.context())
+        upstream, sleeps = stops["podman-web-blue.service"]
+        self.assertEqual(upstream, "127.0.0.1:8002\n")
+        self.assertEqual(sleeps, [10])
+        self.assertEqual(self.world.active_state("podman-web-blue.service"), "inactive")
 
     def test_changed_blue_green_definition_moves_to_the_idle_slot(self) -> None:
         self.change_definition("web")
@@ -85,7 +94,7 @@ class ReconcileTest(HostTestCase):
         self.assertEqual(state.apps["web"].slot, "green")
         self.assertEqual(state.apps["web"].definition_hash, "def-2")
         self.assertEqual(state.apps["web"].current.digest, self.v1["web"].digest)
-        self.assertEqual(self.upstream.read_text(), "to 127.0.0.1:8002\n")
+        self.assertEqual(self.upstream.read_text(), "127.0.0.1:8002\n")
         self.assertEqual(self.world.running["podman-web-green.service"], self.v1["web"].id)
         self.assertIn(("stop", "podman-web-blue.service"), self.world.calls)
         self.assertEqual(state.history[-1].operation, "refresh")
@@ -98,15 +107,16 @@ class ReconcileTest(HostTestCase):
         )
         self.world.unit = replace(self.world.unit, apps={**self.world.unit.apps, "web": app})
         self.world.port_units[8102] = "podman-web-green.service"
-        self.world.reload_errors = ["temporary reload failure"]
+        self.world.unhealthy.add(self.v1["web"].id)
         before = self.state()
         with self.assertRaises(FailedError):
             reconcile(self.world.context())
         self.assertEqual(self.state(), before)
-        self.assertEqual(self.upstream.read_text(), "to 127.0.0.1:8001\n")
+        self.assertEqual(self.upstream.read_text(), "127.0.0.1:8001\n")
         self.assertEqual(self.world.running["podman-web-blue.service"], self.v1["web"].id)
+        self.world.unhealthy.clear()
         reconcile(self.world.context())
-        self.assertEqual(self.upstream.read_text(), "to 127.0.0.1:8102\n")
+        self.assertEqual(self.upstream.read_text(), "127.0.0.1:8102\n")
         self.assertEqual(self.state().apps["web"].definition_hash, "def-2")
 
     def test_changed_recreate_definition_runs_pre_stop_then_restarts(self) -> None:
@@ -203,7 +213,7 @@ class ReconcileTest(HostTestCase):
             self.assertEqual(state.apps[name].current.digest, self.v1[name].digest)
 
     def test_unhealthy_app_at_boot_fails_the_reconcile(self) -> None:
-        self.world.states = {"caddy.service": "active"}
+        self.world.states.clear()
         self.world.running.clear()
         self.world.unhealthy.add(self.v1["jobs"].id)
         with self.assertRaises(FailedError):

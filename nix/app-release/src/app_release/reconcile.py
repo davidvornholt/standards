@@ -103,8 +103,10 @@ def _enforce(ctx: Context, state: State) -> tuple[State, set[str], set[str]]:
             ctx.store.save(state)
         if tagged is None or tagged.id != image.id:
             ctx.images.tag(image.id, tag)
-        if app_state.slot is not None and (
-            not active or app_state.definition_hash == app.definition_hash
+        if (
+            active
+            and app_state.slot is not None
+            and app_state.definition_hash == app.definition_hash
         ):
             # A running old definition may still bind the previous slot ports. Keep its
             # live upstream until the replacement is healthy and the transaction switches.
@@ -124,7 +126,15 @@ def _enforce(ctx: Context, state: State) -> tuple[State, set[str], set[str]]:
     failures = wait_healthy(ctx, started)
     if failures:
         raise FailedError("; ".join(failures.values()))
+    _route_to(started)
     return state, running, stale
+
+
+def _route_to(targets: list[HealthTarget]) -> None:
+    """Point the upstreams at healthy slots; Caddy reads the file on every request."""
+    for target in targets:
+        if target.slot is not None:
+            write_upstream(target.app, target.slot)
 
 
 def _refresh_blue_green(
@@ -252,16 +262,7 @@ def _refresh(
 
 
 def _clean_up(ctx: Context, state: State) -> None:
-    """DESIGN reconcile step 4, reloading Caddy first so no request reaches a stopped slot."""
-    # Matching file bytes do not prove Caddy accepted them: a previous reload may have
-    # failed, or a process may have died between writing the file and reloading Caddy.
-    if any(app.upstream_file is not None for app in ctx.unit.apps.values()):
-        caddy = ctx.unit.caddy_reload_unit
-        if ctx.services.active_state(caddy) == "active":
-            error = ctx.services.reload(caddy)
-            if error is not None:
-                message = f"reload of {caddy} failed: {error}"
-                raise FailedError(message)
+    """DESIGN reconcile step 4: stop the slots that are not active, after the drain wait."""
     retirements: list[tuple[AppConfig, Slot]] = []
     for name in sorted(ctx.unit.apps):
         app = ctx.unit.apps[name]

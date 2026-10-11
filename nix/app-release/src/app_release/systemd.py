@@ -12,7 +12,6 @@ class ServiceManager(Protocol):
     def start(self, unit: str, timeout: float | None) -> str | None: ...
     def restart(self, unit: str, timeout: float | None) -> str | None: ...
     def stop(self, unit: str, *, block: bool) -> str | None: ...
-    def reload(self, unit: str) -> str | None: ...
     def active_state(self, unit: str) -> str: ...
 
 
@@ -42,9 +41,6 @@ class Systemctl:
         if block:
             return self._run("stop", unit)
         return self._run("stop", "--no-block", unit)
-
-    def reload(self, unit: str) -> str | None:
-        return self._run("reload", unit)
 
     def active_state(self, unit: str) -> str:
         result = self.runner([self.executable, "show", "--property=ActiveState", "--value", unit])

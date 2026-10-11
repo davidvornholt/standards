@@ -171,7 +171,6 @@ class SystemctlTest(unittest.TestCase):
                     "Job for a.service failed because the control process exited with error code.\n"
                     'See "systemctl status a.service" for details.\n',
                 ),
-                ("systemctl", "reload"): Completed(5, "", ""),
             }
         )
         systemctl = Systemctl("systemctl", runner)
@@ -181,7 +180,6 @@ class SystemctlTest(unittest.TestCase):
             "Job for a.service failed because the control process exited with error code. "
             'See "systemctl status a.service" for details',
         )
-        self.assertEqual(systemctl.reload("a.service"), "exit status 5")
         self.assertEqual(systemctl.active_state("a.service"), "deactivating")
         self.assertEqual(runner.calls[0], ("systemctl", "stop", "--no-block", "a.service"))
 

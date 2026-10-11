@@ -77,6 +77,11 @@ def stop_load() -> list[str]:
     return responses
 
 
+def caddy_connections(port: int) -> str:
+    """The sockets Caddy holds to a slot port; keep-alive keeps them pooled between requests."""
+    return f"ss -Htnp dst 127.0.0.1:{port} | grep -F '(\"caddy\"'"
+
+
 def wait_stopped(unit: str) -> None:
     machine.wait_until_succeeds(
         f"systemctl show -p ActiveState --value {unit} | grep -Eqx 'inactive|failed'", timeout=90
@@ -153,7 +158,11 @@ with subtest("requests that fail authorization or validation are rejected"):
 
 with subtest("release v2 blue to green with zero failed requests"):
     start_load()
+    machine.wait_until_succeeds(caddy_connections(8001), timeout=10)
+    # The release switches traffic, drains and stops the old slot while load runs.
     result, output = release(same("v2"), 100, REVISIONS["v2"])
+    # Stopping the old slot closed Caddy's pooled connections to it.
+    machine.wait_until_fails(caddy_connections(8001), timeout=10)
     responses = stop_load()
     worker_retiring = active_state("podman-worker-blue.service")
     assert result["result"] == "released"
@@ -327,8 +336,6 @@ with subtest("changed slot ports are applied without failed requests"):
     assert data["history"][-1]["operation"] == "refresh"
     assert {unit: invocation(unit) for unit in units} == units
     assert served(8102) == "v3"
-    assert (
-        machine.succeed("cat /var/lib/app-release/shop/web.upstream").strip() == "to 127.0.0.1:8102"
-    )
+    assert machine.succeed("cat /var/lib/app-release/shop/web.upstream").strip() == "127.0.0.1:8102"
     machine.fail("curl -fsS -m 5 http://localhost:8001/")
     assert active_state("podman-web-blue.service") == "inactive"

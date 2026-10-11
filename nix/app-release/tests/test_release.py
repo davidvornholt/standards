@@ -47,7 +47,7 @@ class ReleaseTest(HostTestCase):
             previous = state.apps[name].previous
             self.assertIsNotNone(previous)
             self.assertEqual(previous.digest if previous else None, self.v1[name].digest)
-        self.assertEqual(self.upstream.read_text(), "to 127.0.0.1:8002\n")
+        self.assertEqual(self.upstream.read_text(), "127.0.0.1:8002\n")
         self.assertEqual(self.world.running["podman-web-green.service"], self.v2["web"].id)
         self.assertEqual(self.world.running["podman-worker-green.service"], self.v2["worker"].id)
         self.assertEqual(self.world.running["podman-jobs.service"], self.v2["jobs"].id)
@@ -69,12 +69,13 @@ class ReleaseTest(HostTestCase):
         pre_stop = calls.index(("command", PRE_STOP, "jobs", ""))
         self.assertLess(pre_stop, calls.index(("restart", "podman-jobs.service")))
 
-    def test_old_slots_retire_after_the_drain(self) -> None:
+    def test_old_slots_retire_after_the_switch_and_the_drain(self) -> None:
+        stops = self.watch_stops()
         self.release_v2()
-        self.assertIn(10, self.world.clock.sleeps)
-        self.assertIn(("stop", "podman-web-blue.service"), self.world.calls)
+        upstream, sleeps = stops["podman-web-blue.service"]
+        self.assertEqual(upstream, "127.0.0.1:8002\n")
+        self.assertEqual(sleeps[-1:], [10])
         self.assertIn(("stop-no-block", "podman-worker-blue.service"), self.world.calls)
-        self.assertEqual(self.world.calls.count(("reload", "caddy.service")), 1)
 
     def test_newer_release_supersedes_an_older_run(self) -> None:
         v2 = self.publish(2, SHA_B)
@@ -110,7 +111,7 @@ class ReleaseTest(HostTestCase):
             )
         self.assertIn("web: not healthy within 5 s", raised.exception.message)
         self.assertEqual(self.state(), before)
-        self.assertEqual(self.upstream.read_text(), "to 127.0.0.1:8001\n")
+        self.assertEqual(self.upstream.read_text(), "127.0.0.1:8001\n")
         self.assertEqual(self.world.states["podman-web-green.service"], "inactive")
         self.assertEqual(self.world.states["podman-worker-green.service"], "inactive")
         self.assertNotIn(("restart", "podman-jobs.service"), self.world.calls)
@@ -162,30 +163,40 @@ class ReleaseTest(HostTestCase):
         self.assertEqual(self.world.restarts(), [])
         self.assertNotIn("localhost/app-release/web:candidate", self.world.names)
 
-    def test_failed_reload_switches_back(self) -> None:
+    def test_failed_switch_restores_the_upstream_and_drains_the_new_slot(self) -> None:
         v2 = self.publish(2, SHA_B)
-        self.world.reload_errors = ["caddy reload failed"]
         before = self.state()
-        with self.assertRaises(FailedError):
+        stops = self.watch_stops()
+        with (
+            patch("app_release.steps.write_upstream", side_effect=OSError("disk full")),
+            self.assertRaises(FailedError) as raised,
+        ):
             release(
                 self.world.context(),
                 claims(100),
                 {name: image.digest for name, image in v2.items()},
             )
+        self.assertIn("web: cannot switch", raised.exception.message)
         self.assertEqual(self.state(), before)
-        self.assertEqual(self.upstream.read_text(), "to 127.0.0.1:8001\n")
-        self.assertEqual(self.world.calls.count(("reload", "caddy.service")), 2)
+        self.assertEqual(self.upstream.read_text(), "127.0.0.1:8001\n")
+        upstream, sleeps = stops["podman-web-green.service"]
+        self.assertEqual(upstream, "127.0.0.1:8001\n")
+        self.assertEqual(sleeps[-1:], [10])
         self.assertEqual(self.world.running["podman-jobs.service"], self.v1["jobs"].id)
+        self.assertEqual(self.world.running["podman-web-blue.service"], self.v1["web"].id)
 
-    def test_failed_reload_twice_is_critical(self) -> None:
+    def test_failed_upstream_restore_is_critical(self) -> None:
         v2 = self.publish(2, SHA_B)
-        self.world.reload_errors = ["caddy reload failed", "caddy reload failed"]
-        with self.assertRaises(CriticalError):
+        with (
+            patch("app_release.steps.atomic_write_text", side_effect=OSError("disk full")),
+            self.assertRaises(CriticalError) as raised,
+        ):
             release(
                 self.world.context(),
                 claims(100),
                 {name: image.digest for name, image in v2.items()},
             )
+        self.assertIn(f"cannot restore {self.upstream}", raised.exception.message)
 
     def test_failed_pre_stop_aborts_before_the_switch(self) -> None:
         v2 = self.publish(2, SHA_B)
@@ -211,7 +222,7 @@ class ReleaseTest(HostTestCase):
         self.assertEqual(state.apps["web"].slot, "blue")
         self.assertNotIn(("restart", "podman-web-green.service"), self.world.calls)
         self.assertEqual(self.world.names["localhost/app-release/web:blue"], self.v2["web"].id)
-        self.assertEqual(self.upstream.read_text(), "to 127.0.0.1:8001\n")
+        self.assertEqual(self.upstream.read_text(), "127.0.0.1:8001\n")
 
     def test_nothing_changed_reports_unchanged(self) -> None:
         outcome = release(
@@ -457,7 +468,7 @@ class RollbackTest(HostTestCase):
             previous = state.apps[name].previous
             self.assertEqual(previous.digest if previous else None, self.v2[name].digest)
         self.assertEqual(state.apps["web"].slot, "blue")
-        self.assertEqual(self.upstream.read_text(), "to 127.0.0.1:8001\n")
+        self.assertEqual(self.upstream.read_text(), "127.0.0.1:8001\n")
         self.assertEqual(self.world.running["podman-jobs.service"], self.v1["jobs"].id)
         self.assertEqual(len(self.command_calls(PRE_STOP)), 2)
         rollback(self.world.context(), claims(121, event_name="workflow_dispatch"))
@@ -465,7 +476,7 @@ class RollbackTest(HostTestCase):
         for name in ("web", "worker", "jobs"):
             self.assertEqual(state.apps[name].current.digest, self.v2[name].digest)
         self.assertEqual(state.apps["web"].slot, "green")
-        self.assertEqual(self.upstream.read_text(), "to 127.0.0.1:8002\n")
+        self.assertEqual(self.upstream.read_text(), "127.0.0.1:8002\n")
 
     def test_rollback_pulls_a_missing_previous_image(self) -> None:
         self.release_v2()

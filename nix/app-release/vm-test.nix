@@ -64,13 +64,20 @@ let
       inherit tag;
       contents = [
         pkgs.busybox
+        pkgs.darkhttpd
         (site image)
       ];
       config = {
+        # darkhttpd keeps idle keep-alive connections open for 300 s, longer than
+        # Caddy's 2 min pool timeout, so Caddy still holds pooled connections to
+        # the old slot when it stops. On SIGTERM it closes every connection.
         Cmd = [
-          "/bin/sh"
-          "-c"
-          "trap 'exit 0' TERM; httpd -f -p 3000 -h /www & wait"
+          "/bin/darkhttpd"
+          "/www"
+          "--port"
+          "3000"
+          "--timeout"
+          "300"
         ];
         Labels."org.opencontainers.image.revision" = image.revision;
       };
@@ -168,9 +175,7 @@ in
         enable = true;
         globalConfig = "grace_period 5s";
         virtualHosts."http://localhost".extraConfig = ''
-          reverse_proxy {
-            ${config.services.appRelease.units.shop.apps.web.caddyUpstreamImport}
-          }
+          reverse_proxy ${config.services.appRelease.units.shop.apps.web.caddyUpstream}
         '';
       };
 

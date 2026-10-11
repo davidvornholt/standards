@@ -96,7 +96,6 @@ def unit_json(
             "jwksUrl": "file:///nonexistent",
             "audience": "app-release",
         },
-        "caddyReloadUnit": "caddy.service",
         "apps": apps,
     }
 
@@ -147,7 +146,6 @@ class World:
         self.failing_units: set[str] = set()
         self.slow_stop: set[str] = set()
         self.pull_failures: dict[str, int] = {}
-        self.reload_errors: list[str | None] = []
         self.migration_error: str | None = None
         self.pre_stop_exit = 0
         self.calls: list[tuple[str, ...]] = []
@@ -310,10 +308,6 @@ class World:
         self.states[unit] = "deactivating" if not block and unit in self.slow_stop else "inactive"
         self.running.pop(unit, None)
         return None
-
-    def reload(self, unit: str) -> str | None:
-        self.calls.append(("reload", unit))
-        return self.reload_errors.pop(0) if self.reload_errors else None
 
     def active_state(self, unit: str) -> str:
         return self.states.get(unit, "inactive")

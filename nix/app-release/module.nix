@@ -101,7 +101,6 @@ let
         oidc = {
           inherit (cfg.oidc) issuer jwksUrl audience;
         };
-        caddyReloadUnit = cfg.caddy.reloadUnit;
         apps = lib.mapAttrs (appName: app: {
           inherit (app)
             imageRepository
@@ -241,19 +240,27 @@ let
         upstreamFile = mkOption {
           type = types.nullOr types.str;
           readOnly = true;
-          description = "Blue-green with ports: the file holding the live Caddy upstream. Null otherwise.";
+          description = ''
+            Blue-green with ports: the file holding the live slot address, `127.0.0.1:<port>`.
+            A switch replaces it atomically. Null otherwise.
+          '';
         };
-        caddyUpstreamImport = mkOption {
+        caddyUpstream = mkOption {
           type = types.nullOr types.str;
           readOnly = true;
-          description = "Blue-green with ports: `import <upstreamFile>`, for use inside a `reverse_proxy` block. Null otherwise.";
+          description = ''
+            Blue-green with ports: the upstream for Caddy, `tcp/{file.<upstreamFile>}`, used as
+            `reverse_proxy ''${app.caddyUpstream}` or `to ''${app.caddyUpstream}`. Caddy reads the
+            file on every request, so a switch needs no Caddy reload. Null otherwise.
+          '';
         };
       };
 
       config = {
         upstreamFile =
           if isBlueGreen config && hasPorts config then "${stateRoot}/${unitName}/${name}.upstream" else null;
-        caddyUpstreamImport = if config.upstreamFile == null then null else "import ${config.upstreamFile}";
+        # `tcp/` keeps the Caddyfile adapter from appending a default port to the placeholder.
+        caddyUpstream = if config.upstreamFile == null then null else "tcp/{file.${config.upstreamFile}}";
       };
     };
 
@@ -613,11 +620,7 @@ let
             description = "Reconcile app release unit ${unitName}";
             wantedBy = [ "multi-user.target" ];
             wants = [ "network-online.target" ] ++ unit.serviceDependencies;
-            after = [
-              "network-online.target"
-              cfg.caddy.reloadUnit
-            ]
-            ++ unit.serviceDependencies;
+            after = [ "network-online.target" ] ++ unit.serviceDependencies;
             restartTriggers = [ json ];
             serviceConfig = {
               Type = "oneshot";
@@ -676,7 +679,7 @@ let
           mode = "0644";
           user = "root";
           group = "root";
-          argument = "to 127.0.0.1:${toString app.slotPorts.blue}";
+          argument = "127.0.0.1:${toString app.slotPorts.blue}";
         };
       }
     ) (builtins.filter ({ app, ... }: app.upstreamFile != null) allApps)
@@ -702,16 +705,6 @@ in
         description = "Required `aud` claim of release tokens.";
       };
     };
-    caddy = {
-      reloadUnit = mkOption {
-        type = types.str;
-        default = "caddy.service";
-        description = ''
-          Unit reloaded after upstream files change. Its ExecReload must re-read the Caddyfile
-          and the imported upstream files (NixOS `services.caddy.enableReload = true`).
-        '';
-      };
-    };
     units = mkOption {
       type = types.attrsOf (types.submodule unitModule);
       default = { };
@@ -734,12 +727,6 @@ in
       {
         assertion = config.virtualisation.oci-containers.backend == "podman";
         message = "services.appRelease requires virtualisation.oci-containers.backend = \"podman\".";
-      }
-      {
-        assertion =
-          !(config.services.caddy.enable && cfg.caddy.reloadUnit == "caddy.service")
-          || config.services.caddy.enableReload;
-        message = "services.appRelease needs services.caddy.enableReload = true so upstream switches reload Caddy.";
       }
     ]
     ++ ownershipAssertions

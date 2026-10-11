@@ -3,6 +3,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from app_release.config import parse_unit
 from app_release.podman import Image
@@ -28,8 +29,7 @@ class HostTestCase(unittest.TestCase):
         self.world.run_unit("podman-web-blue.service", self.v1["web"])
         self.world.run_unit("podman-worker-blue.service", self.v1["worker"])
         self.world.run_unit("podman-jobs.service", self.v1["jobs"])
-        self.upstream.write_text("to 127.0.0.1:8001\n")
-        self.world.states["caddy.service"] = "active"
+        self.upstream.write_text("127.0.0.1:8001\n")
         self.world.store.save(
             State(
                 highest_run_id=50,
@@ -48,6 +48,20 @@ class HostTestCase(unittest.TestCase):
     @property
     def upstream(self) -> Path:
         return self.path / "web.upstream"
+
+    def watch_stops(self) -> dict[str, tuple[str, list[float]]]:
+        """Record the web upstream and the sleeps so far each time a unit stops."""
+        seen: dict[str, tuple[str, list[float]]] = {}
+        stop = self.world.stop
+
+        def watched(unit: str, *, block: bool) -> str | None:
+            seen[unit] = (self.upstream.read_text(), list(self.world.clock.sleeps))
+            return stop(unit, block=block)
+
+        patcher = patch.object(self.world, "stop", side_effect=watched)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return seen
 
     def unit_data(self) -> dict[str, object]:
         return unit_json(

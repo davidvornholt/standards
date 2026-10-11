@@ -153,15 +153,18 @@ def wait_healthy(ctx: Context, targets: list[HealthTarget]) -> dict[str, str]:
     return failures
 
 
-def upstream_line(port: int) -> str:
-    return f"to 127.0.0.1:{port}\n"
+def upstream_address(port: int) -> str:
+    return f"127.0.0.1:{port}\n"
 
 
 def write_upstream(app: AppConfig, slot: Slot) -> bool:
-    """Point the app's upstream file at `slot`; True when the content changed."""
+    """Point the app's upstream file at `slot`; True when the content changed.
+
+    Caddy reads the file on every request, so the atomic rename switches traffic.
+    """
     if app.upstream_file is None or app.slot_ports is None:
         return False
-    wanted = upstream_line(app.slot_ports.port(slot))
+    wanted = upstream_address(app.slot_ports.port(slot))
     try:
         if app.upstream_file.read_text() == wanted:
             return False
@@ -189,7 +192,6 @@ class Transaction:
     started: list[tuple[AppConfig, Slot]] = field(default_factory=list)
     recreated: list[tuple[AppConfig, str]] = field(default_factory=list)
     upstreams: list[tuple[Path, str | None]] = field(default_factory=list)
-    reloaded: bool = False
     previous_state: State | None = None
 
     def commit(self, state: State, previous: State) -> None:
@@ -237,27 +239,23 @@ class Transaction:
             raise StepError(failures[app.name])
 
     def switch(self, targets: list[tuple[AppConfig, Slot]]) -> None:
-        """Point the upstream files at the new slots and reload Caddy."""
+        """Point the upstream files at the new slots; each rename switches that app's traffic."""
         ctx = self.ctx
-        switching = [(app, slot) for app, slot in targets if app.upstream_file is not None]
-        if not switching:
-            return
-        for app, slot in switching:
+        for app, slot in targets:
             path = app.upstream_file
             if path is None:
                 continue
             try:
-                previous: str | None = path.read_text()
-            except FileNotFoundError:
-                previous = None
-            self.upstreams.append((path, previous))
-            write_upstream(app, slot)
-            ctx.out.line(f"{app.name}: switching traffic to slot {slot}")
-        self.reloaded = True
-        error = ctx.services.reload(ctx.unit.caddy_reload_unit)
-        if error is not None:
-            message = f"reload of {ctx.unit.caddy_reload_unit} failed: {error}"
-            raise StepError(message)
+                try:
+                    previous: str | None = path.read_text()
+                except FileNotFoundError:
+                    previous = None
+                self.upstreams.append((path, previous))
+                write_upstream(app, slot)
+            except OSError as error:
+                message = f"{app.name}: cannot switch {path} to slot {slot}: {error}"
+                raise StepError(message) from None
+            ctx.out.line(f"{app.name}: switched traffic to slot {slot}")
 
     def _revert_recreate(self, app: AppConfig, old_image_id: str) -> str | None:
         ctx = self.ctx
@@ -297,10 +295,12 @@ class Transaction:
                     atomic_write_text(path, previous)
             except OSError as write_error:
                 problems.append(f"cannot restore {path}: {write_error}")
-        if self.upstreams and self.reloaded:
-            error = ctx.services.reload(ctx.unit.caddy_reload_unit)
-            if error is not None:
-                problems.append(f"reload of {ctx.unit.caddy_reload_unit} failed again: {error}")
+        if self.upstreams and ctx.unit.drain_seconds > 0:
+            # Traffic already reached the new slots; let it finish before they stop.
+            ctx.out.line(
+                f"waiting {ctx.unit.drain_seconds} s for requests to the new slots to drain"
+            )
+            ctx.clock.sleep(ctx.unit.drain_seconds)
         for app, old_image_id in reversed(self.recreated):
             problem = self._revert_recreate(app, old_image_id)
             if problem is not None:
