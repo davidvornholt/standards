@@ -167,8 +167,9 @@ def _settle(ctx: Context, app: AppConfig, unit: str) -> None:
     because the drain may outlast the host activation. systemd drains a container in the
     `stop` sub-state, where ExecStop runs `podman stop`, and enters it only from a running
     unit. Stopping a unit that is still starting or waiting to restart skips ExecStop, so
-    that stop stays blocking: with the default `--sdnotify=conmon` a unit counts as started
-    as soon as its container runs, so no container drains and the stop ends within seconds.
+    that stop stays blocking. The module keeps these workers on `--sdnotify=conmon`, so a
+    unit counts as started as soon as its container runs; no container drains, and the stop
+    ends within seconds.
 
     The drain can end failed before the host switch checks its units, which fails that
     switch. That needs the worker to finish draining within the rest of the switch and to
