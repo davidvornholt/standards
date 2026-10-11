@@ -40,13 +40,15 @@ in {
 
 - `caddyUpstream` reads the live slot address from a file on every request, so a slot switch needs no Caddy reload. Use it as `reverse_proxy <upstream>` or as `to <upstream>` inside a `reverse_proxy` block. Do not proxy to a slot port directly.
 - `strategy` defaults to `blue-green`: two slots on loopback ports, with the idle slot started and health-checked before traffic moves. Use `recreate` only when two versions cannot run side by side, such as a container that other containers address by a stable name; it restarts in place with a short interruption. A worker without ports stays blue-green with `containerPort` and `slotPorts` unset and a `health.command`. Give a worker with long drains `retireWithoutWaiting` and its own unit, so its drain does not hold the lock for other apps.
-- `container` passes through to `virtualisation.oci-containers.containers`. The module owns `image`, `autoStart`, `serviceName`, and `ports`.
+- `container` passes through to `virtualisation.oci-containers.containers`. The module owns `image`, `autoStart`, and `serviceName`, plus `ports` for blue-green apps. Recreate apps publish ports through `container.ports` and need `health.port` or `health.command`.
 - `migration.service` is a oneshot without `RemainAfterExit` or `wantedBy` that runs the image `localhost/app-release/<app>:candidate`. It runs before any new version starts, while the old version keeps serving, so migrations must stay compatible with the serving version.
 - Private images need `registryAuthFile` and `serviceDependencies` set to the private auth file and its login unit; see [Private registry access](bootstrap.md#private-registry-access).
-- Put the unit's `refreshUnit` in the `restartUnits` of every SOPS secret its apps read. Restarting it restarts each app at its current digest, blue-green apps without downtime.
+- Put the unit's `refreshUnit` in the `restartUnits` of every SOPS secret its apps read. Restarting it refreshes apps at their current digests, blue-green apps without downtime, subject to the draining-worker exception below.
 - One repository that drives several units gives each unit its own key. sshd applies the first matching forced command, so one key reaches exactly one unit.
 
-A host deployment that changes a unit's definition, such as environment or volumes, reconciles that unit during activation: each changed app is refreshed at its current digest, blue-green apps without downtime. Every unit also reconciles at boot. A failed reconcile fails the activation, and deploy-rs rolls the host back.
+A host deployment that changes a unit's definition, such as environment or volumes, reconciles that unit during activation: each changed app is refreshed at its current digest, blue-green apps without downtime, subject to the same draining-worker exception. Every unit also reconciles at boot. A failed reconcile fails the activation, and deploy-rs rolls the host back.
+
+Both refresh and reconcile skip a portless worker while its idle slot is still active or deactivating, warn, and preserve its old `definitionHash`. Success can therefore leave old configuration or secret values running. After the drain finishes, a later reconcile or release applies a deferred definition change. For a deferred secret-only refresh, explicitly rerun `app-release refresh <unit>` and verify that the worker restarted with the new secret before revoking the old credential: secret contents do not change `definitionHash`.
 
 ## Release workflow
 
