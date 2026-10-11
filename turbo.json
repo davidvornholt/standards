@@ -47,6 +47,7 @@
         "$TURBO_ROOT$/.github/settings.json",
         "$TURBO_ROOT$/.github/dependabot.base.yml",
         "$TURBO_ROOT$/.github/actions/sops-secret/action.yml",
+        "$TURBO_ROOT$/.github/actions/app-release/**",
         "$TURBO_ROOT$/packages/typescript-config/README.md",
         "$TURBO_ROOT$/packages/typescript-config/*.json",
         "$TURBO_ROOT$/packages/typescript-config/*.ts",
