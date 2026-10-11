@@ -221,9 +221,9 @@ def _apply(  # noqa: PLR0913 - the operation's inputs, passed by keyword
     migrate: bool,
 ) -> State:
     """DESIGN release steps 5 to 10 for the classified targets."""
-    restarting = [target for target in targets if target.restart]
     _check_draining(ctx, state, targets)
     targets = _ensure_old_images(ctx, state, targets)
+    restarting = [target for target in targets if target.restart]
     if migrate and restarting:
         _migrate(ctx, {target.app.name: target for target in targets})
     entry = _history(ctx, operation, result, claims, targets)
@@ -244,7 +244,7 @@ def _apply(  # noqa: PLR0913 - the operation's inputs, passed by keyword
             transaction.restart_recreate(target.app, target.image, target.old_image_id or "")
         transaction.switch([(app, slot) for app, slot, _ in blue_green])
         new_state = _next_state(state, targets, highest_run_id=highest_run_id, entry=entry)
-        ctx.store.save(new_state)
+        transaction.commit(new_state, state)
     except StepError as error:
         raise transaction.fail(error.message) from None
     except AppReleaseError as error:

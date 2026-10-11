@@ -1,10 +1,21 @@
+import os
+import stat
 import unittest
+from functools import partial
+from pathlib import Path
+from typing import TYPE_CHECKING
+from unittest.mock import patch
 
 from app_release.errors import CriticalError, ExitCode, FailedError, RejectedError
+from app_release.fsutil import atomic_write_text
+from app_release.reconcile import refresh
 from app_release.release import release, rollback
 from app_release.state import AppState, Release, State
 from tests.base import MIGRATION, HostTestCase
 from tests.fakes import PRE_STOP, SHA_A, SHA_B, SHA_C, claims, make_image
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 DRAINING = (
     "worker: the previous worker in slot green is still draining; nothing changed. "
@@ -107,15 +118,20 @@ class ReleaseTest(HostTestCase):
 
     def test_failed_recreate_restores_the_previous_image(self) -> None:
         v2 = self.publish(2, SHA_B)
+        for name in list(self.world.names):
+            if self.world.names[name] == self.v1["jobs"].id:
+                del self.world.names[name]
         self.world.unhealthy.add(v2["jobs"].id)
         before = self.state()
-        with self.assertRaises(FailedError):
+        with self.assertRaises(FailedError) as raised:
             release(
                 self.world.context(),
                 claims(100),
                 {name: image.digest for name, image in v2.items()},
             )
         self.assertEqual(self.state(), before)
+        self.assertEqual(raised.exception.exit_code, ExitCode.FAILED)
+        self.assertIn(("pull", f"ghcr.io/owner/jobs@{self.v1['jobs'].digest}"), self.world.calls)
         self.assertEqual(self.world.running["podman-jobs.service"], self.v1["jobs"].id)
         self.assertEqual(self.world.names["localhost/app-release/jobs:current"], self.v1["jobs"].id)
         self.assertEqual(self.world.states["podman-web-green.service"], "inactive")
@@ -350,6 +366,75 @@ class ReleaseTest(HostTestCase):
         )
         self.assertIn(self.v1["web"].id, self.world.local)
         self.assertNotIn(self.v1["jobs"].id, self.world.local)
+
+
+class StateCommitTest(unittest.TestCase):
+    def test_failed_state_commit_restores_state_and_runtime_before_retry(self) -> None:
+        for operation in ("release", "rollback", "refresh"):
+            for failure in ("file-fsync", "directory-fsync", "restore"):
+                with self.subTest(operation=operation, failure=failure):
+                    self.check_failed_commit(operation, failure)
+
+    def check_failed_commit(self, operation: str, failure: str) -> None:
+        host = HostTestCase()
+        host.setUp()
+        self.addCleanup(host.doCleanups)
+        world = host.world
+        v2 = host.publish(2, SHA_B)
+        digests = {name: image.digest for name, image in v2.items()}
+        if operation == "rollback":
+            release(world.context(), claims(), digests)
+        before = host.state()
+        previous_upstream = host.upstream.read_text()
+        failed = False
+        real_fsync = os.fsync
+        directory_fsync = failure != "file-fsync"
+
+        def fail_fsync(descriptor: int) -> None:
+            nonlocal failed
+            info = os.fstat(descriptor)
+            if not failed and stat.S_ISDIR(info.st_mode) == directory_fsync:
+                failed = True
+                message = "simulated state fsync failure"
+                raise OSError(message)
+            real_fsync(descriptor)
+
+        def write_state(path: Path, text: str) -> None:
+            if failed and failure == "restore":
+                message = "simulated state restoration failure"
+                raise OSError(message)
+            with patch("app_release.fsutil.os.fsync", side_effect=fail_fsync):
+                atomic_write_text(path, text)
+
+        operations: dict[str, Callable[[], object]] = {
+            "release": partial(release, world.context(), claims(), digests),
+            "rollback": partial(rollback, world.context(), claims(event_name="workflow_dispatch")),
+            "refresh": partial(refresh, world.context()),
+        }
+        invoke = operations[operation]
+
+        with (
+            patch("app_release.state.atomic_write_text", side_effect=write_state),
+            self.assertRaises(CriticalError if failure == "restore" else FailedError) as raised,
+        ):
+            invoke()
+        self.assertTrue(failed)
+        if failure == "restore":
+            self.assertEqual(raised.exception.exit_code, ExitCode.CRITICAL)
+            self.assertIn("cannot restore the previous state", raised.exception.message)
+            return
+        self.assertEqual(raised.exception.exit_code, ExitCode.FAILED)
+        self.assertEqual(host.state(), before)
+        self.assertEqual(host.upstream.read_text(), previous_upstream)
+        for name, app_state in before.apps.items():
+            image = world.registry[f"{host.repository(name)}@{app_state.current.digest}"]
+            unit = world.unit.apps[name].unit(app_state.slot)
+            self.assertEqual(world.running[unit], image.id)
+        invoke()
+        for name, app_state in host.state().apps.items():
+            image = world.registry[f"{host.repository(name)}@{app_state.current.digest}"]
+            unit = world.unit.apps[name].unit(app_state.slot)
+            self.assertEqual(world.running[unit], image.id)
 
 
 class RollbackTest(HostTestCase):

@@ -4,7 +4,7 @@ from dataclasses import replace
 
 from app_release.config import AppConfig, Slot, other_slot
 from app_release.context import Context
-from app_release.errors import AppReleaseError, FailedError
+from app_release.errors import AppReleaseError, CriticalError, FailedError
 from app_release.podman import Image
 from app_release.state import AppState, HistoryEntry, Release, State
 from app_release.steps import (
@@ -17,7 +17,6 @@ from app_release.steps import (
     retire,
     run_pre_stop,
     start_dependencies,
-    stop_slot,
     wait_healthy,
     write_upstream,
 )
@@ -80,16 +79,14 @@ def _load(ctx: Context) -> State:
     return new_state
 
 
-def _enforce(ctx: Context, state: State) -> tuple[set[str], set[str], bool]:
+def _enforce(ctx: Context, state: State) -> tuple[State, set[str], set[str]]:
     """DESIGN reconcile step 2.
 
-    Returns the apps that were already running, the running apps whose active tag pointed at
-    another image (so they may run something else than the state says), and whether an upstream
-    file changed.
+    Returns the updated state, apps already running, and running apps whose active tag
+    pointed at another image (so they may run something else than the state says).
     """
     running: set[str] = set()
     stale: set[str] = set()
-    upstream_changed = False
     started: list[HealthTarget] = []
     for name in sorted(ctx.unit.apps):
         app = ctx.unit.apps[name]
@@ -97,12 +94,22 @@ def _enforce(ctx: Context, state: State) -> tuple[set[str], set[str], bool]:
         image = ensure_image(ctx, app, app_state.current.digest)
         tag = app.active_tag(app_state.slot)
         tagged = ctx.images.inspect(tag)
+        unit = app.unit(app_state.slot)
+        active = ctx.services.active_state(unit) == "active"
+        if active and tagged is not None and tagged.id != image.id and not app.blue_green:
+            # Persist restart intent before retagging erases the mismatch, including when
+            # preStopCommand fails or the process dies before the recreate restart.
+            state = state.with_app(name, replace(app_state, definition_hash=None))
+            ctx.store.save(state)
         if tagged is None or tagged.id != image.id:
             ctx.images.tag(image.id, tag)
-        if app_state.slot is not None:
-            upstream_changed |= write_upstream(app, app_state.slot)
-        unit = app.unit(app_state.slot)
-        if ctx.services.active_state(unit) == "active":
+        if app_state.slot is not None and (
+            not active or app_state.definition_hash == app.definition_hash
+        ):
+            # A running old definition may still bind the previous slot ports. Keep its
+            # live upstream until the replacement is healthy and the transaction switches.
+            write_upstream(app, app_state.slot)
+        if active:
             running.add(name)
             if tagged is not None and tagged.id != image.id:
                 ctx.out.warn(f"{name}: {tag} pointed at another image; restarting {name} on it")
@@ -117,7 +124,7 @@ def _enforce(ctx: Context, state: State) -> tuple[set[str], set[str], bool]:
     failures = wait_healthy(ctx, started)
     if failures:
         raise FailedError("; ".join(failures.values()))
-    return running, stale, upstream_changed
+    return state, running, stale
 
 
 def _refresh_blue_green(
@@ -149,7 +156,7 @@ def _refresh_blue_green(
                 state.apps[app.name], slot=slot, definition_hash=app.definition_hash
             )
             new_state = new_state.with_app(app.name, app_state)
-        ctx.store.save(new_state)
+        transaction.commit(new_state, state)
     except StepError as error:
         raise transaction.fail(error.message) from None
     except AppReleaseError as error:
@@ -182,7 +189,11 @@ def _refresh_recreate(ctx: Context, state: State, app: AppConfig) -> State:
         ctx.store.save(
             state.with_app(app.name, replace(state.apps[app.name], definition_hash=None))
         )
-        raise FailedError(failures[app.name])
+        message = (
+            f"{failures[app.name]}; the previous definition cannot be restored; "
+            f"{app.name} may be down"
+        )
+        raise CriticalError(message)
     new_state = state.with_app(
         app.name, replace(state.apps[app.name], definition_hash=app.definition_hash)
     )
@@ -240,15 +251,18 @@ def _refresh(
     return state
 
 
-def _clean_up(ctx: Context, state: State, *, upstream_changed: bool) -> None:
+def _clean_up(ctx: Context, state: State) -> None:
     """DESIGN reconcile step 4, reloading Caddy first so no request reaches a stopped slot."""
-    if upstream_changed:
+    # Matching file bytes do not prove Caddy accepted them: a previous reload may have
+    # failed, or a process may have died between writing the file and reloading Caddy.
+    if any(app.upstream_file is not None for app in ctx.unit.apps.values()):
         caddy = ctx.unit.caddy_reload_unit
         if ctx.services.active_state(caddy) == "active":
             error = ctx.services.reload(caddy)
             if error is not None:
                 message = f"reload of {caddy} failed: {error}"
                 raise FailedError(message)
+    retirements: list[tuple[AppConfig, Slot]] = []
     for name in sorted(ctx.unit.apps):
         app = ctx.unit.apps[name]
         slot = state.apps[name].slot
@@ -257,19 +271,17 @@ def _clean_up(ctx: Context, state: State, *, upstream_changed: bool) -> None:
         inactive = other_slot(slot)
         if ctx.services.active_state(app.unit(inactive)) in STOPPED_STATES:
             continue
-        ctx.out.line(f"{name}: stopping the inactive slot {inactive}")
-        error = stop_slot(ctx, app, inactive)
-        if error is not None:
-            ctx.out.warn(f"{name}: cannot stop slot {inactive}: {error}")
+        retirements.append((app, inactive))
+    retire(ctx, retirements)
 
 
 def reconcile(ctx: Context, *, force: bool = False) -> State:
     """Make the host run what the state says, bootstrapping it first if needed."""
     start_dependencies(ctx)
     state = _load(ctx)
-    running, stale, upstream_changed = _enforce(ctx, state)
+    state, running, stale = _enforce(ctx, state)
     state = _refresh(ctx, state, running, stale, force=force)
-    _clean_up(ctx, state, upstream_changed=upstream_changed)
+    _clean_up(ctx, state)
     collect_garbage(ctx)
     return state
 

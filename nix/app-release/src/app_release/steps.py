@@ -8,6 +8,7 @@ from app_release.context import Context
 from app_release.errors import AppReleaseError, CriticalError, FailedError
 from app_release.fsutil import atomic_write_text
 from app_release.podman import Image, PodmanError, digest_of, repository_of
+from app_release.state import State
 from app_release.systemd import BUSY_STATES, STOPPED_STATES
 
 PULL_BACKOFF_SECONDS = (2, 4, 8)
@@ -189,6 +190,12 @@ class Transaction:
     recreated: list[tuple[AppConfig, str]] = field(default_factory=list)
     upstreams: list[tuple[Path, str | None]] = field(default_factory=list)
     reloaded: bool = False
+    previous_state: State | None = None
+
+    def commit(self, state: State, previous: State) -> None:
+        """Keep state rollback possible even when save fails after its atomic rename."""
+        self.previous_state = previous
+        self.ctx.store.save(state)
 
     def start_idle_slots(self, targets: list[tuple[AppConfig, Slot, Image]]) -> None:
         """Start each app's idle slot on its target image and wait until all are healthy."""
@@ -270,10 +277,18 @@ class Transaction:
             return f"{app.name}: the previous version is not healthy: {failures[app.name]}"
         return None
 
+    def _restore_state(self) -> list[str]:
+        if self.previous_state is not None:
+            try:
+                self.ctx.store.save(self.previous_state)
+            except Exception as state_error:  # noqa: BLE001 - still attempt runtime restoration
+                return [f"cannot restore the previous state: {state_error}"]
+        return []
+
     def undo(self) -> list[str]:
         """Undo everything; returns the problems that leave the previous version not serving."""
         ctx = self.ctx
-        problems: list[str] = []
+        problems = self._restore_state()
         for path, previous in reversed(self.upstreams):
             try:
                 if previous is None:
