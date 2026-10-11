@@ -68,6 +68,21 @@ class PrepareTest(HostTestCase):
         self.assertEqual(self.world.names[self.JOBS_TAG], self.v1["jobs"].id)
         self.assertFalse([call for call in self.world.calls if call[0] == "pull"])
 
+    def test_recreate_uses_the_recorded_image_after_a_strategy_change(self) -> None:
+        state = self.state()
+        self.world.registry["ghcr.io/owner/jobs:production"] = self.v1["web"]
+        slots: tuple[Slot, ...] = ("blue", "green")
+        for slot in slots:
+            with self.subTest(slot=slot):
+                stored = state.with_app("jobs", replace(state.apps["jobs"], slot=slot))
+                self.world.store.save(stored)
+                self.world.names.pop(self.JOBS_TAG, None)
+                with patch.object(self.world.store, "save") as save:
+                    prepare(self.world.context(), "jobs", None)
+                    save.assert_not_called()
+                self.assertEqual(self.world.names.get(self.JOBS_TAG), self.v1["jobs"].id)
+                self.assertEqual(self.state(), stored)
+
     def test_before_the_first_reconcile_the_tag_comes_from_production(self) -> None:
         self.forget_state()
         prepare(self.world.context(), "jobs", None)

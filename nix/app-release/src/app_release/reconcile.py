@@ -322,6 +322,8 @@ def prepare(ctx: Context, app_name: str, slot: Slot | None) -> None:
     active = app_state.slot if app_state is not None else None
     if app.blue_green and active is None:
         active = "blue"
+    elif not app.blue_green:
+        active = None
     if slot != active:
         return
     start_dependencies(ctx)
