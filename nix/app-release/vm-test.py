@@ -351,6 +351,10 @@ with subtest("an unchanged app that stays down fails the check, not the host swi
     machine.succeed("app-release check shop")
     # The blue worker stops passing its health check, and its green slot cannot start.
     machine.succeed("podman exec worker-blue rm /www/index.html")
+    # The recreate app stops passing its health check too; the reconcile leaves it alone.
+    machine.succeed("podman exec jobs rm /www/health")
+    jobs = invocation("podman-jobs.service")
+    pre_stops = lines("/run/pre-stop.log")
     drop_in = "/run/systemd/system/podman-worker-green.service.d"
     machine.succeed(
         f"mkdir -p {drop_in}",
@@ -364,7 +368,10 @@ with subtest("an unchanged app that stays down fails the check, not the host swi
     assert data["apps"]["web"]["slot"] == "blue"
     assert data["apps"]["worker"]["slot"] == "blue"
     assert active_state("podman-worker-green.service") == "inactive"
+    assert invocation("podman-jobs.service") == jobs
+    assert lines("/run/pre-stop.log") == pre_stops
     status, output = machine.execute("app-release check shop")
     print(output)
     assert status == 1, f"app-release check exited {status}, expected 1"
     assert "worker: not healthy" in output
+    assert "jobs: not healthy" in output

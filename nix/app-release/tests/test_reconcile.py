@@ -240,11 +240,13 @@ class ReconcileTest(HostTestCase):
                 with self.assertRaises(FailedError):
                     reconcile(self.world.context())
                 self.assertEqual(self.state().apps["jobs"].definition_hash, "def-1")
-                # Restoration and later activations retry that attempted definition.
+                # Restoration and later activations of that attempted definition do not fail:
+                # they retry a stopped unit and leave a running one to the check.
                 for _ in range(2):
-                    seen = len(self.world.output())
                     reconcile(self.world.context())
-                    self.assertIn("jobs stays down", self.world.output()[seen:])
+                    with self.assertRaises(FailedError) as checked:
+                        check(self.world.context())
+                    self.assertIn("jobs:", checked.exception.message)
 
     def test_draining_worker_keeps_its_definition_without_failing(self) -> None:
         self.change_definition("worker")
@@ -336,39 +338,73 @@ class ReconcileTest(HostTestCase):
         self.assertIn("jobs: not healthy", raised.exception.message)
         self.assertEqual(self.state().apps["jobs"].definition_hash, "def-2")
 
-    def test_an_unhealthy_running_app_is_restarted_at_its_current_digest(self) -> None:
-        # The running containers hang; new containers of the same images are healthy.
-        for unit in ("podman-web-blue.service", "podman-jobs.service"):
+    def test_unhealthy_blue_green_apps_recover_in_one_wait(self) -> None:
+        # The running containers hang; new containers of the same images need 4 s to start.
+        for unit in ("podman-web-blue.service", "podman-worker-blue.service"):
             self.world.running[unit] = "hung"
         self.world.unhealthy.add("hung")
-        self.world.pre_stop_exit = 1
+        self.world.warmup = 4
+        started = self.world.clock.time
+        reconcile(self.world.context())
+        state = self.state()
+        self.assertEqual(state.apps["web"].slot, "green")
+        self.assertEqual(state.apps["worker"].slot, "green")
+        self.assertEqual(self.upstream.read_text(), "127.0.0.1:8002\n")
+        self.assertEqual(self.world.active_state("podman-web-blue.service"), "inactive")
+        self.assertIn(("stop-no-block", "podman-worker-blue.service"), self.world.calls)
+        # One health timeout finds both apps, one warmup starts both, then web drains once.
+        self.assertEqual(self.world.clock.time - started, 5 + 4 + 10)
+        self.assertEqual(state.history[-1].operation, "recover")
+        self.assertEqual(
+            state.history[-1].apps, {name: self.v1[name].digest for name in ("web", "worker")}
+        )
+
+    def test_an_app_that_fails_to_recover_does_not_hold_back_the_others(self) -> None:
+        for unit in ("podman-web-blue.service", "podman-worker-blue.service"):
+            self.world.running[unit] = "hung"
+        self.world.unhealthy.add("hung")
+        self.world.failing_units.add("podman-worker-green.service")
         reconcile(self.world.context())
         state = self.state()
         self.assertEqual(state.apps["web"].slot, "green")
         self.assertEqual(self.upstream.read_text(), "127.0.0.1:8002\n")
-        self.assertEqual(self.world.active_state("podman-web-blue.service"), "inactive")
-        self.assertEqual(self.world.running["podman-jobs.service"], self.v1["jobs"].id)
         self.assertEqual(state.apps["worker"].slot, "blue")
-        self.assertEqual(state.history[-1].operation, "recover")
-        self.assertEqual(
-            state.history[-1].apps, {name: self.v1[name].digest for name in ("jobs", "web")}
-        )
+        self.assertEqual(self.world.active_state("podman-worker-green.service"), "inactive")
+        self.assertIn("worker stays down", self.world.output())
+        self.assertEqual(state.history[-1].apps, {"web": self.v1["web"].digest})
+
+    def test_reconcile_leaves_an_unhealthy_recreate_app_to_refresh(self) -> None:
+        # Its restart runs preStopCommand, which has no time limit, so it must not hold up
+        # a host activation; the check reports the app and a refresh restarts it.
+        self.world.running["podman-jobs.service"] = "hung"
+        self.world.unhealthy.add("hung")
+        reconcile(self.world.context())
+        self.assertNotIn(("http", "9000"), self.world.calls)
+        self.assertEqual(self.command_calls(PRE_STOP), [])
+        self.assertEqual(self.world.restarts(), [])
+        self.assertEqual(self.world.running["podman-jobs.service"], "hung")
+        with self.assertRaises(FailedError) as raised:
+            check(self.world.context())
+        self.assertIn("jobs: not healthy within 5 s", raised.exception.message)
+        refresh(self.world.context())
+        self.assertEqual(len(self.command_calls(PRE_STOP)), 1)
+        self.assertEqual(self.world.running["podman-jobs.service"], self.v1["jobs"].id)
+        check(self.world.context())
 
     def test_an_unchanged_app_that_stays_down_only_warns_and_settles_its_units(self) -> None:
         # Failing would fail the host activation and its rollback alike; the check reports it.
-        # Web is stopped, jobs hangs, and the worker is unhealthy: each start fails.
+        # Web and jobs are stopped and the worker is unhealthy: each start fails.
         web_blue, jobs = "podman-web-blue.service", "podman-jobs.service"
         worker_green = "podman-worker-green.service"
-        # The failed refresh tells the worker's new slot to stop without waiting.
+        # The failed recovery tells the worker's new slot to stop without waiting.
         self.world.slow_stop.add(worker_green)
         self.world.stop(web_blue, block=True)
-        self.world.unhealthy |= {"hung", self.v1["worker"].id}
+        self.world.stop(jobs, block=True)
+        self.world.unhealthy.add(self.v1["worker"].id)
         self.world.failing_units |= {web_blue, jobs, worker_green}
         for failing_state in ("failed", "activating"):
             with self.subTest(failing_state=failing_state):
                 self.world.failing_state = failing_state
-                self.world.states[jobs] = "active"
-                self.world.running[jobs] = "hung"
                 reconcile(self.world.context())
                 output = self.world.output()
                 for name in ("jobs", "web", "worker"):
@@ -376,6 +412,7 @@ class ReconcileTest(HostTestCase):
                 for unit in (web_blue, jobs, worker_green):
                     self.assertEqual(self.world.active_state(unit), "inactive")
                 self.assertEqual(self.state().apps["web"].slot, "blue")
+                self.assertEqual(self.state().apps["worker"].slot, "blue")
                 self.assertEqual(self.upstream.read_text(), "127.0.0.1:8001\n")
 
     def test_check_names_each_unhealthy_app_without_changing_anything(self) -> None:
@@ -391,7 +428,7 @@ class ReconcileTest(HostTestCase):
         self.assertIn("web: not healthy within 5 s", message)
         self.assertNotIn("worker", message)
         self.assertIn("app-release refresh shop", message)
-        self.assertEqual({call[0] for call in self.world.calls}, {"command"})
+        self.assertEqual({call[0] for call in self.world.calls}, {"command", "http"})
 
     def state_with_web_on_green(self) -> None:
         state = self.state()

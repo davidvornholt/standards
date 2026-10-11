@@ -147,6 +147,9 @@ class World:
         # "failed", or "activating" for a unit systemd restarts after each failure.
         self.failing_state = "failed"
         self.slow_stop: set[str] = set()
+        # Seconds a started container takes to become healthy.
+        self.warmup = 0.0
+        self.launched: dict[str, float] = {}
         self.pull_failures: dict[str, int] = {}
         self.migration_error: str | None = None
         self.pre_stop_exit = 0
@@ -312,6 +315,7 @@ class World:
             return f"Job for {unit} failed"
         self.states[unit] = "active"
         self.running[unit] = image_id
+        self.launched[unit] = self.clock.time
         return None
 
     def stop(self, unit: str, *, block: bool) -> str | None:
@@ -340,10 +344,16 @@ class World:
     # Prober
 
     def _healthy(self, unit: str) -> bool:
-        return self.states.get(unit) == "active" and self.running.get(unit) not in self.unhealthy
+        warm = self.clock.time - self.launched.get(unit, self.clock.time - self.warmup)
+        return (
+            self.states.get(unit) == "active"
+            and self.running.get(unit) not in self.unhealthy
+            and warm >= self.warmup
+        )
 
     def http(self, port: int, path: str) -> str | None:
         del path
+        self.calls.append(("http", str(port)))
         unit = self.port_units.get(port)
         if unit is not None and self._healthy(unit):
             return None
