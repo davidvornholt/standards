@@ -239,11 +239,20 @@ jobs:
           POSTGRES_DB: ${{ vars.CI_POSTGRES_DB || 'app' }}
         ports:
           - 5432:5432
+        # The runner holds every step until the service reports healthy, and
+        # Docker runs the first probe only after one interval. Postgres is
+        # ready a few seconds after start, so probe every second during the
+        # start period instead of waiting the full 10s interval. The probe uses
+        # TCP because the image's init server accepts socket connections only
+        # and restarts before the real server listens, so a fast socket probe
+        # could pass before any step can connect.
         options: >-
-          --health-cmd "pg_isready -U ${{ vars.CI_POSTGRES_USER || 'app' }} -d ${{ vars.CI_POSTGRES_DB || 'app' }}"
+          --health-cmd "pg_isready -h 127.0.0.1 -U ${{ vars.CI_POSTGRES_USER || 'app' }} -d ${{ vars.CI_POSTGRES_DB || 'app' }}"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10
+          --health-start-period 30s
+          --health-start-interval 1s
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -482,7 +491,38 @@ jobs:
           # in CI. This workflow-only seam keeps local `bun run check`
           # fail-closed.
           STANDARDS_SKIP_GITHUB_CHECK: "true"
+          # Every `turbo run` writes .turbo/runs/<id>.json with each task's
+          # hash, cache status, and duration, also when a task fails. The
+          # task table below and the Turbo prune read these files. Turbo
+          # excludes this variable from task hashes.
+          TURBO_RUN_SUMMARY: "true"
         run: bun run check
+
+      # Consumers run Turbo with --output-logs=errors-only, so this table is
+      # the only per-task record of where the gate spends its time and what
+      # missed the cache. It also goes to the log, where `gh run view --log`
+      # can read it.
+      - name: Summarize Turbo tasks
+        if: "!cancelled()"
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          summaries=(.turbo/runs/*.json)
+          [ "${#summaries[@]}" -gt 0 ] || exit 0
+          jq -rs '
+            [.[].tasks[] | {
+              id: .taskId,
+              cache: .cache.status,
+              seconds: (((.execution.endTime // 0) - (.execution.startTime // 0)) / 1000)
+            }] as $tasks
+            | "### Turbo tasks",
+              "",
+              "\($tasks | map(select(.cache == "HIT")) | length) of \($tasks | length) tasks restored from the Turbo cache.",
+              "",
+              "| Task | Cache | Seconds |",
+              "| --- | --- | ---: |",
+              ($tasks | sort_by(-.seconds)[] | "| `\(.id)` | \(.cache) | \((.seconds * 10 | round) / 10) |")
+          ' "${summaries[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Save the Bun package cache
         if: success() && github.ref == 'refs/heads/main' && steps.bun-cache.outputs.cache-hit != 'true'
@@ -498,15 +538,30 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
 
-      # Keep the newest artifacts within 2 GiB before the successful
-      # default-branch save. Failed, cancelled, PR, and exact-key rerun jobs do
-      # not prune because none of them publishes a snapshot.
+      # Before the successful default-branch save, keep only the artifacts
+      # whose task hashes this run's Turbo summaries list, then cap what is
+      # left at the newest 2 GiB. Pull requests test their merge with the
+      # latest main, so artifacts of older main trees can never hit. A cache
+      # hit does not touch an artifact's mtime, so an mtime-only cap evicts the
+      # longest-hitting artifacts first. Without run summaries only the cap
+      # applies. Failed, cancelled, PR, and exact-key rerun jobs do not prune
+      # because none of them publishes a snapshot.
       - name: Prune the Turbo cache before save
         if: success() && github.ref == 'refs/heads/main' && steps.turbo-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           cache_dir=.turbo/cache
           [ -d "$cache_dir" ] || exit 0
+          shopt -s nullglob
+          summaries=(.turbo/runs/*.json)
+          if [ "${#summaries[@]}" -gt 0 ]; then
+            used=$(jq -r '.tasks[].hash' "${summaries[@]}")
+            find "$cache_dir" -type f -printf '%f\t%p\n' |
+              awk -F'\t' -v used="$used" '
+                BEGIN { split(used, hashes, "\n"); for (i in hashes) keep[hashes[i]] }
+                { hash = $1; sub(/[.-].*/, "", hash); if (!(hash in keep)) print $2 }' |
+              xargs -r rm -f --
+          fi
           find "$cache_dir" -type f -printf '%T@\t%k\t%p\n' |
             sort -rn |
             awk -F'\t' -v budget=$((2 * 1024 * 1024)) \
