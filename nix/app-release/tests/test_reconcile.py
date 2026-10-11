@@ -360,18 +360,57 @@ class ReconcileTest(HostTestCase):
         )
 
     def test_an_app_that_fails_to_recover_does_not_hold_back_the_others(self) -> None:
+        worker_green = "podman-worker-green.service"
         for unit in ("podman-web-blue.service", "podman-worker-blue.service"):
             self.world.running[unit] = "hung"
         self.world.unhealthy.add("hung")
-        self.world.failing_units.add("podman-worker-green.service")
+        self.world.failing_units.add(worker_green)
         reconcile(self.world.context())
         state = self.state()
         self.assertEqual(state.apps["web"].slot, "green")
         self.assertEqual(self.upstream.read_text(), "127.0.0.1:8002\n")
         self.assertEqual(state.apps["worker"].slot, "blue")
-        self.assertEqual(self.world.active_state("podman-worker-green.service"), "inactive")
+        self.assertEqual(self.world.active_state(worker_green), "inactive")
         self.assertIn("worker stays down", self.world.output())
         self.assertEqual(state.history[-1].apps, {"web": self.v1["web"].digest})
+        # Next, web hangs again and the worker's new slot starts but is unhealthy too. Once
+        # told to stop, it drains for longer than a host activation may take.
+        self.world.running["podman-web-green.service"] = "hung"
+        self.world.failing_units.clear()
+        self.world.unhealthy.add(self.v1["worker"].id)
+        self.world.slow_stop.add(worker_green)
+        self.world.calls.clear()
+        reconcile(self.world.context())
+        state = self.state()
+        self.assertEqual(state.apps["web"].slot, "blue")
+        self.assertEqual(self.upstream.read_text(), "127.0.0.1:8001\n")
+        self.assertEqual(state.apps["worker"].slot, "blue")
+        self.assertIn(("stop-no-block", worker_green), self.world.calls)
+        self.assertNotIn(("stop", worker_green), self.world.calls)
+        self.assertEqual(self.world.active_state(worker_green), "deactivating")
+        self.assertIn(f"{worker_green} drains on its own", self.world.output())
+        self.assertEqual(state.history[-1].apps, {"web": self.v1["web"].digest})
+
+    def test_a_failed_idle_worker_slot_warns_in_the_check_and_resets_first(self) -> None:
+        # The worker's last drain ended failed after the reconcile that started it returned.
+        worker_green = "podman-worker-green.service"
+        self.world.states[worker_green] = "failed"
+        check(self.world.context())
+        self.assertIn(
+            f"warning: worker: the idle worker slot {worker_green} failed", self.world.output()
+        )
+        self.assertEqual(self.world.active_state(worker_green), "failed")
+        # A failed active slot is not reset first: the reconcile starts it again.
+        self.world.states["podman-worker-blue.service"] = "failed"
+        self.world.calls.clear()
+        reconcile(self.world.context())
+        self.assertEqual(self.world.calls[0], ("reset-failed", worker_green))
+        self.assertEqual(
+            [call for call in self.world.calls if call[0] == "reset-failed"],
+            [("reset-failed", worker_green)],
+        )
+        self.assertEqual(self.world.active_state(worker_green), "inactive")
+        self.assertEqual(self.world.restarts(), ["podman-worker-blue.service"])
 
     def test_reconcile_leaves_an_unhealthy_recreate_app_to_refresh(self) -> None:
         # Its restart runs preStopCommand, which has no time limit, so it must not hold up

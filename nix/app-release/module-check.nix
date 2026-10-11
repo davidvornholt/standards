@@ -132,6 +132,27 @@ let
     lib.assertMsg (errors == expected) (
       "app-release module assertions (undefined migration service): expected ${builtins.toJSON expected}, got ${builtins.toJSON errors}"
     );
+  # A reconcile waits for a starting worker unit it stops, so that unit must not run a
+  # container that drains.
+  workerNotify =
+    let
+      errors = failedAssertions (
+        evaluate {
+          shop = unit {
+            worker = worker // {
+              retireWithoutWaiting = true;
+              container.podman.sdnotify = "healthy";
+            };
+          };
+        } { }
+      );
+      expected = [
+        "services.appRelease.units.shop.apps.worker: retireWithoutWaiting needs the default container.podman.sdnotify = \"conmon\". With another mode the unit stays activating while its container runs, and a reconcile that stops it during host activation waits for the whole drain. Remove the sdnotify setting or retireWithoutWaiting."
+      ];
+    in
+    lib.assertMsg (errors == expected) (
+      "app-release module assertions (worker sdnotify): expected ${builtins.toJSON expected}, got ${builtins.toJSON errors}"
+    );
   # Generated units: every container prepares its own image tag before it starts and stops
   # cleanly after SIGTERM, and host switches leave the migration service to releases.
   generated =
@@ -163,4 +184,4 @@ let
       && !services.shop-migrate.restartIfChanged
     ) "app-release module: generated container or migration units are missing their activation settings";
 in
-builtins.all check cases && undefinedMigration && generated
+builtins.all check cases && undefinedMigration && workerNotify && generated

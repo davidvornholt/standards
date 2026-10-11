@@ -171,7 +171,9 @@ with subtest("release v2 blue to green with zero failed requests"):
     # Stopping the old slot closed Caddy's pooled connections to it.
     machine.wait_until_fails(caddy_connections(8001), timeout=10)
     responses = stop_load()
-    worker_retiring = active_state("podman-worker-blue.service")
+    worker_retiring = machine.succeed(
+        "systemctl show -p ActiveState -p SubState podman-worker-blue.service"
+    ).split()
     assert result["result"] == "released"
     assert set(responses) == {"v1", "v2"}, responses
     assert responses[-1] == "v2"
@@ -192,8 +194,9 @@ with subtest("release v2 blue to green with zero failed requests"):
     assert lines("/run/pre-stop.log") == ["pre-stop", "jobs", "jobs"]
     assert active_state("podman-web-blue.service") == "inactive"
     assert active_state("podman-worker-green.service") == "active"
-    # Revision 2: the old worker was only told to stop and is still draining.
-    assert worker_retiring == "deactivating", worker_retiring
+    # Revision 2: the old worker was only told to stop and is still draining. It drains in
+    # the `stop` sub-state, while ExecStop runs; the reconcile does not wait for a worker there.
+    assert sorted(worker_retiring) == ["ActiveState=deactivating", "SubState=stop"], worker_retiring
 
 with subtest("a release while the old worker drains fails fast and changes nothing"):
     before = state()

@@ -225,6 +225,7 @@ let
           description = ''
             Port-less blue-green only: retire the old slot with `systemctl stop --no-block`,
             so a long drain does not hold the release. A release fails while the previous worker is still draining.
+            Requires the default `container.podman.sdnotify = "conmon"`.
           '';
         };
         priority = mkOption {
@@ -495,6 +496,12 @@ let
       {
         assertion = builtins.all (c: c.podman == null || c.podman.user == "root") evaluatedContainers;
         message = "${where}: app-release tags images in root's podman storage, so container.podman.user must stay root.";
+      }
+      {
+        assertion =
+          !app.retireWithoutWaiting
+          || builtins.all (c: c.podman == null || c.podman.sdnotify == "conmon") evaluatedContainers;
+        message = "${where}: retireWithoutWaiting needs the default container.podman.sdnotify = \"conmon\". With another mode the unit stays activating while its container runs, and a reconcile that stops it during host activation waits for the whole drain. Remove the sdnotify setting or retireWithoutWaiting.";
       }
     ];
 

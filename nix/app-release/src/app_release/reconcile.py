@@ -156,18 +156,73 @@ def _repair_hint(ctx: Context) -> str:
 
 
 def _settle(ctx: Context, app: AppConfig, unit: str) -> None:
-    """Leave a unit this run failed to start inactive unless it runs.
+    """Leave a unit this run failed to start inactive, unless it runs or drains.
 
     A host switch fails while any unit is failed or restarting after a failure. The unit
-    may still restart after its failure, or still stop after a failed refresh told it to
-    without waiting, and either can fail it again; a blocking stop waits for both. Other
-    units of the app stay untouched: an old worker slot may still drain.
+    may still restart after its failure, or still stop after this run told it to without
+    waiting, and either can fail it again; a blocking stop waits for both. Other units of
+    the app stay untouched: an old worker slot may still drain.
+
+    A worker that retires without waiting is not waited for while its container drains,
+    because the drain may outlast the host activation. systemd drains a container in the
+    `stop` sub-state, where ExecStop runs `podman stop`, and enters it only from a running
+    unit. Stopping a unit that is still starting or waiting to restart skips ExecStop, so
+    that stop stays blocking. The module keeps these workers on `--sdnotify=conmon`, so a
+    unit counts as started as soon as its container runs; no container drains, and the stop
+    ends within seconds.
+
+    The drain can end failed before the host switch checks its units, which fails that
+    switch. That needs the worker to finish draining within the rest of the switch and to
+    exit with a status other than 0 or 143; these workers retire without waiting because
+    their drains are long. `retire` leaves every replaced worker in the same position. The
+    next switch resets failed units before it starts any, and the next reconcile resets a
+    failed idle worker slot first; see `_reset_failed_idle_workers`.
     """
+    if (
+        app.retire_without_waiting
+        and ctx.services.active_state(unit) == "deactivating"
+        and ctx.services.sub_state(unit) == "stop"
+    ):
+        ctx.out.line(f"{app.name}: {unit} drains on its own; not waiting for it")
+        return
     if ctx.services.active_state(unit) in ("activating", "deactivating"):
         error = ctx.services.stop(unit, block=True)
         if error is not None:
             ctx.out.warn(f"{app.name}: cannot stop {unit}: {error}")
     if ctx.services.active_state(unit) == "failed":
+        ctx.services.reset_failed(unit)
+
+
+def _failed_idle_workers(ctx: Context, state: State | None) -> list[tuple[AppConfig, str]]:
+    """The failed idle slot of each worker that retires without waiting.
+
+    Its drain goes on after the run that told it to stop, and ends failed when the worker
+    exits with a status other than 0 or 143 or outlasts its stop timeout.
+    """
+    failed: list[tuple[AppConfig, str]] = []
+    for name in sorted(ctx.unit.apps):
+        app = ctx.unit.apps[name]
+        app_state = state.apps.get(name) if state is not None else None
+        if not app.retire_without_waiting or app_state is None or app_state.slot is None:
+            continue
+        unit = app.unit(other_slot(app_state.slot))
+        if ctx.services.active_state(unit) == "failed":
+            failed.append((app, unit))
+    return failed
+
+
+def _reset_failed_idle_workers(ctx: Context) -> None:
+    """Reset failed idle worker slots before anything in the run can fail.
+
+    A host switch fails while any unit is failed. It resets failed units before it starts
+    any, but a drain can end failed after that, while the switch runs. Only idle slots are
+    reset; the run starts a failed active slot again.
+    """
+    for app, unit in _failed_idle_workers(ctx, ctx.store.load()):
+        ctx.out.warn(
+            f"{app.name}: the idle worker slot {unit} failed; resetting it. "
+            f"journalctl -u {unit} shows why."
+        )
         ctx.services.reset_failed(unit)
 
 
@@ -431,6 +486,7 @@ def _clean_up(ctx: Context, state: State) -> None:
 
 def reconcile(ctx: Context, *, force: bool = False) -> State:
     """Make the host run what the state says, bootstrapping it first if needed."""
+    _reset_failed_idle_workers(ctx)
     start_dependencies(ctx)
     state = _load(ctx)
     state, running, stale = _enforce(ctx, state, force=force)
@@ -451,8 +507,17 @@ def gc(ctx: Context) -> None:
 
 
 def check(ctx: Context) -> None:
-    """Fail unless the active slot of every app is healthy; changes nothing."""
+    """Fail unless the active slot of every app is healthy; changes nothing.
+
+    A failed idle worker slot only warns: the active slot still serves, and the next host
+    activation resets the failure.
+    """
     state = ctx.store.load()
+    for app, unit in _failed_idle_workers(ctx, state):
+        ctx.out.warn(
+            f"{app.name}: the idle worker slot {unit} failed; the next host activation "
+            f"resets it. journalctl -u {unit} shows why."
+        )
     problems: list[str] = []
     targets: list[HealthTarget] = []
     for name in sorted(ctx.unit.apps):

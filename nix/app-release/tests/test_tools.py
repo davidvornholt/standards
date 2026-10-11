@@ -186,6 +186,7 @@ class SystemctlTest(unittest.TestCase):
         runner = Recorder(
             {
                 ("systemctl", "show"): Completed(0, "deactivating\n", ""),
+                ("systemctl", "show", "--property=SubState"): Completed(0, "stop\n", ""),
                 ("systemctl", "reset-failed"): Completed(1, "", "Unit a.service not loaded.\n"),
                 ("systemctl", "restart"): Completed(
                     1,
@@ -204,6 +205,7 @@ class SystemctlTest(unittest.TestCase):
         )
         self.assertIsNone(systemctl.start("a.service", 10))
         self.assertEqual(systemctl.active_state("a.service"), "deactivating")
+        self.assertEqual(systemctl.sub_state("a.service"), "stop")
         self.assertEqual(
             runner.calls[:5],
             [

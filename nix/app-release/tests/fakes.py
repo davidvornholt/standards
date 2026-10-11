@@ -147,6 +147,9 @@ class World:
         # "failed", or "activating" for a unit systemd restarts after each failure.
         self.failing_state = "failed"
         self.slow_stop: set[str] = set()
+        # Slow stops that interrupted a start. systemd then signals the unit's processes at
+        # once; stopping a running unit first runs ExecStop, where a worker drains.
+        self.interrupted_starts: set[str] = set()
         # Seconds a started container takes to become healthy.
         self.warmup = 0.0
         self.launched: dict[str, float] = {}
@@ -326,6 +329,10 @@ class World:
         if state != "failed":
             if not block and unit in self.slow_stop:
                 self.states[unit] = "deactivating"
+                if state == "active":
+                    self.interrupted_starts.discard(unit)
+                else:
+                    self.interrupted_starts.add(unit)
             elif state in ("activating", "deactivating") and unit in self.failing_units:
                 self.states[unit] = "failed"
             else:
@@ -340,6 +347,13 @@ class World:
 
     def active_state(self, unit: str) -> str:
         return self.states.get(unit, "inactive")
+
+    def sub_state(self, unit: str) -> str:
+        state = self.active_state(unit)
+        if state == "deactivating":
+            return "stop-sigterm" if unit in self.interrupted_starts else "stop"
+        sub_states = {"active": "running", "activating": "auto-restart", "failed": "failed"}
+        return sub_states.get(state, "dead")
 
     # Prober
 
