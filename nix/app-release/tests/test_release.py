@@ -57,8 +57,10 @@ class ReleaseTest(HostTestCase):
     def test_migration_runs_first_with_the_candidate_image(self) -> None:
         self.release_v2()
         calls = self.world.calls
-        migration = calls.index(("start", MIGRATION))
-        first_restart = next(i for i, call in enumerate(calls) if call[0] == "restart")
+        migration = calls.index(("restart", MIGRATION))
+        first_restart = next(
+            i for i, call in enumerate(calls) if call[0] == "restart" and call[1] != MIGRATION
+        )
         self.assertLess(migration, first_restart)
         self.assertEqual(self.world.migration_saw, self.v2["web"].id)
         self.assertNotIn("localhost/app-release/web:candidate", self.world.names)
@@ -275,7 +277,7 @@ class ReleaseTest(HostTestCase):
                 {name: image.digest for name, image in v2.items()},
             )
         self.assertEqual(raised.exception.message, DRAINING)
-        self.assertNotIn(("start", MIGRATION), self.world.calls)
+        self.assertNotIn(("restart", MIGRATION), self.world.calls)
         self.assertEqual(self.world.restarts(), [])
         self.assertEqual(self.state(), before)
 
@@ -496,7 +498,7 @@ class RollbackTest(HostTestCase):
         self.release_v2()
         self.world.calls.clear()
         rollback(self.world.context(), claims(120, event_name="workflow_dispatch"))
-        self.assertNotIn(("start", MIGRATION), self.world.calls)
+        self.assertNotIn(("restart", MIGRATION), self.world.calls)
 
 
 if __name__ == "__main__":

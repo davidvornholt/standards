@@ -31,10 +31,18 @@ class Systemctl:
         lines = [line.strip() for line in result.stderr.splitlines() if line.strip()]
         return " ".join(lines).rstrip(".") if lines else result.summary()
 
+    def _reset_failed(self, unit: str) -> None:
+        # A unit that failed repeatedly, for example while its image was missing, refuses
+        # further starts until its start limit resets. A unit that never ran has nothing to
+        # reset, so the result does not matter.
+        self.runner([self.executable, "reset-failed", unit])
+
     def start(self, unit: str, timeout: float | None) -> str | None:
+        self._reset_failed(unit)
         return self._run("start", unit, timeout=timeout)
 
     def restart(self, unit: str, timeout: float | None) -> str | None:
+        self._reset_failed(unit)
         return self._run("restart", unit, timeout=timeout)
 
     def stop(self, unit: str, *, block: bool) -> str | None:

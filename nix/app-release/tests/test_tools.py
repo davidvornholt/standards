@@ -186,6 +186,7 @@ class SystemctlTest(unittest.TestCase):
         runner = Recorder(
             {
                 ("systemctl", "show"): Completed(0, "deactivating\n", ""),
+                ("systemctl", "reset-failed"): Completed(1, "", "Unit a.service not loaded.\n"),
                 ("systemctl", "restart"): Completed(
                     1,
                     "",
@@ -201,8 +202,18 @@ class SystemctlTest(unittest.TestCase):
             "Job for a.service failed because the control process exited with error code. "
             'See "systemctl status a.service" for details',
         )
+        self.assertIsNone(systemctl.start("a.service", 10))
         self.assertEqual(systemctl.active_state("a.service"), "deactivating")
-        self.assertEqual(runner.calls[0], ("systemctl", "stop", "--no-block", "a.service"))
+        self.assertEqual(
+            runner.calls[:5],
+            [
+                ("systemctl", "stop", "--no-block", "a.service"),
+                ("systemctl", "reset-failed", "a.service"),
+                ("systemctl", "restart", "a.service"),
+                ("systemctl", "reset-failed", "a.service"),
+                ("systemctl", "start", "a.service"),
+            ],
+        )
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -290,6 +301,10 @@ class CliTest(unittest.TestCase):
             self.assertIn("unknown unit 'shop'", output)
             self.assertEqual(self.run_cli(["reconcile"], root)[0], ExitCode.REJECTED)
             self.assertEqual(self.run_cli(["deploy", "shop"], root)[0], ExitCode.REJECTED)
+            self.assertEqual(self.run_cli(["prepare", "shop"], root)[0], ExitCode.REJECTED)
+            code, output = self.run_cli(["prepare", "shop", "web", "purple"], root)
+            self.assertEqual(code, ExitCode.REJECTED)
+            self.assertIn("unknown slot 'purple'", output)
             self.assertEqual(self.run_cli(["status"], root), (ExitCode.OK, ""))
 
     def test_local_operations_end_with_a_result(self) -> None:

@@ -6,13 +6,13 @@ from collections.abc import Callable
 from contextlib import ExitStack
 
 from app_release import executor, ssh
-from app_release.config import NAME_PATTERN, UnitConfig, configured_units
+from app_release.config import NAME_PATTERN, SLOTS, UnitConfig, configured_units
 from app_release.context import Context
 from app_release.environment import LOCK_TIMEOUT_SECONDS, Environment, current_environment
 from app_release.errors import AppReleaseError, ExitCode, RejectedError
 from app_release.fsutil import exclusive_lock
 from app_release.output import Output
-from app_release.reconcile import gc, reconcile, refresh
+from app_release.reconcile import gc, prepare, reconcile, refresh
 from app_release.report import safe_payload, status
 
 USAGE = """usage: app-release <command> [<unit>]
@@ -25,6 +25,9 @@ commands:
   refresh <unit>     restart every app of the unit at its current digest without downtime
   status [<unit>]    print the release state and the live units (all units by default)
   gc [<unit>]        remove local images no app needs (all units by default)
+  prepare <unit> <app> [<slot>]
+                     tag the image a container starts from when the tag is missing; the
+                     generated container units run it before they start
 
 CI calls the host through the SSH forced command app-release-ssh <unit>.
 
@@ -80,6 +83,18 @@ def _local(environment: Environment, operation: str, unit_name: str, out: Output
             return ExitCode.OK
 
 
+def _prepare(environment: Environment, arguments: list[str], out: Output) -> int:
+    unit_name, app_name, *rest = arguments
+    slot = rest[0] if rest else None
+    if slot is not None and slot not in SLOTS:
+        message = f"unknown slot {slot!r}; expected one of {', '.join(SLOTS)}"
+        raise RejectedError(message)
+    unit = environment.load_unit(unit_name)
+    # No lock: releases and the reconcile hold it while they start these units.
+    prepare(environment.context(unit, out), app_name, slot)
+    return ExitCode.OK
+
+
 def run_cli(arguments: list[str], environment_factory: Callable[[], Environment]) -> int:
     out = Output(sys.stdout)
     if not arguments or arguments[0] in ("-h", "--help", "help"):
@@ -90,6 +105,8 @@ def run_cli(arguments: list[str], environment_factory: Callable[[], Environment]
         environment = environment_factory()
         if command == "execute-request" and len(rest) == 1:
             return executor.main(environment, rest[0])
+        if command == "prepare" and len(rest) in (2, 3):
+            return _prepare(environment, rest, out)
         if command not in ("reconcile", "refresh", "status", "gc") or len(rest) > 1:
             sys.stderr.write(USAGE)
             return ExitCode.REJECTED
@@ -98,7 +115,7 @@ def run_cli(arguments: list[str], environment_factory: Callable[[], Environment]
         for unit in units:
             code = _local(environment, command, unit, out)
             if code != ExitCode.OK:
-                return code
+                break
     except AppReleaseError as error:
         out.line(f"error: {error.message}")
         out.result(safe_payload(None, None, "failed", error.message))

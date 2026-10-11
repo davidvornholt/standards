@@ -302,6 +302,7 @@ let
                   description = ''
                     Oneshot service, without `RemainAfterExit` and `wantedBy`, that runs migrations from
                     `localhost/app-release/<app>:candidate`. A failure fails the release before traffic moves.
+                    The module sets its `restartIfChanged` to false, because only releases run it.
                   '';
                 };
                 app = mkOption {
@@ -503,8 +504,11 @@ let
       where = "services.appRelease.units.${unitName}";
       migrationService =
         if unit.migration == null then null else lib.removeSuffix ".service" unit.migration.service;
+      # The module sets restartIfChanged on the migration service, so the service always
+      # exists; one that runs nothing was never defined by the host.
       migrationDefinition =
-        if migrationService == null then null else config.systemd.services.${migrationService} or null;
+        if migrationService == null then null else config.systemd.services.${migrationService};
+      migrationDefined = migrationDefinition != null && migrationDefinition.serviceConfig ? ExecStart;
       generatedContainerUnits = lib.concatLists (
         lib.mapAttrsToList (
           appName: app:
@@ -524,12 +528,12 @@ let
         message = "${where}: migration.app must name an app of this unit.";
       }
       {
-        assertion = unit.migration == null || migrationDefinition != null;
+        assertion = unit.migration == null || migrationDefined;
         message = "${where}: migration.service must be defined in systemd.services.";
       }
       {
         assertion =
-          migrationDefinition == null
+          !migrationDefined
           || (
             (migrationDefinition.serviceConfig.Type or "simple") == "oneshot"
             && !(isTruthy (migrationDefinition.serviceConfig.RemainAfterExit or false))
@@ -537,7 +541,7 @@ let
         message = "${where}: migration.service must be Type=oneshot without RemainAfterExit, so every release runs it.";
       }
       {
-        assertion = migrationDefinition == null || migrationDefinition.wantedBy == [ ];
+        assertion = !migrationDefined || migrationDefinition.wantedBy == [ ];
         message = "${where}: migration.service must not be wanted by any target; app-release starts it.";
       }
       {
@@ -597,15 +601,41 @@ let
   ) allApps;
 
   containerServices = lib.concatMap (
-    { appName, app, ... }:
-    map (containerName: {
+    {
+      unitName,
+      appName,
+      app,
+      ...
+    }:
+    lib.mapAttrsToList (slot: containerName: {
       name = "podman-${containerName}";
       value = lib.mkMerge [
-        { restartIfChanged = false; }
+        {
+          restartIfChanged = false;
+          # A unit that starts the container before the reconcile does, for example on the
+          # host's first activation, would otherwise find no image tag and fail.
+          serviceConfig.ExecStartPre = [
+            "${package}/bin/app-release prepare ${unitName} ${appName}${
+              lib.optionalString (isBlueGreen app) " ${slot}"
+            }"
+          ];
+        }
         app.serviceConfig
       ];
-    }) (builtins.attrValues (appContainers appName app))
+    }) (appContainers appName app)
   ) allApps;
+
+  # Releases run the migration service, so a host switch never should. Starting it during
+  # a switch fails without a candidate image, and switch-to-configuration would roll back.
+  migrationServices = lib.concatLists (
+    lib.mapAttrsToList (
+      _: unit:
+      lib.optional (unit.migration != null) {
+        name = lib.removeSuffix ".service" unit.migration.service;
+        value.restartIfChanged = false;
+      }
+    ) cfg.units
+  );
 
   unitServices = lib.concatLists (
     lib.mapAttrsToList (
@@ -746,7 +776,10 @@ in
       blueGreenContainers ++ recreateContainers
     );
 
-    systemd.services = builtins.listToAttrs (containerServices ++ unitServices);
+    systemd.services = lib.mkMerge [
+      (builtins.listToAttrs (containerServices ++ unitServices))
+      (builtins.listToAttrs migrationServices)
+    ];
 
     systemd.tmpfiles.settings."10-app-release" = tmpfileRules;
 
