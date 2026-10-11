@@ -44,6 +44,10 @@ python3Packages.buildPythonApplication {
     "--set APP_RELEASE_SYSTEMD_RUN ${lib.getExe' systemd "systemd-run"}"
     "--set APP_RELEASE_BASH ${lib.getExe bash}"
     "--set APP_RELEASE_CA_FILE ${caFile}"
+    "--set APP_RELEASE_CONFIG_DIR /etc/app-release"
+    "--set APP_RELEASE_STATE_DIR /var/lib/app-release"
+    "--set APP_RELEASE_RUN_DIR /run/app-release"
+    "--set APP_RELEASE_CACHE_DIR /var/cache/app-release"
     "--set PATH ${toolPath}:/run/current-system/sw/bin"
   ];
 

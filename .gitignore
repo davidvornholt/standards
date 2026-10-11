@@ -23,3 +23,8 @@ mise.*.local.toml
 # hashes. Consumers commit their lock (it is their drift baseline); the source
 # does not need one.
 sync-standards.lock
+
+# Python caches from running the nix/app-release checks outside Nix.
+__pycache__/
+.mypy_cache/
+.ruff_cache/
