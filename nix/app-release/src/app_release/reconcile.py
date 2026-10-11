@@ -1,4 +1,4 @@
-"""The local reconcile, refresh and gc operations."""
+"""The local reconcile, refresh, check and gc operations."""
 
 from dataclasses import replace
 
@@ -84,15 +84,22 @@ def _load(ctx: Context) -> State:
     return new_state
 
 
-def _enforce(ctx: Context, state: State) -> tuple[State, set[str], set[str]]:
+def _enforce(ctx: Context, state: State, *, force: bool) -> tuple[State, set[str], set[str]]:
     """DESIGN reconcile step 2.
 
     Returns the updated state, apps already running, and running apps whose active tag
-    pointed at another image (so they may run something else than the state says).
+    pointed at another image (so they may run something else than the state says). Fails
+    only for a forced refresh or apps whose definition changed; see `_give_up` for the others.
     """
     running: set[str] = set()
     stale: set[str] = set()
     started: list[HealthTarget] = []
+    failures: dict[str, str] = {}
+    changed = {
+        name
+        for name, app in ctx.unit.apps.items()
+        if state.apps[name].definition_hash != app.definition_hash
+    }
     for name in sorted(ctx.unit.apps):
         app = ctx.unit.apps[name]
         app_state = state.apps[name]
@@ -124,15 +131,56 @@ def _enforce(ctx: Context, state: State) -> tuple[State, set[str], set[str]]:
             continue
         ctx.out.line(f"{name}: starting {unit}")
         error = ctx.services.restart(unit, timeout=app.health.timeout_seconds)
+        # A later activation retries this definition even if its first start failed.
+        state = _record_definitions(ctx, state, {name})
         if error is not None:
-            message = f"{name}: {unit} failed to start: {error}"
-            raise FailedError(message)
+            failures[name] = f"{name}: {unit} failed to start: {error}"
+            continue
         started.append(HealthTarget(app, app_state.slot))
-    failures = wait_healthy(ctx, started)
-    if failures:
-        raise FailedError("; ".join(failures.values()))
-    _route_to(started)
+    failures |= wait_healthy(ctx, started)
+    fatal = [failures[name] for name in sorted(failures) if force or name in changed]
+    if fatal:
+        raise FailedError("; ".join(fatal))
+    for name in failures:
+        _settle(ctx, ctx.unit.apps[name], ctx.unit.apps[name].unit(state.apps[name].slot))
+    _give_up(ctx, failures)
+    _route_to([target for target in started if target.app.name not in failures])
     return state, running, stale
+
+
+def _repair_hint(ctx: Context) -> str:
+    return (
+        "Check the container logs with journalctl, fix the cause, then run "
+        f"app-release refresh {ctx.unit.name}, release a fixed version, or roll back."
+    )
+
+
+def _settle(ctx: Context, app: AppConfig, unit: str) -> None:
+    """Leave a unit this run failed to start inactive unless it runs.
+
+    A host switch fails while any unit is failed or restarting after a failure. The unit
+    may still restart after its failure, or still stop after a failed refresh told it to
+    without waiting, and either can fail it again; a blocking stop waits for both. Other
+    units of the app stay untouched: an old worker slot may still drain.
+    """
+    if ctx.services.active_state(unit) in ("activating", "deactivating"):
+        error = ctx.services.stop(unit, block=True)
+        if error is not None:
+            ctx.out.warn(f"{app.name}: cannot stop {unit}: {error}")
+    if ctx.services.active_state(unit) == "failed":
+        ctx.services.reset_failed(unit)
+
+
+def _give_up(ctx: Context, failures: dict[str, str]) -> None:
+    """Report apps that stay down without failing.
+
+    Apps get here only when this run does not apply a changed definition to them, so they
+    were already down or broken. Failing would fail every host activation that reconciles
+    the unit, and its rollback, until someone repairs them; `app-release check` fails for
+    them instead.
+    """
+    for name, message in sorted(failures.items()):
+        ctx.out.warn(f"{message}; {name} stays down. {_repair_hint(ctx)}")
 
 
 def _route_to(targets: list[HealthTarget]) -> None:
@@ -200,9 +248,14 @@ def _refresh_recreate(ctx: Context, state: State, app: AppConfig) -> State:
     )
     if failures:
         # The previous definition is gone from the host, so there is nothing to restore.
-        # Clearing the hash makes the next reconcile or release restart the app again.
+        # Record the configured one, which the container now runs. A later reconcile of the
+        # same definition, such as the restore after a failed rollback, then retries an app
+        # that stays down without failing its host activation; a cleared hash would fail
+        # every activation until someone repairs the app.
         ctx.store.save(
-            state.with_app(app.name, replace(state.apps[app.name], definition_hash=None))
+            state.with_app(
+                app.name, replace(state.apps[app.name], definition_hash=app.definition_hash)
+            )
         )
         message = (
             f"{failures[app.name]}; the previous definition cannot be restored; "
@@ -217,7 +270,7 @@ def _refresh_recreate(ctx: Context, state: State, app: AppConfig) -> State:
 
 
 def _record_definitions(ctx: Context, state: State, names: set[str]) -> State:
-    """Apps that were started now run the configured definition."""
+    """Record the configured definitions whose start was attempted."""
     new_state = state
     for name in sorted(names):
         app = ctx.unit.apps[name]
@@ -234,7 +287,6 @@ def _refresh(
     ctx: Context, state: State, running: set[str], stale: set[str], *, force: bool
 ) -> State:
     """DESIGN reconcile step 3: restart running apps whose definition changed."""
-    state = _record_definitions(ctx, state, set(ctx.unit.apps) - running)
     due = [
         ctx.unit.apps[name]
         for name in sorted(running)
@@ -266,6 +318,73 @@ def _refresh(
     return state
 
 
+def _restart_unhealthy(ctx: Context, state: State, app: AppConfig) -> State | None:
+    """Restart an unhealthy app at its current digest; None when it is still unhealthy.
+
+    A blue-green app moves to its idle slot as a refresh does, so a slot that still serves
+    some requests keeps serving until the new one is healthy.
+    """
+    if app.blue_green:
+        slot = state.apps[app.name].slot
+        try:
+            image = ensure_image(ctx, app, state.apps[app.name].current.digest)
+            refreshed = _refresh_blue_green(ctx, state, [app], {app.name: image})
+        except AppReleaseError as error:
+            if slot is not None:
+                _settle(ctx, app, app.unit(other_slot(slot)))
+            ctx.out.warn(error.message)
+            return None
+        # The refresh skips, with a warning, a worker whose idle slot still drains.
+        return refreshed if refreshed.apps[app.name].slot != slot else None
+    pre_stop_error = run_pre_stop(ctx, app)
+    if pre_stop_error is not None:
+        # As when a release restores the previous version, restart anyway: the app is down.
+        ctx.out.warn(f"{pre_stop_error}; restarting {app.name} anyway")
+    unit = app.unit(None)
+    ctx.out.line(f"{app.name}: restarting {unit}")
+    restart_error = ctx.services.restart(unit, timeout=app.health.timeout_seconds)
+    problem = (
+        f"{app.name}: {unit} failed to start: {restart_error}"
+        if restart_error is not None
+        else wait_healthy(ctx, [HealthTarget(app, None)]).get(app.name)
+    )
+    if problem is not None:
+        _settle(ctx, app, unit)
+        ctx.out.warn(problem)
+        return None
+    return state
+
+
+def _recover(ctx: Context, state: State, names: set[str]) -> State:
+    """Restart running apps whose active slot is unhealthy; warn about those that stay so."""
+    apps = [ctx.unit.apps[name] for name in sorted(names)]
+    failures = wait_healthy(ctx, [HealthTarget(app, state.apps[app.name].slot) for app in apps])
+    recovered: dict[str, str] = {}
+    for app in sorted(
+        (app for app in apps if app.name in failures), key=lambda a: (a.priority, a.name)
+    ):
+        ctx.out.warn(f"{failures[app.name]}; restarting {app.name} at its current digest")
+        restarted = _restart_unhealthy(ctx, state, app)
+        if restarted is not None:
+            state = restarted
+            recovered[app.name] = state.apps[app.name].current.digest
+            del failures[app.name]
+    _give_up(ctx, failures)
+    if recovered:
+        state = state.with_history(
+            HistoryEntry(
+                at=ctx.clock.now(),
+                operation="recover",
+                result="recovered",
+                run_id=None,
+                actor=None,
+                apps=recovered,
+            )
+        )
+        ctx.store.save(state)
+    return state
+
+
 def _clean_up(ctx: Context, state: State) -> None:
     """DESIGN reconcile step 4: stop the slots that are not active, after the drain wait."""
     retirements: list[tuple[AppConfig, Slot]] = []
@@ -285,8 +404,9 @@ def reconcile(ctx: Context, *, force: bool = False) -> State:
     """Make the host run what the state says, bootstrapping it first if needed."""
     start_dependencies(ctx)
     state = _load(ctx)
-    state, running, stale = _enforce(ctx, state)
+    state, running, stale = _enforce(ctx, state, force=force)
     state = _refresh(ctx, state, running, stale, force=force)
+    state = _recover(ctx, state, running)
     _clean_up(ctx, state)
     collect_garbage(ctx)
     return state
@@ -299,6 +419,25 @@ def refresh(ctx: Context) -> State:
 
 def gc(ctx: Context) -> None:
     collect_garbage(ctx)
+
+
+def check(ctx: Context) -> None:
+    """Fail unless the active slot of every app is healthy; changes nothing."""
+    state = ctx.store.load()
+    problems: list[str] = []
+    targets: list[HealthTarget] = []
+    for name in sorted(ctx.unit.apps):
+        app = ctx.unit.apps[name]
+        app_state = state.apps.get(name) if state is not None else None
+        if app_state is None or app.blue_green != (app_state.slot is not None):
+            problems.append(f"{name}: not reconciled yet")
+            continue
+        targets.append(HealthTarget(app, app_state.slot))
+    failures = wait_healthy(ctx, targets)
+    problems.extend(failures[name] for name in sorted(failures))
+    if problems:
+        message = f"{'; '.join(problems)}. {_repair_hint(ctx)}"
+        raise FailedError(message)
 
 
 def prepare(ctx: Context, app_name: str, slot: Slot | None) -> None:
