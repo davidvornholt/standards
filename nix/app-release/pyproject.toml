@@ -48,6 +48,14 @@ ignore = [
   "SLF001",
   "ANN401",
 ]
+"vm-test.py" = [
+  # The NixOS test driver defines `machine`, `subtest` and the prepended
+  # `REVISIONS` header; it type-checks the script with those in scope.
+  "F821",
+  # Assertions and literal exit codes are the test's checks.
+  "S101",
+  "PLR2004",
+]
 
 [tool.mypy]
 strict = true

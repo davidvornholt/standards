@@ -44,6 +44,10 @@
             appRelease = self.packages.${system}.app-release;
           };
         }
+        # The VM test needs KVM, which CI only provides on x86_64-linux runners.
+        // nixpkgs.lib.optionalAttrs (system == "x86_64-linux") {
+          app-release-vm = pkgs.testers.runNixOSTest (import ./nix/app-release/vm-test.nix { inherit pkgs; });
+        }
       );
 
       devShells = forAllSystems (

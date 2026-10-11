@@ -252,8 +252,7 @@ let
       config = {
         upstreamFile =
           if isBlueGreen config && hasPorts config then "${stateRoot}/${unitName}/${name}.upstream" else null;
-        caddyUpstreamImport =
-          if config.upstreamFile == null then null else "import ${config.upstreamFile}";
+        caddyUpstreamImport = if config.upstreamFile == null then null else "import ${config.upstreamFile}";
       };
     };
 
@@ -377,7 +376,12 @@ let
     ];
 
   appAssertions =
-    { unitName, appName, app, ... }:
+    {
+      unitName,
+      appName,
+      app,
+      ...
+    }:
     let
       where = "services.appRelease.units.${unitName}.apps.${appName}";
       containerNames = builtins.attrValues (appContainers appName app);
@@ -483,7 +487,9 @@ let
           migrationService == null
           || builtins.all (
             service:
-            !(builtins.elem "${migrationService}.service" (service.requires ++ service.wants ++ service.bindsTo))
+            !(builtins.elem "${migrationService}.service" (
+              service.requires ++ service.wants ++ service.bindsTo
+            ))
           ) generatedContainerUnits;
         message = "${where}: app containers must not require migration.service.";
       }
@@ -668,7 +674,9 @@ in
         assertion = portCollisions == { };
         message = "services.appRelease: slot ports collide: ${
           lib.concatStringsSep "; " (
-            lib.mapAttrsToList (port: owners: "${port} used by ${lib.concatStringsSep ", " owners}") portCollisions
+            lib.mapAttrsToList (
+              port: owners: "${port} used by ${lib.concatStringsSep ", " owners}"
+            ) portCollisions
           )
         }.";
       }
