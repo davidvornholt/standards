@@ -114,7 +114,13 @@ with subtest("bootstrap from :production"):
     assert served(9000) == "v1"
     data = state()
     assert data["highestRunId"] == 0
-    assert data["history"][-1]["operation"] == "bootstrap"
+    # jobs-early-client started the jobs container before the reconcile; its prepare step
+    # tagged the image, and the reconcile restarted it once to record its definition.
+    assert [entry["operation"] for entry in data["history"]] == ["bootstrap", "refresh"]
+    assert active_state("jobs-early-client.service") == "active"
+    assert machine.succeed("systemctl show -p NRestarts --value podman-jobs.service").strip() == "0"
+    assert lines("/run/pre-stop.log") == ["pre-stop", "jobs", "jobs"]
+    machine.succeed("rm /run/pre-stop.log")
     assert current_digests(data) == digests_of("v1")
     assert previous_digests(data) == dict.fromkeys(APPS)
     assert data["apps"]["web"]["current"]["revision"] == REVISIONS["v1"]

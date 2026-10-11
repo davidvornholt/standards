@@ -202,7 +202,12 @@ class World:
         return self.stream.getvalue()
 
     def restarts(self) -> list[str]:
-        return [call[1] for call in self.calls if call[0] == "restart"]
+        """The container units restarted so far, without the migration runs."""
+        return [
+            call[1]
+            for call in self.calls
+            if call[0] == "restart" and not self._is_migration(call[1])
+        ]
 
     # ImageStore
 
@@ -280,10 +285,6 @@ class World:
     def start(self, unit: str, timeout: float | None) -> str | None:
         del timeout
         self.calls.append(("start", unit))
-        if self.unit.migration is not None and unit == self.unit.migration.service:
-            tag = self.unit.apps[self.unit.migration.app].local_tag("candidate")
-            self.migration_saw = self.names.get(tag)
-            return self.migration_error
         if self.states.get(unit) == "active":
             return None
         return self._launch(unit)
@@ -293,7 +294,15 @@ class World:
         self.calls.append(("restart", unit))
         return self._launch(unit)
 
+    def _is_migration(self, unit: str) -> bool:
+        return self.unit.migration is not None and unit == self.unit.migration.service
+
     def _launch(self, unit: str) -> str | None:
+        migration = self.unit.migration
+        if migration is not None and unit == migration.service:
+            tag = self.unit.apps[migration.app].local_tag("candidate")
+            self.migration_saw = self.names.get(tag)
+            return self.migration_error
         image_id = self.names.get(self.unit_tags.get(unit, ""))
         if unit in self.failing_units or image_id is None:
             self.states[unit] = "failed"

@@ -145,7 +145,9 @@ def _migrate(ctx: Context, targets: dict[str, Target]) -> None:
     ctx.out.line(f"running migration {migration.service} with {target.image.digest}")
     ctx.images.tag(target.image.id, tag)
     try:
-        error = ctx.services.start(migration.service, timeout=None)
+        # Restart rather than start: a migration unit that an earlier host configuration kept
+        # active stays active after the switch, and starting it again would do nothing.
+        error = ctx.services.restart(migration.service, timeout=None)
     finally:
         try:
             ctx.images.untag(target.image.id, tag)

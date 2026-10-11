@@ -2,9 +2,9 @@ import unittest
 from dataclasses import replace
 from unittest.mock import patch
 
-from app_release.config import SlotPorts
-from app_release.errors import CriticalError, ExitCode, FailedError
-from app_release.reconcile import reconcile, refresh
+from app_release.config import Slot, SlotPorts
+from app_release.errors import CriticalError, ExitCode, FailedError, RejectedError
+from app_release.reconcile import prepare, reconcile, refresh
 from app_release.release import release
 from tests.base import APPS, HostTestCase
 from tests.fakes import PRE_STOP, SHA_B, claims
@@ -44,6 +44,89 @@ class BootstrapTest(HostTestCase):
         self.assertIn("worker", raised.exception.message)
         self.assertIn("ghcr.io/owner/worker:production", raised.exception.message)
         self.assertIsNone(self.world.store.load())
+
+
+class PrepareTest(HostTestCase):
+    JOBS_TAG = "localhost/app-release/jobs:current"
+
+    def forget_state(self) -> None:
+        self.world.store.path.unlink()
+        self.world.local.clear()
+        self.world.names.clear()
+        self.world.states.clear()
+        self.world.running.clear()
+
+    def test_an_existing_tag_is_left_alone(self) -> None:
+        self.world.names[self.JOBS_TAG] = self.v1["web"].id
+        prepare(self.world.context(), "jobs", None)
+        self.assertEqual(self.world.calls, [])
+        self.assertEqual(self.world.names[self.JOBS_TAG], self.v1["web"].id)
+
+    def test_a_missing_tag_names_the_image_of_the_state(self) -> None:
+        del self.world.names[self.JOBS_TAG]
+        prepare(self.world.context(), "jobs", None)
+        self.assertEqual(self.world.names[self.JOBS_TAG], self.v1["jobs"].id)
+        self.assertFalse([call for call in self.world.calls if call[0] == "pull"])
+
+    def test_recreate_uses_the_recorded_image_after_a_strategy_change(self) -> None:
+        state = self.state()
+        self.world.registry["ghcr.io/owner/jobs:production"] = self.v1["web"]
+        slots: tuple[Slot, ...] = ("blue", "green")
+        for slot in slots:
+            with self.subTest(slot=slot):
+                stored = state.with_app("jobs", replace(state.apps["jobs"], slot=slot))
+                self.world.store.save(stored)
+                self.world.names.pop(self.JOBS_TAG, None)
+                with patch.object(self.world.store, "save") as save:
+                    prepare(self.world.context(), "jobs", None)
+                    save.assert_not_called()
+                self.assertEqual(self.world.names.get(self.JOBS_TAG), self.v1["jobs"].id)
+                self.assertEqual(self.state(), stored)
+
+    def test_before_the_first_reconcile_the_tag_comes_from_production(self) -> None:
+        self.forget_state()
+        prepare(self.world.context(), "jobs", None)
+        self.assertIn(("pull", "ghcr.io/owner/jobs:production"), self.world.calls)
+        self.assertIsNone(self.world.start("podman-jobs.service", timeout=None))
+        self.assertEqual(self.world.running["podman-jobs.service"], self.v1["jobs"].id)
+        self.assertIsNone(self.world.store.load())
+
+    def test_the_first_reconcile_restarts_a_container_started_early_once(self) -> None:
+        self.forget_state()
+        prepare(self.world.context(), "jobs", None)
+        self.world.start("podman-jobs.service", timeout=None)
+        reconcile(self.world.context())
+        state = self.state()
+        self.assertEqual([entry.operation for entry in state.history], ["bootstrap", "refresh"])
+        self.assertEqual(self.world.restarts().count("podman-jobs.service"), 1)
+        self.assertEqual(state.apps["jobs"].definition_hash, "def-1")
+        self.assertEqual(self.world.running["podman-jobs.service"], self.v1["jobs"].id)
+
+    def test_before_the_first_reconcile_only_blue_is_tagged(self) -> None:
+        self.forget_state()
+        prepare(self.world.context(), "web", "green")
+        self.assertNotIn("localhost/app-release/web:green", self.world.names)
+        prepare(self.world.context(), "web", "blue")
+        self.assertEqual(self.world.names["localhost/app-release/web:blue"], self.v1["web"].id)
+
+    def test_only_the_active_slot_of_the_state_is_tagged(self) -> None:
+        state = self.state()
+        self.world.store.save(state.with_app("web", replace(state.apps["web"], slot="green")))
+        del self.world.names["localhost/app-release/web:blue"]
+        prepare(self.world.context(), "web", "blue")
+        self.assertNotIn("localhost/app-release/web:blue", self.world.names)
+        prepare(self.world.context(), "web", "green")
+        self.assertEqual(self.world.names["localhost/app-release/web:green"], self.v1["web"].id)
+
+    def test_rejects_containers_the_unit_does_not_have(self) -> None:
+        cases: tuple[tuple[str, Slot | None], ...] = (
+            ("missing", None),
+            ("web", None),
+            ("jobs", "blue"),
+        )
+        for app, slot in cases:
+            with self.subTest(app=app, slot=slot), self.assertRaises(RejectedError):
+                prepare(self.world.context(), app, slot)
 
 
 class ReconcileTest(HostTestCase):

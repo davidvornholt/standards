@@ -4,7 +4,7 @@ from dataclasses import replace
 
 from app_release.config import AppConfig, Slot, other_slot
 from app_release.context import Context
-from app_release.errors import AppReleaseError, CriticalError, FailedError
+from app_release.errors import AppReleaseError, CriticalError, FailedError, RejectedError
 from app_release.podman import Image
 from app_release.state import AppState, HistoryEntry, Release, State
 from app_release.steps import (
@@ -25,7 +25,7 @@ from app_release.systemd import STOPPED_STATES
 PRODUCTION_TAG = "production"
 
 
-def _bootstrap_app(ctx: Context, app: AppConfig) -> AppState:
+def _production_image(ctx: Context, app: AppConfig) -> Image:
     reference = f"{app.image_repository}:{PRODUCTION_TAG}"
     ctx.out.line(f"{app.name}: bootstrapping from {reference}")
     try:
@@ -37,6 +37,11 @@ def _bootstrap_app(ctx: Context, app: AppConfig) -> AppState:
     if image is None:
         message = f"{app.name}: the tag {reference} is missing after the pull"
         raise FailedError(message)
+    return image
+
+
+def _bootstrap_app(ctx: Context, app: AppConfig) -> AppState:
+    image = _production_image(ctx, app)
     return AppState(
         slot="blue" if app.blue_green else None,
         definition_hash=None,
@@ -294,3 +299,38 @@ def refresh(ctx: Context) -> State:
 
 def gc(ctx: Context) -> None:
     collect_garbage(ctx)
+
+
+def prepare(ctx: Context, app_name: str, slot: Slot | None) -> None:
+    """Tag the image a container unit starts from when that tag is missing.
+
+    Every generated container unit runs this before it starts, without the unit lock, so
+    another unit that starts it before the reconcile does (on a host's first activation, for
+    example) finds its image instead of failing. Releases and the reconcile tag images
+    before they start units, so this only fills a missing tag of the active slot: with the
+    image the state records, or with `:production` before the first reconcile.
+    """
+    app = ctx.unit.apps.get(app_name)
+    if app is None or app.blue_green != (slot is not None):
+        message = f"unit {ctx.unit.name} has no container for app {app_name!r} in slot {slot}"
+        raise RejectedError(message)
+    tag = app.active_tag(slot)
+    if ctx.images.exists(tag):
+        return
+    stored = ctx.store.load()
+    app_state = stored.apps.get(app_name) if stored is not None else None
+    active = app_state.slot if app_state is not None else None
+    if app.blue_green and active is None:
+        active = "blue"
+    elif not app.blue_green:
+        active = None
+    if slot != active:
+        return
+    start_dependencies(ctx)
+    image = (
+        _production_image(ctx, app)
+        if app_state is None
+        else ensure_image(ctx, app, app_state.current.digest)
+    )
+    ctx.out.line(f"{app.name}: tagging {tag} before its container starts")
+    ctx.images.tag(image.id, tag)

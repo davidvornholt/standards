@@ -190,6 +190,22 @@ in
         };
       };
 
+      # Like an ingress proxy in front of a recreate app, this unit requires the jobs container
+      # and starts it at boot before the first reconcile has tagged any image.
+      systemd.services.jobs-early-client = {
+        description = "Use the jobs container before the first reconcile";
+        wantedBy = [ "multi-user.target" ];
+        requires = [ "podman-jobs.service" ];
+        after = [ "podman-jobs.service" ];
+        before = [ "app-release-shop.service" ];
+        path = [ pkgs.curl ];
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+        };
+        script = "curl -fsS -m 5 --retry 30 --retry-delay 1 --retry-all-errors http://127.0.0.1:9000/health";
+      };
+
       systemd.services.shop-migrate = {
         description = "Run the shop migrations from the candidate image";
         path = [ config.virtualisation.podman.package ];

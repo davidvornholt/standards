@@ -72,35 +72,88 @@ let
       ];
     }
   ];
+  evaluate =
+    units: services:
+    import "${nixpkgsPath}/nixos/lib/eval-config.nix" {
+      system = "x86_64-linux";
+      modules = [
+        ./module.nix
+        {
+          system.stateVersion = "26.05";
+          boot.loader.grub.enable = false;
+          fileSystems."/" = {
+            device = "none";
+            fsType = "tmpfs";
+          };
+          virtualisation.podman.enable = true;
+          services.appRelease = {
+            enable = true;
+            inherit units;
+          };
+          systemd.services = services;
+        }
+      ];
+    };
   check =
     case:
     let
-      evaluated = import "${nixpkgsPath}/nixos/lib/eval-config.nix" {
-        system = "x86_64-linux";
-        modules = [
-          ./module.nix
-          {
-            system.stateVersion = "26.05";
-            boot.loader.grub.enable = false;
-            fileSystems."/" = {
-              device = "none";
-              fsType = "tmpfs";
-            };
-            virtualisation.podman.enable = true;
-            services.appRelease = {
-              enable = true;
-              inherit (case) units;
-            };
-          }
-        ];
-      };
-      errors = map (assertion: assertion.message) (
-        builtins.filter (assertion: !assertion.assertion) evaluated.config.assertions
-      );
+      evaluated = evaluate case.units { };
+      errors = failedAssertions evaluated;
       expected = map (message: "services.appRelease: ${message}.") case.errors;
     in
     lib.assertMsg (errors == expected) (
       "app-release module assertions (${case.name}): expected ${builtins.toJSON expected}, got ${builtins.toJSON errors}"
     );
+  migratingUnits = {
+    shop = unit {
+      web = worker;
+      jobs = recreate;
+    }
+    // {
+      migration = {
+        service = "shop-migrate.service";
+        app = "web";
+      };
+    };
+  };
+  failedAssertions =
+    evaluated: map (assertion: assertion.message) (
+      builtins.filter (assertion: !assertion.assertion) evaluated.config.assertions
+    );
+  # The module sets restartIfChanged on the migration service, which must not hide that
+  # the host never defined it.
+  undefinedMigration =
+    let
+      errors = failedAssertions (evaluate migratingUnits { });
+      expected = [
+        "services.appRelease.units.shop: migration.service must be defined in systemd.services."
+      ];
+    in
+    lib.assertMsg (errors == expected) (
+      "app-release module assertions (undefined migration service): expected ${builtins.toJSON expected}, got ${builtins.toJSON errors}"
+    );
+  # Generated units: every container prepares its own image tag before it starts, and host
+  # switches leave the migration service to releases.
+  generated =
+    let
+      services =
+        (evaluate migratingUnits {
+          shop-migrate = {
+            script = "true";
+            serviceConfig.Type = "oneshot";
+          };
+        }).config.systemd.services;
+      prepares =
+        service: command:
+        builtins.any (lib.hasSuffix "/bin/app-release prepare ${command}") (
+          lib.toList services.${service}.serviceConfig.ExecStartPre
+        );
+    in
+    lib.assertMsg (
+      prepares "podman-web-blue" "shop web blue"
+      && prepares "podman-web-green" "shop web green"
+      && prepares "podman-jobs" "shop jobs"
+      && !services.shop-migrate.restartIfChanged
+    ) "app-release module: generated container or migration units are missing their activation settings";
 in
-builtins.all check cases
+builtins.all check cases && undefinedMigration && generated
