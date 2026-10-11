@@ -5,9 +5,12 @@ import { collectStructureProblems } from './structure-check';
 import {
   buildConsumer,
   CANONICAL_SCRIPTS,
+  CANONICAL_TURBO_TASKS,
   cleanupStructureTmps,
   ROOT_LINT_SCRIPTS,
+  ROOT_LINT_TASKS,
   consumerRootManifest as rootManifest,
+  turboJson,
   writeInto as write,
 } from './structure-test-support';
 
@@ -17,6 +20,18 @@ const WORKSPACES_REQUIREMENT =
   'package.json: "workspaces" must be a non-empty array of literal paths or one-level "<dir>/*" patterns';
 const aliasProblem = (name: string): string =>
   `package.json: root script "${name}" must invoke Turbo directly with "turbo"`;
+const LINT_TASK_PROBLEMS = {
+  defineLint:
+    'turbo.json: define the root task "//#lint" as { "outputs": [] }; Turbo runs the root "lint" script only through that task, so without it turbo run lint never runs Biome',
+  defineLintFix:
+    'turbo.json: define the root task "//#lint:fix" as { "cache": false, "outputs": [] }; Turbo runs the root "lint:fix" script only through that task, so without it turbo run lint:fix never runs Biome',
+  lintInputs:
+    'turbo.json: remove "inputs" from the root task "//#lint"; the default inputs cover every file Biome checks, and a narrower set replays a cached pass after a linted file changes',
+  lintFixCache:
+    'turbo.json: set "cache": false on the root task "//#lint:fix"; a cache hit replays the previous output instead of running Biome\'s fixes',
+} as const;
+const removeLintTaskProblem = (key: string): string =>
+  `turbo.json: remove task "${key}"; linting runs once at the repository root through the root tasks "//#lint" and "//#lint:fix"`;
 const aliasSyntaxProblem = (name: string): string =>
   `package.json: root script "${name}" contains shell syntax the structure gate does not parse (quotes, |, ;, #, backticks, $(, CR/LF line breaks, or malformed ampersand separators); write one command with plain arguments, using --filter=./apps/* for a glob`;
 
@@ -209,6 +224,144 @@ describe('collectStructureProblems workspace declarations', () => {
     const problems = await collect(consumer);
     expect(problems).toEqual([
       'packages/ui: internal workspace version must be "0.0.0"',
+    ]);
+  });
+});
+
+describe('collectStructureProblems root lint tasks', () => {
+  it.each([
+    [
+      'workspace lint tasks in place of the root tasks',
+      {
+        lint: { outputs: [] },
+        'lint:fix': { cache: false, outputs: [] },
+        test: { outputs: [] },
+      },
+      [
+        LINT_TASK_PROBLEMS.defineLint,
+        LINT_TASK_PROBLEMS.defineLintFix,
+        removeLintTaskProblem('lint'),
+        removeLintTaskProblem('lint:fix'),
+      ],
+    ],
+    [
+      'a leftover workspace lint task beside the root tasks',
+      { ...CANONICAL_TURBO_TASKS, lint: { dependsOn: ['^lint'] } },
+      [removeLintTaskProblem('lint')],
+    ],
+    [
+      'package lint overrides',
+      {
+        ...CANONICAL_TURBO_TASKS,
+        'web#lint': { outputs: [] },
+        '@repo/ui#lint:fix': { cache: false },
+      },
+      [
+        removeLintTaskProblem('web#lint'),
+        removeLintTaskProblem('@repo/ui#lint:fix'),
+      ],
+    ],
+    [
+      'root tasks that are not task objects',
+      { '//#lint': null, '//#lint:fix': true },
+      [LINT_TASK_PROBLEMS.defineLint, LINT_TASK_PROBLEMS.defineLintFix],
+    ],
+    [
+      'narrowed //#lint inputs',
+      {
+        ...CANONICAL_TURBO_TASKS,
+        '//#lint': { inputs: ['apps/**'], outputs: [] },
+      },
+      [LINT_TASK_PROBLEMS.lintInputs],
+    ],
+    [
+      'explicit default //#lint inputs',
+      {
+        ...CANONICAL_TURBO_TASKS,
+        '//#lint': { inputs: ['$TURBO_DEFAULT$'], outputs: [] },
+      },
+      [LINT_TASK_PROBLEMS.lintInputs],
+    ],
+    [
+      'a cached //#lint:fix',
+      { ...CANONICAL_TURBO_TASKS, '//#lint:fix': { outputs: [] } },
+      [LINT_TASK_PROBLEMS.lintFixCache],
+    ],
+    [
+      'an explicitly cached //#lint:fix',
+      {
+        ...CANONICAL_TURBO_TASKS,
+        '//#lint:fix': { cache: true, outputs: [] },
+      },
+      [LINT_TASK_PROBLEMS.lintFixCache],
+    ],
+  ])('rejects %s', async (_label, tasks, expected) => {
+    const consumer = buildConsumer();
+    write(consumer, 'turbo.json', turboJson(tasks));
+    expect(await collect(consumer)).toEqual(expected);
+  });
+});
+
+describe('collectStructureProblems turbo.json input', () => {
+  it.each([
+    ['without tasks', '{ "$schema": "https://turbo.build/schema.json" }'],
+    ['with tasks that are not an object', '{ "tasks": [] }'],
+  ])(
+    'requires both root lint tasks in a turbo.json %s',
+    async (_label, raw) => {
+      const consumer = buildConsumer();
+      write(consumer, 'turbo.json', raw);
+      expect(await collect(consumer)).toEqual([
+        LINT_TASK_PROBLEMS.defineLint,
+        LINT_TASK_PROBLEMS.defineLintFix,
+      ]);
+    },
+  );
+
+  it.each([
+    ['missing', null],
+    ['malformed', '{ "tasks": '],
+    ['an array', '[]'],
+  ])('rejects a turbo.json that is %s', async (_label, raw) => {
+    const consumer = buildConsumer();
+    if (raw === null) {
+      rmSync(join(consumer, 'turbo.json'));
+    } else {
+      write(consumer, 'turbo.json', raw);
+    }
+    expect(await collect(consumer)).toEqual([
+      'turbo.json must exist and contain a JSON object',
+    ]);
+  });
+
+  it('accepts comments, trailing commas, and extra root task settings', async () => {
+    const consumer = buildConsumer();
+    write(
+      consumer,
+      'turbo.json',
+      [
+        '{',
+        '  "tasks": {',
+        '    // Biome lints the whole repository once from the root.',
+        '    "//#lint": { "cache": false, "outputs": [], "passThroughEnv": ["CI"] },',
+        '    "//#lint:fix": { "cache": false, "outputs": [], },',
+        '    /* Unrelated lint-like task names stay allowed. */',
+        '    "lint:md": { "outputs": [] },',
+        '  },',
+        '}',
+        '',
+      ].join('\n'),
+    );
+    expect(await collect(consumer)).toEqual([]);
+  });
+
+  it('reports turbo.json problems beside a missing root manifest', async () => {
+    const consumer = buildConsumer();
+    rmSync(join(consumer, 'package.json'));
+    write(consumer, 'turbo.json', turboJson({ ...ROOT_LINT_TASKS, lint: {} }));
+    expect(await collect(consumer)).toEqual([
+      'package.json must exist and contain a JSON object',
+      removeLintTaskProblem('lint'),
     ]);
   });
 });

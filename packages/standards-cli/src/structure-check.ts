@@ -13,6 +13,7 @@ import {
 } from './structure-profile';
 import { filteredTurboAliasProblem, hasSafeCommands } from './structure-script';
 import { collectCiSecretsProblems } from './structure-secrets';
+import { collectTurboLintProblems } from './structure-turbo';
 import { inspectWorkspace, type Workspace } from './structure-workspace';
 
 const ROOT_FIXED_SCRIPTS = new Set(
@@ -155,14 +156,17 @@ export const collectStructureProblems = async (
   consumer: string,
   profile: StructureProfile,
 ): Promise<ReadonlyArray<string>> => {
-  const [root, secretsProblems, callerProblems] = await Promise.all([
-    readJsonFile(join(consumer, 'package.json')),
-    collectCiSecretsProblems(consumer),
-    collectSopsActionCallerProblems(consumer),
-  ]);
+  const [root, turboProblems, secretsProblems, callerProblems] =
+    await Promise.all([
+      readJsonFile(join(consumer, 'package.json')),
+      collectTurboLintProblems(consumer),
+      collectCiSecretsProblems(consumer),
+      collectSopsActionCallerProblems(consumer),
+    ]);
   if (root === null) {
     return [
       'package.json must exist and contain a JSON object',
+      ...turboProblems,
       ...secretsProblems,
       ...callerProblems,
     ];
@@ -194,6 +198,7 @@ export const collectStructureProblems = async (
     ...missingPublishedCliProblems(profile, workspaces),
     ...collectBunVersionProblems(root),
     ...inspectRootScripts(root, profile, requireA11y),
+    ...turboProblems,
     ...inspections.flatMap((i) => [...i.problems]),
     ...secretsProblems,
     ...callerProblems,

@@ -32,6 +32,7 @@ import {
   CI_SECRETS_YAML,
   ROOT_LINT_SCRIPTS,
   TEMPLATE_CI_SECRETS_YAML,
+  turboJson,
 } from './structure-test-support';
 
 const ENGINE = join(import.meta.dir, 'cli.ts');
@@ -81,6 +82,16 @@ const TURBO_CACHE_SAVE_CONDITION =
 const TURBO_CACHE_PRUNE_RUN = `set -euo pipefail
 cache_dir=.turbo/cache
 [ -d "$cache_dir" ] || exit 0
+shopt -s nullglob
+summaries=(.turbo/runs/*.json)
+if [ "\${#summaries[@]}" -gt 0 ]; then
+  used=$(jq -r '.tasks[].hash' "\${summaries[@]}")
+  find "$cache_dir" -type f -printf '%f\\t%p\\n' |
+    awk -F'\\t' -v used="$used" '
+      BEGIN { split(used, hashes, "\\n"); for (i in hashes) keep[hashes[i]] }
+      { hash = $1; sub(/[.-].*/, "", hash); if (!(hash in keep)) print $2 }' |
+    xargs -r rm -f --
+fi
 find "$cache_dir" -type f -printf '%T@\\t%k\\t%p\\n' |
   sort -rn |
   awk -F'\\t' -v budget=$((2 * 1024 * 1024)) \\
@@ -398,7 +409,7 @@ sudo rm -f /etc/apt/sources.list.d/google-chrome.list /etc/apt/sources.list.d/go
     },
     {
       name: 'Check',
-      env: { STANDARDS_SKIP_GITHUB_CHECK: 'true' },
+      env: { STANDARDS_SKIP_GITHUB_CHECK: 'true', TURBO_RUN_SUMMARY: 'true' },
       run: 'bun run check',
     },
   ];
@@ -1097,6 +1108,7 @@ const buildUpstream = (paths: ReadonlyArray<string> = STD_PATHS): string => {
     'template/apps/web/tsconfig.json',
     '{ "extends": "@davidvornholt/typescript-config/base" }\n',
   );
+  write(up, 'template/turbo.json', turboJson());
   write(up, 'template/secrets/ci.example.yaml', CI_EXAMPLE_YAML);
   write(up, 'managed/a.txt', 'alpha\n');
   write(up, 'managed/b.txt', 'beta\n');
@@ -2464,6 +2476,25 @@ describe('canonical standards workflow Postgres service', () => {
         `Quality Postgres service must use ${QUALITY_POSTGRES_IMAGE}`,
       );
     }
+  });
+
+  // The image's init server listens on the Unix socket only and restarts
+  // before the real server accepts TCP, so a one-second probe must use TCP
+  // or the job could start before the database endpoint resolves.
+  it('probes the TCP listener every second while Postgres starts', () => {
+    const { services } = parseWorkflow(STANDARDS_WORKFLOW).jobs.quality as {
+      readonly services: Record<string, Record<string, unknown>>;
+    };
+    expect(services.postgres?.options).toBe(
+      [
+        `--health-cmd "pg_isready -h 127.0.0.1 -U ${githubExpression("vars.CI_POSTGRES_USER || 'app'")} -d ${githubExpression("vars.CI_POSTGRES_DB || 'app'")}"`,
+        '--health-interval 10s',
+        '--health-timeout 5s',
+        '--health-retries 10',
+        '--health-start-period 30s',
+        '--health-start-interval 1s',
+      ].join(' '),
+    );
   });
 });
 
