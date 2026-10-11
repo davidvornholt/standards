@@ -16,9 +16,6 @@ const WORKFLOW = join(ACTUAL_UPSTREAM, '.github/workflows/standards.yml');
 const PROOF_STEP = 'Prove a validated pull request result';
 const EXECUTABLE_MODE = 0o755;
 const SHA_LENGTH = 40;
-const SECONDS_PER_HOUR = 3600;
-const MILLISECONDS_PER_SECOND = 1000;
-const STALE_TURBO_HOURS = 48;
 const RUN_ID = 12;
 const OTHER_RUN_ID = 13;
 const CHECK_RUN_ID = 34;
@@ -28,8 +25,7 @@ const FORK = 'contributor/repo';
 const SHA = 'a'.repeat(SHA_LENGTH);
 const HEAD = 'b'.repeat(SHA_LENGTH);
 const TREE = 'c'.repeat(SHA_LENGTH);
-const LOCK_HASH = 'd'.repeat(SHA_LENGTH);
-const REF = 'refs/heads/main';
+const MERGED_AT = '2026-10-10T12:00:00Z';
 const TREE_TITLE = 'Standards validated tree';
 const SNAKE_BOUNDARY = /[A-Z]/gu;
 const ENDPOINT_SEPARATOR = /[^A-Za-z0-9]/gu;
@@ -75,15 +71,6 @@ const proofEnvironment = (): Record<string, string> => {
   );
 };
 
-const hoursAgo = (hours: number): string =>
-  new Date(
-    Date.now() - hours * SECONDS_PER_HOUR * MILLISECONDS_PER_SECOND,
-  ).toISOString();
-
-const cacheList = (keys: ReadonlyArray<string>, createdAt = hoursAgo(1)) => ({
-  actionsCaches: keys.map((key) => ({ createdAt, key })),
-});
-
 const run = (overrides: Record<string, Json> = {}): Record<string, Json> => ({
   conclusion: 'success',
   event: 'pull_request',
@@ -122,8 +109,6 @@ const treeAnnotation = (overrides: Record<string, Json> = {}) => [
 const endpoints = {
   annotations: (id: number) =>
     `repos/${REPOSITORY}/check-runs/${id}/annotations?per_page=100`,
-  caches: (prefix: string) =>
-    `repos/${REPOSITORY}/actions/caches?ref=${REF}&key=${prefix}&per_page=100`,
   commit: `repos/${REPOSITORY}/git/commits/${SHA}`,
   jobs: (id: number) =>
     `repos/${REPOSITORY}/actions/runs/${id}/jobs?filter=latest&per_page=100`,
@@ -138,20 +123,12 @@ const provenApi = (): Record<string, Json> => ({
       base: { repo: { fullName: REPOSITORY } },
       head: { repo: { fullName: REPOSITORY }, sha: HEAD },
       mergeCommitSha: SHA,
-      mergedAt: hoursAgo(0),
+      mergedAt: MERGED_AT,
     },
   ],
   [endpoints.runs]: { workflowRuns: [run()] },
   [endpoints.jobs(RUN_ID)]: jobs(),
   [endpoints.annotations(CHECK_RUN_ID)]: treeAnnotation(),
-  [endpoints.caches('bun-packages-v2-')]: cacheList([
-    'bun-packages-v2-Linux-X64-old',
-    `bun-packages-v2-Linux-X64-${LOCK_HASH}`,
-  ]),
-  [endpoints.caches('playwright-v2-')]: cacheList([]),
-  [endpoints.caches('turbo-trusted-v2-')]: cacheList([
-    `turbo-trusted-v2-Linux-X64-${SHA}`,
-  ]),
 });
 
 const GH_STUB = `#!/usr/bin/env bash
@@ -161,7 +138,6 @@ shift
 endpoint=
 for argument in "$@"; do
   case "$argument" in
-    --paginate) ;;
     -*) echo "unexpected gh flag $argument" >&2; exit 2 ;;
     *) endpoint=$argument ;;
   esac
@@ -171,11 +147,7 @@ file="$FIXTURE/api/$(printf '%s' "$endpoint" | tr -c 'A-Za-z0-9' '_').json"
 cat "$file"
 `;
 
-const prove = (
-  api: Record<string, Json>,
-  lockHash = LOCK_HASH,
-  runAttempt = '1',
-) => {
+const prove = (api: Record<string, Json>, runAttempt = '1') => {
   const fixture = mkTmp('standards-reuse-proof-');
   for (const [endpoint, body] of Object.entries(api)) {
     write(
@@ -198,9 +170,7 @@ const prove = (
         ['FIXTURE', fixture],
         ['GITHUB_OUTPUT', outputPath],
         ['GITHUB_RUN_ATTEMPT', runAttempt],
-        ['LOCK_HASH', lockHash],
         ['PATH', `${join(fixture, 'bin')}:${process.env.PATH ?? ''}`],
-        ['REF', REF],
         ['REPOSITORY', REPOSITORY],
         ['SHA', SHA],
       ]),
@@ -231,7 +201,7 @@ const FULL_GATE_CASES: ReadonlyArray<readonly [string, Record<string, Json>]> =
             base: { repo: { fullName: REPOSITORY } },
             head: { repo: { fullName: FORK }, sha: HEAD },
             mergeCommitSha: SHA,
-            mergedAt: hoursAgo(0),
+            mergedAt: MERGED_AT,
           },
         ],
       },
@@ -295,35 +265,6 @@ const FULL_GATE_CASES: ReadonlyArray<readonly [string, Record<string, Json>]> =
         }),
       },
     ],
-    [
-      'no Bun snapshot for the current lock',
-      {
-        [endpoints.caches('bun-packages-v2-')]: cacheList([
-          'bun-packages-v2-Linux-X64-old',
-        ]),
-      },
-    ],
-    [
-      'Playwright snapshots only for another lock',
-      {
-        [endpoints.caches('playwright-v2-')]: cacheList([
-          'playwright-v2-Linux-X64-old',
-        ]),
-      },
-    ],
-    [
-      'no Turbo snapshot',
-      { [endpoints.caches('turbo-trusted-v2-')]: cacheList([]) },
-    ],
-    [
-      'a stale Turbo snapshot',
-      {
-        [endpoints.caches('turbo-trusted-v2-')]: cacheList(
-          [`turbo-trusted-v2-Linux-X64-${SHA}`],
-          hoursAgo(STALE_TURBO_HOURS),
-        ),
-      },
-    ],
   ];
 
 afterEach(cleanupTmpDirs);
@@ -344,25 +285,10 @@ describe('main-push reuse proof', () => {
 describe('main-push reuse proof edge cases', () => {
   // A re-run can follow an attempt whose full gate failed on this tree.
   it('runs the full gate on a re-run', () => {
-    expect(prove(provenApi(), LOCK_HASH, '2')).toEqual({
+    expect(prove(provenApi(), '2')).toEqual({
       proven: false,
       status: 0,
     });
-  });
-
-  it('runs the full gate without a lockfile hash', () => {
-    expect(prove(provenApi(), '')).toEqual({ proven: false, status: 0 });
-  });
-
-  it('accepts Playwright snapshots for the current lock', () => {
-    expect(
-      prove({
-        ...provenApi(),
-        [endpoints.caches('playwright-v2-')]: cacheList([
-          `playwright-v2-Linux-X64-${LOCK_HASH}`,
-        ]),
-      }),
-    ).toEqual({ proven: true, status: 0 });
   });
 
   it('keeps looking past a run that recorded another tree', () => {
@@ -392,12 +318,4 @@ describe('main-push reuse proof errors', () => {
       expect(result.status).not.toBe(0);
     },
   );
-
-  it('fails without proving when a cache lookup fails', () => {
-    const result = prove(
-      without(provenApi(), endpoints.caches('turbo-trusted-v2-')),
-    );
-    expect(result.proven).toBe(false);
-    expect(result.status).not.toBe(0);
-  });
 });

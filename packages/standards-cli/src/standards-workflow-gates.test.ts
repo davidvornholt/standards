@@ -8,6 +8,7 @@ import { ACTUAL_UPSTREAM, runProcess, yamlRunScript } from './cli-test-support';
 const WORKFLOW = join(ACTUAL_UPSTREAM, '.github/workflows/standards.yml');
 const AGGREGATE_STEP = 'Require all standards gates';
 const PROOF_STEP = 'Prove a validated pull request result';
+const REQUEST_STEP = 'Request stale cache publication';
 const GATE_RUN_CONDITION =
   "!cancelled() && !github.event.pull_request.draft && needs.reuse.outputs.proven != 'true'";
 const STATUS_FUNCTION = /(?:^|\W)(?:!cancelled|always)\(\)/u;
@@ -35,8 +36,9 @@ type Job = {
   readonly steps: ReadonlyArray<Step & { 'continue-on-error'?: boolean }>;
 };
 type Workflow = {
+  readonly concurrency: Record<string, string>;
   readonly jobs: Record<string, Job>;
-  readonly on: Record<string, { readonly types?: Array<string> }>;
+  readonly on: Record<string, { readonly types?: Array<string> } | null>;
 };
 
 const workflow = (): Workflow =>
@@ -79,8 +81,9 @@ describe('main-push reuse wiring', () => {
   it('proves reuse in a push-only preflight that runs no repository code', () => {
     const { reuse } = workflow().jobs;
     expect(reuse?.if).toBe("github.event_name == 'push'");
+    // Write access only creates the cache publication dispatch.
     expect(reuse?.permissions).toEqual({
-      actions: 'read',
+      actions: 'write',
       checks: 'read',
       contents: 'read',
       'pull-requests': 'read',
@@ -91,14 +94,20 @@ describe('main-push reuse wiring', () => {
     expect(reuse?.steps.map((step) => step.name)).toEqual([
       'Checkout the lockfile',
       PROOF_STEP,
+      REQUEST_STEP,
     ]);
     expect(reuse?.steps[0]?.with).toEqual({
       'persist-credentials': false,
       'sparse-checkout': 'bun.lock',
       'sparse-checkout-cone-mode': false,
     });
-    // A proof error must select the full gate, never fail the run.
+    // A proof error must select the full gate, never fail the run, and cache
+    // state must never decide it.
     expect(reuse?.steps[1]?.['continue-on-error']).toBe(true);
+    expect(JSON.stringify(reuse?.steps[1])).not.toContain('CACHE');
+    // A failed publication request leaves caches stale, never the gate red.
+    expect(reuse?.steps[2]?.if).toBe("steps.proof.outputs.proven == 'true'");
+    expect(reuse?.steps[2]?.['continue-on-error']).toBe(true);
   });
 
   it('gates every source-repository and consumer gate on the proof', () => {
@@ -141,18 +150,45 @@ describe('main-push reuse wiring', () => {
 
   it('checks freshness against the caches the quality job publishes', () => {
     const { jobs } = workflow();
-    const proofEnvironment =
-      jobs.reuse?.steps.find((step) => step.name === PROOF_STEP)?.env ?? {};
+    const requestEnvironment =
+      jobs.reuse?.steps.find((step) => step.name === REQUEST_STEP)?.env ?? {};
     const savedKeys = (jobs.quality?.steps ?? [])
       .filter((step) => step.uses?.startsWith('actions/cache/save@'))
       .map((step) => String(step.with?.key));
 
     expect(savedKeys).toHaveLength(CACHE_PREFIX_ENVIRONMENT.length);
     for (const variable of CACHE_PREFIX_ENVIRONMENT) {
-      const prefix = proofEnvironment[variable] ?? '';
+      const prefix = requestEnvironment[variable] ?? '';
       expect(prefix).not.toBe('');
       expect(savedKeys.filter((key) => key.startsWith(prefix))).toHaveLength(1);
     }
+  });
+});
+
+describe('cache publication runs', () => {
+  it('run as manual dispatches that release pollers never select', () => {
+    const { on } = workflow();
+    expect(Object.keys(on)).toEqual([
+      'pull_request',
+      'push',
+      'workflow_dispatch',
+    ]);
+    expect(on.workflow_dispatch).toBeNull();
+  });
+
+  it('queue in one group that never cancels a running publication', () => {
+    expect(workflow().concurrency).toEqual({
+      group: `${expression('github.workflow')}-${expression(
+        "github.event_name == 'pull_request' && github.ref || github.event_name == 'workflow_dispatch' && 'dispatch' || github.sha",
+      )}`,
+      'cancel-in-progress': expression("github.event_name == 'pull_request'"),
+    });
+  });
+
+  it('run the full gate because only a push runs the reuse proof', () => {
+    const { jobs } = workflow();
+    expect(jobs.reuse?.if).toBe("github.event_name == 'push'");
+    expect(jobs.quality?.if).toBe(GATE_RUN_CONDITION);
   });
 });
 

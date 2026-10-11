@@ -183,7 +183,7 @@ it('preserves queued release pushes and gives every pushed SHA its own quality g
     'group: publish-standards-cli\n  queue: max\n  cancel-in-progress: false',
   );
   expect(standards).toContain(
-    "github.event_name == 'pull_request' && github.ref || github.sha",
+    "github.event_name == 'pull_request' && github.ref || github.event_name == 'workflow_dispatch' && 'dispatch' || github.sha",
   );
   expect(publishWorkflowJobs().publish.needs).toBe('gate');
 });

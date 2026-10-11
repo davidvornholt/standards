@@ -20,7 +20,7 @@ Quality jobs require an ephemeral runner: leave `CI_CODEBUILD_PROJECT` unset for
 
 Draft pull requests skip the `Standards` gates; marking a pull request ready for review runs them on its current head. A draft run skips its aggregator under a name other than `check`, so a required `check` stays missing, and merge stays blocked, until the ready run finishes.
 
-A push to `main` reuses the pull request's result instead of repeating the gate when a successful same-repository pull-request run recorded the pushed tree, which is the usual outcome of squash-merging an up-to-date branch. Reuse also requires trusted Bun and Playwright snapshots for the current lock and a Turbo snapshot younger than a day; otherwise the push runs the full gate and refreshes those caches.
+A push to `main` reuses the pull request's result instead of repeating the gate when a successful same-repository pull-request run recorded the pushed tree, which is the usual outcome of squash-merging an up-to-date branch. Cache freshness does not affect reuse. When a reused push finds no trusted Bun or Playwright snapshot for the current lock, or no Turbo snapshot younger than a day, it dispatches a full `Standards` run on `main` that publishes them. Nothing waits for that run, and release pollers select only `push` runs. One dispatched run executes at a time; the newest request waits behind it. Maintainers can also dispatch the workflow on `main` manually to refresh the caches.
 
 ## Local PostgreSQL
 

@@ -2581,18 +2581,24 @@ describe('canonical standards workflow settings security', () => {
     // The job holds no durable credential, so it needs no executable file from
     // the repository at all: declarative settings inputs and nothing else.
     expect(settingsJobSource).not.toContain('GITHUB_ENV');
-    // Only the reuse proof binds a GitHub CLI token: the read-only workflow
-    // token, in a job that runs no repository code.
+    // Only the reuse job binds a GitHub CLI token: the workflow token, in a
+    // job that runs no repository code.
     expect(workflowSource.match(/GH_TOKEN:.*/gu)).toEqual([
       `GH_TOKEN: ${githubExpression('github.token')}`,
+      `GH_TOKEN: ${githubExpression('github.token')}`,
     ]);
-    expect(
-      workflowSteps(workflow.jobs.reuse, 'reuse').find(
-        (step) => step.name === 'Prove a validated pull request result',
-      )?.env,
-    ).toEqual(
-      expect.objectContaining({ GH_TOKEN: githubExpression('github.token') }),
-    );
+    for (const name of [
+      'Prove a validated pull request result',
+      'Request stale cache publication',
+    ]) {
+      expect(
+        workflowSteps(workflow.jobs.reuse, 'reuse').find(
+          (step) => step.name === name,
+        )?.env,
+      ).toEqual(
+        expect.objectContaining({ GH_TOKEN: githubExpression('github.token') }),
+      );
+    }
     expect(settingsRun).not.toContain('GITHUB_OUTPUT');
     expect(settingsRun).toContain('GH_TOKEN="$SETTINGS_TOKEN"');
     // An empty or multi-line token must stop the job rather than reach the CLI,
