@@ -12,7 +12,7 @@ from app_release.environment import LOCK_TIMEOUT_SECONDS, Environment, current_e
 from app_release.errors import AppReleaseError, ExitCode, RejectedError
 from app_release.fsutil import exclusive_lock
 from app_release.output import Output
-from app_release.reconcile import gc, prepare, reconcile, refresh
+from app_release.reconcile import check, gc, prepare, reconcile, refresh
 from app_release.report import safe_payload, status
 
 USAGE = """usage: app-release <command> [<unit>]
@@ -24,6 +24,8 @@ commands:
                      apply changed host definitions
   refresh <unit>     restart every app of the unit at its current digest without downtime
   status [<unit>]    print the release state and the live units (all units by default)
+  check [<unit>]     wait until the active slot of every app is healthy, and exit 1 when
+                     one is not within its health timeout (all units by default)
   gc [<unit>]        remove local images no app needs (all units by default)
   prepare <unit> <app> [<slot>]
                      tag the image a container starts from when the tag is missing; the
@@ -38,6 +40,7 @@ exit codes: 0 ok, 1 failed (previous version serving), 2 rejected,
 LOCAL_OPERATIONS: dict[str, Callable[[Context], object]] = {
     "reconcile": reconcile,
     "refresh": refresh,
+    "check": check,
     "gc": gc,
 }
 
@@ -107,14 +110,16 @@ def run_cli(arguments: list[str], environment_factory: Callable[[], Environment]
             return executor.main(environment, rest[0])
         if command == "prepare" and len(rest) in (2, 3):
             return _prepare(environment, rest, out)
-        if command not in ("reconcile", "refresh", "status", "gc") or len(rest) > 1:
+        if command not in ("reconcile", "refresh", "status", "check", "gc") or len(rest) > 1:
             sys.stderr.write(USAGE)
             return ExitCode.REJECTED
-        units = _units(environment, rest, all_by_default=command in ("status", "gc"))
+        units = _units(environment, rest, all_by_default=command in ("status", "check", "gc"))
         code: int = ExitCode.OK
         for unit in units:
-            code = _local(environment, command, unit, out)
-            if code != ExitCode.OK:
+            unit_code = _local(environment, command, unit, out)
+            code = code or unit_code
+            # A check reports every unit; other operations stop at the first failure.
+            if code != ExitCode.OK and command != "check":
                 break
     except AppReleaseError as error:
         out.line(f"error: {error.message}")

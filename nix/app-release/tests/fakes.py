@@ -144,6 +144,8 @@ class World:
         self.running: dict[str, str] = {}
         self.unhealthy: set[str] = set()
         self.failing_units: set[str] = set()
+        # "failed", or "activating" for a unit systemd restarts after each failure.
+        self.failing_state = "failed"
         self.slow_stop: set[str] = set()
         self.pull_failures: dict[str, int] = {}
         self.migration_error: str | None = None
@@ -305,7 +307,7 @@ class World:
             return self.migration_error
         image_id = self.names.get(self.unit_tags.get(unit, ""))
         if unit in self.failing_units or image_id is None:
-            self.states[unit] = "failed"
+            self.states[unit] = self.failing_state
             self.running.pop(unit, None)
             return f"Job for {unit} failed"
         self.states[unit] = "active"
@@ -314,9 +316,23 @@ class World:
 
     def stop(self, unit: str, *, block: bool) -> str | None:
         self.calls.append(("stop" if block else "stop-no-block", unit))
-        self.states[unit] = "deactivating" if not block and unit in self.slow_stop else "inactive"
+        # Like systemd, keep a failed unit failed until its failure is reset, and fail a unit
+        # whose stop interrupts a start that fails.
+        state = self.states.get(unit)
+        if state != "failed":
+            if not block and unit in self.slow_stop:
+                self.states[unit] = "deactivating"
+            elif state in ("activating", "deactivating") and unit in self.failing_units:
+                self.states[unit] = "failed"
+            else:
+                self.states[unit] = "inactive"
         self.running.pop(unit, None)
         return None
+
+    def reset_failed(self, unit: str) -> None:
+        self.calls.append(("reset-failed", unit))
+        if self.states.get(unit) == "failed":
+            self.states[unit] = "inactive"
 
     def active_state(self, unit: str) -> str:
         return self.states.get(unit, "inactive")

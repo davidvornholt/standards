@@ -346,3 +346,25 @@ with subtest("changed slot ports are applied without failed requests"):
     assert machine.succeed("cat /var/lib/app-release/shop/web.upstream").strip() == "127.0.0.1:8102"
     machine.fail("curl -fsS -m 5 http://localhost:8001/")
     assert active_state("podman-web-blue.service") == "inactive"
+
+with subtest("an unchanged app that stays down fails the check, not the host switch"):
+    machine.succeed("app-release check shop")
+    # The blue worker stops passing its health check, and its green slot cannot start.
+    machine.succeed("podman exec worker-blue rm /www/index.html")
+    drop_in = "/run/systemd/system/podman-worker-green.service.d"
+    machine.succeed(
+        f"mkdir -p {drop_in}",
+        f"printf '[Service]\\nExecStartPre=%s\\n' \"$(type -P false)\" >{drop_in}/fail.conf",
+        "systemctl daemon-reload",
+    )
+    # Switching back changes the web definition, so the reconcile runs.
+    machine.succeed("/run/booted-system/bin/switch-to-configuration test")
+    machine.succeed("journalctl -u app-release-shop.service | grep -F 'worker stays down'")
+    data = state()
+    assert data["apps"]["web"]["slot"] == "blue"
+    assert data["apps"]["worker"]["slot"] == "blue"
+    assert active_state("podman-worker-green.service") == "inactive"
+    status, output = machine.execute("app-release check shop")
+    print(output)
+    assert status == 1, f"app-release check exited {status}, expected 1"
+    assert "worker: not healthy" in output
