@@ -1,6 +1,7 @@
 import process from 'node:process';
 import AxeBuilder from '@axe-core/playwright';
 import type * as playwright from '@playwright/test';
+import { animationsSettled } from './animation-settle';
 
 export const wcag22AaTags: ReadonlyArray<string> = [
   'wcag2a',
@@ -82,29 +83,13 @@ const waitForStreamedDom = async (page: playwright.Page): Promise<void> => {
   }
 };
 
-// Entrance animations fade and move content into place. Axe samples colour
-// contrast and target positions from the current frame, so a scan taken
-// mid-animation reports failures the settled page does not have. Wait for
-// every finite animation to finish; looping indicators such as spinners are
-// ignored because they never do.
 const animationSettleDeadlineMilliseconds = 10_000;
 
 const waitForAnimations = async (page: playwright.Page): Promise<void> => {
   try {
-    await page.waitForFunction(
-      () =>
-        document
-          .getAnimations()
-          .every(
-            (animation) =>
-              animation.playState === 'finished' ||
-              animation.playState === 'idle' ||
-              animation.effect?.getTiming().iterations ===
-                Number.POSITIVE_INFINITY,
-          ),
-      undefined,
-      { timeout: animationSettleDeadlineMilliseconds },
-    );
+    await page.waitForFunction(animationsSettled, undefined, {
+      timeout: animationSettleDeadlineMilliseconds,
+    });
   } catch {
     process.stderr.write(
       `Axe scan of ${page.url()} proceeded after the ${animationSettleDeadlineMilliseconds}ms animation deadline; results may reflect a still-animating page.\n`,
