@@ -5,9 +5,11 @@ type PageAnimation = ReturnType<
   AnimatedPage['document']['getAnimations']
 >[number];
 
-class StubDocumentTimeline {}
+class ForeignDocumentTimeline {
+  readonly [Symbol.toStringTag] = 'DocumentTimeline';
+}
 
-const documentTimeline = new StubDocumentTimeline();
+const documentTimeline = { [Symbol.toStringTag]: 'DocumentTimeline' };
 const scrollTimeline = {};
 const viewTimeline = {};
 
@@ -24,7 +26,6 @@ const animation = (
 const pageWith = (
   ...animations: ReadonlyArray<PageAnimation>
 ): AnimatedPage => ({
-  documentTimelineClass: StubDocumentTimeline,
   document: { getAnimations: () => animations },
 });
 
@@ -53,11 +54,14 @@ describe('animationsSettled', () => {
   });
 
   it('waits for a finite animation on another document timeline', () => {
-    expect(
-      animationsSettled(
-        pageWith(animation(new StubDocumentTimeline(), 'running')),
-      ),
-    ).toBe(false);
+    for (const timeline of [
+      { ...documentTimeline },
+      new ForeignDocumentTimeline(),
+    ]) {
+      expect(animationsSettled(pageWith(animation(timeline, 'running')))).toBe(
+        false,
+      );
+    }
   });
 
   it('does not wait for looping or idle time-based animations', () => {

@@ -1,7 +1,5 @@
-// What decides whether a page has stopped animating: its document and its
-// `DocumentTimeline` class.
+// What decides whether a page has stopped animating: its document.
 export type AnimatedPage = {
-  readonly documentTimelineClass: abstract new () => object;
   readonly document: {
     readonly getAnimations: () => ReadonlyArray<{
       readonly playState: AnimationPlayState;
@@ -23,16 +21,16 @@ export type AnimatedPage = {
 // the page scrolls, and animations without a timeline, which never advance.
 //
 // Playwright serializes this predicate into the page, so it must not reference
-// anything outside its own body. It reads the page's own document and
-// `DocumentTimeline` class unless others are passed in.
-export const animationsSettled = (
-  page: AnimatedPage = { document, documentTimelineClass: DocumentTimeline },
-): boolean =>
+// anything outside its own body. It reads the page's own document unless
+// another is passed in. Timeline branding also recognizes document timelines
+// from another realm, such as animations on nodes adopted from an iframe.
+export const animationsSettled = (page: AnimatedPage = { document }): boolean =>
   page.document
     .getAnimations()
     .every(
       (animation) =>
-        !(animation.timeline instanceof page.documentTimelineClass) ||
+        Object.prototype.toString.call(animation.timeline) !==
+          '[object DocumentTimeline]' ||
         animation.playState === 'finished' ||
         animation.playState === 'idle' ||
         animation.effect?.getTiming().iterations === Number.POSITIVE_INFINITY,
