@@ -14,6 +14,7 @@ class ServiceManager(Protocol):
     def stop(self, unit: str, *, block: bool) -> str | None: ...
     def reset_failed(self, unit: str) -> None: ...
     def active_state(self, unit: str) -> str: ...
+    def sub_state(self, unit: str) -> str: ...
 
 
 class Systemctl:
@@ -52,6 +53,12 @@ class Systemctl:
         return self._run("stop", "--no-block", unit)
 
     def active_state(self, unit: str) -> str:
-        result = self.runner([self.executable, "show", "--property=ActiveState", "--value", unit])
-        state = result.stdout.strip()
-        return state if result.ok and state else "unknown"
+        return self._property(unit, "ActiveState")
+
+    def sub_state(self, unit: str) -> str:
+        return self._property(unit, "SubState")
+
+    def _property(self, unit: str, name: str) -> str:
+        result = self.runner([self.executable, "show", f"--property={name}", "--value", unit])
+        value = result.stdout.strip()
+        return value if result.ok and value else "unknown"
