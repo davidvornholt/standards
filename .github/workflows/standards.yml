@@ -360,6 +360,36 @@ jobs:
             echo "present=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # actions/cache compresses with zstd only when a zstd binary is on PATH
+      # and otherwise falls back to gzip, which costs CodeBuild quality runs
+      # tens of seconds per cache save and several per restore. The CodeBuild
+      # image has no zstd; GitHub-hosted runners do, so this step runs only on
+      # CodeBuild and must precede Setup Bun, the first Actions cache user.
+      # Ubuntu's zstd package links libzstd statically and needs only base
+      # system libraries, so extracting the pinned release-pocket build skips
+      # apt. The compression method is part of the cache version, so a failed
+      # install fails the job instead of publishing gzip snapshots that zstd
+      # runs cannot restore.
+      - name: Install zstd for the Actions cache
+        if: vars.CI_CODEBUILD_PROJECT != ''
+        run: |
+          set -euo pipefail
+          version=1.5.5+dfsg2-2build1
+          case "$(uname -m)" in
+            x86_64) arch=amd64; archive=https://archive.ubuntu.com/ubuntu; sha=bb14385ff3d6df723a686778dc5f87849f720a0add261b5de9bcd4915a490b2a ;;
+            aarch64) arch=arm64; archive=https://ports.ubuntu.com/ubuntu-ports; sha=e054f8bf2c8b3f1d82a1e87352c1cb6f62887aac22a88b55f7dd715567f74bfd ;;
+            *)
+              echo "::error::No pinned zstd package for runner architecture $(uname -m)"
+              exit 1
+              ;;
+          esac
+          package="$RUNNER_TEMP/zstd.deb"
+          curl -sSfLo "$package" --retry 3 --retry-all-errors --connect-timeout 10 --max-time 60 "$archive/pool/main/libz/libzstd/zstd_${version}_${arch}.deb"
+          echo "$sha  $package" | sha256sum --check --quiet
+          dpkg-deb -x "$package" "$RUNNER_TEMP/zstd"
+          "$RUNNER_TEMP/zstd/usr/bin/zstd" --version
+          echo "$RUNNER_TEMP/zstd/usr/bin" >> "$GITHUB_PATH"
+
       - name: Read Bun version
         id: bun
         run: |
