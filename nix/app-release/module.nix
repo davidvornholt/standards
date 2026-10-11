@@ -612,13 +612,18 @@ let
       value = lib.mkMerge [
         {
           restartIfChanged = false;
-          # A unit that starts the container before the reconcile does, for example on the
-          # host's first activation, would otherwise find no image tag and fail.
-          serviceConfig.ExecStartPre = [
-            "${package}/bin/app-release prepare ${unitName} ${appName}${
-              lib.optionalString (isBlueGreen app) " ${slot}"
-            }"
-          ];
+          serviceConfig = {
+            # A unit that starts the container before the reconcile does, for example on
+            # the host's first activation, would otherwise find no image tag and fail.
+            ExecStartPre = [
+              "${package}/bin/app-release prepare ${unitName} ${appName}${
+                lib.optionalString (isBlueGreen app) " ${slot}"
+              }"
+            ];
+            # Stopping a container sends SIGTERM, after which runtimes such as Bun exit
+            # with 143. Every retired slot would otherwise stay failed.
+            SuccessExitStatus = [ "143" ];
+          };
         }
         app.serviceConfig
       ];
