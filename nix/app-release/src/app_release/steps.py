@@ -367,15 +367,21 @@ def collect_garbage(ctx: Context) -> None:
 def _remove_image(
     ctx: Context, image_id: str, names: tuple[str, ...], repositories: set[str]
 ) -> None:
-    tags = [name for name in names if "@" not in name and repository_of(name) in repositories]
-    for name in tags:
+    """Remove the unit's names of an image; podman deletes the image with its last name.
+
+    Removing by ID is only possible for an image without names: podman refuses to
+    delete an image by ID while it has more than one name, and the same image often
+    has a digest name in the repository of every app that runs it.
+    """
+    owned = [name for name in names if repository_of(name) in repositories]
+    for name in owned:
         error = ctx.images.remove(name)
         if error is not None:
             ctx.out.warn(f"gc: cannot remove {name}: {error}")
             return
         ctx.out.line(f"gc: removed {name}")
-    if any(repository_of(name) not in repositories for name in names):
-        # Another name, such as a slot tag, still refers to the image.
+    if owned:
+        # Any other name, such as a slot tag, keeps the image.
         return
     error = ctx.images.remove(image_id)
     if error is not None:

@@ -4,7 +4,7 @@ from app_release.errors import CriticalError, ExitCode, FailedError, RejectedErr
 from app_release.release import release, rollback
 from app_release.state import AppState, Release, State
 from tests.base import MIGRATION, HostTestCase
-from tests.fakes import PRE_STOP, SHA_A, SHA_B, SHA_C, claims
+from tests.fakes import PRE_STOP, SHA_A, SHA_B, SHA_C, claims, make_image
 
 DRAINING = (
     "worker: the previous worker in slot green is still draining; nothing changed. "
@@ -306,6 +306,26 @@ class ReleaseTest(HostTestCase):
             self.assertNotIn(self.v1[name].id, self.world.local, name)
             self.assertIn(self.v2[name].id, self.world.local, name)
             self.assertIn(v3[name].id, self.world.local, name)
+
+    def test_garbage_collection_removes_an_image_that_several_apps_share(self) -> None:
+        # Podman refuses to delete an image by ID while it has several names.
+        shared = make_image("shared", SHA_A)
+        for name in ("web", "jobs"):
+            self.world.store_locally(self.repository(name), shared)
+        self.release_v2()
+        self.assertNotIn(shared.id, self.world.local)
+        self.assertIn(("rmi", f"ghcr.io/owner/web@{shared.digest}"), self.world.calls)
+        self.assertIn(("rmi", f"ghcr.io/owner/jobs@{shared.digest}"), self.world.calls)
+        self.assertNotIn(("rmi", shared.id), self.world.calls)
+
+    def test_garbage_collection_leaves_names_of_other_repositories(self) -> None:
+        shared = make_image("shared", SHA_A)
+        self.world.store_locally(self.repository("web"), shared)
+        self.world.names["docker.io/library/other:latest"] = shared.id
+        self.release_v2()
+        self.assertIn(shared.id, self.world.local)
+        names = [name for name, target in self.world.names.items() if target == shared.id]
+        self.assertEqual(names, ["docker.io/library/other:latest"])
 
     def test_garbage_collection_keeps_images_other_units_need(self) -> None:
         self.world.other_states = [

@@ -253,7 +253,7 @@ class World:
             summaries.append(
                 ImageSummary(
                     id=image_id,
-                    names=tuple(name for name in names if "@" not in name),
+                    names=tuple(names),
                     repo_digests=tuple(name for name in names if "@" in name),
                     containers=in_use + self.extra_containers.get(image_id, 0),
                 )
@@ -263,9 +263,9 @@ class World:
     def remove(self, name: str) -> str | None:
         self.calls.append(("rmi", name))
         if name in self.local:
-            tags = [n for n, target in self.names.items() if target == name and "@" not in n]
-            if len(tags) > 1:
-                return "image is referenced in multiple tags"
+            aliases = [n for n, target in self.names.items() if target == name]
+            if len(aliases) > 1:
+                return f'unable to delete image "{name}" by ID with more than one tag'
             for alias in [n for n, target in self.names.items() if target == name]:
                 del self.names[alias]
             del self.local[name]

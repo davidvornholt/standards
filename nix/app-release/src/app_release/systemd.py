@@ -25,7 +25,12 @@ class Systemctl:
 
     def _run(self, *args: str, timeout: float | None = None) -> str | None:
         result = self.runner([self.executable, *args], timeout=timeout)
-        return None if result.ok else result.summary()
+        if result.ok:
+            return None
+        # systemctl explains a failed job on its first line and points to the logs
+        # on the next one, so keep every line.
+        lines = [line.strip() for line in result.stderr.splitlines() if line.strip()]
+        return " ".join(lines).rstrip(".") if lines else result.summary()
 
     def start(self, unit: str, timeout: float | None) -> str | None:
         return self._run("start", unit, timeout=timeout)

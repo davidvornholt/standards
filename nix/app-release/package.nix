@@ -49,11 +49,9 @@ python3Packages.buildPythonApplication {
     "--set APP_RELEASE_RUN_DIR /run/app-release"
     "--set APP_RELEASE_CACHE_DIR /var/cache/app-release"
     "--set PATH ${toolPath}:/run/current-system/sw/bin"
+    # The forced command starts `app-release` again inside a transient unit.
+    "--set APP_RELEASE_EXECUTABLE ${placeholder "out"}/bin/app-release"
   ];
-
-  preFixup = ''
-    makeWrapperArgs+=(--set APP_RELEASE_EXECUTABLE "$out/bin/app-release")
-  '';
 
   pythonImportsCheck = [ "app_release" ];
 

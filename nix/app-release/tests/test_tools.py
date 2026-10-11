@@ -163,12 +163,23 @@ class SystemctlTest(unittest.TestCase):
         runner = Recorder(
             {
                 ("systemctl", "show"): Completed(0, "deactivating\n", ""),
-                ("systemctl", "restart"): Completed(1, "", "Job failed.\n"),
+                ("systemctl", "restart"): Completed(
+                    1,
+                    "",
+                    "Job for a.service failed because the control process exited with error code.\n"
+                    'See "systemctl status a.service" for details.\n',
+                ),
+                ("systemctl", "reload"): Completed(5, "", ""),
             }
         )
         systemctl = Systemctl("systemctl", runner)
         self.assertIsNone(systemctl.stop("a.service", block=False))
-        self.assertEqual(systemctl.restart("a.service", 10), "Job failed.")
+        self.assertEqual(
+            systemctl.restart("a.service", 10),
+            "Job for a.service failed because the control process exited with error code. "
+            'See "systemctl status a.service" for details',
+        )
+        self.assertEqual(systemctl.reload("a.service"), "exit status 5")
         self.assertEqual(systemctl.active_state("a.service"), "deactivating")
         self.assertEqual(runner.calls[0], ("systemctl", "stop", "--no-block", "a.service"))
 
