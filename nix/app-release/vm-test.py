@@ -311,7 +311,7 @@ with subtest("a reboot restores the released slot and version"):
     assert active_state("podman-worker-blue.service") == "active"
     assert apps_state(state()) == apps_state(before)
 
-with subtest("a changed container definition is applied without failed requests"):
+with subtest("changed slot ports are applied without failed requests"):
     before = state()
     units = {
         unit: invocation(unit) for unit in ("podman-worker-blue.service", "podman-jobs.service")
@@ -326,5 +326,9 @@ with subtest("a changed container definition is applied without failed requests"
     assert current_digests(data) == current_digests(before)
     assert data["history"][-1]["operation"] == "refresh"
     assert {unit: invocation(unit) for unit in units} == units
-    machine.succeed("podman exec web-green printenv TEST_CHANGED")
+    assert served(8102) == "v3"
+    assert (
+        machine.succeed("cat /var/lib/app-release/shop/web.upstream").strip() == "to 127.0.0.1:8102"
+    )
+    machine.fail("curl -fsS -m 5 http://localhost:8001/")
     assert active_state("podman-web-blue.service") == "inactive"

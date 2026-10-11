@@ -259,7 +259,10 @@ in
 
       # Switching to this specialisation changes the web container definition.
       specialisation.changed.configuration = {
-        services.appRelease.units.shop.apps.web.container.environment.TEST_CHANGED = "1";
+        services.appRelease.units.shop.apps.web.slotPorts = {
+          blue = lib.mkForce 8101;
+          green = lib.mkForce 8102;
+        };
       };
     };
 

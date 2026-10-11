@@ -1,8 +1,13 @@
 import json
+import os
 import tempfile
+import threading
 import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import IO
+from unittest.mock import patch
 
 import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -190,6 +195,38 @@ class OidcTest(unittest.TestCase):
 
 
 class ReplayTest(unittest.TestCase):
+    def test_duplicate_is_rejected_before_the_first_marker_is_written(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            seen = Path(directory) / "seen-jti"
+            created = threading.Event()
+            resume = threading.Event()
+            original_fdopen = os.fdopen
+
+            def pause_writer(descriptor: int, mode: str) -> IO[str]:
+                file = original_fdopen(descriptor, mode)
+                if not created.is_set():
+                    created.set()
+                    if not resume.wait(10):
+                        file.close()
+                        message = "the duplicate request did not finish"
+                        raise AssertionError(message)
+                return file
+
+            with (
+                patch("app_release.replay.os.fdopen", side_effect=pause_writer),
+                ThreadPoolExecutor(max_workers=1) as executor,
+            ):
+                first = executor.submit(remember, seen, "jti-1", 2000, now=1000)
+                try:
+                    self.assertTrue(created.wait(10))
+                    self.assertEqual(next(seen.iterdir()).read_bytes(), b"")
+                    with self.assertRaises(RejectedError):
+                        remember(seen, "jti-1", 2000, now=1000)
+                finally:
+                    resume.set()
+                first.result(timeout=10)
+            self.assertEqual(next(seen.iterdir()).read_text(), "2000\n")
+
     def test_a_jti_is_accepted_once(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             seen = Path(directory) / "seen-jti"

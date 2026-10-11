@@ -14,7 +14,8 @@ def _prune(directory: Path, now: float) -> None:
         try:
             expires_at = int(entry.read_text().strip())
         except (OSError, ValueError):
-            expires_at = 0
+            # Another request may have created the marker but not written its expiry yet.
+            continue
         if expires_at + LEEWAY_SECONDS < now:
             with contextlib.suppress(FileNotFoundError):
                 entry.unlink()

@@ -1,6 +1,7 @@
 {
   appRelease,
   lib,
+  path,
   python3,
   ruff,
   runCommand,
@@ -12,6 +13,10 @@ let
     ps.pyjwt
   ]);
 in
+assert import ./module-check.nix {
+  inherit lib;
+  nixpkgsPath = path;
+};
 runCommand "app-release-check-${appRelease.version}"
   {
     nativeBuildInputs = [

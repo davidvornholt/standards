@@ -79,6 +79,7 @@ let
         container = stripModuleArgs (removeAttrs evaluated slotFields);
         serviceConfig = stripModuleArgs app.serviceConfig;
         inherit (app) strategy containerPort;
+        slotPorts = if app.slotPorts == null then null else { inherit (app.slotPorts) blue green; };
       }
     );
 
@@ -343,6 +344,56 @@ let
       }) unit.apps
     ) cfg.units
   );
+
+  ownershipAssertion =
+    resource: uses:
+    let
+      collisions = lib.filterAttrs (_: owners: builtins.length owners > 1) (
+        lib.groupBy (use: use.name) uses
+      );
+    in
+    {
+      assertion = collisions == { };
+      message = "services.appRelease: ${resource} collide: ${
+        lib.concatStringsSep "; " (
+          lib.mapAttrsToList (
+            name: owners: "${name} used by ${lib.concatMapStringsSep ", " (use: use.owner) owners}"
+          ) collisions
+        )
+      }.";
+    };
+
+  ownershipAssertions = [
+    (ownershipAssertion "app names/local image tags" (
+      map (entry: {
+        name = entry.appName;
+        owner = "${entry.unitName}/${entry.appName}";
+      }) allApps
+    ))
+    (ownershipAssertion "container names" (
+      lib.concatMap (
+        entry:
+        lib.mapAttrsToList (slot: name: {
+          inherit name;
+          owner = "${entry.unitName}/${entry.appName}/${slot}";
+        }) (appContainers entry.appName entry.app)
+      ) allApps
+    ))
+    (ownershipAssertion "release service names" (
+      lib.concatLists (
+        lib.mapAttrsToList (unitName: _: [
+          {
+            name = "app-release-${unitName}";
+            owner = "${unitName}/reconcile";
+          }
+          {
+            name = "app-release-${unitName}-refresh";
+            owner = "${unitName}/refresh";
+          }
+        ]) cfg.units
+      )
+    ))
+  ];
 
   slotPortUses = lib.concatMap (
     entry:
@@ -691,6 +742,7 @@ in
         message = "services.appRelease needs services.caddy.enableReload = true so upstream switches reload Caddy.";
       }
     ]
+    ++ ownershipAssertions
     ++ lib.concatMap appAssertions allApps
     ++ lib.concatLists (lib.mapAttrsToList unitAssertions cfg.units);
 
