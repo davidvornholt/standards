@@ -190,31 +190,37 @@ def _route_to(targets: list[HealthTarget]) -> None:
             write_upstream(target.app, target.slot)
 
 
-def _refresh_blue_green(
-    ctx: Context, state: State, apps: list[AppConfig], images: dict[str, Image]
-) -> State:
-    """Move each app to its idle slot on the same image, then switch and retire the old slot."""
-    targets: list[tuple[AppConfig, Slot, Image]] = []
-    for app in apps:
-        slot = state.apps[app.name].slot
-        if slot is None:
-            continue
-        idle = other_slot(slot)
-        if app.portless and ctx.services.active_state(app.unit(idle)) not in STOPPED_STATES:
-            ctx.out.warn(
-                f"{app.name}: the previous worker in slot {idle} is still draining; "
-                "keeping the running definition. The next release applies it."
-            )
-            continue
-        targets.append((app, idle, images[app.name]))
-    if not targets:
-        return state
+def _drains(ctx: Context, app: AppConfig, slot: Slot) -> bool:
+    """Whether an old port-less worker still runs in `slot`; starting the slot would stop it."""
+    return app.portless and ctx.services.active_state(app.unit(slot)) not in STOPPED_STATES
+
+
+def _move_to_idle_slots(
+    ctx: Context,
+    state: State,
+    targets: list[tuple[AppConfig, Slot, Image]],
+    *,
+    all_or_nothing: bool,
+) -> tuple[State, dict[str, str]]:
+    """Start each app's idle slot on its image, then switch to it and retire the old slot.
+
+    With `all_or_nothing`, a failing app undoes every app. Otherwise an app whose new slot
+    fails keeps its old slot without holding back the others, and the failures are
+    returned. Raises once anything else fails, after undoing every app.
+    """
     transaction = Transaction(ctx)
+    failures: dict[str, str] = {}
     try:
-        transaction.start_idle_slots(targets)
-        transaction.switch([(app, slot) for app, slot, _ in targets])
+        if all_or_nothing:
+            transaction.start_idle_slots(targets)
+        else:
+            failures = transaction.start_idle_slots_independently(targets)
+        moved = [(app, slot) for app, slot, _ in targets if app.name not in failures]
+        if not moved:
+            return state, failures
+        transaction.switch(moved)
         new_state = state
-        for app, slot, _ in targets:
+        for app, slot in moved:
             app_state = replace(
                 state.apps[app.name], slot=slot, definition_hash=app.definition_hash
             )
@@ -228,8 +234,31 @@ def _refresh_blue_green(
         # After something moved, any error must restore the previous version.
         message = f"unexpected error: {error!r}"
         raise transaction.fail(message) from error
-    retire(ctx, [(app, other_slot(slot)) for app, slot, _ in targets])
-    return new_state
+    retire(ctx, [(app, other_slot(slot)) for app, slot in moved])
+    return new_state, failures
+
+
+def _refresh_blue_green(
+    ctx: Context, state: State, apps: list[AppConfig], images: dict[str, Image]
+) -> State:
+    """Move each app to its idle slot on the same image, then switch and retire the old slot."""
+    targets: list[tuple[AppConfig, Slot, Image]] = []
+    for app in apps:
+        slot = state.apps[app.name].slot
+        if slot is None:
+            continue
+        idle = other_slot(slot)
+        if _drains(ctx, app, idle):
+            ctx.out.warn(
+                f"{app.name}: the previous worker in slot {idle} is still draining; "
+                "keeping the running definition. The next release applies it."
+            )
+            continue
+        targets.append((app, idle, images[app.name]))
+    if not targets:
+        return state
+    state, _ = _move_to_idle_slots(ctx, state, targets, all_or_nothing=True)
+    return state
 
 
 def _refresh_recreate(ctx: Context, state: State, app: AppConfig) -> State:
@@ -318,55 +347,55 @@ def _refresh(
     return state
 
 
-def _restart_unhealthy(ctx: Context, state: State, app: AppConfig) -> State | None:
-    """Restart an unhealthy app at its current digest; None when it is still unhealthy.
-
-    A blue-green app moves to its idle slot as a refresh does, so a slot that still serves
-    some requests keeps serving until the new one is healthy.
-    """
-    if app.blue_green:
+def _recovery_targets(
+    ctx: Context, state: State, apps: list[AppConfig], failures: dict[str, str]
+) -> list[tuple[AppConfig, Slot, Image]]:
+    """The idle slot and current image of each unhealthy app that can move now."""
+    targets: list[tuple[AppConfig, Slot, Image]] = []
+    for app in apps:
         slot = state.apps[app.name].slot
+        if app.name not in failures or slot is None:
+            continue
+        idle = other_slot(slot)
+        if _drains(ctx, app, idle):
+            ctx.out.warn(
+                f"{app.name}: the previous worker in slot {idle} is still draining; "
+                f"not restarting {app.name} until it stops"
+            )
+            continue
         try:
             image = ensure_image(ctx, app, state.apps[app.name].current.digest)
-            refreshed = _refresh_blue_green(ctx, state, [app], {app.name: image})
         except AppReleaseError as error:
-            if slot is not None:
-                _settle(ctx, app, app.unit(other_slot(slot)))
             ctx.out.warn(error.message)
-            return None
-        # The refresh skips, with a warning, a worker whose idle slot still drains.
-        return refreshed if refreshed.apps[app.name].slot != slot else None
-    pre_stop_error = run_pre_stop(ctx, app)
-    if pre_stop_error is not None:
-        # As when a release restores the previous version, restart anyway: the app is down.
-        ctx.out.warn(f"{pre_stop_error}; restarting {app.name} anyway")
-    unit = app.unit(None)
-    ctx.out.line(f"{app.name}: restarting {unit}")
-    restart_error = ctx.services.restart(unit, timeout=app.health.timeout_seconds)
-    problem = (
-        f"{app.name}: {unit} failed to start: {restart_error}"
-        if restart_error is not None
-        else wait_healthy(ctx, [HealthTarget(app, None)]).get(app.name)
-    )
-    if problem is not None:
-        _settle(ctx, app, unit)
-        ctx.out.warn(problem)
-        return None
-    return state
+            continue
+        ctx.out.warn(f"{failures[app.name]}; restarting {app.name} at its current digest")
+        targets.append((app, idle, image))
+    return targets
 
 
 def _recover(ctx: Context, state: State, names: set[str]) -> State:
-    """Restart running apps whose active slot is unhealthy; warn about those that stay so."""
-    apps = [ctx.unit.apps[name] for name in sorted(names)]
+    """Move running blue-green apps whose active slot is unhealthy to their idle slot.
+
+    It probes every app in one health wait and waits for all new slots in a second one, so
+    the waits do not grow with the number of unhealthy apps. A slot that still serves some
+    requests keeps serving until its replacement is healthy. Recreate apps are left to
+    systemd, `app-release check` and `app-release refresh`: their restarts run
+    preStopCommand, which has no time limit, one app at a time.
+    """
+    apps = [ctx.unit.apps[name] for name in sorted(names) if ctx.unit.apps[name].blue_green]
     failures = wait_healthy(ctx, [HealthTarget(app, state.apps[app.name].slot) for app in apps])
+    targets = _recovery_targets(ctx, state, apps, failures)
+    try:
+        state, problems = _move_to_idle_slots(ctx, state, targets, all_or_nothing=False)
+    except AppReleaseError as error:
+        problems = {app.name: error.message for app, _, _ in targets}
+    for message in dict.fromkeys(problems.values()):
+        ctx.out.warn(message)
     recovered: dict[str, str] = {}
-    for app in sorted(
-        (app for app in apps if app.name in failures), key=lambda a: (a.priority, a.name)
-    ):
-        ctx.out.warn(f"{failures[app.name]}; restarting {app.name} at its current digest")
-        restarted = _restart_unhealthy(ctx, state, app)
-        if restarted is not None:
-            state = restarted
+    for app, slot, _ in targets:
+        if app.name in problems:
+            _settle(ctx, app, app.unit(slot))
+        else:
             recovered[app.name] = state.apps[app.name].current.digest
             del failures[app.name]
     _give_up(ctx, failures)

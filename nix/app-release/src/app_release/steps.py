@@ -199,27 +199,58 @@ class Transaction:
         self.previous_state = previous
         self.ctx.store.save(state)
 
+    def _start_idle_slot(self, app: AppConfig, slot: Slot, image: Image) -> None:
+        ctx = self.ctx
+        unit = app.unit(slot)
+        if not app.portless and ctx.services.active_state(unit) not in STOPPED_STATES:
+            ctx.out.line(f"{app.name}: stopping the leftover {unit} first")
+            error = ctx.services.stop(unit, block=True)
+            if error is not None:
+                message = f"{app.name}: cannot stop the leftover {unit}: {error}"
+                raise StepError(message)
+        ctx.images.tag(image.id, app.local_tag(slot))
+        self.started.append((app, slot))
+        ctx.out.line(f"{app.name}: starting {image.digest} in slot {slot}")
+        error = ctx.services.restart(unit, timeout=app.health.timeout_seconds)
+        if error is not None:
+            message = f"{app.name}: {unit} failed to start: {error}"
+            raise StepError(message)
+
     def start_idle_slots(self, targets: list[tuple[AppConfig, Slot, Image]]) -> None:
         """Start each app's idle slot on its target image and wait until all are healthy."""
-        ctx = self.ctx
         for app, slot, image in targets:
-            unit = app.unit(slot)
-            if not app.portless and ctx.services.active_state(unit) not in STOPPED_STATES:
-                ctx.out.line(f"{app.name}: stopping the leftover {unit} first")
-                error = ctx.services.stop(unit, block=True)
-                if error is not None:
-                    message = f"{app.name}: cannot stop the leftover {unit}: {error}"
-                    raise StepError(message)
-            ctx.images.tag(image.id, app.local_tag(slot))
-            self.started.append((app, slot))
-            ctx.out.line(f"{app.name}: starting {image.digest} in slot {slot}")
-            error = ctx.services.restart(unit, timeout=app.health.timeout_seconds)
-            if error is not None:
-                message = f"{app.name}: {unit} failed to start: {error}"
-                raise StepError(message)
-        failures = wait_healthy(ctx, [HealthTarget(app, slot) for app, slot, _ in targets])
+            self._start_idle_slot(app, slot, image)
+        failures = wait_healthy(self.ctx, [HealthTarget(app, slot) for app, slot, _ in targets])
         if failures:
             raise StepError("; ".join(failures.values()))
+
+    def start_idle_slots_independently(
+        self, targets: list[tuple[AppConfig, Slot, Image]]
+    ) -> dict[str, str]:
+        """Start every app's idle slot, then wait for all of them at once.
+
+        An app whose slot fails does not fail the others: its slot stops and leaves the
+        transaction. Returns the failures by app name.
+        """
+        failures: dict[str, str] = {}
+        for app, slot, image in targets:
+            try:
+                self._start_idle_slot(app, slot, image)
+            except StepError as error:
+                failures[app.name] = error.message
+            except AppReleaseError as error:
+                failures[app.name] = error.message
+        failures |= wait_healthy(
+            self.ctx,
+            [HealthTarget(app, slot) for app, slot, _ in targets if app.name not in failures],
+        )
+        for app, slot in self.started:
+            if app.name in failures:
+                stop_error = stop_slot(self.ctx, app, slot)
+                if stop_error is not None:
+                    self.ctx.out.warn(f"{app.name}: cannot stop slot {slot}: {stop_error}")
+        self.started = [(app, slot) for app, slot in self.started if app.name not in failures]
+        return failures
 
     def restart_recreate(self, app: AppConfig, image: Image, old_image_id: str) -> None:
         """Run preStopCommand, then restart a recreate app on `image` and wait until healthy."""
