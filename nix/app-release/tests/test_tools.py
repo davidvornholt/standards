@@ -308,7 +308,7 @@ class CliTest(unittest.TestCase):
             self.assertEqual(self.run_cli(["status"], root), (ExitCode.OK, ""))
 
     def test_local_operations_end_with_a_result(self) -> None:
-        for operation in ("status", "reconcile", "refresh", "gc"):
+        for operation in ("status", "reconcile", "refresh", "check", "gc"):
             for failure in (None, "operation", "corrupt state"):
                 fails = failure is not None
                 with (
