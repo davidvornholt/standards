@@ -1,5 +1,5 @@
 {
-  description = "Nix package for the davidvornholt standards CLI and poller";
+  description = "Nix packages for the davidvornholt standards CLI, poller and app-release host module";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
 
@@ -24,8 +24,11 @@
         {
           standards-cli = standardsCli;
           default = standardsCli;
+          app-release = pkgs.callPackage ./nix/app-release/package.nix { };
         }
       );
+
+      nixosModules.app-release = ./nix/app-release/module.nix;
 
       checks = forAllSystems (
         system:
@@ -36,6 +39,9 @@
         {
           standards-cli = pkgs.callPackage ./nix/standards-cli-check.nix {
             inherit bunSystemMetadata standardsCli;
+          };
+          app-release = pkgs.callPackage ./nix/app-release/check.nix {
+            appRelease = self.packages.${system}.app-release;
           };
         }
       );
