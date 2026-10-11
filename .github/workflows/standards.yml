@@ -258,6 +258,10 @@ jobs:
       # Workflows are the one file class the rest of the gate never exercises —
       # a broken workflow only fails when its trigger fires, after merge. Lint
       # them first: it is the cheapest step, so certain failures cost nothing.
+      # CodeBuild runners occasionally see a pinned download stall for two
+      # minutes and end in an HTTP error, so every pinned download in this
+      # workflow caps each attempt and retries. The checksum still decides
+      # what runs.
       - name: Lint workflows
         run: |
           set -euo pipefail
@@ -271,7 +275,7 @@ jobs:
               ;;
           esac
           archive="$RUNNER_TEMP/actionlint.tar.gz"
-          curl -sfLo "$archive" "https://github.com/rhysd/actionlint/releases/download/v${version}/actionlint_${version}_linux_${arch}.tar.gz"
+          curl -sSfLo "$archive" --retry 3 --retry-all-errors --connect-timeout 10 --max-time 60 "https://github.com/rhysd/actionlint/releases/download/v${version}/actionlint_${version}_linux_${arch}.tar.gz"
           echo "$sha  $archive" | sha256sum --check --quiet
           tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
           # The v3 GitHub App token action accepts client-id, but actionlint
@@ -634,6 +638,7 @@ jobs:
             .github/settings.local.json
           sparse-checkout-cone-mode: false
 
+      # Downloads retry for the reason given at Lint workflows.
       - name: Install pinned settings checker
         run: |
           set -euo pipefail
@@ -648,7 +653,7 @@ jobs:
           esac
           bun_archive="$RUNNER_TEMP/bun.zip"
           bun_root="$RUNNER_TEMP/standards-bin"
-          curl -sfLo "$bun_archive" "https://github.com/oven-sh/bun/releases/download/bun-v${bun_version}/bun-linux-${bun_arch}.zip"
+          curl -sSfLo "$bun_archive" --retry 3 --retry-all-errors --connect-timeout 10 --max-time 60 "https://github.com/oven-sh/bun/releases/download/bun-v${bun_version}/bun-linux-${bun_arch}.zip"
           echo "$bun_sha  $bun_archive" | sha256sum --check --quiet
           mkdir "$bun_root"
           unzip -q "$bun_archive" -d "$bun_root"
@@ -659,7 +664,7 @@ jobs:
           standards_archive="$RUNNER_TEMP/standards.tgz"
           cli_root="$RUNNER_TEMP/standards-cli"
           mkdir -p "$cli_root/package"
-          curl -sfLo "$standards_archive" "https://registry.npmjs.org/@davidvornholt/standards/-/standards-${standards_version}.tgz"
+          curl -sSfLo "$standards_archive" --retry 3 --retry-all-errors --connect-timeout 10 --max-time 60 "https://registry.npmjs.org/@davidvornholt/standards/-/standards-${standards_version}.tgz"
           echo "$standards_sha  $standards_archive" | sha512sum --check --quiet
           tar -xzf "$standards_archive" -C "$cli_root/package" --strip-components=1
 
@@ -667,7 +672,7 @@ jobs:
           yaml_sha=dcdc4df3eefc39dcdb4fb0bf5a31acc9f3c0b4968ddc5343b16c6fed8ee6703b13fe83a6816f01a72410145067bd91378fd63649dcf550b14b7b32fb11bdb217
           yaml_archive="$RUNNER_TEMP/yaml.tgz"
           mkdir -p "$cli_root/node_modules/yaml"
-          curl -sfLo "$yaml_archive" "https://registry.npmjs.org/yaml/-/yaml-${yaml_version}.tgz"
+          curl -sSfLo "$yaml_archive" --retry 3 --retry-all-errors --connect-timeout 10 --max-time 60 "https://registry.npmjs.org/yaml/-/yaml-${yaml_version}.tgz"
           echo "$yaml_sha  $yaml_archive" | sha512sum --check --quiet
           tar -xzf "$yaml_archive" -C "$cli_root/node_modules/yaml" --strip-components=1
 
