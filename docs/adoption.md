@@ -75,12 +75,32 @@ The root package must declare the CLI directly and run `standards check` before 
 {
   "scripts": {
     "check": "standards check && turbo run lint check-types test build test:a11y --output-logs=errors-only",
-    "check:fix": "standards check && turbo run lint:fix check-types test build test:a11y --output-logs=errors-only"
+    "check:fix": "standards check && turbo run lint:fix check-types test build test:a11y --output-logs=errors-only",
+    "lint": "biome check --error-on-warnings .",
+    "lint:fix": "biome check --write --error-on-warnings ."
   }
 }
 ```
 
 Use the repository's actual tasks. The invariant is that a failed standards check remains fatal.
+
+Biome runs once for the whole repository from the root `lint` and `lint:fix` scripts. Workspaces must not declare their own lint scripts. In `turbo.json`, define the lint tasks as root tasks:
+
+```json
+{
+  "tasks": {
+    "//#lint": {
+      "outputs": []
+    },
+    "//#lint:fix": {
+      "cache": false,
+      "outputs": []
+    }
+  }
+}
+```
+
+Keep the default inputs for `//#lint`. They cover every file in the repository that git does not ignore, so any change to a linted file invalidates the cached result.
 
 The root `packageManager` is the Bun version contract. The synced mise config reads it directly. Add project tools to the project-owned `mise.toml`.
 

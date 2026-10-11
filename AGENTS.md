@@ -25,7 +25,8 @@ Do not weaken quality gates to make a change pass. Explain inline suppressions. 
 
 ## Workspace scripts
 
-- Operational scripts belong to the owning workspace's `package.json`. Keep root scripts minimal: the quality gates plus narrowly useful filtered Turbo convenience aliases.
+- Operational scripts belong to the owning workspace's `package.json`. Keep root scripts minimal: the quality gates, including `lint` and `lint:fix`, plus narrowly useful filtered Turbo convenience aliases.
+- Biome lints the whole repository once from the root, so workspaces do not declare lint scripts.
 - Canonical repo-spanning workflows and convenience recipes live in the root `justfile`; project-specific recipes live in `local.just`.
 
 ## Effect standards

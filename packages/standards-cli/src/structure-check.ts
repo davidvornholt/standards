@@ -16,7 +16,7 @@ import { collectCiSecretsProblems } from './structure-secrets';
 import { inspectWorkspace, type Workspace } from './structure-workspace';
 
 const ROOT_FIXED_SCRIPTS = new Set(
-  'standards,check,check:fix,test:a11y'.split(','),
+  'standards,check,check:fix,lint,lint:fix,test:a11y'.split(','),
 );
 const GLOB_SUFFIX = '/*';
 const WORKSPACES_REQUIREMENT =

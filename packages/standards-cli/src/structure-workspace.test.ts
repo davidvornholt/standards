@@ -14,8 +14,6 @@ afterEach(() => {
 
 const CANONICAL_SCRIPTS = {
   'check-types': 'tsc --noEmit',
-  lint: 'biome check --error-on-warnings .',
-  'lint:fix': 'biome check --write --error-on-warnings .',
   test: 'bun test',
 };
 
@@ -55,24 +53,14 @@ describe('inspectWorkspace manifest rules', () => {
       ...baseManifest(),
       scripts: {
         'check-types': 'tsc --noEmit --help',
-        lint: 'biome check --error-on-warnings . --help',
-        'lint:fix': 'biome check --write --error-on-warnings . --version',
         test: 'bun test --help',
       },
     });
     const { problems } = await inspect(ws);
-    expect(problems).toContain(
+    expect(problems).toEqual([
       'apps/web: script "check-types" must run tsc --noEmit',
-    );
-    expect(problems).toContain(
-      'apps/web: script "lint" must run biome check --error-on-warnings .',
-    );
-    expect(problems).toContain(
-      'apps/web: script "lint:fix" must run biome check --write --error-on-warnings .',
-    );
-    expect(problems).toContain(
       'apps/web: script "test" must run bun test or bun test --isolate',
-    );
+    ]);
   });
 
   it('requires internal workspace version 0.0.0', async () => {
@@ -122,6 +110,35 @@ describe('inspectWorkspace manifest rules', () => {
       'packages/typescript-config',
     );
     expect((await inspect(ws)).problems).toEqual([]);
+  });
+});
+
+describe('inspectWorkspace root-only lint scripts', () => {
+  const rootOnlyProblem = (name: string): string =>
+    `apps/web: remove script "${name}"; linting runs once at the repository root through the root "lint" and "lint:fix" scripts`;
+
+  it.each([
+    ['lint', 'biome check --error-on-warnings .'],
+    ['lint:fix', 'biome check --write --error-on-warnings .'],
+    ['lint', 'eslint .'],
+    ['lint:fix', ''],
+  ])('rejects a workspace %s script: %s', async (name, script) => {
+    const ws = makeWorkspace({
+      ...baseManifest(),
+      scripts: { ...CANONICAL_SCRIPTS, [name]: script },
+    });
+    expect((await inspect(ws)).problems).toEqual([rootOnlyProblem(name)]);
+  });
+
+  it('reports both lint scripts, even when one is not a string', async () => {
+    const ws = makeWorkspace({
+      ...baseManifest(),
+      scripts: { ...CANONICAL_SCRIPTS, lint: null, 'lint:fix': 'biome' },
+    });
+    expect((await inspect(ws)).problems).toEqual([
+      rootOnlyProblem('lint'),
+      rootOnlyProblem('lint:fix'),
+    ]);
   });
 });
 

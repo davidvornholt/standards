@@ -3,10 +3,10 @@
   "agentGuidance": false,
   "globalDependencies": ["biome.jsonc", "biome.base.jsonc"],
   "tasks": {
-    "lint": {
+    "//#lint": {
       "outputs": []
     },
-    "lint:fix": {
+    "//#lint:fix": {
       "cache": false,
       "outputs": []
     },

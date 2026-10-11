@@ -3,6 +3,13 @@
   "agentGuidance": false,
   "globalDependencies": ["biome.jsonc", "biome.base.jsonc"],
   "tasks": {
+    "//#lint": {
+      "outputs": []
+    },
+    "//#lint:fix": {
+      "cache": false,
+      "outputs": []
+    },
     "build": {
       "dependsOn": ["^build"],
       "outputs": [".next/**", "!.next/cache/**", ".output/**", "dist/**"]
@@ -14,13 +21,6 @@
     "dev": {
       "cache": false,
       "persistent": true
-    },
-    "lint": {
-      "outputs": []
-    },
-    "lint:fix": {
-      "cache": false,
-      "outputs": []
     },
     "test": {
       "outputs": []

@@ -11,11 +11,13 @@
     "dev": "turbo run dev --filter=./apps/*",
     "standards": "standards",
     "check": "standards check && turbo run lint check-types test build test:a11y --output-logs=errors-only",
-    "check:fix": "standards check && turbo run lint:fix check-types test build test:a11y --output-logs=errors-only"
+    "check:fix": "standards check && turbo run lint:fix check-types test build test:a11y --output-logs=errors-only",
+    "lint": "biome check --error-on-warnings .",
+    "lint:fix": "biome check --write --error-on-warnings ."
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
-    "@davidvornholt/standards": "0.28.0",
+    "@davidvornholt/standards": "0.29.0",
     "turbo": "^2.11.7",
     "typescript": "7.0.2"
   },
