@@ -222,6 +222,7 @@ class ReconcileTest(HostTestCase):
     def test_failed_recreate_refresh_records_the_definition_it_started(self) -> None:
         for failure in ("health", "restart"):
             with self.subTest(failure=failure):
+                self.world.run_unit("podman-jobs.service", self.v1["jobs"])
                 self.change_definition("jobs", f"def-{failure}")
                 self.world.unhealthy.clear()
                 if failure == "health":
@@ -233,10 +234,17 @@ class ReconcileTest(HostTestCase):
                 self.assertEqual(raised.exception.exit_code, ExitCode.CRITICAL)
                 self.assertIn("may be down", raised.exception.message)
                 self.assertEqual(self.state().apps["jobs"].definition_hash, f"def-{failure}")
-                # Like the rollback that follows, the next reconcile only retries the app.
-                seen = len(self.world.output())
-                reconcile(self.world.context())
-                self.assertIn("jobs stays down", self.world.output()[seen:])
+                # The host rollback restores the old definition and starts its stopped unit.
+                self.world.stop("podman-jobs.service", block=True)
+                self.change_definition("jobs", "def-1")
+                with self.assertRaises(FailedError):
+                    reconcile(self.world.context())
+                self.assertEqual(self.state().apps["jobs"].definition_hash, "def-1")
+                # Restoration and later activations retry that attempted definition.
+                for _ in range(2):
+                    seen = len(self.world.output())
+                    reconcile(self.world.context())
+                    self.assertIn("jobs stays down", self.world.output()[seen:])
 
     def test_draining_worker_keeps_its_definition_without_failing(self) -> None:
         self.change_definition("worker")
@@ -301,6 +309,24 @@ class ReconcileTest(HostTestCase):
         for name in APPS:
             self.assertEqual(state.apps[name].current.digest, self.v1[name].digest)
 
+    def test_refresh_fails_when_an_unchanged_stopped_app_cannot_start(self) -> None:
+        for name in ("jobs", "web"):
+            unit = self.world.unit.apps[name].unit(self.state().apps[name].slot)
+            for failure in ("health", "restart"):
+                with self.subTest(app=name, failure=failure):
+                    self.world.unhealthy.clear()
+                    self.world.failing_units.clear()
+                    if failure == "health":
+                        self.world.unhealthy.add(self.v1[name].id)
+                    else:
+                        self.world.failing_units.add(unit)
+                    for _ in range(2):
+                        self.world.stop(unit, block=True)
+                        with self.assertRaises(FailedError) as raised:
+                            refresh(self.world.context())
+                        self.assertIn(name, raised.exception.message)
+                    self.world.run_unit(unit, self.v1[name])
+
     def test_a_stopped_app_that_fails_on_its_new_definition_fails_the_reconcile(self) -> None:
         self.world.stop("podman-jobs.service", block=True)
         self.change_definition("jobs")
@@ -308,7 +334,7 @@ class ReconcileTest(HostTestCase):
         with self.assertRaises(FailedError) as raised:
             reconcile(self.world.context())
         self.assertIn("jobs: not healthy", raised.exception.message)
-        self.assertEqual(self.state().apps["jobs"].definition_hash, "def-1")
+        self.assertEqual(self.state().apps["jobs"].definition_hash, "def-2")
 
     def test_an_unhealthy_running_app_is_restarted_at_its_current_digest(self) -> None:
         # The running containers hang; new containers of the same images are healthy.
