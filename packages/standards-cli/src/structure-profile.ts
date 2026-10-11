@@ -56,11 +56,9 @@ const SOURCE_ROOT_EXPECTATIONS: ReadonlyArray<RootScriptExpectation> = [
 // Biome runs once over the whole repository from the root. With the project
 // domain on, every invocation loads the entire repository, so one root run
 // replaces a full project load per workspace and also covers root files.
-const rootLintExpectations = (
-  exact: boolean,
-): ReadonlyArray<RootScriptExpectation> => [
-  { name: 'lint', commands: [ROOT_LINT], exact },
-  { name: 'lint:fix', commands: [ROOT_LINT_FIX], exact },
+const ROOT_LINT_EXPECTATIONS: ReadonlyArray<RootScriptExpectation> = [
+  { name: 'lint', commands: [ROOT_LINT], exact: true },
+  { name: 'lint:fix', commands: [ROOT_LINT_FIX], exact: true },
 ];
 
 export const rootScriptExpectations = (
@@ -68,12 +66,12 @@ export const rootScriptExpectations = (
   requireA11y: boolean,
 ): ReadonlyArray<RootScriptExpectation> => [
   ...(profile === 'source'
-    ? [...SOURCE_ROOT_EXPECTATIONS, ...rootLintExpectations(true)]
+    ? SOURCE_ROOT_EXPECTATIONS
     : [
         { name: 'check', commands: [CONSUMER_CHECK], exact: false },
         { name: 'check:fix', commands: [CONSUMER_CHECK_FIX], exact: false },
-        ...rootLintExpectations(false),
       ]),
+  ...ROOT_LINT_EXPECTATIONS,
   ...(requireA11y
     ? [{ name: 'test:a11y', commands: [ROOT_A11Y], exact: false }]
     : []),

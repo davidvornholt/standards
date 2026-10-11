@@ -57,8 +57,8 @@ describe('collectStructureProblems basics and scripts', () => {
       ),
     );
     expect(await collect(buildConsumer(rootManifest({ scripts })))).toEqual([
-      'package.json: root script "lint" must run biome check --error-on-warnings .',
-      'package.json: root script "lint:fix" must run biome check --write --error-on-warnings .',
+      'package.json: root script "lint" must run exactly biome check --error-on-warnings .',
+      'package.json: root script "lint:fix" must run exactly biome check --write --error-on-warnings .',
     ]);
   });
 
@@ -68,8 +68,12 @@ describe('collectStructureProblems basics and scripts', () => {
     ['lint', 'biome check --error-on-warnings apps'],
     ['lint', 'biome check --error-on-warnings . --help'],
     ['lint', 'biome check --error-on-warnings . || true'],
+    ['lint', 'cd apps/web && biome check --error-on-warnings .'],
+    ['lint', 'exit 0 && biome check --error-on-warnings .'],
     ['lint:fix', 'biome check --error-on-warnings .'],
     ['lint:fix', 'biome check --write .'],
+    ['lint:fix', 'cd apps/web && biome check --write --error-on-warnings .'],
+    ['lint:fix', 'exit 0 && biome check --write --error-on-warnings .'],
   ])('rejects a wrong root %s script: %s', async (name, script) => {
     const scripts = {
       ...(rootManifest().scripts as Record<string, string>),
@@ -80,7 +84,7 @@ describe('collectStructureProblems basics and scripts', () => {
         ? 'biome check --error-on-warnings .'
         : 'biome check --write --error-on-warnings .';
     expect(await collect(buildConsumer(rootManifest({ scripts })))).toEqual([
-      `package.json: root script "${name}" must run ${expected}`,
+      `package.json: root script "${name}" must run exactly ${expected}`,
     ]);
   });
 
