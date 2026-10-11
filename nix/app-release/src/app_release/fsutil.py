@@ -21,15 +21,16 @@ def atomic_write(path: Path, data: bytes, mode: int = 0o644) -> None:
             handle.flush()
             os.fchmod(handle.fileno(), mode)
             os.fsync(handle.fileno())
-        Path(temporary).replace(path)
+        # A reader may remove the directory as soon as the new file becomes visible.
+        directory_descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            Path(temporary).replace(path)
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(directory_descriptor)
     except BaseException:
         Path(temporary).unlink(missing_ok=True)
         raise
-    directory_descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        os.fsync(directory_descriptor)
-    finally:
-        os.close(directory_descriptor)
 
 
 def atomic_write_text(path: Path, text: str, mode: int = 0o644) -> None:

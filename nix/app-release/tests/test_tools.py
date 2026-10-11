@@ -47,6 +47,27 @@ class Recorder:
 
 
 class FsutilTest(unittest.TestCase):
+    def test_atomic_write_finishes_after_reader_removes_the_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as name:
+            directory = Path(name) / "request"
+            directory.mkdir()
+            path = directory / "exit"
+            replace = Path.replace
+
+            def consume_exit(temporary: Path, target: Path) -> Path:
+                result = replace(temporary, target)
+                self.assertEqual(path.read_text(), "0\n")
+                path.unlink()
+                directory.rmdir()
+                return result
+
+            with (
+                mock.patch.object(Path, "replace", consume_exit),
+                mock.patch("app_release.fsutil.os.fsync", wraps=os.fsync) as fsync,
+            ):
+                atomic_write_text(path, "0\n", mode=0o600)
+            self.assertEqual(fsync.call_count, 2)
+
     def test_atomic_write_sets_the_mode_and_leaves_no_temporary_files(self) -> None:
         with tempfile.TemporaryDirectory() as name:
             path = Path(name) / "file"
