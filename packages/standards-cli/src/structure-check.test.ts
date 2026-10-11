@@ -6,6 +6,7 @@ import {
   buildConsumer,
   CANONICAL_SCRIPTS,
   cleanupStructureTmps,
+  ROOT_LINT_SCRIPTS,
   consumerRootManifest as rootManifest,
   writeInto as write,
 } from './structure-test-support';
@@ -47,6 +48,44 @@ describe('collectStructureProblems basics and scripts', () => {
     expect(await collect(buildConsumer(rootManifest({ scripts })))).toEqual(
       expected,
     );
+  });
+
+  it('requires the root lint scripts', async () => {
+    const scripts = Object.fromEntries(
+      Object.entries(rootManifest().scripts as Record<string, string>).filter(
+        ([name]) => !(name in ROOT_LINT_SCRIPTS),
+      ),
+    );
+    expect(await collect(buildConsumer(rootManifest({ scripts })))).toEqual([
+      'package.json: root script "lint" must run exactly biome check --error-on-warnings .',
+      'package.json: root script "lint:fix" must run exactly biome check --write --error-on-warnings .',
+    ]);
+  });
+
+  it.each([
+    ['lint', 'turbo run lint'],
+    ['lint', 'biome check .'],
+    ['lint', 'biome check --error-on-warnings apps'],
+    ['lint', 'biome check --error-on-warnings . --help'],
+    ['lint', 'biome check --error-on-warnings . || true'],
+    ['lint', 'cd apps/web && biome check --error-on-warnings .'],
+    ['lint', 'exit 0 && biome check --error-on-warnings .'],
+    ['lint:fix', 'biome check --error-on-warnings .'],
+    ['lint:fix', 'biome check --write .'],
+    ['lint:fix', 'cd apps/web && biome check --write --error-on-warnings .'],
+    ['lint:fix', 'exit 0 && biome check --write --error-on-warnings .'],
+  ])('rejects a wrong root %s script: %s', async (name, script) => {
+    const scripts = {
+      ...(rootManifest().scripts as Record<string, string>),
+      [name]: script,
+    };
+    const expected =
+      name === 'lint'
+        ? 'biome check --error-on-warnings .'
+        : 'biome check --write --error-on-warnings .';
+    expect(await collect(buildConsumer(rootManifest({ scripts })))).toEqual([
+      `package.json: root script "${name}" must run exactly ${expected}`,
+    ]);
   });
 
   /* Per-shape coverage lives in structure-script.test.ts with the diagnostic
@@ -135,6 +174,24 @@ describe('collectStructureProblems workspace declarations', () => {
     expect(problems).toContain(
       'packages/broken: package.json must contain a JSON object',
     );
+  });
+
+  it('surfaces a workspace lint script through the root entry point', async () => {
+    const consumer = buildConsumer();
+    write(
+      consumer,
+      'packages/ui/package.json',
+      JSON.stringify({
+        name: '@repo/ui',
+        version: '0.0.0',
+        exports: { './button': './src/button.tsx' },
+        scripts: { ...CANONICAL_SCRIPTS, ...ROOT_LINT_SCRIPTS },
+      }),
+    );
+    expect(await collect(consumer)).toEqual([
+      'packages/ui: remove script "lint"; linting runs once at the repository root through the root "lint" and "lint:fix" scripts',
+      'packages/ui: remove script "lint:fix"; linting runs once at the repository root through the root "lint" and "lint:fix" scripts',
+    ]);
   });
 
   it('surfaces per-workspace problems through the root entry point', async () => {

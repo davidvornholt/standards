@@ -30,6 +30,7 @@ import {
 import {
   CI_EXAMPLE_YAML,
   CI_SECRETS_YAML,
+  ROOT_LINT_SCRIPTS,
   TEMPLATE_CI_SECRETS_YAML,
 } from './structure-test-support';
 
@@ -1077,6 +1078,7 @@ const buildUpstream = (paths: ReadonlyArray<string> = STD_PATHS): string => {
           'standards check && turbo run lint check-types test build test:a11y --output-logs=errors-only',
         'check:fix':
           'standards check && turbo run lint:fix check-types test build test:a11y --output-logs=errors-only',
+        ...ROOT_LINT_SCRIPTS,
       },
       devDependencies: { '@davidvornholt/standards': '0.1.0' },
     }),
@@ -1087,12 +1089,7 @@ const buildUpstream = (paths: ReadonlyArray<string> = STD_PATHS): string => {
     JSON.stringify({
       name: '@repo/web',
       version: '0.0.0',
-      scripts: {
-        'check-types': 'tsc --noEmit',
-        lint: 'biome check --error-on-warnings .',
-        'lint:fix': 'biome check --write --error-on-warnings .',
-        test: 'bun test',
-      },
+      scripts: { 'check-types': 'tsc --noEmit', test: 'bun test' },
     }),
   );
   write(
@@ -2128,6 +2125,7 @@ const installPackedCli = (
           'standards check && turbo run lint check-types test build test:a11y --output-logs=errors-only',
         'check:fix':
           'standards check && turbo run lint:fix check-types test build test:a11y --output-logs=errors-only',
+        ...ROOT_LINT_SCRIPTS,
       },
       devDependencies: {
         '@davidvornholt/standards': `file:${tarball}`,

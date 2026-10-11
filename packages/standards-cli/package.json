@@ -1,6 +1,6 @@
 {
   "name": "@davidvornholt/standards",
-  "version": "0.28.0",
+  "version": "0.29.0",
   "description": "Bootstrap, synchronize, and validate davidvornholt/standards consumers",
   "license": "MIT",
   "repository": {
@@ -180,8 +180,6 @@
     "src/sops-action-callers.ts"
   ],
   "scripts": {
-    "lint": "biome check --error-on-warnings .",
-    "lint:fix": "biome check --write --error-on-warnings .",
     "check-types": "tsc --noEmit",
     "test": "bun test"
   },

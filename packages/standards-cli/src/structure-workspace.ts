@@ -13,10 +13,12 @@ export type Workspace = {
 };
 const WORKSPACE_SCRIPTS: ReadonlyArray<readonly [string, string]> = [
   ['check-types', 'tsc --noEmit'],
-  ['lint', 'biome check --error-on-warnings .'],
-  ['lint:fix', 'biome check --write --error-on-warnings .'],
   ['test', 'bun test'],
 ];
+// Biome lints the whole repository once from the root "lint" scripts, and
+// Turbo runs only that root task. A workspace copy would be a stale second
+// entry point, so declaring one fails instead of being silently ignored.
+const ROOT_ONLY_SCRIPTS = ['lint', 'lint:fix'] as const;
 const A11Y_DEPENDENCIES = ['@axe-core/playwright', '@playwright/test'] as const;
 const DEPENDENCY_FIELDS =
   'dependencies devDependencies peerDependencies optionalDependencies'.split(
@@ -57,8 +59,9 @@ const containsA11ySuite = async (dir: string): Promise<boolean> => {
   );
   return nested.includes(true);
 };
-const inspectScripts = (ws: Workspace): ReadonlyArray<string> =>
-  WORKSPACE_SCRIPTS.flatMap(([name, command]) => {
+const inspectScripts = (ws: Workspace): ReadonlyArray<string> => {
+  const scripts = isRecord(ws.manifest.scripts) ? ws.manifest.scripts : {};
+  const required = WORKSPACE_SCRIPTS.flatMap(([name, command]) => {
     const script = scriptOf(ws.manifest, name);
     const accepted =
       hasSafeCommand(script, command) ||
@@ -67,6 +70,14 @@ const inspectScripts = (ws: Workspace): ReadonlyArray<string> =>
       name === 'test' ? 'bun test or bun test --isolate' : command;
     return accepted ? [] : [`${ws.rel}: script "${name}" must run ${expected}`];
   });
+  const rootOnly = ROOT_ONLY_SCRIPTS.filter((name) =>
+    Object.hasOwn(scripts, name),
+  ).map(
+    (name) =>
+      `${ws.rel}: remove script "${name}"; linting runs once at the repository root through the root "lint" and "lint:fix" scripts`,
+  );
+  return [...required, ...rootOnly];
+};
 const declaredDependencies = (manifest: Record<string, unknown>) =>
   DEPENDENCY_FIELDS.flatMap((field) => {
     const deps = manifest[field];

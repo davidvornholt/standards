@@ -13,6 +13,8 @@ const CONSUMER_CHECK =
 const CONSUMER_CHECK_FIX =
   'turbo run lint:fix check-types test build test:a11y --output-logs=errors-only';
 const ROOT_A11Y = 'turbo run test:a11y';
+const ROOT_LINT = 'biome check --error-on-warnings .';
+const ROOT_LINT_FIX = 'biome check --write --error-on-warnings .';
 
 export const PUBLISHED_CLI_WORKSPACE = 'packages/standards-cli';
 const PUBLISHED_CLI_PACKAGE = '@davidvornholt/standards';
@@ -51,6 +53,14 @@ const SOURCE_ROOT_EXPECTATIONS: ReadonlyArray<RootScriptExpectation> = [
   },
 ];
 
+// Biome runs once over the whole repository from the root. With the project
+// domain on, every invocation loads the entire repository, so one root run
+// replaces a full project load per workspace and also covers root files.
+const ROOT_LINT_EXPECTATIONS: ReadonlyArray<RootScriptExpectation> = [
+  { name: 'lint', commands: [ROOT_LINT], exact: true },
+  { name: 'lint:fix', commands: [ROOT_LINT_FIX], exact: true },
+];
+
 export const rootScriptExpectations = (
   profile: StructureProfile,
   requireA11y: boolean,
@@ -61,6 +71,7 @@ export const rootScriptExpectations = (
         { name: 'check', commands: [CONSUMER_CHECK], exact: false },
         { name: 'check:fix', commands: [CONSUMER_CHECK_FIX], exact: false },
       ]),
+  ...ROOT_LINT_EXPECTATIONS,
   ...(requireA11y
     ? [{ name: 'test:a11y', commands: [ROOT_A11Y], exact: false }]
     : []),

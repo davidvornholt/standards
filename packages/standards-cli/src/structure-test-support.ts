@@ -20,9 +20,13 @@ export const writeInto = (root: string, rel: string, content: string): void => {
 
 export const CANONICAL_SCRIPTS = {
   'check-types': 'tsc --noEmit',
+  test: 'bun test',
+};
+// Biome runs once from the repository root, so these live only in the root
+// manifest and never in a workspace.
+export const ROOT_LINT_SCRIPTS = {
   lint: 'biome check --error-on-warnings .',
   'lint:fix': 'biome check --write --error-on-warnings .',
-  test: 'bun test',
 };
 export const TSCONFIG =
   '{ "extends": "@davidvornholt/typescript-config/base" }\n';
@@ -81,6 +85,7 @@ export const consumerRootManifest = (
       'standards check && turbo run lint check-types test build test:a11y --output-logs=errors-only',
     'check:fix':
       'standards check && turbo run lint:fix check-types test build test:a11y --output-logs=errors-only',
+    ...ROOT_LINT_SCRIPTS,
   },
   ...overrides,
 });

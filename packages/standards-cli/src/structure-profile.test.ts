@@ -4,6 +4,7 @@ import {
   CANONICAL_SCRIPTS,
   cleanupStructureTmps,
   newStructureTmp,
+  ROOT_LINT_SCRIPTS,
   TSCONFIG,
   writeInto as write,
   writeCiSecretsPair,
@@ -62,6 +63,7 @@ const sourceRootManifest = (
     standards: CLI,
     check: SOURCE_GATE_COMMANDS.check.join(' && '),
     'check:fix': SOURCE_GATE_COMMANDS['check:fix'].join(' && '),
+    ...ROOT_LINT_SCRIPTS,
   },
   ...overrides,
 });
@@ -113,6 +115,7 @@ describe('source profile', () => {
         'standards check && turbo run lint check-types test build test:a11y --output-logs=errors-only',
       'check:fix':
         'standards check && turbo run lint:fix check-types test build test:a11y --output-logs=errors-only',
+      lint: `true && ${ROOT_LINT_SCRIPTS.lint}`,
     };
     const problems = await collectStructureProblems(
       buildSource(sourceRootManifest({ scripts })),
@@ -122,6 +125,8 @@ describe('source profile', () => {
       `package.json: root script "standards" must run exactly ${CLI}`,
       `package.json: root script "check" must run exactly ${SOURCE_GATE_COMMANDS.check.join(' && ')}`,
       `package.json: root script "check:fix" must run exactly ${SOURCE_GATE_COMMANDS['check:fix'].join(' && ')}`,
+      `package.json: root script "lint" must run exactly ${ROOT_LINT_SCRIPTS.lint}`,
+      `package.json: root script "lint:fix" must run exactly ${ROOT_LINT_SCRIPTS['lint:fix']}`,
     ]);
   });
 
@@ -151,6 +156,22 @@ describe('source profile', () => {
     expect(problems).toContain(
       'packages/standards-cli: the source profile requires the published CLI workspace',
     );
+  });
+
+  it('rejects workspace lint scripts in the source repository too', async () => {
+    const problems = await collectStructureProblems(
+      buildSource(
+        sourceRootManifest(),
+        cliManifest({
+          scripts: { ...CANONICAL_SCRIPTS, ...ROOT_LINT_SCRIPTS },
+        }),
+      ),
+      'source',
+    );
+    expect(problems).toEqual([
+      'packages/standards-cli: remove script "lint"; linting runs once at the repository root through the root "lint" and "lint:fix" scripts',
+      'packages/standards-cli: remove script "lint:fix"; linting runs once at the repository root through the root "lint" and "lint:fix" scripts',
+    ]);
   });
 
   it('holds the published CLI to every other workspace rule', async () => {
