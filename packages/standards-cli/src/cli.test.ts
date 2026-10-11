@@ -32,6 +32,7 @@ import {
   CI_SECRETS_YAML,
   ROOT_LINT_SCRIPTS,
   TEMPLATE_CI_SECRETS_YAML,
+  turboJson,
 } from './structure-test-support';
 
 const ENGINE = join(import.meta.dir, 'cli.ts');
@@ -1097,6 +1098,7 @@ const buildUpstream = (paths: ReadonlyArray<string> = STD_PATHS): string => {
     'template/apps/web/tsconfig.json',
     '{ "extends": "@davidvornholt/typescript-config/base" }\n',
   );
+  write(up, 'template/turbo.json', turboJson());
   write(up, 'template/secrets/ci.example.yaml', CI_EXAMPLE_YAML);
   write(up, 'managed/a.txt', 'alpha\n');
   write(up, 'managed/b.txt', 'beta\n');

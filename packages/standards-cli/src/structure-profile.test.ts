@@ -6,6 +6,7 @@ import {
   newStructureTmp,
   ROOT_LINT_SCRIPTS,
   TSCONFIG,
+  turboJson,
   writeInto as write,
   writeCiSecretsPair,
 } from './structure-test-support';
@@ -86,6 +87,7 @@ const buildSource = (
 ): string => {
   const dir = newStructureTmp('structure-source-');
   write(dir, 'package.json', JSON.stringify(root));
+  write(dir, 'turbo.json', turboJson());
   writeCiSecretsPair(dir);
   if (cli !== null) {
     write(dir, 'packages/standards-cli/package.json', JSON.stringify(cli));
@@ -171,6 +173,20 @@ describe('source profile', () => {
     expect(problems).toEqual([
       'packages/standards-cli: remove script "lint"; linting runs once at the repository root through the root "lint" and "lint:fix" scripts',
       'packages/standards-cli: remove script "lint:fix"; linting runs once at the repository root through the root "lint" and "lint:fix" scripts',
+    ]);
+  });
+
+  it('requires the root lint tasks in the source repository too', async () => {
+    const dir = buildSource();
+    write(
+      dir,
+      'turbo.json',
+      turboJson({ lint: { outputs: [] }, '//#lint:fix': { outputs: [] } }),
+    );
+    expect(await collectStructureProblems(dir, 'source')).toEqual([
+      'turbo.json: define the root task "//#lint" as { "outputs": [] }; Turbo runs the root "lint" script only through that task, so without it turbo run lint never runs Biome',
+      'turbo.json: set "cache": false on the root task "//#lint:fix"; a cache hit replays the previous output instead of running Biome\'s fixes',
+      'turbo.json: remove task "lint"; linting runs once at the repository root through the root tasks "//#lint" and "//#lint:fix"',
     ]);
   });
 

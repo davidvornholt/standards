@@ -1,6 +1,6 @@
 {
   "name": "@davidvornholt/standards",
-  "version": "0.29.0",
+  "version": "0.29.1",
   "description": "Bootstrap, synchronize, and validate davidvornholt/standards consumers",
   "license": "MIT",
   "repository": {
@@ -173,6 +173,7 @@
     "src/structure-script.ts",
     "src/structure-secrets.ts",
     "src/structure-sops-envelope.ts",
+    "src/structure-turbo.ts",
     "src/structure-workspace.ts",
     "src/sync-policy.ts",
     "src/yaml-emit.ts",
