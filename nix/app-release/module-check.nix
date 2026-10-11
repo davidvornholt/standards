@@ -132,8 +132,8 @@ let
     lib.assertMsg (errors == expected) (
       "app-release module assertions (undefined migration service): expected ${builtins.toJSON expected}, got ${builtins.toJSON errors}"
     );
-  # Generated units: every container prepares its own image tag before it starts, and host
-  # switches leave the migration service to releases.
+  # Generated units: every container prepares its own image tag before it starts and stops
+  # cleanly after SIGTERM, and host switches leave the migration service to releases.
   generated =
     let
       services =
@@ -148,11 +148,18 @@ let
         builtins.any (lib.hasSuffix "/bin/app-release prepare ${command}") (
           lib.toList services.${service}.serviceConfig.ExecStartPre
         );
+      stopsCleanly =
+        service: builtins.elem "143" (lib.toList services.${service}.serviceConfig.SuccessExitStatus);
     in
     lib.assertMsg (
       prepares "podman-web-blue" "shop web blue"
       && prepares "podman-web-green" "shop web green"
       && prepares "podman-jobs" "shop jobs"
+      && builtins.all stopsCleanly [
+        "podman-web-blue"
+        "podman-web-green"
+        "podman-jobs"
+      ]
       && !services.shop-migrate.restartIfChanged
     ) "app-release module: generated container or migration units are missing their activation settings";
 in

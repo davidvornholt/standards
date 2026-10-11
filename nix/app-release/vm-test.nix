@@ -70,14 +70,12 @@ let
       config = {
         # darkhttpd keeps idle keep-alive connections open for 300 s, longer than
         # Caddy's 2 min pool timeout, so Caddy still holds pooled connections to
-        # the old slot when it stops. On SIGTERM it closes every connection.
+        # the old slot when it stops. On SIGTERM it closes every connection. The
+        # shell then exits with 143, as `bun run start` does.
         Cmd = [
-          "/bin/darkhttpd"
-          "/www"
-          "--port"
-          "3000"
-          "--timeout"
-          "300"
+          "/bin/sh"
+          "-c"
+          "/bin/darkhttpd /www --port 3000 --timeout 300 & trap 'kill -TERM $!; wait $!; exit 143' TERM; wait"
         ];
         Labels."org.opencontainers.image.revision" = image.revision;
       };
