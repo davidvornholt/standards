@@ -98,6 +98,27 @@ find "$cache_dir" -type f -printf '%T@\\t%k\\t%p\\n' |
     '{ total += $2; if (total > budget) print $3 }' |
   xargs -r rm -f --
 `;
+const ZSTD_INSTALL_STEP = {
+  name: 'Install zstd for the Actions cache',
+  if: "vars.CI_CODEBUILD_PROJECT != ''",
+  run: `set -euo pipefail
+version=1.5.5+dfsg2-2build1
+case "$(uname -m)" in
+  x86_64) arch=amd64; archive=https://archive.ubuntu.com/ubuntu; sha=bb14385ff3d6df723a686778dc5f87849f720a0add261b5de9bcd4915a490b2a ;;
+  aarch64) arch=arm64; archive=https://ports.ubuntu.com/ubuntu-ports; sha=e054f8bf2c8b3f1d82a1e87352c1cb6f62887aac22a88b55f7dd715567f74bfd ;;
+  *)
+    echo "::error::No pinned zstd package for runner architecture $(uname -m)"
+    exit 1
+    ;;
+esac
+package="$RUNNER_TEMP/zstd.deb"
+curl -sSfLo "$package" --retry 3 --retry-all-errors --connect-timeout 10 --max-time 60 "$archive/pool/main/libz/libzstd/zstd_\${version}_\${arch}.deb"
+echo "$sha  $package" | sha256sum --check --quiet
+dpkg-deb -x "$package" "$RUNNER_TEMP/zstd"
+"$RUNNER_TEMP/zstd/usr/bin/zstd" --version
+echo "$RUNNER_TEMP/zstd/usr/bin" >> "$GITHUB_PATH"
+`,
+};
 const EXECUTABLE_MODE = 0o755;
 const CACHE_FIXTURE_FILE_SIZE = 4096;
 const OLDEST_CACHE_MTIME = 100;
@@ -772,7 +793,7 @@ const canonicalWorkflowPaths = (
 // This merge-time ratchet keeps configurable routing on the exact compatible
 // canonical jobs. It catches accidental workflow drift after review; it does
 // not authorize a request before CodeBuild starts a runner for the queued job.
-const CONFIGURABLE_RUNNER_VARIABLE_OCCURRENCES = 16;
+const CONFIGURABLE_RUNNER_VARIABLE_OCCURRENCES = 17;
 const QUALITY_JOB_NAME = 'quality';
 const CODEBUILD_JOB_TIMEOUT_MINUTES = 30;
 const NOTIFY_JOB_TIMEOUT_MINUTES = 5;
@@ -2769,6 +2790,21 @@ it('pins Node for quality tools that intentionally require it', () => {
     uses: 'actions/setup-node@v7',
     with: { 'node-version': '26' },
   });
+});
+
+it('installs a pinned zstd on CodeBuild before the first Actions cache user', () => {
+  const workflow = parseWorkflow(STANDARDS_WORKFLOW);
+  const steps = workflowSteps(workflow.jobs.quality, 'quality');
+  const zstdStep = qualityStep(workflow, ZSTD_INSTALL_STEP.name);
+  expect(zstdStep).toEqual(ZSTD_INSTALL_STEP);
+  // setup-bun caches its own binary through the same Actions cache client.
+  const firstCacheUserIndex = steps.findIndex(
+    (step) =>
+      typeof step.uses === 'string' &&
+      (step.uses.startsWith('actions/cache') ||
+        step.uses.startsWith('oven-sh/setup-bun')),
+  );
+  expect(firstCacheUserIndex).toBeGreaterThan(steps.indexOf(zstdStep));
 });
 
 it('requires database resolution before dependency installation', () => {

@@ -75,7 +75,7 @@ The host reports `superseded` and changes nothing when a run is older than the n
 
 ## Rollback and status
 
-A `Roll back` workflow runs on `workflow_dispatch` from main, in the same concurrency group, with `command: rollback`. It switches every app of the unit to its previous digest without migrations or revision checks, and pulls the previous image again if it is gone. Running it again returns to the newer version. The database stays migrated, so the previous version must still work with the current schema; otherwise fix forward. If a rollback succeeds but moving `:production` fails, do not re-run it, because that switches back; point each tag at its `live-images` entry instead.
+A `Roll back` workflow runs on `workflow_dispatch` from main, in the same concurrency group, with `command: rollback`. It switches every app of the unit to its previous digest without migrations or revision checks, and pulls the previous image again if it is gone. Running it again returns to the newer version. The database stays migrated, so the previous version must still work with the current schema; otherwise fix forward. If a rollback succeeds but moving `:production` fails, do not re-run it, because that switches back; point each tag at its `live-images` entry instead. The rollback job and the `release` job also require `github.repository == '<owner>/<repo>' && github.ref == 'refs/heads/main'` in their job-level `if`, so a fork provisioned with the age key never contacts the host.
 
 `command: status` reports the live digests, previous digests, and slots. On the host, `app-release status [<unit>]` prints the same state.
 
