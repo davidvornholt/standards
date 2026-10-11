@@ -124,6 +124,7 @@ with subtest("bootstrap from :production"):
     assert active_state("podman-web-blue.service") == "active"
     assert active_state("podman-web-green.service") == "inactive"
     assert active_state("podman-worker-blue.service") == "active"
+    assert machine.succeed("sysctl -n net.ipv4.tcp_migrate_req").strip() == "1"
     machine.succeed("mint-token --init")
 
 with subtest("requests that fail authorization or validation are rejected"):

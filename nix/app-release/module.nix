@@ -750,6 +750,11 @@ in
 
     systemd.tmpfiles.settings."10-app-release" = tmpfileRules;
 
+    # Slot switches never reload Caddy, but configuration changes still do. Each reload
+    # binds a new SO_REUSEPORT listener and closes the old one; without this setting the
+    # kernel resets the connections still queued on the closed listener. Linux 5.14+.
+    boot.kernel.sysctl."net.ipv4.tcp_migrate_req" = 1;
+
     users.users.root.openssh.authorizedKeys.keys = lib.mkAfter (
       lib.concatLists (
         lib.mapAttrsToList (
