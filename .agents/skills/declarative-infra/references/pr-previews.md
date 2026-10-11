@@ -10,7 +10,7 @@ Previews are the sanctioned exception to "all desired state lives in git." The a
 
 The state file is a JSON array of `{ number, image, headSha, updatedAt }`. Treat it as untrusted on every read: validate the full schema (positive bounded PR numbers, unique, digest-pinned image refs matching the allowed image name) before use, write it atomically (temp file, validate, rename), and serialize all mutations with an exclusive `flock`.
 
-The active-preview state enters the flake the same way as image digests (see bootstrap: build-time parameters via environment with safe fallbacks), so plain `nix flake check` evaluates with an empty preview set; the host-side rebuild passes the state file path and runs with `--impure`.
+The active-preview state enters the flake through an environment variable naming the state file, read with `builtins.getEnv`, falling back to an empty set when unset, and passed to modules through `specialArgs`. Plain `nix flake check` therefore evaluates with an empty preview set; the host-side rebuild passes the state file path and runs with `--impure`.
 
 ## Trust boundaries
 
@@ -41,7 +41,7 @@ The command reads `SSH_ORIGINAL_COMMAND` with the contract `deploy <pr-number> <
 
 The command's package is also its retention boundary. Every store path that the generated command reads after deployment, including the flake source, image manifest, validator, and any other runtime file, must be in that command's own closure. Preserve Nix string context when embedding paths: pass interpolated paths to `pkgs.replaceVars`, `pkgs.writeText`, or the package's `text`, and never convert a path with `toString` before embedding it. `system.extraDependencies` is not a substitute; it can retain a different realization from the path named inside the command. Add a flake check that extracts the store paths named by the generated command, including sourced helper packages, and asserts that each path appears in its closure.
 
-Deploy semantics: take the lock, read the current production image (from the running container, falling back to the recorded deploy state) so the rebuild never moves production, upsert the preview into the state file, `switch`, run migrations, restart the preview container. If any step fails, remove the preview from state, converge again, and drop its database — a failed deploy leaves nothing behind. Destroy is idempotent: a PR number not in state returns success.
+Deploy semantics: take the lock, verify that production's active slot runs the digest recorded in its [app-release](app-release.md) state, upsert the preview into the state file, `switch`, run migrations, restart the preview container. The release state, not the flake, selects the production digest, so the rebuild never moves production to another image. If any step fails, remove the preview from state, converge again, and drop its database — a failed deploy leaves nothing behind. Destroy is idempotent: a PR number not in state returns success.
 
 Migrations run as a one-shot container as the preview's own UID against the preview's own database over the host Postgres socket, with `--network=none`, dropped capabilities, and resource caps.
 

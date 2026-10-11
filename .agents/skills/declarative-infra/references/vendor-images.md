@@ -1,6 +1,6 @@
-# Vendor image promotion
+# Vendor image updates
 
-Use this contract for third-party containers whose publisher is outside the infrastructure owner's control. Such images require reviewed, immutable desired-state updates and verified deployment completion. They do not require our source announcement workflow or access to the vendor's private Actions logs.
+Use this contract for third-party containers whose publisher is outside the infrastructure owner's control. The host repository pins them by digest and deploys them with the host, so every update is a reviewed, immutable desired-state change with verified deployment completion. It needs no access to the vendor's Actions logs. First-party apps release through [App releases](app-release.md) instead.
 
 ## Publisher and desired state
 
@@ -8,7 +8,7 @@ The infrastructure repository owns a strict manifest with each release family's 
 
 Prefer the official upstream publisher. A personal fork needs a documented server customization or another concrete reason, plus responsibility for keeping it current. Repository ownership alone does not turn third-party software into an internally maintained application. Changing publishers is a reviewed metadata change, with runtime, migration, and data-format compatibility checked before deployment.
 
-Existing immutable production pins may be adopted unchanged into the manifest without republishing a vendor build or disabling the application. Show that adoption preserves the evaluated container references. Do not duplicate a pin in both source and vendor manifests.
+Existing immutable production pins may be adopted unchanged into the manifest without republishing a vendor build or disabling the application. Show that adoption preserves the evaluated container references. Pin each image in exactly one place.
 
 ## Discovery and review
 
@@ -26,7 +26,7 @@ Opening or reusing a verified vendor-update PR retires every other trusted open 
 
 The publisher decides which release is newer. For version tags, compare versions under the declared policy. For a moving tag such as `latest`, the release the tag points at now is newer than every other candidate for that tag: resolve the tag in the same retirement run and require exactly the newer candidate's digest for every family member. PR numbers, creation times, discovery order, and digest differences alone do not prove that a release is newer. Equal version numbers with different digests, publisher or family changes, and otherwise incomparable candidates close nothing. Do not apply source-commit ancestry rules to vendor releases.
 
-Record retirement through the trusted updater's closure event and link the replacement PR. Reruns of an open candidate retry unfinished retirement, and failed closure or verification is reported rather than treated as success. A retired candidate is terminal: reruns do not recreate it, and merge and deployment gates reject its promotion even if someone reopens the PR. If the newer candidate fails, repair or retry it or propose a verified newer release; never reactivate the retired identity. Restoring a previously deployed digest uses the separate reviewed rollback below.
+Record retirement through the trusted updater's closure event and link the replacement PR. Reruns of an open candidate retry unfinished retirement, and failed closure or verification is reported rather than treated as success. A retired candidate is terminal: reruns do not recreate it, and merge and deployment gates reject it even if someone reopens the PR. If the newer candidate fails, repair or retry it or propose a verified newer release; never reactivate the retired identity. Restoring a previously deployed digest uses the separate reviewed rollback below.
 
 Verify this lifecycle in the owning updater's tests: strictly newer candidates, including the release a moving tag points at now, retire only eligible older PRs; reuse retries incomplete retirement; equal, incomparable, untrusted, and unrelated candidates remain open; and newer-release failure or manual reopening cannot reactivate a retired candidate.
 
@@ -34,9 +34,9 @@ Verify this lifecycle in the owning updater's tests: strictly newer candidates, 
 
 Images published as one vendor release, such as Immich server and machine learning, form a release family. Select the same upstream version for every member and pin them in one PR. A separately versioned database or cache remains a separate family unless upstream declares a joint version contract. Vendor images need not share a source SHA or Actions run.
 
-One PR coordinates desired state, but container rollout remains sequential. Establish mixed-version compatibility or stop the family before shared migrations. Pre-pull every selected digest first and fail the whole deployment when a required member or migration fails.
+One PR coordinates desired state, but container rollout remains sequential. Establish mixed-version compatibility or stop the family before shared migrations. Fail the whole deployment when a required member or migration fails.
 
-Use the infrastructure home's exact-commit quality gate, current-main guard, serialized deployment, and pre-mutation registry verification. Completion belongs to the exact merged PR, infrastructure merge SHA, and successful deploy attempt. Require every affected image's runtime digest and health plus all required infrastructure postconditions. A merge, successful pull, or another commit's deployment does not prove completion. Attach a deployment result and evidence link to the original PR.
+Deploy through the host repository's serialized main-branch pipeline. It requires the quality gate for the exact merge commit, rejects retired candidates, and verifies that every selected digest resolves in its registry before it mutates anything. A run whose commit is no longer current main applies nothing. Completion belongs to the exact merged PR, infrastructure merge SHA, and successful deploy attempt. Require every affected image's runtime digest and health plus all required infrastructure postconditions on every host whose system changed. A merge, successful pull, or another commit's deployment does not prove completion. Report a run that applied nothing because main moved on as superseded, neither complete nor failed; the newer run deploys the change. Attach a deployment result and evidence link to the original PR.
 
 A rollback is a new reviewed manifest change with verified old digests and an explicit database recovery decision where needed. Never move a tag or reactivate a closed candidate to bypass review.
 
