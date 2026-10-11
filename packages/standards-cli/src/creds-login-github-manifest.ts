@@ -42,9 +42,7 @@ export const resolveGithubAppName = (
 // workflow actually uses today; widening it is a deliberate edit here plus a
 // settings-page change on the existing App, not a default to grow into.
 const DEFAULT_PERMISSIONS = {
-  actions: 'read',
   contents: 'write',
-  issues: 'write',
   metadata: 'read',
   pull_requests: 'write',
   workflows: 'write',

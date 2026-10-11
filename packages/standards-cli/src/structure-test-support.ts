@@ -28,6 +28,20 @@ export const ROOT_LINT_SCRIPTS = {
   lint: 'biome check --error-on-warnings .',
   'lint:fix': 'biome check --write --error-on-warnings .',
 };
+// Turbo runs the root lint scripts only through these root tasks.
+export const ROOT_LINT_TASKS = {
+  '//#lint': { outputs: [] },
+  '//#lint:fix': { cache: false, outputs: [] },
+};
+export const CANONICAL_TURBO_TASKS = {
+  ...ROOT_LINT_TASKS,
+  'check-types': { outputs: [] },
+  test: { outputs: [] },
+};
+export const turboJson = (
+  tasks: Record<string, unknown> = CANONICAL_TURBO_TASKS,
+): string =>
+  `${JSON.stringify({ $schema: 'https://turbo.build/schema.json', tasks })}\n`;
 export const TSCONFIG =
   '{ "extends": "@davidvornholt/typescript-config/base" }\n';
 
@@ -96,6 +110,7 @@ export const buildConsumer = (
 ): string => {
   const consumer = newStructureTmp('structure-');
   writeInto(consumer, 'package.json', JSON.stringify(root));
+  writeInto(consumer, 'turbo.json', turboJson());
   writeInto(
     consumer,
     'sync-standards.json',
