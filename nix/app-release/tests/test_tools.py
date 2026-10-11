@@ -12,12 +12,14 @@ from unittest import mock
 
 from app_release.cli import run_cli
 from app_release.environment import Environment
-from app_release.errors import ExitCode, LockTimeoutError
+from app_release.errors import ExitCode, FailedError, LockTimeoutError
 from app_release.fsutil import atomic_write_text, exclusive_lock
+from app_release.output import RESULT_PREFIX
 from app_release.podman import Podman, content_key, digest_of, repository_of
 from app_release.probes import SystemProber
 from app_release.runner import Completed, run
 from app_release.systemd import Systemctl
+from tests.fakes import app_json, unit_json
 
 
 class Recorder:
@@ -270,6 +272,54 @@ class CliTest(unittest.TestCase):
             self.assertEqual(self.run_cli(["reconcile"], root)[0], ExitCode.REJECTED)
             self.assertEqual(self.run_cli(["deploy", "shop"], root)[0], ExitCode.REJECTED)
             self.assertEqual(self.run_cli(["status"], root), (ExitCode.OK, ""))
+
+    def test_local_operations_end_with_a_result(self) -> None:
+        for operation in ("status", "reconcile", "refresh", "gc"):
+            for failure in (None, "operation", "corrupt state"):
+                fails = failure is not None
+                with (
+                    self.subTest(operation=operation, failure=failure),
+                    tempfile.TemporaryDirectory() as name,
+                ):
+                    root = Path(name)
+                    (root / "etc").mkdir()
+                    (root / "etc/shop.json").write_text(
+                        json.dumps(unit_json({"web": app_json("web", ports=(8001, 8002))}))
+                    )
+                    if failure == "corrupt state":
+                        state_path = root / "lib/shop/state.json"
+                        state_path.parent.mkdir(parents=True)
+                        state_path.write_text("{")
+                    handler = mock.Mock(
+                        side_effect=FailedError("operation failed") if fails else None
+                    )
+                    with (
+                        mock.patch.dict("app_release.cli.LOCAL_OPERATIONS", {operation: handler}),
+                        mock.patch("app_release.cli.status", handler),
+                    ):
+                        code, output = self.run_cli([operation, "shop"], root)
+                    self.assertEqual(code, ExitCode.FAILED if fails else ExitCode.OK)
+                    self.assertEqual(output.count(RESULT_PREFIX), 1, output)
+                    result = json.loads(output.splitlines()[-1].removeprefix(RESULT_PREFIX))
+                    self.assertEqual(result["result"], "failed" if fails else "status")
+                    self.assertEqual(result["unit"], "shop")
+                    self.assertEqual(result["apps"], {})
+
+    def test_status_obeys_the_operation_lock(self) -> None:
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            (root / "etc").mkdir()
+            (root / "etc/shop.json").write_text(
+                json.dumps(unit_json({"web": app_json("web", ports=(8001, 8002))}))
+            )
+            with (
+                exclusive_lock(self.environment(root).lock_path("shop"), 0, lambda: None),
+                mock.patch("app_release.cli.LOCK_TIMEOUT_SECONDS", 0),
+            ):
+                code, output = self.run_cli(["status", "shop"], root)
+            self.assertEqual(code, ExitCode.LOCK_TIMEOUT, output)
+            result = json.loads(output.splitlines()[-1].removeprefix(RESULT_PREFIX))
+            self.assertEqual(result["result"], "failed")
 
     def test_environment_comes_from_the_wrapper(self) -> None:
         environ = {

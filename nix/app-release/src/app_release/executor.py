@@ -8,15 +8,14 @@ from types import FrameType
 from typing import TextIO, cast
 
 from app_release.command import parse_request
-from app_release.config import ConfigError
+from app_release.config import ConfigError, UnitConfig
 from app_release.context import Claims, Context
 from app_release.environment import LOCK_TIMEOUT_SECONDS, Environment
 from app_release.errors import AppReleaseError, ExitCode
 from app_release.fsutil import atomic_write_text, exclusive_lock
 from app_release.output import Output
 from app_release.release import release, rollback
-from app_release.report import payload, status
-from app_release.state import State
+from app_release.report import payload, safe_payload, status
 
 REQUEST_FILE = "request.json"
 OUTPUT_FILE = "output.log"
@@ -53,13 +52,6 @@ def _claims(value: object) -> Claims:
     )
 
 
-def _safe_state(ctx: Context) -> State | None:
-    try:
-        return ctx.store.load()
-    except AppReleaseError:
-        return None
-
-
 def _run(ctx: Context, operation: str, claims: Claims, digests: dict[str, str]) -> int:
     out = ctx.out
     try:
@@ -73,14 +65,14 @@ def _run(ctx: Context, operation: str, claims: Claims, digests: dict[str, str]) 
             return ExitCode.OK
     except AppReleaseError as error:
         out.line(f"error: {error.message}")
-        out.result(payload(ctx.unit, "failed", _safe_state(ctx), error.message))
+        out.result(safe_payload(ctx.unit, ctx.store, "failed", error.message))
         return error.exit_code
     except Exception as error:  # noqa: BLE001 - every failure must end with a result line
         # Steps that move traffic restore the previous version themselves, so an error that
         # reaches this point happened before anything moved.
         message = f"unexpected error: {error!r}"
         out.line(f"error: {message}")
-        out.result(payload(ctx.unit, "failed", _safe_state(ctx), message))
+        out.result(safe_payload(ctx.unit, ctx.store, "failed", message))
         return ExitCode.FAILED
     out.line(outcome.message)
     out.result(payload(ctx.unit, outcome.result, outcome.state, outcome.message))
@@ -97,6 +89,7 @@ def execute_request(environment: Environment, directory: Path, stdout: TextIO) -
 
 
 def _execute(environment: Environment, directory: Path, out: Output) -> int:
+    unit: UnitConfig | None = None
     try:
         raw: object = json.loads((directory / REQUEST_FILE).read_text())
         if not isinstance(raw, dict):
@@ -107,7 +100,10 @@ def _execute(environment: Environment, directory: Path, out: Output) -> int:
         request = parse_request(data.get("request"))
         claims = _claims(data.get("claims"))
     except (AppReleaseError, OSError, ValueError) as error:
-        out.line(f"error: cannot read the request: {error}")
+        message = f"cannot read the request: {error}"
+        out.line(f"error: {message}")
+        store = environment.state_store(unit.name) if unit is not None else None
+        out.result(safe_payload(unit, store, "failed", message))
         return ExitCode.FAILED
     ctx = environment.context(unit, out)
     out.line(
@@ -123,7 +119,7 @@ def _execute(environment: Environment, directory: Path, out: Output) -> int:
             return _run(ctx, request.operation, claims, request.digests)
     except AppReleaseError as error:
         out.line(f"error: {error.message}")
-        out.result(payload(unit, "failed", _safe_state(ctx), error.message))
+        out.result(safe_payload(unit, ctx.store, "failed", error.message))
         return error.exit_code
 
 

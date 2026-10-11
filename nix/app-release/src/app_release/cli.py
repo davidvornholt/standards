@@ -3,16 +3,17 @@
 import os
 import sys
 from collections.abc import Callable
+from contextlib import ExitStack
 
 from app_release import executor, ssh
-from app_release.config import NAME_PATTERN, configured_units
+from app_release.config import NAME_PATTERN, UnitConfig, configured_units
 from app_release.context import Context
 from app_release.environment import LOCK_TIMEOUT_SECONDS, Environment, current_environment
 from app_release.errors import AppReleaseError, ExitCode, RejectedError
 from app_release.fsutil import exclusive_lock
 from app_release.output import Output
 from app_release.reconcile import gc, reconcile, refresh
-from app_release.report import status
+from app_release.report import safe_payload, status
 
 USAGE = """usage: app-release <command> [<unit>]
 
@@ -48,19 +49,35 @@ def _units(environment: Environment, arguments: list[str], *, all_by_default: bo
 
 
 def _local(environment: Environment, operation: str, unit_name: str, out: Output) -> int:
-    unit = environment.load_unit(unit_name)
-    ctx = environment.context(unit, out)
-    if operation == "status":
-        status(ctx)
-        return ExitCode.OK
-    with exclusive_lock(
-        environment.lock_path(unit.name),
-        LOCK_TIMEOUT_SECONDS,
-        lambda: out.line(f"waiting for another operation on unit {unit.name} to finish"),
-    ):
-        LOCAL_OPERATIONS[operation](ctx)
-    out.line(f"{operation} of unit {unit.name} finished")
-    return ExitCode.OK
+    unit: UnitConfig | None = None
+    # Keep the lock through the final state read and result line, including handled failures.
+    with ExitStack() as stack:
+        try:
+            unit = environment.load_unit(unit_name)
+            ctx = environment.context(unit, out)
+            stack.enter_context(
+                exclusive_lock(
+                    environment.lock_path(unit.name),
+                    LOCK_TIMEOUT_SECONDS,
+                    lambda: out.line(
+                        f"waiting for another operation on unit {unit.name} to finish"
+                    ),
+                )
+            )
+            if operation == "status":
+                status(ctx)
+            else:
+                LOCAL_OPERATIONS[operation](ctx)
+        except AppReleaseError as error:
+            out.line(f"error: {error.message}")
+            store = environment.state_store(unit.name) if unit is not None else None
+            out.result(safe_payload(unit, store, "failed", error.message))
+            return error.exit_code
+        else:
+            message = f"{operation} of unit {unit.name} finished"
+            out.line(message)
+            out.result(safe_payload(unit, ctx.store, "status", message))
+            return ExitCode.OK
 
 
 def run_cli(arguments: list[str], environment_factory: Callable[[], Environment]) -> int:
@@ -79,9 +96,12 @@ def run_cli(arguments: list[str], environment_factory: Callable[[], Environment]
         units = _units(environment, rest, all_by_default=command in ("status", "gc"))
         code: int = ExitCode.OK
         for unit in units:
-            code = max(code, _local(environment, command, unit, out))
+            code = _local(environment, command, unit, out)
+            if code != ExitCode.OK:
+                return code
     except AppReleaseError as error:
         out.line(f"error: {error.message}")
+        out.result(safe_payload(None, None, "failed", error.message))
         return error.exit_code
     return code
 

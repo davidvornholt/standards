@@ -17,12 +17,12 @@ from app_release.command import Request, parse_command
 from app_release.config import UnitConfig
 from app_release.context import Claims
 from app_release.environment import Environment
-from app_release.errors import AppReleaseError, ExitCode, FailedError, RejectedError
+from app_release.errors import AppReleaseError, CriticalError, FailedError, RejectedError
 from app_release.executor import EXIT_FILE, OUTPUT_FILE, REQUEST_FILE
 from app_release.oidc import JwksCache, Verified, fetch_url, verify
 from app_release.output import Output
 from app_release.replay import remember
-from app_release.report import payload
+from app_release.report import safe_payload
 from app_release.systemd import STOPPED_STATES
 
 TOKEN_LIMIT_BYTES = 16 * 1024
@@ -149,8 +149,9 @@ def stream(
         if finished:
             try:
                 return int(exit_file.read_text().strip())
-            except ValueError:
-                return ExitCode.CRITICAL
+            except (OSError, ValueError) as error:
+                message = f"cannot read the operation exit code: {error}"
+                raise CriticalError(message) from error
         if clock() - last_check >= UNIT_CHECK_SECONDS:
             last_check = clock()
             if running():
@@ -160,13 +161,9 @@ def stream(
                 # The unit may have just written its exit file; give it one more round.
                 if gone_checks > 1 and not exit_file.exists():
                     message = (
-                        "error: the operation stopped without a result; "
-                        "check its unit in the journal\n"
+                        "the operation stopped without a result; check its unit in the journal"
                     )
-                    with contextlib.suppress(OSError, ValueError):
-                        out.write(message)
-                        out.flush()
-                    return ExitCode.CRITICAL
+                    raise CriticalError(message)
         sleep(POLL_SECONDS)
 
 
@@ -174,14 +171,8 @@ def _reject(
     out: Output, unit: UnitConfig | None, environment: Environment, error: AppReleaseError
 ) -> int:
     out.line(f"error: {error.message}")
-    if unit is not None:
-        try:
-            state = environment.state_store(unit.name).load()
-        except AppReleaseError:
-            state = None
-        out.result(payload(unit, "failed", state, error.message))
-    else:
-        out.result({"unit": None, "result": "failed", "apps": {}, "message": error.message})
+    store = environment.state_store(unit.name) if unit is not None else None
+    out.result(safe_payload(unit, store, "failed", error.message))
     return error.exit_code
 
 
@@ -229,6 +220,9 @@ def ssh_main(
         message = f"cannot start the operation: {error_message}"
         return _reject(out, unit, environment, FailedError(message))
     out.line(f"started {name}")
-    code = stream(directory, stdout, lambda: launcher.running(name))
-    shutil.rmtree(directory, ignore_errors=True)
-    return code
+    try:
+        return stream(directory, stdout, lambda: launcher.running(name))
+    except CriticalError as error:
+        return _reject(out, unit, environment, error)
+    finally:
+        shutil.rmtree(directory, ignore_errors=True)

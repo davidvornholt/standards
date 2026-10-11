@@ -6,20 +6,22 @@ import threading
 import time
 import unittest
 from collections.abc import Mapping, Sequence
+from functools import partial
 from pathlib import Path
+from unittest import mock
 
 import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 from app_release.config import parse_unit
 from app_release.environment import Environment
-from app_release.errors import ExitCode, RejectedError
-from app_release.executor import EXIT_FILE, OUTPUT_FILE, execute_request
+from app_release.errors import CriticalError, ExitCode, RejectedError
+from app_release.executor import EXIT_FILE, OUTPUT_FILE, REQUEST_FILE, execute_request
 from app_release.output import RESULT_PREFIX
 from app_release.runner import Completed
 from app_release.ssh import read_token, ssh_main, stream
 from app_release.state import AppState, Release, State
-from tests.fakes import SHA_A, SHA_B, app_json, digest, unit_json
+from tests.fakes import SHA_A, SHA_B, FakeClock, app_json, digest, unit_json
 from tests.test_oidc import ISSUER, jwk
 
 
@@ -92,9 +94,8 @@ class StreamTest(unittest.TestCase):
                 now[0] += seconds * 20
 
             out = io.StringIO()
-            code = stream(directory, out, lambda: False, sleep=sleep, clock=lambda: now[0])
-            self.assertEqual(code, ExitCode.CRITICAL)
-            self.assertIn("stopped without a result", out.getvalue())
+            with self.assertRaisesRegex(CriticalError, "stopped without a result"):
+                stream(directory, out, lambda: False, sleep=sleep, clock=lambda: now[0])
 
 
 class FakeSystem:
@@ -223,6 +224,7 @@ class SshTest(unittest.TestCase):
         code, output = self.call("status", token)
         self.assertEqual(code, ExitCode.OK, output)
         result = self.result(output)
+        self.assertEqual(output.count(RESULT_PREFIX), 1)
         self.assertEqual(result["result"], "status")
         self.assertEqual(
             result["apps"],
@@ -242,6 +244,55 @@ class SshTest(unittest.TestCase):
         for argv in self.system.argv:
             self.assertNotIn(token, " ".join(argv))
         self.assertEqual(list((self.environment.run_dir / "requests").iterdir()), [])
+
+    def test_boundary_failures_end_with_a_result(self) -> None:
+        for failure in (
+            "missing request",
+            "malformed request",
+            "malformed claims",
+            "vanished",
+            "corrupt exit",
+        ):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as name:
+                directory = Path(name)
+                out = io.StringIO()
+                if failure in ("missing request", "malformed request", "malformed claims"):
+                    if failure == "malformed request":
+                        (directory / REQUEST_FILE).write_text("{")
+                    elif failure == "malformed claims":
+                        (directory / REQUEST_FILE).write_text(
+                            json.dumps(
+                                {"unit": "shop", "request": {"operation": "status", "digests": {}}}
+                            )
+                        )
+                    code = execute_request(self.environment, directory, out)
+                    output = out.getvalue()
+                    self.assertEqual(code, ExitCode.FAILED)
+                else:
+                    (directory / OUTPUT_FILE).write_text("")
+                    if failure == "corrupt exit":
+                        (directory / EXIT_FILE).write_text("corrupt")
+                    clock = FakeClock()
+
+                    with (
+                        mock.patch(
+                            "app_release.ssh._prepare", return_value=("test-unit", directory)
+                        ),
+                        mock.patch("app_release.ssh.Launcher.start", return_value=None),
+                        mock.patch("app_release.ssh.Launcher.running", return_value=False),
+                        mock.patch(
+                            "app_release.ssh.stream",
+                            side_effect=partial(stream, sleep=clock.sleep, clock=clock.monotonic),
+                        ),
+                    ):
+                        code, output = self.call("status", self.token(jti=failure))
+                    self.assertEqual(code, ExitCode.CRITICAL)
+                self.assertEqual(output.count(RESULT_PREFIX), 1, output)
+                result = self.result(output)
+                self.assertEqual(result["result"], "failed")
+                self.assertEqual(
+                    bool(result["apps"]), failure not in ("missing request", "malformed request")
+                )
 
     def test_replayed_token_is_rejected(self) -> None:
         token = self.token()

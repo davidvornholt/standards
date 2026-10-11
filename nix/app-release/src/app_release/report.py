@@ -2,7 +2,8 @@
 
 from app_release.config import UnitConfig
 from app_release.context import Context
-from app_release.state import Release, State
+from app_release.errors import AppReleaseError
+from app_release.state import Release, State, StateStore
 
 STATUS_HISTORY = 10
 
@@ -21,6 +22,19 @@ def payload(unit: UnitConfig, result: str, state: State | None, message: str) ->
             "slot": app_state.slot,
         }
     return {"unit": unit.name, "result": result, "apps": apps, "message": message}
+
+
+def safe_payload(
+    unit: UnitConfig | None, store: StateStore | None, result: str, message: str
+) -> dict[str, object]:
+    """Report the available state even when the request or state cannot be read."""
+    if unit is None:
+        return {"unit": None, "result": result, "apps": {}, "message": message}
+    try:
+        state = store.load() if store is not None else None
+    except AppReleaseError:
+        state = None
+    return payload(unit, result, state, message)
 
 
 def _describe(release: Release | None) -> str:
