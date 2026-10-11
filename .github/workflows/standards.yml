@@ -560,14 +560,26 @@ jobs:
         with:
           ref: ${{ github.sha }}
 
+      # The action opens /dev/kvm to the build users; declaring the kvm
+      # feature lets the x86_64-linux runner build the app-release VM test.
+      # Arm runners have no KVM, so they declare no extra features.
       - name: Install Nix
         uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: ${{ matrix.system == 'x86_64-linux' && 'system-features = nixos-test benchmark big-parallel kvm' || '' }}
 
       - name: Test Nix system metadata
         run: bash nix/bun-system-metadata.test.sh
 
       - name: Build Nix check
         run: nix build ".#checks.${{ matrix.system }}.standards-cli" -L
+
+      - name: Build app-release check
+        run: nix build ".#checks.${{ matrix.system }}.app-release" -L
+
+      - name: Run app-release VM test
+        if: matrix.system == 'x86_64-linux'
+        run: nix build ".#checks.x86_64-linux.app-release-vm" -L
 
   # Keep the stable required-check name while making all independent gates
   # mandatory. `always()` ensures a failed or cancelled dependency cannot turn

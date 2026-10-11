@@ -3226,22 +3226,6 @@ describe('canonical standards workflow Nix gate', () => {
         ]),
       );
     }
-    expect(nixJob.steps).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          name: 'Install Nix',
-          uses: 'cachix/install-nix-action@v31',
-        }),
-        expect.objectContaining({
-          name: 'Test Nix system metadata',
-          run: 'bash nix/bun-system-metadata.test.sh',
-        }),
-        expect.objectContaining({
-          name: 'Build Nix check',
-          run: `nix build ".#checks.${githubMatrixExpression('system')}.standards-cli" -L`,
-        }),
-      ]),
-    );
   });
 
   it('emits the current native runner matrix from its sole JSON owner', () => {
@@ -3287,6 +3271,56 @@ describe('canonical standards workflow Nix gate', () => {
 
     expect(result.status).not.toBe(0);
     expect(output).toBe('');
+  });
+});
+
+describe('canonical standards workflow Nix steps', () => {
+  const nixSteps = (): ReadonlyArray<Readonly<Record<string, unknown>>> =>
+    yamlJobs(STANDARDS_WORKFLOW).nix.steps as ReadonlyArray<
+      Readonly<Record<string, unknown>>
+    >;
+
+  it('builds every Nix check on each native runner', () => {
+    expect(nixSteps()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'Install Nix',
+          uses: 'cachix/install-nix-action@v31',
+          with: {
+            extra_nix_config: githubExpression(
+              "matrix.system == 'x86_64-linux' && 'system-features = nixos-test benchmark big-parallel kvm' || ''",
+            ),
+          },
+        }),
+        expect.objectContaining({
+          name: 'Test Nix system metadata',
+          run: 'bash nix/bun-system-metadata.test.sh',
+        }),
+        expect.objectContaining({
+          name: 'Build Nix check',
+          run: `nix build ".#checks.${githubMatrixExpression('system')}.standards-cli" -L`,
+        }),
+        expect.objectContaining({
+          name: 'Build app-release check',
+          run: `nix build ".#checks.${githubMatrixExpression('system')}.app-release" -L`,
+        }),
+      ]),
+    );
+  });
+
+  it('runs the app-release VM test only where the runner provides KVM', () => {
+    const vmSteps = nixSteps().filter(
+      (step) =>
+        typeof step.run === 'string' && step.run.includes('app-release-vm'),
+    );
+
+    expect(vmSteps).toEqual([
+      {
+        name: 'Run app-release VM test',
+        if: "matrix.system == 'x86_64-linux'",
+        run: 'nix build ".#checks.x86_64-linux.app-release-vm" -L',
+      },
+    ]);
   });
 });
 
