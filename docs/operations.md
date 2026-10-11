@@ -121,4 +121,4 @@ Publication starts from the declaring push, preserving its exact provenance comm
 
 ## Infrastructure
 
-NixOS hosts, OpenTofu stacks, host secrets, pull request previews, and cross-repository image promotion follow the [declarative infrastructure skill](../.agents/skills/declarative-infra/SKILL.md). Make those changes in the infrastructure home repository.
+NixOS hosts, OpenTofu stacks, host secrets, pull request previews, and first-party app releases follow the [declarative infrastructure skill](../.agents/skills/declarative-infra/SKILL.md). Make host and stack changes in the infrastructure home repository; an app's release workflow lives in the app's own repository.

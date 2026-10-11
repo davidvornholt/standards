@@ -1,8 +1,8 @@
 # Bootstrapping a host repo
 
-How to stand up the home for genuinely new infrastructure: a dedicated repo, or an `infra/` directory inside an app repo. Bootstrap only when the host or zone has no home yet — connecting an app to an existing server is an app module and image digest in that host's home repo, not a new stack. Inspect any existing infrastructure first and preserve working host definitions, state, secrets, and workflows.
+How to stand up the home for genuinely new infrastructure: a dedicated repo, or an `infra/` directory inside an app repo. Bootstrap only when the host or zone has no home yet — connecting an app to an existing server is an app module with an [app-release](app-release.md) unit in that host's home repo, not a new stack. Inspect any existing infrastructure first and preserve working host definitions, state, secrets, and workflows.
 
-Reuse is copying: instantiate this reference material inline and adapt it to the host. Do not create or depend on shared infrastructure flakes or modules across repos — improvements to the patterns belong upstream in this skill.
+Reuse is copying: instantiate this reference material inline and adapt it to the host. Do not create or depend on shared infrastructure flakes or modules across repos — improvements to the patterns belong upstream in this skill. The one exception is the app-release module, which hosts import from the standards flake.
 
 A dedicated infra repo is a full standards consumer like any other repo: bootstrap it with `standards init` before laying out the infrastructure, which brings the SOPS secrets workflow, the quality and drift gates, GitHub settings enforcement, Dependabot composition, and the review skills. There is no partial consumer profile — the synced TypeScript payload is deliberately carried inert rather than forking the contract per repo class. Nix and OpenTofu update blocks go in `.github/dependabot.local.yml`.
 
@@ -45,6 +45,8 @@ The machine carries the same identifier: `networking.hostName = "prod-1"`, with 
     sops-nix.inputs.nixpkgs.follows = "nixpkgs";
     treefmt-nix.url = "github:numtide/treefmt-nix";
     treefmt-nix.inputs.nixpkgs.follows = "nixpkgs";
+    standards.url = "github:davidvornholt/standards/<commit>";
+    standards.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs = inputs@{ self, nixpkgs, deploy-rs, disko, sops-nix, treefmt-nix, ... }:
@@ -59,6 +61,7 @@ The machine carries the same identifier: `networking.hostName = "prod-1"`, with 
         modules = [
           disko.nixosModules.disko
           sops-nix.nixosModules.sops
+          inputs.standards.nixosModules.app-release
           ./modules/base.nix
           ./modules/apps
           ./hosts/prod-1/configuration.nix
@@ -84,7 +87,7 @@ The machine carries the same identifier: `networking.hostName = "prod-1"`, with 
 }
 ```
 
-When `images.json` lives beside the flake in the same gated checkout, app modules read it directly with `builtins.fromJSON (builtins.readFile ./images.json)` using the correct relative path. Derive full references as `imageRepository@digest` and validate required pins during evaluation, so `nix flake check` checks the same service configuration that deploys. Do not replace those available pins with empty non-deploy fallbacks. Use `specialArgs` for parameters genuinely supplied from outside the repository, such as the host-local active preview set. For an external image input, name its full-reference variable once per app (`WEB_IMAGE`, for example) and have the exact-main-SHA deploy gate reject an empty or non-`^ghcr\.io/...@sha256:[0-9a-f]{64}$` value before mutation. Cross-repo bumps and readback follow `image-promotion.md`.
+First-party app digests never enter the flake; the host's release state records them (see `app-release.md`). Third-party images are pinned in a digest manifest beside the flake (see `vendor-images.md`), which modules read directly with `builtins.fromJSON (builtins.readFile ./vendor-images.json)` using the correct relative path. Derive full references as `repository@digest` and validate required pins during evaluation, so `nix flake check` checks the same service configuration that deploys. Do not replace those pins with empty non-deploy fallbacks. Use `specialArgs` only for parameters genuinely supplied from outside the repository, such as the host-local active preview set.
 
 ## Server profile
 
@@ -179,7 +182,7 @@ in {
 Beyond the module:
 
 - Only Caddy publishes services; nothing else opens 80/443, and every additional firewall port is a documented decision in the host repo.
-- Pin container images by digest.
+- Pin third-party container images by digest. First-party apps run the digests their releases record.
 - Every Podman host needs image retention for production as well as previews. Daily image-only pruning of unused images created more than seven days ago is the default. Podman protects images referenced by any container, including stopped containers. Do not use `podman system prune`, volume pruning, or external-container removal as a substitute. Nix garbage collection and journal retention do not reclaim OCI images.
 - The age filter uses the image creation timestamp, not its pull or last-use time. Retired images may need to be pulled again for rollback; keep registry access available. Where a deployment or preview controller protects staged or rollback images beyond container references, coordinate cleanup with that controller or exclude its labels and retain its own collector. A preview-only collector does not replace production retention.
 - Verify the timer and a successful cleanup on each host after deployment. During a disk-full incident, check PostgreSQL recovery and every service sharing the filesystem after reclaiming unused images; never remove database files or volumes to make room.
@@ -227,7 +230,7 @@ In `hosts/<name>/configuration.nix`: `networking.hostName` (the host identifier,
 
 ## App modules
 
-Host-specific services (containers, jobs) live under the repo's own option namespace (`<repo>.apps.*`) in `modules/apps/`, gated behind `enable` options. They consume the profile: publish through Caddy virtual hosts, run on Podman with digest-pinned images, peer-auth to their database as their own system user, read secrets from SOPS paths.
+Host-specific services (containers, jobs) live under the repo's own option namespace (`<repo>.apps.*`) in `modules/apps/`, gated behind `enable` options. They consume the profile: publish through Caddy virtual hosts, run on Podman with digest-pinned images, peer-auth to their database as their own system user, read secrets from SOPS paths. A first-party app's module declares its app-release unit and Caddy wiring, never its image digest.
 
 A host serving a web app also carries PR preview environments as a default part of adoption — wire them alongside the app module per `pr-previews.md`.
 
@@ -244,7 +247,7 @@ sops = {
   defaultSopsFile = ./secrets.yaml;
   secrets."apps/web/env" = {
     mode = "0400";
-    restartUnits = [ "podman-web.service" ]; # redeploy picks up rotations
+    restartUnits = [ config.services.appRelease.units.web.refreshUnit ]; # a rotation restarts the app at its current digest
   };
 };
 ```
@@ -286,16 +289,19 @@ A repo whose trusted CI builds and deploys NixOS system closures uses a private,
 
 ## Deploy downtime
 
-A deploy that changes an app's image restarts `podman-<app>.service` in place: the old container stops before the new one starts, and Caddy has no upstream for that app until the new container is up. That brief interruption is the accepted default for this profile. The health readback in `image-promotion.md` verifies that the deploy completed; it does not keep the old container serving through the switch.
+App releases switch blue-green slots without downtime, and a host deployment that changes an app's definition refreshes it the same way (see `app-release.md`). A `recreate` app, a third-party container whose image or definition changes, and a Caddy restart still interrupt service briefly. That interruption is the accepted default for those cases; a host that cannot accept it records the decision and its wiring in the host repo.
 
-Keep the window to container startup, not registry pull: after the deploy job's identity and registry-access checks and immediately before `nix run .#deploy-rs`, the workflow pre-pulls every gated image reference on the target over the deploy SSH connection. Set `REGISTRY_AUTH_FILE` and pass `--authfile` on every Podman registry command. Public entries use the root-owned empty `/run/containers/auth/anonymous.json`; private entries use only `/run/containers/auth/ghcr-private.json`, atomically created by the host's SOPS-backed `podman-ghcr-login` unit. Give every container unit the matching `REGISTRY_AUTH_FILE` too, so implicit pulls cannot fall back to ambient Podman or Docker auth. A private pre-pull always contacts the registry even when the digest is cached, so missing or expired credentials fail before activation; a public cached digest may skip its network pull after the same deployment has independently proved anonymous access to that exact digest. Pulling by digest is idempotent and additive, and any failed pre-pull fails the deploy before activation touches the running system.
+## Private registry access
 
-Private-image migration and container units require and order after `podman-ghcr-login.service`. Public-image units must not depend on that service. The SOPS secret restarts the oneshot when its decrypted value changes. The unit reads `registry.github_token` through stdin, writes a same-directory `0600` temporary auth file, and atomically renames it to the private path only after `podman login` succeeds. The complete credential, two-stage adoption, auth-file, and rotation contract is in `image-promotion.md#private-ghcr-host-access`.
+GitHub-hosted workflows read private GHCR packages with their job-scoped `GITHUB_TOKEN`; a host cannot. A host that pulls private images keeps one classic GitHub PAT with the sole scope `read:packages` in its SOPS host target at `registry.github_token`. The PAT can read every private package its owner can read, so the host repo either names a dedicated package-reader identity limited to the host's packages or records an explicit acceptance of that account-wide reach. Never put the PAT in a Nix expression, the Nix store, an image manifest, or a workflow secret.
 
-Zero-downtime switchover — a second container instance behind a Caddy upstream flip, with draining — is not part of the profile. A host whose availability requirement justifies that complexity documents the decision and its wiring in the host repo, and that requirement is often the signal the app has outgrown the single-host profile.
+- A `podman-ghcr-login` oneshot reads the PAT through stdin, logs in to a same-directory `0600` temporary file, and renames it to `/run/containers/auth/ghcr-private.json` only after the login succeeds. The SOPS secret's `restartUnits` includes that oneshot.
+- The host also creates the root-owned `0600` file `/run/containers/auth/anonymous.json` containing exactly `{"auths":{}}`.
+- Every registry pull names its auth file explicitly: the private file for private images, the anonymous file for public ones. An explicit file prevents fallback to ambient Podman or Docker credentials. Container and migration units that pull set `REGISTRY_AUTH_FILE` and pass `--authfile`. App-release containers run local tags and never pull, so an app-release unit sets only `registryAuthFile`, plus the login unit in `serviceDependencies` for private images. Public images never depend on the login unit.
+- Rotate by replace, refresh, verify, revoke: create a replacement PAT with only `read:packages`, re-check which packages its owner can read, replace `registry.github_token` in the SOPS host target, deploy and confirm the login unit rewrote the private auth file, force an uncached authenticated pull through that file, and only then revoke the old PAT. GitHub has no API for classic PATs, so `bun standards creds` does not manage this credential.
 
 ## Install and convergence
 
 - **First install**: nixos-anywhere with the disko layout, or a NixOS installer + `disko` run; capture `hardware-configuration.nix` from the target. After install, collect the host key and re-encrypt secrets for it.
-- **Convergence**: a main-branch workflow deploys — `nix run .#deploy-rs` (deploy-rs handles rollback on failed activation) using a dedicated deploy SSH key that only CI holds; `tofu apply` runs there too, gated on the plan job. PR workflows run the validation gates only, with read-only credentials or `-backend=false`.
+- **Convergence**: a main-branch workflow deploys — `nix run .#deploy-rs` (deploy-rs handles rollback on failed activation) using a dedicated deploy SSH key that only CI holds, only to hosts whose system closure changed; `tofu apply` runs there too, gated on the plan job. App releases do not pass through this workflow; see `app-release.md`. PR workflows run the validation gates only, with read-only credentials or `-backend=false`.
 - Branch protection itself comes with the synced GitHub settings; what bootstrap adds is requiring the infra PR gates as status checks via the `.github/settings.local.json` seam.

@@ -27,7 +27,7 @@ Canonical workflows use maintained major-version tags for external actions.
 - Restore on every run; publish only from a successful default-branch run; bound the size before saving.
 - A default-branch run that reuses a result publishes nothing, so bound the staleness it causes without letting it decide reuse: when trusted snapshots for the current lock are missing or per-commit snapshots are old, request a separate default-branch publication run that nothing on the release path waits for.
 - Publishable snapshots must not accumulate history: build them from an empty store so they contain only what the current lockfile reaches. Do not rely on a tool's own garbage collection — it is version-asymmetric; an older tool cannot recognize a newer release's artifacts.
-- Large caches such as container layers belong in owned object storage behind a purpose-scoped credential, not in the shared Actions quota, where eviction churn costs more than the cache saves.
+- Large caches such as container layers belong in owned object storage behind a purpose-scoped credential, not in the shared Actions quota, where eviction churn costs more than the cache saves. Never use `type=gha` for image layers. A repository without owned object storage uses a registry cache, `type=registry,ref=ghcr.io/<owner>/<image>:buildcache`: every build reads it, and only default-branch push builds write it, with `mode=max,image-manifest=true,oci-mediatypes=true`. Registry retention must keep the `:buildcache` tag.
 - Executable stores stay at their tool-default paths; strict-env task runners hide relocated paths from exactly the subprocesses that need them.
 
 ## Ordering and failure

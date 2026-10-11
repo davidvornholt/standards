@@ -25,6 +25,5 @@ Before pushing, run `nix flake check`, build the host toplevel, run `tofu fmt -c
 - For a new infrastructure home or changes to host layout, Podman/Caddy, PostgreSQL, Nix caching, or deployment behavior, read [Bootstrapping a host repo](references/bootstrap.md).
 - For SOPS, development environments, CI secrets, or provider credentials, read [Secrets bootstrap](references/secrets.md).
 - For preview environments, read [Pull request previews](references/pr-previews.md). They are the default for web-host adoption; omitting them requires a recorded decision in the host repository.
-- For image promotion into a dedicated infrastructure repository, read [Image promotion](references/image-promotion.md).
-
-- For third-party container updates whose publisher is outside the infrastructure owner's control, read [Vendor image promotion](references/vendor-image-promotion.md).
+- For releasing, rolling back, or hosting a first-party app's container images, read [App releases](references/app-release.md).
+- For third-party container updates whose publisher is outside the infrastructure owner's control, read [Vendor image updates](references/vendor-images.md).
