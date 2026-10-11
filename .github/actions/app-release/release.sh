@@ -152,7 +152,9 @@ fi
 extract_path="[\"${ssh_key_path//./\"][\"}\"]"
 
 # The pin and checksums match the canonical sops-secret action; a test in the
-# standards repository fails when the two drift apart.
+# standards repository fails when the two drift apart. Runners occasionally see
+# the download stall and end in an HTTP error, so each attempt is capped and
+# retried.
 install_sops() {
   version=v3.13.3
   case "$(uname -m)" in
@@ -161,7 +163,7 @@ install_sops() {
     *) fail "No pinned SOPS binary for runner architecture $(uname -m)" ;;
   esac
   sops="$work/sops"
-  if ! curl -sfLo "$sops" "https://github.com/getsops/sops/releases/download/${version}/sops-${version}.linux.${arch}"; then
+  if ! curl -sSfLo "$sops" --retry 3 --retry-all-errors --connect-timeout 10 --max-time 60 "https://github.com/getsops/sops/releases/download/${version}/sops-${version}.linux.${arch}"; then
     rm -f "$sops"
     fail "Downloading SOPS ${version} for linux/${arch} failed"
   fi

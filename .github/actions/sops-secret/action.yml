@@ -64,7 +64,9 @@ runs:
             *) reason="No pinned SOPS binary for runner architecture $(uname -m)" ;;
           esac
           sops="$RUNNER_TEMP/sops"
-          if [ -z "$reason" ] && ! curl -sfLo "$sops" "https://github.com/getsops/sops/releases/download/${version}/sops-${version}.linux.${arch}"; then
+          # Runners occasionally see the download stall and end in an HTTP
+          # error, so each attempt is capped and retried.
+          if [ -z "$reason" ] && ! curl -sSfLo "$sops" --retry 3 --retry-all-errors --connect-timeout 10 --max-time 60 "https://github.com/getsops/sops/releases/download/${version}/sops-${version}.linux.${arch}"; then
             rm -f "$sops"
             reason="Downloading SOPS ${version} for linux/${arch} failed"
           fi
