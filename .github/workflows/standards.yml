@@ -15,14 +15,21 @@ on:
   push:
     branches:
       - main
+  # A dispatched run on main is a full gate that nothing waits for. The reuse
+  # job requests one when a reused push leaves the trusted cache snapshots
+  # missing or stale, so cache publication never delays the gate a release
+  # waits for. Release pollers select `push` runs, so dispatched runs never
+  # stand in for a push gate.
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
   # Preserve every push SHA needed by publication; only PR runs supersede one
-  # another when a newer commit updates the same PR.
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  # another when a newer commit updates the same PR. Dispatched runs share one
+  # group, so at most one runs and the newest request waits behind it.
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.event_name == 'workflow_dispatch' && 'dispatch' || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -35,16 +42,16 @@ jobs:
   # reuse trusts same-repository authors as far as the pull-request run itself
   # already does; fork runs never qualify. It runs no repository code. Any miss
   # leaves `proven` unset and any error fails only this step, so the full gate
-  # runs. Reuse also skips cache publication, so it additionally requires
-  # trusted Bun and Playwright snapshots for the current lock and a Turbo
-  # snapshot younger than a day, which bounds how stale pull-request restores
-  # can become.
+  # runs. Cache freshness never decides reuse; a reused push instead requests
+  # a separate cache publication run when the snapshots are missing or stale.
   reuse:
     if: github.event_name == 'push'
     runs-on: ${{ vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-small', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || 'ubuntu-latest' }}
     timeout-minutes: 5
     permissions:
-      actions: read
+      # Write only creates the cache publication dispatch; no step in this job
+      # runs repository code.
+      actions: write
       checks: read
       contents: read
       pull-requests: read
@@ -62,15 +69,9 @@ jobs:
         id: proof
         continue-on-error: true
         env:
-          BUN_CACHE_PREFIX: bun-packages-v2-
           GH_TOKEN: ${{ github.token }}
-          LOCK_HASH: ${{ hashFiles('bun.lock') }}
-          PLAYWRIGHT_CACHE_PREFIX: playwright-v2-
-          REF: ${{ github.ref }}
           REPOSITORY: ${{ github.repository }}
           SHA: ${{ github.sha }}
-          TURBO_CACHE_PREFIX: turbo-trusted-v2-
-          TURBO_SNAPSHOT_MAX_AGE_SECONDS: "86400"
         run: |
           set -euo pipefail
           miss() {
@@ -121,7 +122,40 @@ jobs:
           done
           [ "$validated" = true ] || miss "no successful pull request run of $head recorded tree $tree"
 
-          [ -n "$LOCK_HASH" ] || miss "bun.lock is missing"
+          echo "proven=true" >> "$GITHUB_OUTPUT"
+
+      # A reused push publishes no caches. Bound the staleness that causes
+      # without delaying the gate: when main lacks trusted Bun or Playwright
+      # snapshots for the current lock, or its newest Turbo snapshot is older
+      # than a day, dispatch a full gate run on main, which publishes exactly
+      # as a full push run does. Repositories with no Playwright snapshot have
+      # no browser suite to publish for. A failed request only leaves the
+      # caches stale, so it warns instead of failing the gate.
+      - name: Request stale cache publication
+        if: steps.proof.outputs.proven == 'true'
+        continue-on-error: true
+        env:
+          BUN_CACHE_PREFIX: bun-packages-v2-
+          GH_TOKEN: ${{ github.token }}
+          LOCK_HASH: ${{ hashFiles('bun.lock') }}
+          PLAYWRIGHT_CACHE_PREFIX: playwright-v2-
+          REF: ${{ github.ref }}
+          REPOSITORY: ${{ github.repository }}
+          TURBO_CACHE_PREFIX: turbo-trusted-v2-
+          TURBO_SNAPSHOT_MAX_AGE_SECONDS: "86400"
+        run: |
+          set -euo pipefail
+          publish() {
+            echo "::notice::Requesting cache publication: $1"
+            gh api --method POST "repos/$REPOSITORY/actions/workflows/standards.yml/dispatches" \
+              -f "ref=${REF#refs/heads/}" >/dev/null
+            exit 0
+          }
+
+          if [ -z "$LOCK_HASH" ]; then
+            echo "::warning::Cannot check cache freshness: bun.lock is missing"
+            exit 1
+          fi
           main_caches() {
             gh api --paginate "repos/$REPOSITORY/actions/caches?ref=$REF&key=$1&per_page=100" \
               | jq -r '.actions_caches[] | [.key, .created_at] | @tsv'
@@ -133,17 +167,16 @@ jobs:
             awk -F'\t' -v suffix="-$LOCK_HASH" \
               'substr($1, length($1) - length(suffix) + 1) == suffix { found = 1 } END { exit !found }'
           }
-          current_lock <<<"$bun_caches" || miss "main has no Bun snapshot for the current lock"
+          current_lock <<<"$bun_caches" || publish "main has no Bun snapshot for the current lock"
           if [ -n "$playwright_caches" ] && ! current_lock <<<"$playwright_caches"; then
-            miss "main has no Playwright snapshot for the current lock"
+            publish "main has no Playwright snapshot for the current lock"
           fi
           newest_turbo=$(cut -f2 <<<"$turbo_caches" | sort | tail -n 1)
-          [ -n "$newest_turbo" ] || miss "main has no Turbo snapshot"
+          [ -n "$newest_turbo" ] || publish "main has no Turbo snapshot"
           turbo_age=$(( $(date -u +%s) - $(date -u -d "$newest_turbo" +%s) ))
           [ "$turbo_age" -le "$TURBO_SNAPSHOT_MAX_AGE_SECONDS" ] \
-            || miss "the newest main Turbo snapshot is $turbo_age seconds old"
-
-          echo "proven=true" >> "$GITHUB_OUTPUT"
+            || publish "the newest main Turbo snapshot is $turbo_age seconds old"
+          echo "Trusted cache snapshots are current"
 
   # Canonical quality gate synced from davidvornholt/standards. `bun run check`
   # runs the sync drift-check first, then lint, types, tests, build, and the
@@ -181,7 +214,8 @@ jobs:
   # skipping a pointless download in repos with nothing to render.
   #
   # Draft revisions skip the gate, and a main push skips it only when the reuse
-  # job proved that a pull-request run already validated the exact tree.
+  # job proved that a pull-request run already validated the exact tree. A
+  # dispatched run has no reuse job, so it always runs the full gate.
   # `!cancelled()` keeps the gate running when the reuse job is skipped or fails.
   quality:
     needs: reuse
@@ -351,9 +385,10 @@ jobs:
       # restore semantics change, so immutable legacy snapshots cannot survive
       # the cutover through an exact key hit or an old restore prefix.
       # PRs may restore the latest default-branch Turbo snapshot but never
-      # publish cache state. A successful default-branch run saves at most one
-      # pruned snapshot per commit, so reruns cannot duplicate an upload and PR
-      # revisions cannot consume repository cache quota.
+      # publish cache state. A successful default-branch push or dispatched
+      # run saves at most one pruned snapshot per commit, so reruns cannot
+      # duplicate an upload and PR revisions cannot consume repository cache
+      # quota.
       - name: Restore the Turbo cache
         id: turbo-cache
         uses: actions/cache/restore@v6
@@ -370,10 +405,11 @@ jobs:
       # browser) see no redirected path variables and resolve the defaults —
       # a relocated store is invisible to exactly the processes that need it.
       # Trust comes from publication, not location: pull requests may restore
-      # trusted snapshots but cannot publish; only a successful main run
-      # saves. Quality always uses an ephemeral hosted or per-run CodeBuild
-      # runner; arbitrary persistent CI_RUNNER pools are unsupported so an
-      # earlier PR cannot leave executable state in the next run's defaults.
+      # trusted snapshots but cannot publish; only a successful main push or
+      # dispatched main run saves, and both run main's own code. Quality always
+      # uses an ephemeral hosted or per-run CodeBuild runner; arbitrary
+      # persistent CI_RUNNER pools are unsupported so an earlier PR cannot
+      # leave executable state in the next run's defaults.
       #
       # Published Bun and Playwright snapshots must be history-free. A main
       # snapshot published after a lock change contains only what the current
