@@ -587,15 +587,23 @@ jobs:
       # A Next.js app writes its compiler cache only when `next build` ran,
       # not when Turbo restored the build, so main publishes a snapshot only
       # after it compiled an app. Repositories without one publish nothing.
+      # Bound the combined apparent size to 512 MiB, including sparse files.
+      # Skip oversized snapshots intact; pruning files can corrupt Turbopack.
       - name: Detect a Next.js build cache
         id: next-cache
         if: success() && github.ref == 'refs/heads/main'
         run: |
+          set -euo pipefail
+          present=false
           if compgen -G 'apps/*/.next/cache/turbopack' >/dev/null; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "present=false" >> "$GITHUB_OUTPUT"
+            cache_bytes=$(du --apparent-size --block-size=1 --summarize apps/*/.next/cache/turbopack | awk '{ bytes += $1 } END { printf "%.0f", bytes }')
+            if (( cache_bytes <= 512 * 1024 * 1024 )); then
+              present=true
+            else
+              echo "::notice::Skipping Next.js build cache save: ${cache_bytes} bytes exceeds the 512 MiB snapshot budget."
+            fi
           fi
+          echo "present=$present" >> "$GITHUB_OUTPUT"
 
       - name: Save the Next.js build cache
         if: success() && github.ref == 'refs/heads/main' && steps.next-cache.outputs.present == 'true'

@@ -9,6 +9,8 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
+  truncateSync,
   utimesSync,
   writeFileSync,
 } from 'node:fs';
@@ -278,11 +280,17 @@ const NEXT_CACHE_DETECT_CONDITION =
   "success() && github.ref == 'refs/heads/main'";
 const NEXT_CACHE_SAVE_CONDITION = `${NEXT_CACHE_DETECT_CONDITION} && steps.next-cache.outputs.present == 'true'`;
 const NEXT_CACHE_DETECT_STEP = 'Detect a Next.js build cache';
-const NEXT_CACHE_DETECT_RUN = `if compgen -G 'apps/*/.next/cache/turbopack' >/dev/null; then
-  echo "present=true" >> "$GITHUB_OUTPUT"
-else
-  echo "present=false" >> "$GITHUB_OUTPUT"
+const NEXT_CACHE_DETECT_RUN = `set -euo pipefail
+present=false
+if compgen -G 'apps/*/.next/cache/turbopack' >/dev/null; then
+  cache_bytes=$(du --apparent-size --block-size=1 --summarize apps/*/.next/cache/turbopack | awk '{ bytes += $1 } END { printf "%.0f", bytes }')
+  if (( cache_bytes <= 512 * 1024 * 1024 )); then
+    present=true
+  else
+    echo "::notice::Skipping Next.js build cache save: \${cache_bytes} bytes exceeds the 512 MiB snapshot budget."
+  fi
 fi
+echo "present=$present" >> "$GITHUB_OUTPUT"
 `;
 const runNixDiscovery = ({
   filter,
@@ -2974,14 +2982,49 @@ describe('canonical standards workflow database resolver', () => {
 });
 
 it.each([
-  ['an app compiled with Turbopack', 'apps/web/.next/cache/turbopack/db', true],
-  ['only data caches', 'apps/web/.next/cache/fetch-cache/entry', false],
-  ['no Next.js app', 'packages/ui/src/index.ts', false],
+  [
+    'an app compiled with Turbopack',
+    ['apps/web/.next/cache/turbopack/db'],
+    0,
+    true,
+  ],
+  ['only data caches', ['apps/web/.next/cache/fetch-cache/entry'], 0, false],
+  ['no Next.js app', ['packages/ui/src/index.ts'], 0, false],
+  [
+    'a 511 MiB cache',
+    ['apps/web/.next/cache/turbopack/db'],
+    511 * 1024 ** 2,
+    true,
+  ],
+  [
+    'one byte over 512 MiB',
+    ['apps/web/.next/cache/turbopack/db'],
+    512 * 1024 ** 2 + 1,
+    false,
+  ],
+  [
+    'an 8 GiB sparse cache',
+    ['apps/web/.next/cache/turbopack/db'],
+    8 * 1024 ** 3,
+    false,
+  ],
+  [
+    'two individually small caches exceeding the combined budget',
+    [
+      'apps/web/.next/cache/turbopack/db',
+      'apps/admin/.next/cache/turbopack/db',
+    ],
+    300 * 1024 ** 2,
+    false,
+  ],
 ])(
   'detects a publishable Next.js build cache with %s',
-  (_case, file, present) => {
+  (_case, files, cacheBytes, present) => {
     const fixture = mkTmp('next-cache-');
-    write(fixture, file, '');
+    for (const file of files) {
+      write(fixture, file, '');
+      truncateSync(join(fixture, file), cacheBytes);
+    }
     const outputPath = join(fixture, 'github-output');
     const result = runExecutable(
       'bash',
@@ -2996,6 +3039,12 @@ it.each([
     );
     expect(result.status).toBe(0);
     expect(readFileSync(outputPath, 'utf8')).toBe(`present=${present}\n`);
+    expect(result.stdout.includes('::notice::')).toBe(
+      cacheBytes * files.length > 512 * 1024 ** 2,
+    );
+    for (const file of files) {
+      expect(statSync(join(fixture, file)).size).toBe(cacheBytes);
+    }
   },
 );
 
