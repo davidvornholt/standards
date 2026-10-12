@@ -281,9 +281,11 @@ const NEXT_CACHE_DETECT_CONDITION =
 const NEXT_CACHE_SAVE_CONDITION = `${NEXT_CACHE_DETECT_CONDITION} && steps.next-cache.outputs.present == 'true'`;
 const NEXT_CACHE_DETECT_STEP = 'Detect a Next.js build cache';
 const NEXT_CACHE_DETECT_RUN = `set -euo pipefail
+shopt -s nullglob
+caches=(apps/*/.next/cache/turbopack)
 present=false
-if compgen -G 'apps/*/.next/cache/turbopack' >/dev/null; then
-  cache_bytes=$(du --apparent-size --block-size=1 --summarize apps/*/.next/cache/turbopack | awk '{ bytes += $1 } END { printf "%.0f", bytes }')
+if (( \${#caches[@]} > 0 )); then
+  cache_bytes=$(du --apparent-size --block-size=1 --summarize "\${caches[@]}" | awk '{ bytes += $1 } END { printf "%.0f", bytes }')
   if (( cache_bytes <= 512 * 1024 * 1024 )); then
     present=true
   else
@@ -3026,6 +3028,8 @@ it.each([
       truncateSync(join(fixture, file), cacheBytes);
     }
     const outputPath = join(fixture, 'github-output');
+    // Non-interactive bash builds, such as Nix's default in the dev shell,
+    // omit completion builtins, so the step must work without `compgen`.
     const result = runExecutable(
       'bash',
       fixture,
@@ -3033,7 +3037,7 @@ it.each([
         '-euo',
         'pipefail',
         '-c',
-        yamlRunScript(STANDARDS_WORKFLOW, NEXT_CACHE_DETECT_STEP),
+        `enable -n compgen 2>/dev/null || true\n${yamlRunScript(STANDARDS_WORKFLOW, NEXT_CACHE_DETECT_STEP)}`,
       ],
       { GITHUB_OUTPUT: outputPath },
     );
