@@ -589,14 +589,17 @@ jobs:
       # after it compiled an app. Repositories without one publish nothing.
       # Bound the combined apparent size to 512 MiB, including sparse files.
       # Skip oversized snapshots intact; pruning files can corrupt Turbopack.
+      # A nullglob array replaces `compgen`, which non-interactive bash omits.
       - name: Detect a Next.js build cache
         id: next-cache
         if: success() && github.ref == 'refs/heads/main'
         run: |
           set -euo pipefail
+          shopt -s nullglob
+          caches=(apps/*/.next/cache/turbopack)
           present=false
-          if compgen -G 'apps/*/.next/cache/turbopack' >/dev/null; then
-            cache_bytes=$(du --apparent-size --block-size=1 --summarize apps/*/.next/cache/turbopack | awk '{ bytes += $1 } END { printf "%.0f", bytes }')
+          if (( ${#caches[@]} > 0 )); then
+            cache_bytes=$(du --apparent-size --block-size=1 --summarize "${caches[@]}" | awk '{ bytes += $1 } END { printf "%.0f", bytes }')
             if (( cache_bytes <= 512 * 1024 * 1024 )); then
               present=true
             else
