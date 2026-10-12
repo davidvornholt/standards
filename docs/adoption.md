@@ -102,6 +102,8 @@ Biome runs once for the whole repository from the root `lint` and `lint:fix` scr
 
 Keep the default inputs for `//#lint`. They cover every file in the repository that git does not ignore, so any change to a linted file invalidates the cached result.
 
+`biome.base.jsonc` enables Biome's Turborepo rules. One of them, `noUndeclaredEnvVars`, reports every environment variable that code reads but `turbo.json` does not declare. A declaration anywhere in `turbo.json` counts: `globalEnv`, `globalPassThroughEnv`, or the `env` or `passThroughEnv` of any task. Declare a variable in the `env` of each task whose output depends on it, so that Turbo does not reuse a result cached with a different value. Declare the rest, such as settings that only a running server reads, in `passThroughEnv` on `//#lint`, which adds them to no cache key. When you remove workspace lint scripts, move the variables that `<package>#lint` overrides declared to one of these places. `//#lint:fix` needs no copy.
+
 The root `packageManager` is the Bun version contract. The synced mise config reads it directly. Add project tools to the project-owned `mise.toml`.
 
 New repositories also receive a project-owned Nix flake and `.envrc`. The flake builds Bun through the synced `nix/standards-bun.nix` helper. Add project packages or shell settings in `dev-shell.local.nix`:
