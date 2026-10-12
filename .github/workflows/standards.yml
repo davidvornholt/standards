@@ -441,6 +441,22 @@ jobs:
           restore-keys: |
             turbo-trusted-v2-${{ runner.os }}-${{ runner.arch }}-
 
+      # `next build` keeps Turbopack's incremental compiler cache in each app's
+      # .next/cache/turbopack, which Turbo task outputs exclude. PRs restore the
+      # latest default-branch snapshot, so a build that misses the Turbo cache
+      # recompiles only changed modules. Only the compiler cache is shared:
+      # data caches such as fetch results stay per build. Main never restores
+      # it, so every published snapshot comes from a cold build of its own
+      # commit and cannot accumulate entries or state from earlier builds.
+      - name: Restore the Next.js build cache
+        if: github.ref != 'refs/heads/main'
+        uses: actions/cache/restore@v6
+        with:
+          path: apps/*/.next/cache/turbopack
+          key: next-trusted-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
+          restore-keys: |
+            next-trusted-v1-${{ runner.os }}-${{ runner.arch }}-
+
       # Bun's package store and Playwright's browser store hold executable
       # content and live at their tool-default paths. The defaults matter
       # beyond convention: Turbo runs tasks in strict env mode, so a task's
@@ -567,6 +583,34 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
+
+      # A Next.js app writes its compiler cache only when `next build` ran,
+      # not when Turbo restored the build, so main publishes a snapshot only
+      # after it compiled an app. Repositories without one publish nothing.
+      # Bound the combined apparent size to 512 MiB, including sparse files.
+      # Skip oversized snapshots intact; pruning files can corrupt Turbopack.
+      - name: Detect a Next.js build cache
+        id: next-cache
+        if: success() && github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          present=false
+          if compgen -G 'apps/*/.next/cache/turbopack' >/dev/null; then
+            cache_bytes=$(du --apparent-size --block-size=1 --summarize apps/*/.next/cache/turbopack | awk '{ bytes += $1 } END { printf "%.0f", bytes }')
+            if (( cache_bytes <= 512 * 1024 * 1024 )); then
+              present=true
+            else
+              echo "::notice::Skipping Next.js build cache save: ${cache_bytes} bytes exceeds the 512 MiB snapshot budget."
+            fi
+          fi
+          echo "present=$present" >> "$GITHUB_OUTPUT"
+
+      - name: Save the Next.js build cache
+        if: success() && github.ref == 'refs/heads/main' && steps.next-cache.outputs.present == 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: apps/*/.next/cache/turbopack
+          key: next-trusted-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
 
       # Before the successful default-branch save, keep only the artifacts
       # whose task hashes this run's Turbo summaries list, then cap what is
