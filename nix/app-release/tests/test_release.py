@@ -1,6 +1,7 @@
 import os
 import stat
 import unittest
+from dataclasses import replace
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -278,6 +279,27 @@ class ReleaseTest(HostTestCase):
             )
         self.assertEqual(raised.exception.message, DRAINING)
         self.assertNotIn(("restart", MIGRATION), self.world.calls)
+        self.assertEqual(self.world.restarts(), [])
+        self.assertEqual(self.state(), before)
+
+    def test_dependency_that_does_not_start_fails_before_anything_changes(self) -> None:
+        login = "registry-login.service"
+        self.world.unit = replace(self.world.unit, service_dependencies=(login,))
+        self.world.pending_starts.add(login)
+        v2 = self.publish(2, SHA_B)
+        before = self.state()
+        with self.assertRaises(FailedError) as raised:
+            release(
+                self.world.context(),
+                claims(100),
+                {name: image.digest for name, image in v2.items()},
+            )
+        self.assertEqual(
+            raised.exception.message,
+            f"dependency {login} failed to start: timed out after 300 s. "
+            f"journalctl -u {login} shows why; fix the cause, then try again.",
+        )
+        self.assertEqual([call for call in self.world.calls if login in call], [("start", login)])
         self.assertEqual(self.world.restarts(), [])
         self.assertEqual(self.state(), before)
 

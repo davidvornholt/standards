@@ -13,6 +13,10 @@ from app_release.systemd import BUSY_STATES, STOPPED_STATES
 
 PULL_BACKOFF_SECONDS = (2, 4, 8)
 HEALTH_POLL_SECONDS = 1
+# A dependency that systemd restarts after each failure, such as a registry login, keeps its
+# start job pending until it succeeds. Five minutes covers dozens of 5 s retries and DNS
+# settling during a host switch, and leaves most of a 30-minute release job for the release.
+DEPENDENCY_START_TIMEOUT_SECONDS = 300
 
 
 class StepError(Exception):
@@ -32,9 +36,14 @@ def draining_message(app: AppConfig, slot: Slot) -> str:
 
 def start_dependencies(ctx: Context) -> None:
     for dependency in ctx.unit.service_dependencies:
-        error = ctx.services.start(dependency, timeout=None)
+        # A timeout leaves the start job queued: systemd keeps retrying the unit, a later start
+        # joins the same job, and cancelling it would fail the jobs of units that require it.
+        error = ctx.services.start(dependency, timeout=DEPENDENCY_START_TIMEOUT_SECONDS)
         if error is not None:
-            message = f"dependency {dependency} failed to start: {error}"
+            message = (
+                f"dependency {dependency} failed to start: {error}. "
+                f"journalctl -u {dependency} shows why; fix the cause, then try again."
+            )
             raise FailedError(message)
 
 
