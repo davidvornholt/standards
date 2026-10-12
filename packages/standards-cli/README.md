@@ -101,7 +101,7 @@ bun standards structure --profile source
 
 Starting with 0.29.0, Biome runs once from the repository root instead of once per workspace. The root `package.json` must declare `lint` running `biome check --error-on-warnings .` and `lint:fix` running `biome check --write --error-on-warnings .`, and any workspace that declares `lint` or `lint:fix` fails. To upgrade an existing repository:
 
-1. Install the new CLI with `bun add --dev --exact @davidvornholt/standards@0.29.2`.
+1. Install the new CLI with `bun add --dev --exact @davidvornholt/standards@0.29.3`.
 2. Run `bun standards sync` so the canonical `packages/typescript-config` and `packages/a11y-testing` drop their lint scripts. A repository that pins `ref` in `sync-standards.local.json` first moves it to `v0.29.0` or later.
 3. Add the root `lint` and `lint:fix` scripts and remove both scripts from every workspace `package.json`.
 4. In `turbo.json`, replace the `lint` and `lint:fix` tasks with `//#lint` (`"outputs": []`) and `//#lint:fix` (`"cache": false`, `"outputs": []`), and delete any `<package>#lint` overrides. Keep the default inputs for `//#lint`. Starting with 0.29.1, `structure` fails until this step is done: Turbo runs the root lint scripts only through the `//#` tasks, so a leftover `lint` task makes `turbo run lint` pass without running Biome.
