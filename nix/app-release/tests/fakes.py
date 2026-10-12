@@ -146,6 +146,9 @@ class World:
         self.failing_units: set[str] = set()
         # "failed", or "activating" for a unit systemd restarts after each failure.
         self.failing_state = "failed"
+        # Units whose start job never finishes, like a registry login that systemd restarts
+        # after each failure until the login succeeds.
+        self.pending_starts: set[str] = set()
         self.slow_stop: set[str] = set()
         # Slow stops that interrupted a start. systemd then signals the unit's processes at
         # once; stopping a running unit first runs ExecStop, where a worker drains.
@@ -291,8 +294,12 @@ class World:
     # ServiceManager
 
     def start(self, unit: str, timeout: float | None) -> str | None:
-        del timeout
         self.calls.append(("start", unit))
+        if unit in self.pending_starts:
+            if timeout is None:
+                message = f"starting {unit} without a time limit never returns"
+                raise AssertionError(message)
+            return f"timed out after {timeout} s"
         if self.states.get(unit) == "active":
             return None
         return self._launch(unit)
