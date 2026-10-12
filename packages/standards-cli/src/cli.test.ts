@@ -268,6 +268,22 @@ const PLAYWRIGHT_CACHE_RESTORE_KEYS = githubExpression(
 const PLAYWRIGHT_CACHE_PATH = '~/.cache/ms-playwright';
 const PLAYWRIGHT_CACHE_SAVE_CONDITION =
   "success() && github.ref == 'refs/heads/main' && steps.a11y.outputs.present == 'true' && steps.playwright-cache.outputs.cache-hit != 'true'";
+const NEXT_CACHE_KEY = `next-trusted-v1-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-${githubExpression('github.sha')}`;
+const NEXT_CACHE_RESTORE_PREFIX = `next-trusted-v1-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-`;
+const NEXT_CACHE_PATH = 'apps/*/.next/cache/turbopack';
+// Main never restores the Next.js compiler cache, so each snapshot it
+// publishes comes from a cold build of its own commit.
+const NEXT_CACHE_RESTORE_CONDITION = "github.ref != 'refs/heads/main'";
+const NEXT_CACHE_DETECT_CONDITION =
+  "success() && github.ref == 'refs/heads/main'";
+const NEXT_CACHE_SAVE_CONDITION = `${NEXT_CACHE_DETECT_CONDITION} && steps.next-cache.outputs.present == 'true'`;
+const NEXT_CACHE_DETECT_STEP = 'Detect a Next.js build cache';
+const NEXT_CACHE_DETECT_RUN = `if compgen -G 'apps/*/.next/cache/turbopack' >/dev/null; then
+  echo "present=true" >> "$GITHUB_OUTPUT"
+else
+  echo "present=false" >> "$GITHUB_OUTPUT"
+fi
+`;
 const runNixDiscovery = ({
   filter,
   metadata,
@@ -501,6 +517,21 @@ const assertExactMainCacheCleanup = (workflow: ParsedWorkflow): void => {
   }
 };
 
+const assertNextCacheDetection = (workflow: ParsedWorkflow): void => {
+  if (
+    !isDeepStrictEqual(qualityStep(workflow, NEXT_CACHE_DETECT_STEP), {
+      name: NEXT_CACHE_DETECT_STEP,
+      id: 'next-cache',
+      if: NEXT_CACHE_DETECT_CONDITION,
+      run: NEXT_CACHE_DETECT_RUN,
+    })
+  ) {
+    throw new Error(
+      'Next.js cache publication must follow the approved detection program',
+    );
+  }
+};
+
 const assertQualityCacheContract = (workflow: ParsedWorkflow): void => {
   assertQualityWorkflowContract(workflow);
   const steps = workflowSteps(workflow.jobs.quality, 'quality');
@@ -520,6 +551,16 @@ const assertQualityCacheContract = (workflow: ParsedWorkflow): void => {
         path: '.turbo/cache',
         key: TURBO_CACHE_KEY,
         'restore-keys': `${TURBO_CACHE_RESTORE_PREFIX}\n`,
+      },
+    },
+    {
+      name: 'Restore the Next.js build cache',
+      if: NEXT_CACHE_RESTORE_CONDITION,
+      uses: 'actions/cache/restore@v6',
+      with: {
+        path: NEXT_CACHE_PATH,
+        key: NEXT_CACHE_KEY,
+        'restore-keys': `${NEXT_CACHE_RESTORE_PREFIX}\n`,
       },
     },
     {
@@ -556,6 +597,12 @@ const assertQualityCacheContract = (workflow: ParsedWorkflow): void => {
       with: { path: PLAYWRIGHT_CACHE_PATH, key: PLAYWRIGHT_CACHE_KEY },
     },
     {
+      name: 'Save the Next.js build cache',
+      if: NEXT_CACHE_SAVE_CONDITION,
+      uses: 'actions/cache/save@v6',
+      with: { path: NEXT_CACHE_PATH, key: NEXT_CACHE_KEY },
+    },
+    {
       name: 'Save the Turbo cache',
       if: TURBO_CACHE_SAVE_CONDITION,
       uses: 'actions/cache/save@v6',
@@ -567,34 +614,21 @@ const assertQualityCacheContract = (workflow: ParsedWorkflow): void => {
   }
   assertQualityCacheConsumers(workflow);
 
-  const restoreIndex = steps.indexOf(cacheSteps[0] as WorkflowStep);
-  const bunRestoreIndex = steps.indexOf(cacheSteps[1] as WorkflowStep);
-  const installIndex = steps.indexOf(
-    qualityStep(workflow, 'Install dependencies'),
-  );
-  const playwrightRestoreIndex = steps.indexOf(cacheSteps[2] as WorkflowStep);
-  const playwrightInstallIndex = steps.indexOf(
-    qualityStep(workflow, 'Install Playwright Chromium'),
-  );
-  const playwrightSaveIndex = steps.indexOf(cacheSteps[4] as WorkflowStep);
-  const checkIndex = steps.indexOf(qualityStep(workflow, 'Check'));
-  const bunSaveIndex = steps.indexOf(cacheSteps[3] as WorkflowStep);
-  const pruneIndex = steps.indexOf(
-    qualityStep(workflow, 'Prune the Turbo cache before save'),
-  );
-  const saveIndex = steps.indexOf(cacheSteps[5] as WorkflowStep);
   const orderedIndices = [
-    restoreIndex,
-    bunRestoreIndex,
-    installIndex,
-    playwrightRestoreIndex,
-    playwrightInstallIndex,
-    checkIndex,
-    bunSaveIndex,
-    playwrightSaveIndex,
-    pruneIndex,
-    saveIndex,
-  ];
+    'Restore the Turbo cache',
+    'Restore the Next.js build cache',
+    'Restore the Bun package cache',
+    'Install dependencies',
+    'Restore the Playwright browser cache',
+    'Install Playwright Chromium',
+    'Check',
+    'Save the Bun package cache',
+    'Save the Playwright browser cache',
+    NEXT_CACHE_DETECT_STEP,
+    'Save the Next.js build cache',
+    'Prune the Turbo cache before save',
+    'Save the Turbo cache',
+  ].map((name) => steps.indexOf(qualityStep(workflow, name)));
   for (const [index, stepIndex] of orderedIndices.entries()) {
     const previousIndex = orderedIndices[index - 1];
     if (
@@ -618,6 +652,7 @@ const assertQualityCacheContract = (workflow: ParsedWorkflow): void => {
       'Turbo pruning must match the complete approved fail-closed program',
     );
   }
+  assertNextCacheDetection(workflow);
 };
 
 const moveQualityStepBefore = (
@@ -2937,6 +2972,32 @@ describe('canonical standards workflow database resolver', () => {
     expect(existsSync(marker)).toBe(false);
   });
 });
+
+it.each([
+  ['an app compiled with Turbopack', 'apps/web/.next/cache/turbopack/db', true],
+  ['only data caches', 'apps/web/.next/cache/fetch-cache/entry', false],
+  ['no Next.js app', 'packages/ui/src/index.ts', false],
+])(
+  'detects a publishable Next.js build cache with %s',
+  (_case, file, present) => {
+    const fixture = mkTmp('next-cache-');
+    write(fixture, file, '');
+    const outputPath = join(fixture, 'github-output');
+    const result = runExecutable(
+      'bash',
+      fixture,
+      [
+        '-euo',
+        'pipefail',
+        '-c',
+        yamlRunScript(STANDARDS_WORKFLOW, NEXT_CACHE_DETECT_STEP),
+      ],
+      { GITHUB_OUTPUT: outputPath },
+    );
+    expect(result.status).toBe(0);
+    expect(readFileSync(outputPath, 'utf8')).toBe(`present=${present}\n`);
+  },
+);
 
 it('accepts semantically identical cache mappings in any key order', () => {
   const workflow = structuredClone(parseWorkflow(STANDARDS_WORKFLOW));

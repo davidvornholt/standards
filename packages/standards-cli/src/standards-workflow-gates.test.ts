@@ -17,6 +17,11 @@ const CACHE_PREFIX_ENVIRONMENT = [
   'PLAYWRIGHT_CACHE_PREFIX',
   'TURBO_CACHE_PREFIX',
 ] as const;
+// Main publishes a Next.js compiler snapshot only when it compiled an app, so
+// a dispatched run whose builds all hit the Turbo cache publishes none. A
+// missing Next.js snapshot therefore cannot request publication: the request
+// would repeat on every reused push without ever producing one.
+const UNTRACKED_CACHE_PREFIXES = ['next-trusted-v1-'] as const;
 
 type Step = {
   readonly env?: Record<string, string>;
@@ -154,7 +159,11 @@ describe('main-push reuse wiring', () => {
       jobs.reuse?.steps.find((step) => step.name === REQUEST_STEP)?.env ?? {};
     const savedKeys = (jobs.quality?.steps ?? [])
       .filter((step) => step.uses?.startsWith('actions/cache/save@'))
-      .map((step) => String(step.with?.key));
+      .map((step) => String(step.with?.key))
+      .filter(
+        (key) =>
+          !UNTRACKED_CACHE_PREFIXES.some((prefix) => key.startsWith(prefix)),
+      );
 
     expect(savedKeys).toHaveLength(CACHE_PREFIX_ENVIRONMENT.length);
     for (const variable of CACHE_PREFIX_ENVIRONMENT) {
