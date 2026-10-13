@@ -154,7 +154,7 @@ describe('inspectWorkspace tsconfig and a11y wiring', () => {
     expect((await inspect(standalone)).problems).toEqual([expected]);
   });
 
-  it.each(['', 'playwright test --list'])(
+  it.each(['', 'playwright test --list', 'a11y-playwright --ui'])(
     'rejects a non-executing a11y gate %#',
     async (testA11y) => {
       const ws = makeWorkspace(
@@ -170,22 +170,21 @@ describe('inspectWorkspace tsconfig and a11y wiring', () => {
       const result = await inspect(ws);
       expect(result.hasA11ySuite).toBe(true);
       expect(result.problems).toEqual([
-        'apps/web: a *.a11y.ts suite requires a non-empty "test:a11y" script that runs playwright test',
+        'apps/web: a *.a11y.ts suite requires a non-empty "test:a11y" script that runs a11y-playwright or playwright test',
         'apps/web: a *.a11y.ts suite requires a direct dependency on @axe-core/playwright',
         'apps/web: a *.a11y.ts suite requires a direct dependency on @playwright/test',
       ]);
     },
   );
 
-  it('accepts a fully wired explicit a11y suite', async () => {
+  it.each([
+    'bun run prepare-a11y && playwright test --config playwright.config.ts',
+    'bun run prepare-a11y && a11y-playwright --config playwright.config.ts',
+  ])('accepts a fully wired explicit a11y suite %#', async (testA11y) => {
     const ws = makeWorkspace(
       {
         ...baseManifest(),
-        scripts: {
-          ...CANONICAL_SCRIPTS,
-          'test:a11y':
-            'bun run prepare-a11y && playwright test --config playwright.config.ts',
-        },
+        scripts: { ...CANONICAL_SCRIPTS, 'test:a11y': testA11y },
         devDependencies: {
           '@axe-core/playwright': '^4.0.0',
           '@playwright/test': '^1.0.0',

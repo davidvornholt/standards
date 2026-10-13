@@ -38,12 +38,24 @@ const scriptOf = (
   const script = scripts[name];
   return typeof script === 'string' ? script : null;
 };
+// `a11y-playwright` from @davidvornholt/a11y-testing runs `playwright test`
+// with the same arguments, network-isolated where the host allows it. Apps
+// whose a11y web server needs the host network call `playwright test`.
+const a11yRunOptions = (
+  tokens: ReadonlyArray<string>,
+): ReadonlyArray<string> | null => {
+  if (tokens[0] === 'a11y-playwright') {
+    return tokens.slice(1);
+  }
+  return tokens[0] === 'playwright' && tokens[1] === 'test'
+    ? tokens.slice(2)
+    : null;
+};
 const hasSafeA11yCommand = (script: string | null): boolean =>
-  parseSafeCommands(script)?.some(
-    (tokens) =>
-      tokens[0] === 'playwright' &&
-      tokens[1] === 'test' &&
-      tokens.slice(2).every((token) => !NON_EXECUTING_A11Y_OPTION.test(token)),
+  parseSafeCommands(script)?.some((tokens) =>
+    a11yRunOptions(tokens)?.every(
+      (token) => !NON_EXECUTING_A11Y_OPTION.test(token),
+    ),
   ) ?? false;
 const containsA11ySuite = async (dir: string): Promise<boolean> => {
   const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
@@ -140,7 +152,7 @@ const inspectA11y = async (
     ...(hasSafeA11yCommand(scriptOf(ws.manifest, 'test:a11y'))
       ? []
       : [
-          `${ws.rel}: a *.a11y.ts suite requires a non-empty "test:a11y" script that runs playwright test`,
+          `${ws.rel}: a *.a11y.ts suite requires a non-empty "test:a11y" script that runs a11y-playwright or playwright test`,
         ]),
     ...A11Y_DEPENDENCIES.filter((dep) => !declared.has(dep)).map(
       (dep) =>
