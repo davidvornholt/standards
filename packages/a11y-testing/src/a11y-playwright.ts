@@ -22,13 +22,16 @@ if (notice !== null) {
   process.stderr.write(`a11y-playwright: ${notice}\n`);
 }
 
-const tests = spawn(program, args, { stdio: 'inherit' });
 const forward = (signal: NodeJS.Signals) => {
   tests.kill(signal);
 };
+// Catch the signals before Playwright starts: one that arrived between its
+// start and the handlers would end this process at once and leave Playwright
+// running. Handlers run only after this synchronous setup, once `tests` exists.
 for (const signal of forwardedSignals) {
   process.on(signal, forward);
 }
+const tests = spawn(program, args, { stdio: 'inherit' });
 
 tests.on('error', (error) => {
   process.stderr.write(

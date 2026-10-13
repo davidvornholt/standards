@@ -37,28 +37,6 @@ const startRunner = (playwright: string, args: ReadonlyArray<string> = []) => {
   });
 };
 
-// Reads the output as it arrives. Each call reads until `enough` accepts the
-// text so far or the output ends, and returns all text read until then.
-const outputReader = (stream: ReadableStream<Uint8Array>) => {
-  const reader = stream.getReader();
-  const decoder = new TextDecoder();
-  let text = '';
-  const readUntil = async (
-    enough: (output: string) => boolean,
-  ): Promise<string> => {
-    if (enough(text)) {
-      return text;
-    }
-    const chunk = await reader.read();
-    if (chunk.done) {
-      return text;
-    }
-    text += decoder.decode(chunk.value, { stream: true });
-    return readUntil(enough);
-  };
-  return readUntil;
-};
-
 afterEach(() => {
   for (const directory of scratchDirectories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
@@ -82,16 +60,23 @@ describe('a11y-playwright', () => {
     expect(await new Response(run.stderr).text()).toMatch(fallbackNotice);
   });
 
-  it('forwards SIGTERM to Playwright and waits for it to finish', async () => {
+  it('forwards SIGTERM that arrives as Playwright starts and waits for it to finish', async () => {
+    // Playwright signals the runner the moment it starts. A runner that
+    // caught signals too late would end at once and leave Playwright running;
+    // the loop ends after about five seconds, so a failed run leaves nothing
+    // behind.
     const run = startRunner(
-      'trap "echo stopping; exit 143" TERM\necho ready\nwhile :; do sleep 0.05; done',
+      [
+        'trap "echo stopping; exit 143" TERM',
+        'kill -TERM $PPID',
+        'n=0',
+        'while [ $n -lt 100 ]; do sleep 0.05; n=$((n + 1)); done',
+      ].join('\n'),
     );
-    const output = outputReader(run.stdout);
-    await output((text) => text.includes('ready\n'));
-    run.kill('SIGTERM');
 
     expect(await run.exited).toBe(143);
-    expect(await output(() => false)).toBe('ready\nstopping\n');
+    expect(run.signalCode).toBeNull();
+    expect(await new Response(run.stdout).text()).toBe('stopping\n');
   });
 
   it('ends with the signal that ended Playwright', async () => {
