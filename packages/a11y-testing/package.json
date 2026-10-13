@@ -5,7 +5,11 @@
   "type": "module",
   "exports": {
     "./axe": "./src/axe.ts",
+    "./network-isolation": "./src/network-isolation.ts",
     "./playwright-config": "./src/playwright-config.ts"
+  },
+  "bin": {
+    "a11y-playwright": "./src/a11y-playwright.ts"
   },
   "scripts": {
     "check-types": "tsc --noEmit",
