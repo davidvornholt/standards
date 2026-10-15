@@ -2562,6 +2562,18 @@ describe('canonical standards workflow Postgres service', () => {
       ].join(' '),
     );
   });
+
+  it('skips disk syncs because its data is disposable', () => {
+    const { services } = parseWorkflow(STANDARDS_WORKFLOW).jobs.quality as {
+      readonly services: Record<string, Record<string, unknown>>;
+    };
+    expect(services.postgres?.env).toEqual(
+      expect.objectContaining({
+        POSTGRES_INITDB_ARGS:
+          '--no-sync --set fsync=off --set synchronous_commit=off --set full_page_writes=off',
+      }),
+    );
+  });
 });
 
 const SETTINGS_CHECK_STEP_NAMES = [
