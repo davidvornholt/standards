@@ -1,14 +1,14 @@
 {
   "aarch64-linux": {
-    "archiveHash": "sha256-VDKLvC2cjgyfiSxUTWbFeoO4QTnjSQnl7oF1jxrI/ac=",
+    "archiveHash": "sha256-76mBPaXtckI7+Ef5FujSxHwNd2rdlyNUAmp14Q2pqiE=",
     "archivePlatform": "aarch64",
-    "bunVersion": "1.4.2",
+    "bunVersion": "1.4.3",
     "runner": "ubuntu-24.04-arm"
   },
   "x86_64-linux": {
-    "archiveHash": "sha256-NjaPrvdSeHXV/6UuU81IAhdB8qg+tiCKjdZAaNQiqRM=",
+    "archiveHash": "sha256-PnMFKNiXdfA/h/BcBnh8TfQJnQo38/JS57gpyyOBbhg=",
     "archivePlatform": "x64",
-    "bunVersion": "1.4.2",
+    "bunVersion": "1.4.3",
     "runner": "ubuntu-24.04"
   }
 }

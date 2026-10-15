@@ -24,7 +24,7 @@
   "engines": {
     "node": "26"
   },
-  "packageManager": "bun@1.4.2",
+  "packageManager": "bun@1.4.3",
   "devDatabase": {
     "postgresVersion": "18"
   }

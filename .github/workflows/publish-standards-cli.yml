@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 env:
-  BUN_VERSION: 1.4.2
+  BUN_VERSION: 1.4.3
   PACKAGE_NAME: "@davidvornholt/standards"
   PACKAGE_PATH: packages/standards-cli/package.json
 
