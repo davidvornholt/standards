@@ -90,6 +90,11 @@ jobs:
     environment: ${{ vars.CI_SECRETS_ENVIRONMENT }}
     needs: policy
     if: needs.policy.outputs.auto-sync != 'false'
+    # The job token only reads: it fetches the sync branch and checks whether
+    # an open pull request still uses it. The broker App tokens do all writes.
+    permissions:
+      contents: read
+      pull-requests: read
     runs-on: ${{ vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-small', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || 'ubuntu-latest' }}
     timeout-minutes: 30
     steps:
@@ -225,8 +230,12 @@ jobs:
           permission-contents: read
           permission-pull-requests: write
 
-      # Rebase the durable automation branch so maintainer seam edits survive.
-      # A concurrent push is guarded by the exact head lease in the writer step.
+      # Rebase the branch of the open sync PR so maintainer seam edits survive.
+      # Without an open PR, no review depends on that history: a closed or
+      # merged PR leaves its branch behind for recovery, and rebasing it onto
+      # a newer base conflicts on the files every sync rewrites. Rebuild the
+      # branch from the base instead. A concurrent push is guarded by the
+      # exact head lease in the writer step.
       - name: Prepare reusable sync branch
         id: sync-base
         env:
@@ -241,11 +250,22 @@ jobs:
           trap 'git config --unset credential.helper' EXIT
           git fetch --no-tags origin "$SYNC_BASE_REF"
           previous=$(git ls-remote --heads origin "refs/heads/$branch" | cut -f1)
+          open=
           if [ -n "$previous" ]; then
+            open=$(GH_TOKEN="$SYNC_READ_TOKEN" gh pr list --state open --head "$branch" --limit 1000 --json number,headRefName,isCrossRepository --jq '[.[] | select((.isCrossRepository | not) and .headRefName == "standards-sync/update")][0].number // empty')
+          fi
+          if [ -n "$open" ]; then
             git fetch --no-tags origin "refs/heads/$branch"
             git switch -c "$branch" "$previous"
-            git rebase "origin/$SYNC_BASE_REF"
+            if ! git rebase "origin/$SYNC_BASE_REF"; then
+              git rebase --abort
+              echo "::error::Standards sync PR #$open conflicts with $SYNC_BASE_REF. Rebase $branch onto $SYNC_BASE_REF and push it, or close PR #$open so the next run rebuilds the branch from $SYNC_BASE_REF."
+              exit 1
+            fi
           else
+            if [ -n "$previous" ]; then
+              echo "::notice::No open pull request uses $branch; rebuilding it from $SYNC_BASE_REF instead of reusing $previous."
+            fi
             git switch -c "$branch"
           fi
           echo "previous=$previous" >> "$GITHUB_OUTPUT"
