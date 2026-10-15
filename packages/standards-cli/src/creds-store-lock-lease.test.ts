@@ -1,13 +1,14 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import process from 'node:process';
 import { withBrokerLock } from './creds-store-lock';
 
 const STALE_MS = 10;
-const BLOCKED_MAIN_THREAD_MS = 50;
+// The lease worker can take several renewal intervals to start on a loaded
+// machine; this only bounds how long a broken lease makes the test wait, and
+// stays below the 5 s test timeout so that failure reports the stale holder.
+const RENEWAL_DEADLINE_MS = 2000;
 const dirs: Array<string> = [];
 
 afterEach(() => {
@@ -30,11 +31,18 @@ describe('broker store lock lease', () => {
         }
         const holderPath = join(`${path}.lock`, holder);
         const before = statSync(holderPath).mtimeMs;
-        const blocked = spawnSync(process.execPath, [
-          '-e',
-          `setTimeout(() => undefined, ${BLOCKED_MAIN_THREAD_MS})`,
-        ]);
-        expect(blocked.status).toBe(0);
+        // Block the main thread, as synchronous SOPS or Nix work does, until
+        // the lease renews the holder or the deadline passes.
+        const pause = new Int32Array(
+          new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT),
+        );
+        const deadline = Date.now() + RENEWAL_DEADLINE_MS;
+        while (
+          statSync(holderPath).mtimeMs <= before &&
+          Date.now() < deadline
+        ) {
+          Atomics.wait(pause, 0, 0, 1);
+        }
         expect(statSync(holderPath).mtimeMs).toBeGreaterThan(before);
         return Promise.resolve();
       },
