@@ -29,7 +29,13 @@ concurrency:
   # Preserve every push SHA needed by publication; only PR runs supersede one
   # another when a newer commit updates the same PR. Dispatched runs share one
   # group, so at most one runs and the newest request waits behind it.
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.event_name == 'workflow_dispatch' && 'dispatch' || github.sha }}
+  # Draft and ready runs of a PR use separate groups. When a push to a draft is
+  # followed at once by ready for review, GitHub can start the push's run
+  # second; in a shared group that draft run, which runs no gate, cancels the
+  # ready run and leaves the head without its required check. With separate
+  # groups, a ready run keeps running after its PR returns to draft, until the
+  # next ready run replaces it.
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('{0}-{1}', github.ref, github.event.pull_request.draft && 'draft' || 'ready') || github.event_name == 'workflow_dispatch' && 'dispatch' || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:

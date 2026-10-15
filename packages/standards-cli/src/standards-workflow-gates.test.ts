@@ -188,7 +188,7 @@ describe('cache publication runs', () => {
   it('queue in one group that never cancels a running publication', () => {
     expect(workflow().concurrency).toEqual({
       group: `${expression('github.workflow')}-${expression(
-        "github.event_name == 'pull_request' && github.ref || github.event_name == 'workflow_dispatch' && 'dispatch' || github.sha",
+        "github.event_name == 'pull_request' && format('{0}-{1}', github.ref, github.event.pull_request.draft && 'draft' || 'ready') || github.event_name == 'workflow_dispatch' && 'dispatch' || github.sha",
       )}`,
       'cancel-in-progress': expression("github.event_name == 'pull_request'"),
     });
