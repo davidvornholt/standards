@@ -16,7 +16,10 @@ type WorkflowStep = {
 type ParsedWorkflow = {
   readonly permissions: Readonly<Record<string, string>>;
   readonly jobs: {
-    readonly sync: { readonly steps: ReadonlyArray<WorkflowStep> };
+    readonly sync: {
+      readonly permissions: Readonly<Record<string, string>>;
+      readonly steps: ReadonlyArray<WorkflowStep>;
+    };
   };
 };
 export type TokenConsumerContracts = {
@@ -25,7 +28,9 @@ export type TokenConsumerContracts = {
 };
 export type MutableWorkflow = {
   permissions: Record<string, string>;
-  jobs: { sync: { steps: Array<WorkflowStep> } };
+  jobs: {
+    sync: { permissions: Record<string, string>; steps: Array<WorkflowStep> };
+  };
 };
 
 const workflowPath = join(

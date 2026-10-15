@@ -138,6 +138,12 @@ describe('Standards sync broker credential contract', () => {
   it('pins exact fail-closed mappings, token isolation, and ordering', () => {
     assertSecuritySensitiveSteps(parsedWorkflow, consumerContracts);
     expect(parsedWorkflow.permissions).toEqual({ contents: 'read' });
+    // The job token only fetches and checks for an open sync PR; every write
+    // goes through a broker App token.
+    expect(parsedWorkflow.jobs.sync.permissions).toEqual({
+      contents: 'read',
+      'pull-requests': 'read',
+    });
     expect(
       namedStep(parsedWorkflow, 'Checkout').with?.['persist-credentials'],
     ).toBe(false);

@@ -36,7 +36,7 @@ const shell = (cwd: string, name: string, values: Record<string, string>) =>
 afterEach(cleanupTmpDirs);
 
 it.each([false, true])(
-  'reuses the branch and PR after another run (first PR creation failed: %s)',
+  'keeps one branch and PR across runs (first PR creation failed: %s)',
   (failFirst) => {
     const root = mkTmp('sync-reuse-');
     const remote = join(root, 'remote.git');
@@ -112,9 +112,19 @@ it.each([false, true])(
         'refs/heads',
       ),
     ).toBe(`main\n${BRANCH}`);
-    expect(git(root, '--git-dir', remote, 'show', `${BRANCH}:seam.txt`)).toBe(
-      'maintainer configuration',
-    );
+    // A failed creation leaves no open PR that reviews the maintainer commit,
+    // so the second run rebuilds the branch from main without it.
+    expect(
+      git(
+        root,
+        '--git-dir',
+        remote,
+        'ls-tree',
+        '--name-only',
+        BRANCH,
+        'seam.txt',
+      ),
+    ).toBe(failFirst ? '' : 'seam.txt');
     expect(
       git(root, '--git-dir', remote, 'show', `${BRANCH}:base-update.txt`),
     ).toBe('new main');
@@ -123,6 +133,76 @@ it.each([false, true])(
     ]);
     expect(readFileSync(join(root, 'pr-creations'), 'utf8')).toBe('created\n');
     expect(existsSync(join(root, 'pr-closures'))).toBe(false);
+  },
+);
+
+it.each([
+  {
+    open: true,
+    status: 1,
+    message: `::error::Standards sync PR #7 conflicts with main. Rebase ${BRANCH} onto main and push it, or close PR #7 so the next run rebuilds the branch from main.`,
+    head: 'stale',
+  },
+  {
+    open: false,
+    status: 0,
+    message: `::notice::No open pull request uses ${BRANCH}; rebuilding it from main`,
+    head: 'main',
+  },
+])(
+  'handles a sync branch that conflicts with main (open PR: $open)',
+  ({ open, status, message, head }) => {
+    const root = mkTmp('sync-conflict-');
+    const remote = join(root, 'remote.git');
+    git(root, 'init', '--bare', '--initial-branch=main', remote);
+    const maintainer = join(root, 'maintainer');
+    git(root, 'clone', remote, maintainer);
+    git(maintainer, 'config', 'user.name', 'fixture');
+    git(maintainer, 'config', 'user.email', 'fixture@example.invalid');
+    git(maintainer, 'config', 'commit.gpgsign', 'false');
+    const commit = (content: string): string => {
+      write(maintainer, 'sync-standards.lock', content);
+      git(maintainer, 'add', 'sync-standards.lock');
+      git(maintainer, 'commit', '-m', content);
+      return git(maintainer, 'rev-parse', 'HEAD');
+    };
+    commit('base\n');
+    git(maintainer, 'push', 'origin', 'main');
+    git(maintainer, 'switch', '-c', BRANCH);
+    const stale = commit('earlier sync\n');
+    git(maintainer, 'push', 'origin', BRANCH);
+    git(maintainer, 'switch', 'main');
+    const main = commit('later sync\n');
+    git(maintainer, 'push', 'origin', 'main');
+
+    const runner = join(root, 'runner');
+    git(root, 'clone', remote, runner);
+    git(runner, 'config', 'commit.gpgsign', 'false');
+    const pullRequests = open
+      ? [{ number: 7, headRefName: BRANCH, isCrossRepository: false }]
+      : [];
+    write(root, 'pr-state', JSON.stringify(pullRequests));
+    const output = join(root, 'output');
+    const result = shell(runner, 'Prepare reusable sync branch', {
+      ...fakeGitHub(root, process.env.PATH ?? ''),
+      ...Object.fromEntries([
+        ['SYNC_BASE_REF', 'main'],
+        ['SYNC_READ_TOKEN', 'read-fixture'],
+        ['GITHUB_OUTPUT', output],
+      ]),
+    });
+
+    expect(result.status).toBe(status);
+    expect(result.stdout).toContain(message);
+    expect(git(runner, 'rev-parse', 'HEAD')).toBe(
+      head === 'stale' ? stale : main,
+    );
+    expect(git(runner, 'status', '--porcelain')).toBe('');
+    // The writer step leases the push on this head, so a rebuilt branch
+    // replaces the stale one only if nobody pushed to it in between.
+    expect(existsSync(output) ? readFileSync(output, 'utf8') : '').toBe(
+      open ? '' : `previous=${stale}\n`,
+    );
   },
 );
 
