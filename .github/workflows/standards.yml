@@ -243,6 +243,12 @@ jobs:
           POSTGRES_USER: ${{ vars.CI_POSTGRES_USER || 'app' }}
           POSTGRES_PASSWORD: ${{ vars.CI_POSTGRES_PASSWORD || 'app' }}
           POSTGRES_DB: ${{ vars.CI_POSTGRES_DB || 'app' }}
+          # The service holds only disposable test data, so it gives up crash
+          # safety for speed. Every DROP DATABASE forces a checkpoint that
+          # syncs every unwritten file in the cluster, which took 1.4–2.2 s per
+          # drop while other tests created databases, and 22 ms without syncs.
+          # `--no-sync` also skips syncing the new cluster during start-up.
+          POSTGRES_INITDB_ARGS: --no-sync --set fsync=off --set synchronous_commit=off --set full_page_writes=off
         ports:
           - 5432:5432
         # The runner holds every step until the service reports healthy, and
