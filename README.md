@@ -70,14 +70,14 @@ Read [Sync and ownership](docs/sync-and-ownership.md) before changing a path who
 | --- | --- |
 | [Adoption](docs/adoption.md) | Installing the standards in a new or existing repository. |
 | [Sync and ownership](docs/sync-and-ownership.md) | Deciding where changes belong, pinning a source, and testing canonical edits. |
-| [Operations](docs/operations.md) | CodeBuild, local PostgreSQL, the poller, Nix packaging, and releases. |
+| [Operations](docs/operations.md) | CodeBuild, local PostgreSQL, Nix packaging, and releases. |
 | [CLI reference](packages/standards-cli/README.md) | Commands, configuration, and focused examples. |
 | [Agent contract](AGENTS.md) | Rules enforced in every consumer. |
 | [Infrastructure skill](.agents/skills/declarative-infra/SKILL.md) | NixOS hosts, OpenTofu, secrets, previews, and app releases. |
 
 ## Packages
 
-- [`@davidvornholt/standards`](packages/standards-cli/README.md) provides initialization, synchronization, validation, GitHub convergence, credential brokering, screenshot publishing, and poller automation.
+- [`@davidvornholt/standards`](packages/standards-cli/README.md) provides initialization, synchronization, validation, GitHub convergence, credential brokering, and screenshot publishing.
 - [`@davidvornholt/typescript-config`](packages/typescript-config/README.md) provides the shared TypeScript presets.
 - [`@davidvornholt/a11y-testing`](packages/a11y-testing/README.md) provides the shared Playwright and Axe accessibility gate.
 

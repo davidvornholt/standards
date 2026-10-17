@@ -16,19 +16,19 @@ afterEach(() => {
 });
 
 const declared = [
-  { name: 'approved-for-fix', color: '0e8a16', description: 'Approve a fix' },
+  { name: 'triaged', color: '0e8a16', description: 'Ready for implementation' },
 ] as const;
 
 describe('diffLabels', () => {
   it('matches live label identity without regard to case', () => {
-    expect(
-      diffLabels(declared, [{ ...declared[0], name: 'Approved-For-Fix' }]),
-    ).toEqual([]);
+    expect(diffLabels(declared, [{ ...declared[0], name: 'Triaged' }])).toEqual(
+      [],
+    );
   });
 
   it('reports a missing declared label', () => {
     expect(diffLabels(declared, [])).toEqual([
-      'label "approved-for-fix" is declared but missing on GitHub',
+      'label "triaged" is declared but missing on GitHub',
     ]);
   });
 
@@ -36,20 +36,20 @@ describe('diffLabels', () => {
     expect(
       diffLabels(declared, [
         {
-          name: 'approved-for-fix',
+          name: 'triaged',
           color: 'FBCA04',
-          description: 'Approve a fix',
+          description: 'Ready for implementation',
         },
       ]),
     ).toEqual([
-      'label "approved-for-fix" has color "fbca04" on GitHub, declared "0e8a16"',
+      'label "triaged" has color "fbca04" on GitHub, declared "0e8a16"',
     ]);
     expect(
       diffLabels(declared, [
-        { name: 'approved-for-fix', color: '0e8a16', description: 'other' },
+        { name: 'triaged', color: '0e8a16', description: 'other' },
       ]),
     ).toEqual([
-      'label "approved-for-fix" has a different description on GitHub than declared',
+      'label "triaged" has a different description on GitHub than declared',
     ]);
   });
 
@@ -57,9 +57,9 @@ describe('diffLabels', () => {
     expect(
       diffLabels(declared, [
         {
-          name: 'approved-for-fix',
+          name: 'triaged',
           color: '0e8a16',
-          description: 'Approve a fix',
+          description: 'Ready for implementation',
         },
         { name: 'wontfix', color: 'ffffff', description: '' },
       ]),
@@ -74,7 +74,7 @@ describe('applyLabels', () => {
         body: [
           {
             ...declared[0],
-            name: 'Approved-For-Fix',
+            name: 'Triaged',
             description: 'old',
           },
         ],
@@ -82,9 +82,9 @@ describe('applyLabels', () => {
       { body: {} },
     ]);
     expect(await applyLabels('token', 'o/r', declared)).toEqual([
-      'updated label "approved-for-fix"',
+      'updated label "triaged"',
     ]);
-    expect(calls[1]?.path).toBe('/repos/o/r/labels/Approved-For-Fix');
+    expect(calls[1]?.path).toBe('/repos/o/r/labels/Triaged');
   });
 
   it('creates missing labels and updates drifted ones', async () => {
@@ -92,9 +92,9 @@ describe('applyLabels', () => {
       {
         body: [
           {
-            name: 'fix-failed',
+            name: 'blocked',
             color: '000000',
-            description: 'Automated fix failed',
+            description: 'Waiting on a dependency',
           },
         ],
       },
@@ -104,20 +104,20 @@ describe('applyLabels', () => {
     const actions = await applyLabels('t', 'o/r', [
       ...declared,
       {
-        name: 'fix-failed',
+        name: 'blocked',
         color: 'd73a4a',
-        description: 'Automated fix failed',
+        description: 'Waiting on a dependency',
       },
     ]);
     expect(actions).toEqual([
-      'created label "approved-for-fix"',
-      'updated label "fix-failed"',
+      'created label "triaged"',
+      'updated label "blocked"',
     ]);
     expect(
       calls
         .filter((call) => call.method !== 'GET')
         .map((call) => `${call.method} ${call.path}`),
-    ).toEqual(['POST /repos/o/r/labels', 'PATCH /repos/o/r/labels/fix-failed']);
+    ).toEqual(['POST /repos/o/r/labels', 'PATCH /repos/o/r/labels/blocked']);
   });
 
   it('does nothing when no labels are declared', async () => {

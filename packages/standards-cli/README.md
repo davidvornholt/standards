@@ -35,7 +35,6 @@ Read the [adoption guide](../../docs/adoption.md) before running `init` in a rep
 | `github` | Compare or converge live repository settings. |
 | `creds` | Mint and reconcile brokered credentials. |
 | `screenshots` | Publish pull-request screenshots through the configured bucket. |
-| `poller` | Run one approved fix or review automation tick. |
 | `help` | Print command and option help. |
 
 Use `bun standards help`, `bun standards creds help`, or `bun standards screenshots help` for the complete invocation syntax.
@@ -267,28 +266,6 @@ publicBaseUrl: https://screenshots.example.com
 
 Published URLs are public and permanent. Use demo data and exclude secrets and personal data.
 
-## poller
-
-```sh
-bun standards poller --config <path>
-bun standards poller --acknowledge-only --config <path>
-bun standards poller --print-units --config <path>
-```
-
-The host-level JSON configuration requires:
-
-```json
-{
-  "repos": ["owner/repo"],
-  "model": "<codex model>",
-  "reasoningEffort": "<effort>"
-}
-```
-
-Optional keys are `maxJobsPerTick`, `staleClaimHours`, `runTimeoutMinutes`, `cacheDir`, and `extraCodexArgs`. One poller supports at most 12 repositories.
-
-The worker accepts only exact issue or draft-PR revisions approved by a user with `admin` or `maintain` role. It runs Codex in a disposable worktree, revalidates approval before publication, and leaves merge to a human. The polling host owns authenticated `codex` and `gh`, the service token, writable home, configuration, and systemd deployment.
-
 ## Configuration index
 
 | File or variable | Purpose |
@@ -306,8 +283,6 @@ The worker accepts only exact issue or draft-PR revisions approved by a user wit
 | `GH_TOKEN` or `GITHUB_TOKEN` | GitHub API authentication where required. |
 
 The [root README](../../README.md) gives the short overview. The [adoption guide](../../docs/adoption.md) and [sync guide](../../docs/sync-and-ownership.md) explain repository ownership and first use.
-
-The poller timers use monotonic intervals: after boot, acknowledgement starts after one minute and work starts after two minutes. Missed downtime intervals are not replayed; each tick reads the current queue. The service budget reserves thirty minutes for scanning and setup in addition to its configured agent budget, with at most twelve watched repositories per poller. Split larger lists across pollers with independent API budgets; unusually slow provider or clone operations can exhaust that overhead and require investigating the service timeout before retrying.
 
 ## Source text validation
 

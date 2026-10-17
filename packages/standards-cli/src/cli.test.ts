@@ -12,7 +12,6 @@ import {
   statSync,
   truncateSync,
   utimesSync,
-  writeFileSync,
 } from 'node:fs';
 import { join, relative } from 'node:path';
 import process from 'node:process';
@@ -2347,10 +2346,10 @@ describe('packed artifact distribution', () => {
       [
         `import { loadGithubSettings } from ${JSON.stringify(join(consumer, 'node_modules/@davidvornholt/standards/src/github-settings.ts'))};`,
         'const loaded = loadGithubSettings(',
-        '  JSON.stringify({ repository: {}, rulesets: [], labels: [{ name: "approved-for-fix", color: "0e8a16", description: "Approved" }] }),',
+        '  JSON.stringify({ repository: {}, rulesets: [], labels: [{ name: "triaged", color: "0e8a16", description: "Approved" }] }),',
         '  JSON.stringify({ repository: {}, rulesets: [], labels: [] }),',
         ');',
-        'if (loaded.merged?.labels[0]?.name !== "approved-for-fix" || loaded.problems.length !== 0) process.exit(1);',
+        'if (loaded.merged?.labels[0]?.name !== "triaged" || loaded.problems.length !== 0) process.exit(1);',
       ].join('\n'),
     ]);
     expect(installedSettingsParser.stderr).toBe('');
@@ -4233,15 +4232,6 @@ describe('invalid invocations', () => {
       messages: ['a command is required', 'Usage: standards <command>'],
     },
     { args: ['bogus', '--dir', DIR], messages: ['Unknown command'] },
-    { args: ['poller'], messages: ['--config <path> is required'] },
-    {
-      args: ['check', '--config', 'x.json'],
-      messages: ['--config is only valid with the poller command'],
-    },
-    {
-      args: ['poller', '--install', '--config', 'x.json'],
-      messages: ['Unknown option: --install'],
-    },
   ])('rejects $args', ({ args, messages }) => {
     const consumer = mkTmp('sync-cons-');
     const result = run(
@@ -4287,50 +4277,6 @@ describe('path safety', () => {
     expect(result.stderr).toContain(
       'managed path must be a normalized repository-relative path',
     );
-  });
-});
-
-describe('poller', () => {
-  it('fails loudly on an invalid config file', () => {
-    const consumer = mkTmp('poller-');
-    writeFileSync(
-      join(consumer, 'poller.json'),
-      '{"repos":[],"model":"gpt-5.6-sol","reasoningEffort":"high"}',
-    );
-    const result = run(consumer, [
-      'poller',
-      '--config',
-      join(consumer, 'poller.json'),
-    ]);
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain(
-      'poller config "repos" must list at least one repository',
-    );
-  });
-
-  it('prints systemd units sized from the config without touching the host', () => {
-    const consumer = mkTmp('poller-');
-    const configPath = join(consumer, 'poller.json');
-    writeFileSync(
-      configPath,
-      '{"repos":["owner/repo"],"model":"gpt-5.6-sol","reasoningEffort":"high"}',
-    );
-    const result = run(consumer, [
-      'poller',
-      '--print-units',
-      '--config',
-      configPath,
-    ]);
-    expect(result.status).toBe(0);
-    expect(result.stdout).toContain('standards-poller.service');
-    expect(result.stdout).toContain(
-      'standards-poller-acknowledgements.service',
-    );
-    expect(result.stdout).toContain(`poller --config "${configPath}"`);
-    expect(result.stdout).toContain(
-      `poller --acknowledge-only --config "${configPath}"`,
-    );
-    expect(result.stdout).toContain('TimeoutStartSec=270min');
   });
 });
 

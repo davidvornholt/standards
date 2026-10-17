@@ -75,8 +75,8 @@ describe('runGithubCheck', () => {
     const labels = [
       {
         color: '0e8a16',
-        description: 'Approved for automated work',
-        name: 'approved-for-fix',
+        description: 'Ready for implementation',
+        name: 'triaged',
       },
     ];
     const calls = installApi([

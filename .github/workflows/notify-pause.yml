@@ -1,10 +1,9 @@
 name: Notify pause
 
 # An agent pause is a question posted as a comment plus the
-# `needs-clarification` label: review-fix cycles pause on pull requests, and
-# fix-poller runs pause on issues. The agent posts with the repo owner's own
-# account, and GitHub never notifies you of your own activity — so this
-# workflow is the doorbell: on the label event it pushes a phone notification
+# `needs-clarification` label on a pull request or issue. The agent posts
+# with the repo owner's own account, and GitHub never notifies you of your
+# own activity. On the label event, this workflow pushes a phone notification
 # through ntfy with a deep link to the paused PR or issue. The label is the
 # trigger on purpose: the ping fires off the durable state transition, not off
 # anything harness-specific the agent has to remember.

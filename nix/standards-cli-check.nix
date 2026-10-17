@@ -13,7 +13,7 @@ runCommand "standards-cli-check-${standardsCli.version}"
   }
   ''
     standards help >"$TMPDIR/help.txt"
-    grep -F "poller      Run one fix-poller tick" "$TMPDIR/help.txt"
+    grep -F "Usage: standards <command> [options]" "$TMPDIR/help.txt"
     test "$(bun --version)" = ${lib.escapeShellArg standardsCli.bun.version}
 
     cd ${standardsCli}/lib/standards/packages/standards-cli
@@ -41,19 +41,6 @@ runCommand "standards-cli-check-${standardsCli.version}"
       ${standardsCli.src}/bun.lock \
       ${standardsCli}/lib/standards/packages/standards-cli
 
-    pollerConfig="$TMPDIR/poller.json"
-    printf '%s\n' \
-      '{' \
-      '  "repos": ["davidvornholt/standards"],' \
-      '  "model": "test-model",' \
-      '  "reasoningEffort": "test-effort",' \
-      '  "cacheDir": "./cache"' \
-      '}' >"$pollerConfig"
-    standards poller --print-units --config "$pollerConfig" >"$TMPDIR/units.txt"
-    grep -F "standards-poller.service" "$TMPDIR/units.txt"
-    grep -F "standards-poller-acknowledgements.service" "$TMPDIR/units.txt"
-    grep -F "standards-poller.timer" "$TMPDIR/units.txt"
-
     mkdir "$out"
-    cp "$TMPDIR/help.txt" "$TMPDIR/units.txt" "$out/"
+    cp "$TMPDIR/help.txt" "$out/"
   ''

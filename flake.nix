@@ -1,5 +1,5 @@
 {
-  description = "Nix packages for the davidvornholt standards CLI, poller and app-release host module";
+  description = "Nix packages for the davidvornholt standards CLI and app-release host module";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
 

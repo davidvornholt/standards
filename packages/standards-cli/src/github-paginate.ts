@@ -1,7 +1,7 @@
 // Exhaustive pagination for GitHub list endpoints. Single-page reads are a
 // correctness hazard everywhere the caller needs "the latest" or "all" of
-// something: a truncated timeline mis-attributes label approvals, truncated
-// comments break answer detection, and truncated label lists read as drift.
+// something: truncated label or ruleset lists can misreport declared settings
+// as missing.
 // Overflow past the page cap fails loudly instead of silently truncating.
 
 import { type ApiResponse, apiError, HTTP_OK, request } from './github-api';
