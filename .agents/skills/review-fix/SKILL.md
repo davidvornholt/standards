@@ -9,7 +9,9 @@ Run one bounded cycle: establish the baseline, review the initial diff, fix merg
 
 ## Model
 
-An explicit user choice wins. Otherwise use Claude Opus 5.5 at xhigh effort in Claude Code, GPT-6 Astra at high effort in Codex, or the current model when neither is available. Use the same model for every lens. Never silently replace an explicitly requested model; report an execution blocker if it cannot run.
+Reviewers use GPT-6 Astra at high effort unless the user names another model. Use the same model for every review and verification lens; the orchestrating session and fix workers stay on the current model.
+
+Spawn each lens natively when the harness can run the reviewer model, and set the model and effort explicitly on every spawn. Otherwise delegate it with T3 Code `delegate_task`, and include the lens brief, the review skill path, and the read-only constraint in the task. If neither can run the reviewer model, stop before reviewing and report which model could not start and why. Never substitute another model.
 
 ## Scope
 
@@ -35,7 +37,7 @@ Add a specialized lens only when a material risk such as authorization, persiste
 
 Reuse a successful equivalent exact-head gate that has already finished. Otherwise run the repository gate locally once; do not wait for CI. Repair only PR-introduced mechanical failures before review and record pre-existing failures.
 
-For every required review or verification lens, spawn a separate read-only subagent using the [review skill](../review/SKILL.md). `review-pass` is an optional workflow helper. If delegation is unavailable, report incomplete coverage and stop.
+For every required review or verification lens, spawn a separate read-only subagent on the reviewer model using the [review skill](../review/SKILL.md).
 
 Review the PR base → initial head with the scope, gate result, lenses, and any model override. Retry a skipped lens once, then stop if coverage is still incomplete. Merge duplicate findings while preserving every reporting lens, and assign one decision:
 
