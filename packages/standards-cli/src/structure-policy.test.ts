@@ -4,23 +4,14 @@ import {
   buildConsumer,
   CI_SOPS_METADATA_YAML,
   cleanupStructureTmps,
-  FAKE_ENC,
   writeInto as write,
 } from './structure-test-support';
 
 afterEach(cleanupStructureTmps);
 
 const removeBrokerCredentials = (consumer: string): void => {
-  write(
-    consumer,
-    'secrets/ci.yaml',
-    `ci:\n  ntfy_topic_url: ${FAKE_ENC}\n${CI_SOPS_METADATA_YAML}`,
-  );
-  write(
-    consumer,
-    'secrets/ci.example.yaml',
-    'ci:\n  ntfy_topic_url: placeholder\n',
-  );
+  write(consumer, 'secrets/ci.yaml', CI_SOPS_METADATA_YAML);
+  write(consumer, 'secrets/ci.example.yaml', '{}\n');
 };
 
 describe('automatic sync credential policy', () => {

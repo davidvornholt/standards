@@ -61,7 +61,6 @@ export const CI_SOPS_METADATA_YAML = [
 // keys stay plaintext under SOPS, values are opaque ciphertext.
 export const CI_SECRETS_YAML = [
   'ci:',
-  `    ntfy_topic_url: ${fakeEnc('bnRmeQ==')}`,
   '    broker_app:',
   `        app_id: ${fakeEnc('YXBw')}`,
   `        private_key: ${fakeEnc('a2V5')}`,
@@ -75,7 +74,6 @@ export const TEMPLATE_CI_SECRETS_YAML = CI_SECRETS_YAML.replace(
 );
 export const CI_EXAMPLE_YAML = [
   'ci:',
-  '  ntfy_topic_url: https://ntfy.sh/replace-with-a-random-unguessable-topic',
   '  broker_app:',
   '    app_id: replace-with-the-broker-github-app-id',
   '    private_key: replace-with-the-broker-github-app-private-key',

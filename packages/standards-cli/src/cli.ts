@@ -42,7 +42,6 @@ import {
   interposedAncestor,
   unlockedPathsUnder,
 } from './managed-path-ownership';
-import { runPollerCommand } from './poller-commands';
 import { runScreenshotsCommand } from './screenshots-commands';
 import { collectSopsActionCallerProblems } from './sops-action-callers';
 import { collectSourceTextProblems } from './source-text';
@@ -93,7 +92,6 @@ type Command =
   | 'github'
   | 'help'
   | 'init'
-  | 'poller'
   | 'source-text'
   | 'structure'
   | 'sync';
@@ -107,9 +105,6 @@ type CliOptions = {
   readonly apply: boolean;
   readonly write: boolean;
   readonly profile: StructureProfile;
-  readonly config: string | undefined;
-  readonly printUnits: boolean;
-  readonly acknowledgeOnly: boolean;
 };
 
 const sha256 = (buf: Buffer): string =>
@@ -1113,7 +1108,6 @@ Commands:
   github      Compare (--check) or converge (--apply) live GitHub settings
   creds       Mint, rotate, and revoke brokered credentials (see \`standards creds help\`)
   screenshots Publish UI screenshots to the configured public bucket and print PR-ready markdown (see \`standards screenshots help\`)
-  poller      Run one fix-poller tick over the configured repositories (host automation)
   help        Show this help
 
 Options:
@@ -1124,11 +1118,7 @@ Options:
   --dry-run        Preview a sync without writing anything
   --check          With github/dependabot: compare against the declared sources (default)
   --apply          With github: converge the live repository (needs admin auth)
-  --write          With dependabot: regenerate the composed .github/dependabot.yml
-  --config <path>  With poller: the host-level poller config file (required)
-  --print-units    With poller: print declarative systemd unit content without touching the host
-  --acknowledge-only
-                   With poller: acknowledge queued requests without starting work`;
+  --write          With dependabot: regenerate the composed .github/dependabot.yml`;
 
 const commandFromArg = (arg: string): Command => {
   if (
@@ -1139,7 +1129,6 @@ const commandFromArg = (arg: string): Command => {
     arg === 'github' ||
     arg === 'help' ||
     arg === 'init' ||
-    arg === 'poller' ||
     arg === 'source-text' ||
     arg === 'structure' ||
     arg === 'sync'
@@ -1183,33 +1172,12 @@ type ParsedFlags = {
   readonly write: boolean;
   readonly ref: string | undefined;
   readonly profile: StructureProfile | undefined;
-  readonly config: string | undefined;
-  readonly printUnits: boolean;
-  readonly acknowledgeOnly: boolean;
-};
-
-const assertPollerOptionUsage = (flags: ParsedFlags): void => {
-  if (flags.config !== undefined && flags.command !== 'poller') {
-    throw new Error('--config is only valid with the poller command');
-  }
-  if (flags.printUnits && flags.command !== 'poller') {
-    throw new Error('--print-units is only valid with the poller command');
-  }
-  if (flags.acknowledgeOnly && flags.command !== 'poller') {
-    throw new Error('--acknowledge-only is only valid with the poller command');
-  }
-  if (flags.acknowledgeOnly && flags.printUnits) {
-    throw new Error(
-      'poller accepts only one of --acknowledge-only or --print-units',
-    );
-  }
 };
 
 // Every option is only meaningful with specific commands; reject the rest so a
 // typo fails loudly instead of silently doing the default thing.
 const assertOptionUsage = (flags: ParsedFlags): void => {
   const { command, checkFlag, apply, write, ref, profile } = flags;
-  assertPollerOptionUsage(flags);
   if (checkFlag && command !== 'github' && command !== 'dependabot') {
     throw new Error(
       '--check is only valid with the github and dependabot commands',
@@ -1245,25 +1213,12 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
   let apply = false;
   let write = false;
   let profile: StructureProfile | undefined;
-  let config: string | undefined;
-  let printUnits = false;
-  let acknowledgeOnly = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     switch (arg) {
       case '--apply':
         apply = true;
-        break;
-      case '--acknowledge-only':
-        acknowledgeOnly = true;
-        break;
-      case '--config':
-        config = nextOptionValue(argv, index);
-        index += 1;
-        break;
-      case '--print-units':
-        printUnits = true;
         break;
       case '--check':
         checkFlag = true;
@@ -1306,9 +1261,6 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
     write,
     ref,
     profile,
-    config,
-    printUnits,
-    acknowledgeOnly,
   });
 
   return {
@@ -1320,9 +1272,6 @@ const parseArgs = (argv: ReadonlyArray<string>): CliOptions => {
     apply,
     write,
     profile: profile ?? 'consumer',
-    config,
-    printUnits,
-    acknowledgeOnly,
   };
 };
 
@@ -1502,19 +1451,8 @@ const main = async (): Promise<void> => {
     }
     return;
   }
-  const {
-    command,
-    consumer,
-    dryRun,
-    from,
-    ref,
-    apply,
-    write,
-    profile,
-    config,
-    printUnits,
-    acknowledgeOnly,
-  } = parseArgs(process.argv.slice(2));
+  const { command, consumer, dryRun, from, ref, apply, write, profile } =
+    parseArgs(process.argv.slice(2));
 
   if (command === undefined) {
     console.error('standards: a command is required\n');
@@ -1540,19 +1478,6 @@ const main = async (): Promise<void> => {
 
   if (command === 'dependabot' && write) {
     await runDependabotWrite(consumer);
-    return;
-  }
-
-  if (command === 'poller') {
-    if (
-      !(await runPollerCommand({
-        configPath: config,
-        printUnits,
-        acknowledgeOnly,
-      }))
-    ) {
-      process.exitCode = 1;
-    }
     return;
   }
 

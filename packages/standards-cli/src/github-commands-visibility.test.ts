@@ -72,8 +72,8 @@ describe('runGithubCheck fail-closed visibility', () => {
             labels: [
               {
                 color: '0e8a16',
-                description: 'Approved for automated work',
-                name: 'approved-for-fix',
+                description: 'Ready for implementation',
+                name: 'triaged',
               },
             ],
             optOut: false,
@@ -114,8 +114,8 @@ describe('runGithubCheck fail-closed visibility', () => {
           labels: [
             {
               color: '0e8a16',
-              description: 'Approved for automated work',
-              name: 'approved-for-fix',
+              description: 'Ready for implementation',
+              name: 'triaged',
             },
           ],
           optOut: false,

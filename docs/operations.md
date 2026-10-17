@@ -53,24 +53,6 @@ PostgreSQL fixes credentials and its data format when the volume is initialized.
 
 Project-specific database lifecycles use distinct names in `local.just`.
 
-## Deferred-fix poller
-
-The poller turns maintainer approval into bounded Codex work while GitHub remains the state store.
-
-For an issue, an `admin` or `maintain` user applies `approved-for-fix`. The worker binds approval to the exact issue revision, runs Codex in a disposable worktree, verifies the result, and opens a draft pull request.
-
-For a draft pull request, an `admin` or `maintain` user applies `approved-for-review`. The worker binds approval to the exact head, runs one review-fix cycle, pushes verified commits, posts the report, and marks the pull request ready. Merge remains a human decision.
-
-When a durable decision is required, the worker comments and applies `needs-clarification`. Only an authorized reply resumes the job.
-
-The host infrastructure repository owns the service identity, writable home, authenticated `codex` and `gh`, GitHub token, configuration, and systemd deployment. Render the worker and acknowledgement units with:
-
-```sh
-standards poller --print-units --config <path>
-```
-
-One poller supports at most 12 repositories. See the [CLI reference](../packages/standards-cli/README.md#poller) for the configuration schema.
-
 ## Screenshot publishing
 
 A repository can publish stable review screenshots through its configured public object-storage bucket:
@@ -100,14 +82,13 @@ inputs.standards = {
 };
 ```
 
-Use the package directly in the host service:
+Install the package directly in the host configuration:
 
 ```nix
 let
   standardsCli = inputs.standards.packages.${pkgs.system}.standards-cli;
 in {
-  systemd.user.services.standards-poller.serviceConfig.ExecStart =
-    "${standardsCli}/bin/standards poller --config ${pollerConfig}";
+  environment.systemPackages = [ standardsCli ];
 }
 ```
 
