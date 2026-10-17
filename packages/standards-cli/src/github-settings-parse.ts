@@ -13,7 +13,7 @@ export type RulesetEnforcement = 'enforced' | 'unavailable-on-plan';
 
 // Declared issue labels are an additive floor like rulesets: declared labels
 // must exist with the declared color and description; extra live labels are
-// not drift. The fix-poller protocol labels ride this seam to every consumer.
+// not drift.
 export type LabelDeclaration = {
   readonly name: string;
   readonly color: string;

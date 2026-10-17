@@ -54,14 +54,7 @@ const detect = (secrets: string | null) => {
 };
 
 const brokerApp = (lines: ReadonlyArray<string>): string =>
-  [
-    'ci:',
-    `    ntfy_topic_url: ${encrypted('dXJs')}`,
-    ...lines,
-    'sops:',
-    '    version: 3.13.3',
-    '',
-  ].join('\n');
+  ['ci:', ...lines, 'sops:', '    version: 3.13.3', ''].join('\n');
 
 describe('Standards sync client ID presence check', () => {
   it.each([

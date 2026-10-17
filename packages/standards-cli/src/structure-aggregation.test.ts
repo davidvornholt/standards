@@ -18,14 +18,14 @@ describe('root and CI secret validation aggregation', () => {
     write(
       consumer,
       'secrets/ci.yaml',
-      `ci:\n  ntfy_topic_url: PLAINTEXT_MUST_NOT_BE_ECHOED\n${CI_SOPS_METADATA_YAML}`,
+      `ci:\n  example_token: PLAINTEXT_MUST_NOT_BE_ECHOED\n${CI_SOPS_METADATA_YAML}`,
     );
     const problems = await collectStructureProblems(consumer, 'consumer');
     expect(problems).toContain(
       'package.json must exist and contain a JSON object',
     );
     expect(problems).toContain(
-      'secrets/ci.yaml: value at "ci.ntfy_topic_url" is not a complete SOPS-encrypted value; plaintext secret values must never be committed',
+      'secrets/ci.yaml: value at "ci.example_token" is not a complete SOPS-encrypted value; plaintext secret values must never be committed',
     );
     expect(problems.join('\n')).not.toContain('PLAINTEXT_MUST_NOT_BE_ECHOED');
   });
@@ -49,7 +49,7 @@ describe('root and CI secret validation aggregation', () => {
     rmSync(join(consumer, 'secrets'), { recursive: true });
     expect(await collectStructureProblems(consumer, 'consumer')).toEqual([
       'package.json must exist and contain a JSON object',
-      'secrets/ci.yaml: must exist as a SOPS-encrypted file; the synced CI workflows read ci.ntfy_topic_url and, when automatic sync is enabled, ci.broker_app from it',
+      'secrets/ci.yaml: must exist as a SOPS-encrypted file; the synced Standards sync workflow reads ci.broker_app from it when automatic sync is enabled',
       'secrets/ci.example.yaml: must exist and mirror the key shape of secrets/ci.yaml with plaintext placeholders',
     ]);
   });

@@ -137,7 +137,7 @@ describe('collectStructureProblems basics and scripts', () => {
     rmSync(join(consumer, 'secrets/ci.yaml'));
     const problems = await collect(consumer);
     expect(problems).toEqual([
-      'secrets/ci.yaml: must exist as a SOPS-encrypted file; the synced CI workflows read ci.ntfy_topic_url and, when automatic sync is enabled, ci.broker_app from it',
+      'secrets/ci.yaml: must exist as a SOPS-encrypted file; the synced Standards sync workflow reads ci.broker_app from it when automatic sync is enabled',
     ]);
   });
 });

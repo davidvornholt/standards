@@ -20,7 +20,7 @@ const buildSecrets = (): string => {
   return dir;
 };
 const ENC = 'ENC[AES256_GCM,data:eA==,iv:aWl2,tag:dGFn,type:str]';
-const NTFY_ENC_LINE = /ntfy_topic_url: ENC\[[^\]]+\]/u;
+const APP_ID_ENC_LINE = /app_id: ENC\[[^\]]+\]/u;
 
 describe('collectCiSecretsProblems', () => {
   it('accepts a mirrored SOPS-encrypted pair with the required keys', async () => {
@@ -30,7 +30,7 @@ describe('collectCiSecretsProblems', () => {
   it('requires both files to exist', async () => {
     const dir = newStructureTmp('structure-secrets-');
     expect(await collectCiSecretsProblems(dir)).toEqual([
-      'secrets/ci.yaml: must exist as a SOPS-encrypted file; the synced CI workflows read ci.ntfy_topic_url and, when automatic sync is enabled, ci.broker_app from it',
+      'secrets/ci.yaml: must exist as a SOPS-encrypted file; the synced Standards sync workflow reads ci.broker_app from it when automatic sync is enabled',
       'secrets/ci.example.yaml: must exist and mirror the key shape of secrets/ci.yaml with plaintext placeholders',
     ]);
   });
@@ -44,7 +44,6 @@ describe('collectCiSecretsProblems', () => {
     );
     const problems = await collectCiSecretsProblems(dir);
     expect(problems).toEqual([
-      'secrets/ci.yaml: missing required key "ci.ntfy_topic_url" — the synced Notify pause workflow pushes to it',
       'secrets/ci.yaml: missing required key "ci.broker_app.app_id" — the synced Standards sync workflow mints a branch token with Contents write and Workflows write plus a pull request token with Contents read and Pull requests write from ci.broker_app; provision it with "bun standards creds add github --dest ci:ci.broker_app"',
       'secrets/ci.yaml: missing required key "ci.broker_app.private_key" — the synced Standards sync workflow mints a branch token with Contents write and Workflows write plus a pull request token with Contents read and Pull requests write from ci.broker_app; provision it with "bun standards creds add github --dest ci:ci.broker_app"',
       'secrets/ci.example.yaml: missing key "ci.other" with the same mapping shape; mirror every secrets/ci.yaml key with a placeholder',
@@ -54,13 +53,13 @@ describe('collectCiSecretsProblems', () => {
   it('flags a plaintext leaf by key path without echoing the value', async () => {
     const dir = buildSecrets();
     const leaked = CI_SECRETS_YAML.replace(
-      NTFY_ENC_LINE,
-      'ntfy_topic_url: https://ntfy.sh/oops-a-real-secret',
+      APP_ID_ENC_LINE,
+      'app_id: oops-a-real-secret',
     );
     write(dir, 'secrets/ci.yaml', leaked);
     const problems = await collectCiSecretsProblems(dir);
     expect(problems).toEqual([
-      'secrets/ci.yaml: value at "ci.ntfy_topic_url" is not a complete SOPS-encrypted value; plaintext secret values must never be committed',
+      'secrets/ci.yaml: value at "ci.broker_app.app_id" is not a complete SOPS-encrypted value; plaintext secret values must never be committed',
     ]);
     expect(problems.join('\n')).not.toContain('oops-a-real-secret');
   });
@@ -82,7 +81,7 @@ describe('collectCiSecretsProblems', () => {
       'secrets/ci.example.yaml: must hold plaintext placeholders, not SOPS metadata',
     );
     expect(problems).toContain(
-      'secrets/ci.example.yaml: value at "ci.ntfy_topic_url" looks SOPS-encrypted; replace it with a plaintext placeholder',
+      'secrets/ci.example.yaml: value at "ci.broker_app.app_id" looks SOPS-encrypted; replace it with a plaintext placeholder',
     );
   });
 

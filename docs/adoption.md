@@ -153,7 +153,7 @@ grep AGE-SECRET-KEY "$d/key" | gh secret set SOPS_AGE_KEY
 rm -rf "$d"
 ```
 
-The structure gate requires `secrets/ci.yaml` and `secrets/ci.example.yaml` to have the same business-key shape. It also requires `ci.ntfy_topic_url`, plus `ci.broker_app.app_id` and `ci.broker_app.private_key` while automatic sync is enabled.
+The structure gate requires `secrets/ci.yaml` and `secrets/ci.example.yaml` to have the same business-key shape. It also requires `ci.broker_app.app_id` and `ci.broker_app.private_key` while automatic sync is enabled.
 
 After installing the repository owner's private broker App on this repository, provision its SOPS values:
 
