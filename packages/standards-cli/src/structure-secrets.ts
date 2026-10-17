@@ -15,10 +15,6 @@ const CI_SECRETS = 'secrets/ci.yaml';
 const CI_EXAMPLE = 'secrets/ci.example.yaml';
 const BROKER_REASON =
   'the synced Standards sync workflow mints a branch token with Contents write and Workflows write plus a pull request token with Contents read and Pull requests write from ci.broker_app; provision it with "bun standards creds add github --dest ci:ci.broker_app"';
-const NTFY_REQUIREMENT: RequiredSecretLeaf = {
-  path: ['ci', 'ntfy_topic_url'],
-  reason: 'the synced Notify pause workflow pushes to it',
-};
 const BROKER_REQUIREMENTS: ReadonlyArray<RequiredSecretLeaf> = [
   { path: ['ci', 'broker_app', 'app_id'], reason: BROKER_REASON },
   { path: ['ci', 'broker_app', 'private_key'], reason: BROKER_REASON },
@@ -70,15 +66,12 @@ const requiredLeaves = async (
   try {
     const policy = await readSyncPolicy(consumer);
     return {
-      required:
-        policy.autoSync === false
-          ? [NTFY_REQUIREMENT]
-          : [NTFY_REQUIREMENT, ...BROKER_REQUIREMENTS],
+      required: policy.autoSync === false ? [] : BROKER_REQUIREMENTS,
       problems: [],
     };
   } catch (error) {
     return {
-      required: [NTFY_REQUIREMENT, ...BROKER_REQUIREMENTS],
+      required: BROKER_REQUIREMENTS,
       problems: [error instanceof Error ? error.message : String(error)],
     };
   }
@@ -92,7 +85,7 @@ export const collectCiSecretsProblems = async (
     parseMapping(
       consumer,
       CI_SECRETS,
-      `${CI_SECRETS}: must exist as a SOPS-encrypted file; the synced CI workflows read ci.ntfy_topic_url and, when automatic sync is enabled, ci.broker_app from it`,
+      `${CI_SECRETS}: must exist as a SOPS-encrypted file; the synced Standards sync workflow reads ci.broker_app from it when automatic sync is enabled`,
     ),
     parseMapping(
       consumer,

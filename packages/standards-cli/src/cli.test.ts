@@ -45,10 +45,6 @@ const STANDARDS_WORKFLOW = join(
   ACTUAL_UPSTREAM,
   '.github/workflows/standards.yml',
 );
-const NOTIFY_WORKFLOW = join(
-  ACTUAL_UPSTREAM,
-  '.github/workflows/notify-pause.yml',
-);
 const NIX_SYSTEM_METADATA = join(
   ACTUAL_UPSTREAM,
   'nix/bun-system-metadata.json',
@@ -837,10 +833,9 @@ const canonicalWorkflowPaths = (
 // This merge-time ratchet keeps configurable routing on the exact compatible
 // canonical jobs. It catches accidental workflow drift after review; it does
 // not authorize a request before CodeBuild starts a runner for the queued job.
-const CONFIGURABLE_RUNNER_VARIABLE_OCCURRENCES = 17;
+const CONFIGURABLE_RUNNER_VARIABLE_OCCURRENCES = 15;
 const QUALITY_JOB_NAME = 'quality';
 const CODEBUILD_JOB_TIMEOUT_MINUTES = 30;
-const NOTIFY_JOB_TIMEOUT_MINUTES = 5;
 const REUSE_JOB_TIMEOUT_MINUTES = 5;
 const WORKFLOW_JOB_HEADER_PATTERN = /^ {2}[a-z0-9-]+:\s*$/mu;
 const CODEBUILD_RUNNER = githubExpression(
@@ -859,10 +854,6 @@ const QUALITY_POSTGRES_IMAGE = githubExpression(
   `vars.CI_CODEBUILD_PROJECT != '' && '${PUBLIC_ECR_POSTGRES_IMAGE}' || '${DOCKER_HUB_POSTGRES_IMAGE}'`,
 );
 const CONFIGURABLE_RUNNER_CONTRACTS = {
-  '.github/workflows/notify-pause.yml:notify': {
-    runner: CODEBUILD_RUNNER,
-    timeoutMinutes: NOTIFY_JOB_TIMEOUT_MINUTES,
-  },
   '.github/workflows/standards-sync.yml:policy': {
     runner: CODEBUILD_RUNNER,
     timeoutMinutes: CODEBUILD_JOB_TIMEOUT_MINUTES,
@@ -2454,7 +2445,6 @@ describe('canonical standards workflow security boundaries', () => {
         .toSorted((left, right) => left.localeCompare(right)),
       'The production workflow inventory no longer matches this list. If you added a workflow, add its path to the expected list below. If a path went missing, the shared workflow-file predicate stopped matching it and the workflow has fallen out of these security checks — restore the predicate instead of editing the list.',
     ).toEqual([
-      '.github/workflows/notify-pause.yml',
       '.github/workflows/publish-standards-cli.yml',
       '.github/workflows/standards-sync.yml',
       '.github/workflows/standards.yml',
@@ -3631,7 +3621,6 @@ describe('canonical workflow runner merge-time ratchets', () => {
       workflowPaths,
     } = inspectCanonicalWorkflowRunnerBoundaries(ACTUAL_UPSTREAM);
     expect(workflowPaths.toSorted()).toEqual([
-      '.github/workflows/notify-pause.yml',
       '.github/workflows/standards-sync.yml',
       '.github/workflows/standards.yml',
     ]);
@@ -3762,10 +3751,7 @@ describe('canonical SOPS secret action wiring', () => {
       '';
     // The settings gate is deliberately absent: it resolves no SOPS secret, so
     // it must not check out or execute the resolver either.
-    const localActionWorkflows = [
-      readFileSync(SYNC_WORKFLOW, 'utf8'),
-      readFileSync(NOTIFY_WORKFLOW, 'utf8'),
-    ];
+    const localActionWorkflows = [readFileSync(SYNC_WORKFLOW, 'utf8')];
     expect(action.match(SOPS_VERSION_ASSIGNMENT)).toHaveLength(1);
     expect(action.match(SOPS_CHECKSUM_ASSIGNMENT)).toHaveLength(2);
     // The action owns the SOPS pin. A workflow that installs SOPS itself is a

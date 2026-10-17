@@ -15,7 +15,6 @@ afterEach(cleanupStructureTmps);
 
 const SOPS_METADATA = /sops:[\s\S]*$/u;
 const REQUIRED_KEYS = [
-  ['ntfy_topic_url', 'ci.ntfy_topic_url'],
   ['app_id', 'ci.broker_app.app_id'],
   ['private_key', 'ci.broker_app.private_key'],
 ] as const;

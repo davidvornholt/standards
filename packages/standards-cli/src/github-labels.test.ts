@@ -150,12 +150,12 @@ describe('declared label settings', () => {
 
   it('rejects case-variant canonical collisions', () => {
     const { merged, problems } = loadGithubSettings(
-      '{"repository":{},"rulesets":[],"labels":[{"name":"Needs-Clarification","color":"0e8a16","description":"d"}]}',
-      '{"repository":{},"rulesets":[],"labels":[{"name":"needs-clarification","color":"ffffff","description":"mine"}]}',
+      '{"repository":{},"rulesets":[],"labels":[{"name":"Canonical-Label","color":"0e8a16","description":"d"}]}',
+      '{"repository":{},"rulesets":[],"labels":[{"name":"canonical-label","color":"ffffff","description":"mine"}]}',
     );
     expect(merged).toBeNull();
     expect(problems).toEqual([
-      '.github/settings.local.json label "needs-clarification" collides with a canonical label; canonical labels are read-only',
+      '.github/settings.local.json label "canonical-label" collides with a canonical label; canonical labels are read-only',
     ]);
   });
 

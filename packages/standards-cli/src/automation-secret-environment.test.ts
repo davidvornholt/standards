@@ -22,30 +22,11 @@ const readWorkflow = (name: string) =>
   };
 
 const sync = readWorkflow('standards-sync.yml');
-const notify = readWorkflow('notify-pause.yml');
 
 describe('automation bootstrap secret scope', () => {
-  it('binds both secret-consuming jobs to the same repository-selected environment', () => {
+  it('binds the secret-consuming job to the repository-selected environment', () => {
     const selectedEnvironment = expression('vars.CI_SECRETS_ENVIRONMENT');
     expect(sync.jobs.sync?.environment).toBe(selectedEnvironment);
-    expect(notify.jobs.notify?.environment).toBe(selectedEnvironment);
     expect(sync.jobs.policy?.environment).toBeUndefined();
-  });
-
-  it('passes the resolved notification topic only to the step that sends it', () => {
-    const steps = notify.jobs.notify?.steps ?? [];
-    const readers = steps
-      .filter((step) => JSON.stringify(step).includes('ntfy-topic-url'))
-      .map((step) => step.name);
-    const push = steps.find((step) => step.name === 'Push a notification');
-    expect(readers).toEqual([
-      'Resolve notification topic URL',
-      'Push a notification',
-    ]);
-    expect(push?.env).toMatchObject({
-      [['NTFY', 'TOPIC', 'URL'].join('_')]: expression(
-        'steps.ntfy-topic-url.outputs.value',
-      ),
-    });
   });
 });

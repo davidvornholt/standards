@@ -49,11 +49,5 @@
       ]
     }
   ],
-  "labels": [
-    {
-      "name": "needs-clarification",
-      "color": "d4c5f9",
-      "description": "An agent paused on a question; answering resumes the cycle"
-    }
-  ]
+  "labels": []
 }
