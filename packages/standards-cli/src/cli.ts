@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 
-// Standards CLI. Mirrors upstream-owned ("bucket 1") files from the
+// Standards CLI. Mirrors upstream-owned files from the
 // davidvornholt/standards template into a consumer repo and detects local
-// tampering with them. See the standards repository README for the design.
+// tampering with them. The standards-sync skill describes the ownership model.
 //
 // This bootstrap executable keeps its runtime surface minimal and does not use
 // Effect: `bunx` must be able to execute the published package before a

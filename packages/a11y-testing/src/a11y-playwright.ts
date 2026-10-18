@@ -8,6 +8,14 @@ import { networkIsolatedCommand } from './network-isolation';
 // loopback-only network namespace where the host supports one, and on the
 // host network otherwise. The installed Playwright comes from PATH, as in a
 // `playwright test` package script.
+//
+// Inside the namespace the web server and the tests cannot reach the host
+// network: no database or service on the host, no internet, and no package
+// registry, so `bunx` must find an installed package. An app whose
+// accessibility web server needs the host network runs `playwright test`
+// instead. Chromium runs there only without its sandbox, so do not set
+// `chromiumSandbox: true`. Hosts that restrict unprivileged user namespaces,
+// such as GitHub's `ubuntu-24.04` runners, use the host network.
 
 const forwardedSignals = ['SIGHUP', 'SIGINT', 'SIGTERM'] as const;
 const signalExitBase = 128;

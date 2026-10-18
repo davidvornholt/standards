@@ -188,7 +188,7 @@ jobs:
   # runs the sync drift-check first, then lint, types, tests, build, and the
   # browser a11y suite. This is meant to be a consumer's WHOLE quality gate; a
   # repo with a deploy pipeline keeps that in its own workflow and stops running
-  # the gate there (see the adoption notes in the standards README).
+  # the gate there.
   #
   # A Postgres service is always provisioned because the mandatory a11y gate
   # renders real routes, and on this stack routes are Server Components that

@@ -111,7 +111,7 @@ describe('Standards sync broker documentation contract', () => {
     const templateExample = readFileSync(TEMPLATE_EXAMPLE_PATH, 'utf8');
     const structureSecrets = readFileSync(STRUCTURE_SECRETS_PATH, 'utf8');
 
-    for (const document of [adoptionGuide, cliReadme, secretsReference]) {
+    for (const document of [adoptionGuide, secretsReference]) {
       expect(document).toContain(BROKER_DESTINATION);
       expect(document).toContain(PROVISION_BROKER_COMMAND);
     }
@@ -131,10 +131,8 @@ describe('Standards sync broker documentation contract', () => {
     expect(syncGithubReference).toContain('ci.broker_app');
     expect(syncGithubReference).toContain('short-lived tokens');
     expect(syncGithubReference).toContain('there is no fallback credential');
-    expect(rootReadme).toContain('[Adoption](docs/adoption.md)');
-    expect(rootReadme).toContain(
-      '[Sync and ownership](docs/sync-and-ownership.md)',
-    );
+    expect(rootReadme).toContain('[Adopt the standards](docs/adoption.md)');
+    expect(rootReadme).toContain('[Operations](docs/operations.md)');
 
     for (const document of [
       rootReadme,
@@ -157,7 +155,7 @@ describe('Standards sync broker documentation contract', () => {
 
   it('documents policy-aware recovery without keeping release history in the landing page', () => {
     const rootReadme = readSource('README.md');
-    const syncGuide = readSource('docs/sync-and-ownership.md');
+    const operationsGuide = readSource('docs/operations.md');
     const workflow = readFileSync(WORKFLOW_PATH, 'utf8');
     const upgrade =
       'first upgrade the exact `@davidvornholt/standards` dependency and `bun.lock` with Bun.';
@@ -168,15 +166,17 @@ describe('Standards sync broker documentation contract', () => {
     expect(workflow).toContain(
       'upgrade package.json and bun.lock before accepting this workflow',
     );
-    expect(syncGuide).toContain(upgrade);
-    expect(syncGuide.indexOf(upgrade)).toBeLessThan(
-      syncGuide.indexOf(trackingMain),
+    expect(operationsGuide).toContain(upgrade);
+    expect(operationsGuide.indexOf(upgrade)).toBeLessThan(
+      operationsGuide.indexOf(trackingMain),
     );
-    expect(syncGuide.indexOf(upgrade)).toBeLessThan(syncGuide.indexOf(pinned));
-    expect(syncGuide).toContain(
+    expect(operationsGuide.indexOf(upgrade)).toBeLessThan(
+      operationsGuide.indexOf(pinned),
+    );
+    expect(operationsGuide).toContain(
       'A plain sync without that policy change follows the old pin and cannot fetch it.',
     );
-    expect(syncGuide).toContain(
+    expect(operationsGuide).toContain(
       'does not need to expand or approve its broker App permissions until scheduled sync is re-enabled.',
     );
     expect(rootReadme).not.toContain(upgrade);
