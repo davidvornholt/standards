@@ -28,6 +28,8 @@ Return exactly one decision per finding; do not add a separate severity:
 
 Do not ask about inferable implementation details, reversible choices, local refactors, naming, or test shape. Prefer the smallest in-scope correction and defer optional machinery.
 
+Documentation, comments, or instructions that the diff adds or leaves stale against the documentation rule in `AGENTS.md` are `block` findings with impact `polish`. Quote the passages to cut.
+
 Also record:
 
 - `impact`: `breakage`, `weakening`, or `polish`;

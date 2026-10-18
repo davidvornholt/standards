@@ -44,7 +44,7 @@ Do not weaken quality gates to make a change pass. Explain inline suppressions. 
 
 ## Documentation
 
-Document only what readers need beyond code, configuration, skills, and existing docs; link instead of repeating. Keep change history, implementation summaries, and test-run logs in PRs. Read only documentation relevant to the current task.
+Agents are the main readers of documentation, skills, and instructions, and every word costs tokens on each read. Write only what code, configuration, command help, error messages, types, and tests cannot carry: operational procedures, external constraints, and reasons for non-obvious decisions. State each fact once and link to it. Keep change history, implementation summaries, study and test-run logs, and status notes in PRs or issues. When a change makes documentation stale or derivable, cut it in the same change. Read only documentation relevant to the current task.
 
 ## Project-specific rules
 

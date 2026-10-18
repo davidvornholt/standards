@@ -29,7 +29,7 @@ Choose distinct lenses:
 The default pair is:
 
 1. **Behavior and invariants:** correctness, error paths, state transitions, edge cases, and meaningful tests.
-2. **Premise and integration:** whether the change solves the stated problem and preserves architecture, compatibility, and operational contracts; it owns otherwise unassigned material findings.
+2. **Premise and integration:** whether the change solves the stated problem and preserves architecture, compatibility, and operational contracts; it owns documentation that `AGENTS.md` does not allow and otherwise unassigned material findings.
 
 Add a specialized lens only when a material risk such as authorization, persistence, concurrency, deployment provenance, untrusted output, or complex accessibility otherwise lacks an owner. Give every lens explicit exclusions. Every lens after the second must name the material failure class that would otherwise lack an owner.
 
@@ -50,7 +50,7 @@ Do not ask about inferable implementation details, naming, local refactors, test
 
 ## Fix
 
-Create one self-contained review thread per blocker. A worker subagent reproduces the failure first, makes the smallest correction, and runs focused checks. If it cannot reproduce the failure, leave the thread unresolved and reclassify the finding instead of fixing it speculatively.
+Create one self-contained review thread per blocker. A worker subagent reproduces the failure first, makes the smallest correction, and runs focused checks. If it cannot reproduce the failure, leave the thread unresolved and reclassify the finding instead of fixing it speculatively. A documentation blocker needs no reproduction: cut the quoted passages. Never resolve a finding by adding documentation that code, command help, or an error message could carry; change those instead.
 
 Add at most one regression test per failure class, preferably by extending existing or table-driven coverage. The test should fail on the pre-fix behavior when practical. Do not add a dependency, parser, fixture framework, generic harness, or shared guard for one finding. Use browser tests only for browser-specific behavior.
 
@@ -58,9 +58,9 @@ Keep blocker threads unresolved until their required verification and the final 
 
 ## Verify
 
-Review only the fix commits. Skip fresh review for prose or static-copy changes and isolated tests that do not alter shared fixtures, schemas, workflows, seeded or generated data, global mocks, or test infrastructure. Otherwise use one targeted lens, or two only for two independent invariant families.
+Review only the fix commits, with one targeted lens or two only for two independent invariant families. Skip fresh review for prose or static-copy changes and isolated tests that do not alter shared fixtures, schemas, workflows, seeded or generated data, global mocks, or test infrastructure.
 
-Only an unresolved original blocker or a defect introduced by the fix may trigger one repair round; pre-existing defects are deferred or discarded. Fresh-review the repair only when it touches secrets or authorization, persistence or migrations, recovery, concurrency, retries, transaction boundaries, cache identity, artifact provenance, or untrusted output crossing an authoritative or persisted boundary. Use one targeted lens, or two only for two independent invariant families.
+Only an unresolved original blocker or a defect introduced by the fix may trigger one repair round; pre-existing defects are deferred or discarded. Fresh-review the repair, with the same lens limit, only when it touches secrets or authorization, persistence or migrations, recovery, concurrency, retries, transaction boundaries, cache identity, artifact provenance, or untrusted output crossing an authoritative or persisted boundary.
 
 If repair verification finds a material defect, make one final repair, verify it mechanically only, and stop. Run the full deterministic gate locally once after the last change. Fix cycle-introduced gate failures mechanically without starting another review pass, then resolve blocker threads after verification and the final gate pass.
 

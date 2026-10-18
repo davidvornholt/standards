@@ -7,6 +7,6 @@ description: Use when changing application configuration, environment variables,
 
 A value is secret when disclosure enables impersonation, data access, or cost. Keep secrets only in SOPS-encrypted YAML and other values in plain configuration beside their consumer.
 
-Document each value once. Explain plain values in their configuration and secrets in the matching `*.example.yaml`, including purpose, requiredness, behavior, and defaults. The example must mirror the encrypted target's key shape. Use workspace READMEs for setup that is not clear from those declarations.
+Explain each value once: plain values in their configuration, secrets in the matching `*.example.yaml`, which mirrors the encrypted target's key shape. State purpose and requiredness, plus any default or behavior its consumer does not make obvious. Use workspace READMEs only for setup those declarations cannot express.
 
 Development environments have three workspace-keyed layers: tracked `config/dev.yaml`, encrypted `secrets/dev.yaml`, and gitignored `config/dev.local.yaml` overrides. A key cannot live in both tracked layers. Generate `.env.local` with `bun standards dev-env`; never edit it directly.
