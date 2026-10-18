@@ -30,12 +30,10 @@ const manifestPaths = (): ReadonlyArray<string> => {
 const NARROWED: Readonly<Record<string, ReadonlyArray<string>>> = {
   '.github/actions/sops-secret': ['.github/actions/sops-secret/action.yml'],
   'packages/typescript-config': [
-    'packages/typescript-config/README.md',
     'packages/typescript-config/*.json',
     'packages/typescript-config/*.ts',
   ],
   'packages/a11y-testing': [
-    'packages/a11y-testing/README.md',
     'packages/a11y-testing/package.json',
     'packages/a11y-testing/tsconfig.json',
     'packages/a11y-testing/src/**',
