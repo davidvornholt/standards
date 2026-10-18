@@ -22,8 +22,6 @@ Then [connect CI and GitHub](#connect-ci-and-github).
 | `.github/dependabot.yml` | `.github/dependabot.local.yml` |
 | `.claude/skills/<name>` | `.agents/skills/<name>` |
 
-Claude Code reads `AGENTS.md` when `CLAUDE.md` is absent only from [version 2.1.277](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md#21277), and not on Bedrock, Vertex, or Foundry.
-
 ```sh
 bun add --dev --exact @davidvornholt/standards
 bun standards init
