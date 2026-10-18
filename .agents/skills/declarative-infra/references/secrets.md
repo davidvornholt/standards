@@ -1,32 +1,14 @@
 # Secrets bootstrap (SOPS + age)
 
-Standalone setup for a repo that needs encrypted secrets — CI tokens, app credentials — with or without host infrastructure. Host-side wiring (host-key recipients, sops-nix) is in `bootstrap.md`.
+For any repo with encrypted secrets, with or without hosts. Host recipients and sops-nix wiring are in [bootstrap.md](bootstrap.md). Value ownership and the three dev env layers are in the [secrets-and-config skill](../../secrets-and-config/SKILL.md).
 
 ## Identities and recipients
 
-- Personal identities are standalone age keys at `~/.config/sops/age/keys.txt`, one per person and machine. Create with `just secrets age-create`; never overwrite an existing key.
-- Automation recipients (CI, PR preview) are purpose-specific keypairs, one per repo — a leaked runner key must not unlock other repos. The private key lives only in the consumer's secret store (for GitHub Actions: the `SOPS_AGE_KEY` secret). Losing one is recoverable: personal identities re-encrypt to a replacement via `updatekeys`.
-- `.sops.yaml` lists recipients as named anchors, each with a comment stating what it is. Name each anchor so it identifies the identity on its own — the person and machine for personal identities, the purpose for automation recipients. Use the machine's hostname verbatim when it already encodes the owner (e.g. `&dana-fw13-nixos`); prefix the person only when it does not (e.g. `&alice-work-laptop`). Every creation rule includes all personal identities; automation recipients go only on the files that automation reads:
-
-```yaml
-keys:
-  # Standalone age identity at ~/.config/sops/age/keys.txt.
-  - &dana-fw13-nixos age1...
-  # GitHub Actions CI recipient (private key: SOPS_AGE_KEY Actions secret).
-  - &github_actions_ci age1...
-creation_rules:
-  - path_regex: secrets/dev\.yaml$
-    key_groups:
-      - age:
-          - *dana-fw13-nixos
-  - path_regex: secrets/ci\.yaml$
-    key_groups:
-      - age:
-          - *dana-fw13-nixos
-          - *github_actions_ci
-```
-
-- Creating an automation keypair: generate into a temp directory (`age-keygen` refuses existing files), store the private key only in the consumer's secret store, keep only the recipient:
+- A personal identity is a standalone age key at `~/.config/sops/age/keys.txt`, one per person and machine. Create it with `just secrets age-create`; never overwrite an existing key.
+- Each automation recipient (CI, PR preview) is a purpose-specific keypair for one repo, so a leaked runner key unlocks no other repo. Its private key lives only in the consumer's secret store; for GitHub Actions that is the `SOPS_AGE_KEY` secret. A lost one is recoverable: personal identities re-encrypt to a replacement with `updatekeys`.
+- In `.sops.yaml`, give each recipient a named anchor and a comment saying what it is. The anchor alone must identify the key: person and machine for personal identities, purpose for automation. Use a hostname verbatim when it already names the owner (`&dana-fw13-nixos`); otherwise prefix the person (`&alice-work-laptop`).
+- Every creation rule includes all personal identities. Automation recipients go only on the files that automation reads.
+- Create an automation keypair in a temporary directory (`age-keygen` refuses existing files), store the private key only in the secret store, and keep only the recipient:
 
 ```sh
 d=$(mktemp -d)
@@ -35,64 +17,61 @@ grep AGE-SECRET-KEY "$d/key" | gh secret set SOPS_AGE_KEY
 rm -rf "$d"
 ```
 
-## Working with secrets files
+## Secrets files
 
-The root `justfile` and the `secrets.just` module are canonical synced files — consumers receive and update them via `bun standards sync`, and local edits are drift. `just secrets edit <target>` opens a target in the SOPS editor; `just secrets updatekeys <target>` rewraps it after recipient changes; `just secrets updatekeys-all` rewraps every existing target. An existing target name must bind exactly one file: `infra/hosts/<target>/secrets.yaml` for a host target or `secrets/<target>.yaml` for a flat target. If neither file exists, an existing host directory selects its host secrets file and every other name selects the flat file. If both files exist, `just secrets`, `dev-env`, and credential reconciliation reject the name as ambiguous instead of preferring one, so no per-repo target map exists and no broker action can infer ownership from a shadowed file. Repo-specific recipes and modules (infra workflows, deploy helpers) live in a repo-owned `local.just`, which the canonical justfile imports when present.
+- The root `justfile` and `secrets.just` are synced; editing them in a consumer is drift. Repo-specific recipes go in `local.just`. `secrets.just` documents its recipes and target resolution.
+- A target name binds `infra/hosts/<target>/secrets.yaml` or `secrets/<target>.yaml`. When both exist, `just secrets`, `dev-env`, and `creds` reject the name as ambiguous; rename one. There is no per-repo target map.
 
-## Derived dev env files
+## Dev env files
 
-The dev environment is declared across three workspace-keyed layers (`apps.<name>`, `packages.<name>` — the shape mirrored in `secrets/dev.example.yaml`): tracked configuration in `config/dev.yaml`, literal dev secrets plus broker-reference policy in the SOPS-encrypted `secrets/dev.yaml`, and per-developer/per-machine overrides in the gitignored plain `config/dev.local.yaml`, which wins over both and may override secret values (it is exactly as untracked as the generated output it feeds). Secret-layer env values are strings. A plain-layer env value may instead reference one broker-owned S3 pair part as `{ brokeredS3: <target>, key: <dotted.key>, part: access_key_id | secret_access_key }`, making that pair's separate SOPS target an additional value source for the generated environment. Authorize every referenced pair inside encrypted `secrets/dev.yaml` under the reserved top-level `brokeredReferences` list with its exact `<target>:<dotted.key>` string. Plain layers reject that reserved key, and the secrets layer rejects reference objects: configuration selects a pair while encrypted policy authorizes declassification into `.env.local`. An unauthorized pair is rejected with the exact entry to add before its target is decrypted. Authorized target names must bind exactly one contained secrets file, are decrypted once per generation, and must contain both string S3 pair parts. A later literal override wins before reference resolution, so an overridden target is not decrypted. A key declared in both tracked layers is an error — a value is either configuration or a secret. `just dev-env-generate` (the canonical recipe for `bun standards dev-env`) decrypts the secrets layer, composes the three, resolves authorized referenced targets, and writes each declared workspace's `<group>/<name>/.env.local` with owner-only permissions and a do-not-edit header naming the contributing sources; `just dev-refresh` edits dev secrets and regenerates in one step. The command gathers all problems before writing anything: it fails when a declared workspace has no `package.json`, when `config/dev.local.yaml` exists but is not gitignored, and refuses to write any `.env.local` that git would not ignore.
+- `config/dev.local.yaml` wins over both tracked layers and may override secret values. Secret-layer values are strings.
+- A plain-layer value may reference one part of a broker-owned S3 pair as `{ brokeredS3: <target>, key: <dotted.key>, part: access_key_id | secret_access_key }`. The target must contain both parts.
+- Authorize each referenced pair in encrypted `secrets/dev.yaml` under the reserved top-level `brokeredReferences` list as `<target>:<dotted.key>`. Plain configuration selects a pair; only encrypted policy authorizes writing it into `.env.local`.
+- Generate with `just dev-env-generate` (`bun standards dev-env`). `just dev-refresh` edits dev secrets and regenerates.
 
-## GitHub Actions wiring
+## GitHub Actions
 
-- One bootstrap Actions secret per repo: `SOPS_AGE_KEY`, the CI recipient's private key (`gh secret set SOPS_AGE_KEY`).
-- Workflows decrypt at runtime with a version- and checksum-pinned sops, and mask every decrypted value with `::add-mask::` — SOPS output gets no automatic log masking.
-- Plane separation: only `SOPS_AGE_KEY` bootstraps the machinery and stays a native Actions secret; every other CI secret lives in SOPS targets and is decrypted at runtime. The weekly Standards sync resolves `ci.broker_app.app_id`, `ci.broker_app.client_id` when it exists, and `ci.broker_app.private_key`, then mints two short-lived installation tokens for only the current repository: a branch writer with Contents write and Workflows write, and a PR writer with Contents read and Pull requests write that opens the sync PR and closes superseded ones. Both mint before sync as permission preconditions, but neither enters the sync process; each is exposed only to its post-sync operation. A missing client ID falls back to the App ID. Any other missing App credential, unapproved App permissions, or failed minting stop the workflow; there is no durable sync token or workflow-token fallback. The settings comparison in the Standards gate's `check` aggregator job resolves nothing and holds no durable credential: a private-repository probe compared an installation token against a token holding exactly that job's `contents: read` and `issues: read` grants across every read the check performs and found no difference, so the job reads with the workflow token and still fails closed on state that token cannot see.
+- `SOPS_AGE_KEY` is the repo's only native Actions secret. Every other CI secret lives in SOPS targets and is decrypted at runtime.
+- Decrypt with the synced [`sops-secret` action](../../../../.github/actions/sops-secret/action.yml), which pins and checksums sops and masks values. Any other decryption must use a version- and checksum-pinned sops and mask every value with `::add-mask::`; SOPS output gets no automatic masking.
+- The weekly Standards sync reads `ci.broker_app`, provisioned with `bun standards creds add github --dest ci:ci.broker_app`, and mints two current-repository tokens: a branch writer with Contents write and Workflows write, and a PR writer with Contents read and Pull requests write. There is no durable sync token or workflow-token fallback; see [automatic sync](../../standards-sync/references/github.md).
+- The Standards gate's settings check holds no credential and reads with the workflow token. Do not add one: a probe showed an installation token sees the same state.
 
 ## Brokered provider credentials
 
-Cloudflare API tokens and cross-repo GitHub credentials come from the credential broker, which writes values straight into SOPS targets — never into the terminal, and never hand-created in a provider dashboard for a need the broker covers.
+Cloudflare API tokens and cross-repo GitHub credentials come from `bun standards creds` (see `bun standards creds help`), which writes values straight into SOPS targets and never prints them. Do not hand-create a dashboard credential for a need the broker covers.
 
 ### Minting
 
-- `bun standards creds add cloudflare --dest <target>:<dotted.key> --permissions "<Account Group Name>"` mints a scoped, expiring account token. Permission groups must match the resource supplied: `--zone <zone-id>[,<zone-id>...]` adds a zone resource for zone-scoped groups such as DNS Write and requires at least one such group; account-only groups keep their own account policy on the same token. Zones are named by their 32-character hexadecimal ID from the zone's dashboard overview, because resolving a domain name would need Zone Read on the bootstrap token, which holds Account API Tokens / Edit and nothing else.
-- R2 object storage is fully brokered: `--bucket <name>` scopes the token to one bucket (`--zone` cannot be combined with it), `--jurisdiction default|eu` selects its jurisdiction (default: `default`; FedRAMP is not supported), and `--s3` requires `--bucket` and stores the S3-compatible pair (`<dotted.key>.access_key_id`, `<dotted.key>.secret_access_key`) instead of the raw token. The default endpoint is `https://<account_id>.r2.cloudflarestorage.com`; EU inserts `.eu` before `.r2`. Example: `bun standards creds add cloudflare --dest ci:ci.r2_read --bucket assets --s3 --permissions "Workers R2 Storage Bucket Item Read"`.
-- `bun standards creds add github --dest <target>:<dotted.key>` selects the private broker App whose owner matches the repository origin, verifies that App is installed on the exact repository, and places its credentials for workflows to mint short-lived installation tokens at runtime. Provision the canonical weekly sync shape with `bun standards creds add github --dest ci:ci.broker_app`.
+- Zone-scoped Cloudflare groups such as DNS Write need `--zone <zone-id>`, the 32-character hexadecimal ID on the zone's dashboard overview. Domain names do not work: resolving them would need Zone Read, and the bootstrap token holds only Account API Tokens / Edit.
+- For R2, `--bucket <name>` scopes the token to one bucket and cannot be combined with `--zone`. `--jurisdiction` is `default` or `eu`; FedRAMP is not supported. `--s3` requires `--bucket` and stores `<dotted.key>.access_key_id` and `<dotted.key>.secret_access_key` instead of the token. The endpoint is `https://<account_id>.r2.cloudflarestorage.com`, or `https://<account_id>.eu.r2.cloudflarestorage.com` for EU.
+- `creds add github --dest <target>:<dotted.key>` selects the broker App owned by the origin's owner, verifies it is installed on this exact repository, and stores its credentials so workflows mint short-lived installation tokens at runtime.
 
 ### GitHub App ceiling
 
-Create one private GitHub App per owning user or organization and install it only on selected repositories that account owns, with exactly Contents write, Metadata read, Pull requests write, and Workflows write — Workflows write because the canonical payload owns `.github/workflows/**`, which Contents write alone cannot push. A workflow's `permission-*` inputs only narrow what it mints; the App's own permissions are the real reach of the private key stored in each consumer's `secrets/ci.yaml`. A need outside that set is a deliberate change to the ceiling in `creds-login-github-manifest.ts` plus the matching toggle on the existing App's settings page — the manifest is read only at creation time, so editing it alone changes nothing for an existing App — and added permissions remain unavailable until every installation owner approves the update. A need that only one owner's project-specific workflows have is a toggle on that owner's App alone, recorded in the repository whose workflows use it.
+- Create one private broker App per owning user or organization, installed only on selected repositories that account owns, with exactly Contents write, Metadata read, Pull requests write, and Workflows write. Workflows write is needed because the canonical payload owns `.github/workflows/**`, which Contents write cannot push.
+- A workflow's `permission-*` inputs only narrow a mint. The App's permissions are the real reach of the private key in every consumer's `secrets/ci.yaml`.
+- To widen the ceiling, change `creds-login-github-manifest.ts` and toggle the permission on the existing App's settings page; the manifest is read only when an App is created. Added permissions stay unavailable until every installation owner approves them.
+- A need that only one owner's project-specific workflows have is a toggle on that owner's App alone, recorded in the repository whose workflows use it.
 
-### Reconciliation (`creds plan` / `creds apply`)
+### Reconciliation
 
-Reconciliation covers Cloudflare tokens only, and only ones the broker minted. Deleting the secret key (for S3 pairs, both derived keys) from the SOPS file and applying revokes the provider-side token. An expiring token is renewed only after its stored access key ID is proven to match the current provider token, then replaced by durably writing and verifying the new pair before revoking the old token. Intersecting managed bearer/S3 destination footprints are findings and stop reconciliation before mutation, as is a token whose name claims this repository's reserved `standards/` namespace without being broker-minted — that finding aborts reconciliation repository-wide until the token is renamed in the dashboard or revoked with the command the finding prints.
-
-Both commands also report, in two labelled blocks that never block reconciliation, what they will never renew or revoke:
-
-- **Unmanaged tokens**: every unexpired token that has no parseable managed identity (including malformed names for other repositories in the reserved `standards/` namespace) (expired tokens grant nothing and are left out; the machine's own bootstrap credential is removed by verified ID before anything is classified). Replacing a hand-made credential therefore leaves a live orphan unless it is retired — each row normally prints the exact `revoke` command that does so.
-- **Tokens brokered to another repository**, each named with the repository whose `apply` owns it.
+- `creds plan` and `creds apply` reconcile only Cloudflare tokens the broker minted, always across every configured account.
+- To revoke a brokered token, delete its SOPS key (both derived keys for an S3 pair) and run `creds apply`.
+- `apply` also renews expiring tokens and regenerates dev env files that reference a renewed pair, as does every `creds add` of such a pair. A regeneration failure fails the command but does not roll back the SOPS write.
+- Findings stop reconciliation before any change. A token the broker did not mint whose name claims this repository's `standards/` namespace stops it repository-wide until you rename the token in the dashboard or revoke it with the printed command.
+- The unmanaged-token and other-repository reports never block. The unmanaged report is an account-wide inventory, so unrelated tokens repeat in every repository and run, and a nonempty report is not a failure; still assess unfamiliar entries. A hand-made credential you replaced stays live until you run the `revoke` command its row prints.
 
 ### Revoking
 
-`bun standards creds revoke --account <account-id> --token-id <id>` deletes exactly one Cloudflare token, named by its 32-character hexadecimal token ID; `--account` is required whenever more than one Cloudflare account is configured. It takes ownership from the origin remote and compares repository names case-insensitively (as GitHub does), while `plan` classifies by exact token name — the source of the disagreement in the second refusal below. The refusals:
+`creds revoke --account <account-id> --token-id <id>` deletes one Cloudflare token. Its refusals print the remedy.
 
-- **Brokered to this repository**: normally retire it by deleting its SOPS key and running `creds apply`. If interrupted renewal left same-name duplicates, keep the stored key intact: `creds revoke --account <account-id> --token-id <duplicate-id>` decrypts the destination and refuses the currently stored token. It retires an explicitly selected unused duplicate only after verifying the stored bearer identity or S3 access key ID and rechecking the unchanged destination. Unreadable or unidentifiable credentials stop recovery without deletion. If the key was already removed, a successfully decrypted absent destination allows retiring one duplicate so reconciliation can resume.
-- **Repository name capitalisation**: GitHub owner/repository names compare case-insensitively, including existing minted tokens. Secret target names and key paths remain case-sensitive.
-- **Brokered to a genuinely different repository**, which is named: the same delete-key-and-`apply` remedy runs there. `--force` widens exactly this refusal and nothing else. It verifies nothing about that repository's state, so it is justified only when nothing reconciles the token any more — the owning repository was renamed, transferred, or deleted, and no checkout resolves to its name. If the origin remote resolves to no GitHub repository, every brokered token is refused, `--force` included, because the check it widens never ran.
-Each machine creates its own `standards-broker` bootstrap token; Cloudflare permits these tokens to share a name. An existing token with that name belongs to another machine or an earlier bootstrap: leave it alone, and never reuse, roll, or revoke it while setting up this machine.
-
-- **Bootstrap guards, which nothing overrides**: this machine's stored bootstrap credential is refused by verified ID, and any other token named `standards-broker` is refused by name — the reserved name belongs to another machine's bootstrap or a superseded one, retired in the Cloudflare dashboard, where you can confirm whose it is. The broker cannot re-mint its own root credential.
-
-To consume a brokered S3 pair in generated dev env files without copying it, authorize the destination's exact `<target>:<dotted.key>` entry under encrypted `secrets/dev.yaml` `brokeredReferences`, then point plain-layer env reference objects at the same target and key. Every verified `creds add` write or `creds apply` renewal of that exact referenced pair regenerates the dev env files. If one pair cannot be verified after a write while a sibling pair commits, regeneration updates the verified sibling but preserves the unsafe pair's prior generated values; it fails loudly without changing any env file when those prior generated values cannot be proven and preserved. A regeneration failure does not roll back a durable SOPS write.
-
-The unmanaged-token report is an account-wide inventory, not a change feed. Unrelated legitimate tokens repeat in every repository sharing the account and on every run; there is no acknowledgement list or first-seen history. A nonempty report does not itself mean reconciliation failed, and operators must still assess unfamiliar entries.
+- Retire a token brokered to this repository by deleting its SOPS key and running `creds apply`, not with `revoke`. For same-name duplicates left by an interrupted renewal, keep the stored key and revoke each unused duplicate ID; `revoke` refuses the stored one.
+- Use `--force` only for a token brokered to a repository that was renamed, transferred, or deleted, so that nothing reconciles it. It verifies nothing about that repository.
+- Each machine creates its own `standards-broker` bootstrap token; Cloudflare allows duplicate names, and login requires this name (case-insensitive). Never reuse, roll, rename, or revoke another machine's `standards-broker` token; renaming one removes its name-based protection. Retire a superseded bootstrap token in the Cloudflare dashboard after confirming whose it is. Nothing overrides `revoke`'s refusal of bootstrap tokens.
 
 ## Rotation
 
-Application-owned values rotate by editing the encrypted file; recipients rotate in `.sops.yaml` followed by `updatekeys`. Both land as reviewed commits. Brokered Cloudflare credentials renew via `bun standards creds apply`, which creates a fresh-expiry replacement, durably writes and verifies its value, regenerates dev env files when the destination is referenced, and then revokes the old token. A failed post-write regeneration is reported as a command failure without rolling back the already durable SOPS replacement.
-
-That brokered rotation path is Cloudflare-only. GitHub App keys rotate manually: create a replacement private key on the App settings page, then atomically replace `private_key` only in the matching `github` list entry identified by its `owner` in the protected machine-global broker store (the path printed by login, normally `~/.config/standards/broker.yaml`) while preserving its `0600` mode. Only after the broker store holds the replacement should you update every intended SOPS destination for that owner, verify workflows can mint installation tokens, and revoke the old key on the settings page. This order ensures every later `bun standards creds add github` reads the replacement key rather than restoring the revoked one.
-
-A standalone host's private-GHCR `registry.github_token` is another manual exception because GitHub provides no API for minting or rotating classic package PATs. Keep it only in the SOPS-encrypted host target with `read:packages`, account for every package its owner can read, rotate it through the replace-refresh-verify-revoke sequence in [Private registry access](bootstrap.md#private-registry-access), and never claim that the broker or `creds apply` manages it.
-
-Cloudflare login requires the reserved bootstrap name `standards-broker` (case-insensitive). Keep that name after login; renaming another machine’s bootstrap outside it removes the name-based custody protection. Plan and apply intentionally cover every configured account and reject `--account`; use that flag only on commands that select an account.
+- Rotate application values by editing the encrypted file, and recipients in `.sops.yaml` followed by `updatekeys`; both land as reviewed commits.
+- Brokered Cloudflare credentials renew through `creds apply`.
+- GitHub App keys rotate by hand, in this order: create a replacement private key on the App's settings page; atomically replace `private_key` in the `github` entry for that `owner` in the broker store (the path login prints, normally `~/.config/standards/broker.yaml`), keeping mode `0600`; update every intended SOPS destination for that owner; verify workflows can mint installation tokens; revoke the old key. Updating the store first keeps later `creds add github` runs from restoring the revoked key.
+- A host's private-GHCR `registry.github_token` also rotates by hand, through the sequence in [Private registry access](bootstrap.md#private-registry-access). The broker and `creds apply` do not manage it.
