@@ -1,24 +1,23 @@
 # Project-specific rules
 
-This is the standards template repo itself — the source of truth for `AGENTS.md` and the canonical payload. Changes to canonical files are made here directly (consumers receive them via `bun standards sync`).
+This repository is the source of `AGENTS.md` and the canonical payload. Edit canonical files here; consumers receive them through `bun standards sync`.
 
 ## Source-repository structure profile
 
-This repository is deliberately not a `standards structure` consumer: the root gate runs the local CLI (`structure --profile source`, then `source-text`, then `dependabot --check` or `dependabot --write`, then `github --check`, then the Turbo gate) instead of a recursive `standards check`, and `packages/standards-cli` ships as a published bin-only package with a release SemVer version. The `source` profile in `packages/standards-cli/src/structure-profile.ts` pins exactly these exceptions, and the root `check`/`check:fix` scripts enforce it on this checkout. When the source repository's shape deliberately changes, update the profile and the root scripts in the same change — the gate failing on one without the other is the point.
+This repository is not a `standards structure` consumer. Its root gate runs the local CLI instead of `standards check`, and `packages/standards-cli` is a published bin-only package with a SemVer version. The `source` profile in `packages/standards-cli/src/structure-profile.ts` pins these exceptions. When the repository's shape changes, update that profile and the root `check` and `check:fix` scripts together.
 
 ## Standards CLI bootstrap architecture
 
-`packages/standards-cli` is a deliberate exception to the root Effect standards: use the package's established plain-TypeScript async and error idiom, and keep its runtime dependency surface minimal. The published bin must run through `bunx` before a consumer has installed project dependencies; adding Effect would defeat that bootstrap boundary or split one package into two architectures. Revisit this exception only if the CLI no longer bootstraps dependency-free consumers, its runtime moves to a separately installed package, or that minimal-dependency premise otherwise changes.
+`packages/standards-cli` is exempt from the Effect standards. It must run through `bunx` before a consumer installs dependencies, so it uses plain async TypeScript and minimal runtime dependencies. Revisit this only if that bootstrap premise changes.
 
 ## Standards CLI subcommand vs. justfile recipe
 
-New operator tooling goes into `bun standards` as a subcommand when it has real logic such as validation, credential resolution, provider calls, or structured output. This gives the logic typed code, tests, and versioned distribution to every consumer. The canonical `justfile` is only a thin operator-facing entry point. Recipes stay one-liners that compose existing commands, and a recipe that starts growing logic moves into the CLI. Do not add a justfile wrapper for a CLI subcommand that is already a single obvious invocation.
+Operator tooling with real logic, such as validation, credential resolution, provider calls, or structured output, becomes a tested `bun standards` subcommand. Justfile recipes stay one-line compositions of existing commands. Do not wrap a subcommand that is already a single obvious invocation.
 
 ## Dependency version holds
 
-Template-wide dependency holds are declared as `ignore` entries in the canonical `.github/dependabot.base.yml`, each with a comment stating the reason and the lift condition. Never hold a version by closing Dependabot PRs or via `@dependabot ignore` comments — that is invisible per-repo state. When a hold or a held pin changes, update every affected pin (root `package.json`, `template/package.json`, the `biome.base.jsonc` schema URL) and the hold entry in the same change.
+Declare template-wide holds as `ignore` entries in `.github/dependabot.base.yml`, each with a comment giving the reason and the lift condition. Never hold a version by closing Dependabot PRs or with `@dependabot ignore` comments. When a hold or held pin changes, update the hold entry and every affected pin in the root `package.json`, `template/package.json`, and the `biome.base.jsonc` schema URL together.
 
 ## Authoring the canonical Biome base
 
-- `biome.base.jsonc` must be maximally strict: enable every applicable rule domain, the recommended set, and applicable opt-in nursery and security rules, all at `error`.
-- When upgrading Biome or when new rules become available, adopt them at `error` and opt out deliberately rather than opting in.
+`biome.base.jsonc` enables every applicable rule domain, the recommended set, and applicable opt-in nursery and security rules at `error`. On Biome upgrades, adopt new rules at `error` and opt out deliberately.

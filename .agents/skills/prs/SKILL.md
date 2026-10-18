@@ -5,7 +5,7 @@ description: Use when opening a pull request or changing its title or descriptio
 
 # Pull requests
 
-One pull request delivers one coherent outcome, including its required migrations, tests, documentation, and supporting changes. If the changes contain independent outcomes, propose separate pull requests.
+One pull request delivers one coherent outcome, including its required migrations, tests, and supporting changes. If the changes contain independent outcomes, propose separate pull requests.
 
 ## Draft and ready
 
@@ -39,6 +39,6 @@ Do not repeat information between sections.
 
 ## Verification
 
-Always include `## Verification` with `### Completed checks`, reporting exact results, including partial runs or failures.
+Always include `## Verification` with `### Completed checks`, reporting exact results, including partial runs or failures, in one line per check.
 
 Add `### Check it yourself` only when a reviewer can verify behavior interactively or visually. Give the exact `gh pr checkout <number-or-branch>` command, the shortest steps, and the expected result.
