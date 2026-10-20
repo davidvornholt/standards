@@ -26,8 +26,11 @@ const BEFORE_MERGING =
 const OUT_OF_DATE = `**Before.** This repository mirrors \`${UPSTREAM}\` at \`3821c61\`. Upstream is now at \`2daab29\`. Some files mirrored here are out of date.`;
 const MATCHED = `**Now.** The mirrored files match \`${UPSTREAM}\` at \`2daab29\`.`;
 
-const lock = (sha: string): string =>
-  `${JSON.stringify({ upstream: `github:${UPSTREAM}`, sha, files: {} })}\n`;
+const lock = (
+  sha: string,
+  files: Readonly<Record<string, string>> = {},
+): string =>
+  `${JSON.stringify({ upstream: `github:${UPSTREAM}`, sha, files })}\n`;
 // The GitHub compare response uses snake_case field names.
 const comparison = (total: number, messages: ReadonlyArray<string>) =>
   Object.fromEntries([
@@ -138,6 +141,20 @@ const scenarios: Array<Scenario> = [
       `**Before.** \`sync-standards.lock\` already points to \`${UPSTREAM}\` at \`2daab29\`, but some mirrored files here no longer match that commit.`,
       MATCHED,
       changedFiles(['canonical.txt']),
+      VERIFICATION,
+    ),
+    apiCalls: '',
+  },
+  {
+    name: 'lock-only sync at the recorded commit describes a lock update',
+    base: {
+      'canonical.txt': 'one\n',
+      'sync-standards.lock': lock(CURRENT, { 'stale.txt': '0'.repeat(64) }),
+    },
+    head: { 'sync-standards.lock': lock(CURRENT) },
+    expected: body(
+      `**Before.** \`sync-standards.lock\` already points to \`${UPSTREAM}\` at \`2daab29\`, but its list of mirrored files is out of date.`,
+      '**Now.** `sync-standards.lock` points to `2daab29`. No mirrored files change.',
       VERIFICATION,
     ),
     apiCalls: '',

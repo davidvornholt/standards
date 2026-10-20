@@ -399,7 +399,12 @@ jobs:
           if [ -z "$previous" ]; then
             before="\`sync-standards.lock\` on the base branch does not say which upstream commit this repository mirrors."
           elif [ "$previous" = "$current" ]; then
-            before="\`sync-standards.lock\` already points to \`$source\` at \`${current:0:7}\`, but some mirrored files here no longer match that commit."
+            before="\`sync-standards.lock\` already points to \`$source\` at \`${current:0:7}\`, but"
+            if [ "$mirrored" -eq 0 ]; then
+              before="$before its list of mirrored files is out of date."
+            else
+              before="$before some mirrored files here no longer match that commit."
+            fi
           else
             before="This repository mirrors \`$source\` at \`${previous:0:7}\`. Upstream is now at \`${current:0:7}\`."
             if [ "$mirrored" -eq 0 ]; then
