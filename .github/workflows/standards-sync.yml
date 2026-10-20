@@ -392,27 +392,27 @@ jobs:
               ((.total_commits // (.commits | length)) - ([.commits[-$limit:][]] | length)) as $earlier
               | (if $earlier > 0 then "- Earlier commits not listed here: \($earlier)." else empty end),
                 (.commits[-$limit:][] | "- " + (.commit.message | split("\n")[0] | gsub("(?<![\\w/])#(?<n>[0-9]+)"; "\($repo)#\(.n)")))'); then
-              echo "::warning::Could not list upstream commits; the description links the comparison instead."
+              echo "::warning::Could not list upstream commits. The description links to the comparison instead."
               commits=
             fi
           fi
           if [ -z "$previous" ]; then
-            before="The base branch records no upstream commit in \`sync-standards.lock\`."
+            before="\`sync-standards.lock\` on the base branch does not say which upstream commit this repository mirrors."
           elif [ "$previous" = "$current" ]; then
-            before="Mirrored files here differ from \`$source\` at \`${current:0:7}\`, the commit the lock already records."
+            before="\`sync-standards.lock\` already points to \`$source\` at \`${current:0:7}\`, but some mirrored files here no longer match that commit."
           else
-            before="This repository mirrors \`$source\` at \`${previous:0:7}\`. Upstream is now at \`${current:0:7}\`"
+            before="This repository mirrors \`$source\` at \`${previous:0:7}\`. Upstream is now at \`${current:0:7}\`."
             if [ "$mirrored" -eq 0 ]; then
-              before="$before, but none of its changes touch the files mirrored here."
+              before="$before None of the new upstream changes affect the files mirrored here."
             else
-              before="$before, so the mirrored files here are out of date."
+              before="$before Some files mirrored here are out of date."
             fi
           fi
           # shellcheck disable=SC2016 # Markdown backticks in printf formats are literal on purpose.
           {
             printf '**Before.** %s\n\n' "$before"
             if [ "$mirrored" -eq 0 ]; then
-              printf '**Now.** The lock records `%s`; no mirrored file changes.\n' "${current:0:7}"
+              printf '**Now.** `sync-standards.lock` points to `%s`. No mirrored files change.\n' "${current:0:7}"
             else
               printf '**Now.** The mirrored files match `%s` at `%s`.\n' "$source" "${current:0:7}"
             fi
@@ -427,9 +427,9 @@ jobs:
               jq -r --argjson limit "$path_limit" '(.[:$limit][] | "- `\(.)`"), (if length > $limit then "- Files not listed here: \(length - $limit)." else empty end)' <<<"$paths"
             fi
             if jq -e 'any(.[]; . == ".github/settings.json")' <<<"$paths" > /dev/null; then
-              printf '\n## Before merging\n\n`.github/settings.json` changed. With admin-authenticated `gh`, run `bun standards github --apply` on this branch, then re-run the `check` job; it fails until the declared settings are live.\n'
+              printf '\n## Before merging\n\nThis sync changes `.github/settings.json`. The `check` job fails until GitHub uses the new settings. To apply them, run `bun standards github --apply` on this branch while `gh` is logged in as a repository admin. Then re-run the `check` job.\n'
             fi
-            printf '\n## Verification\n\n### Completed checks\n\n- None in the [`Standards sync` run](%s) that generated this description; the required checks on this pull request validate the synced files. Each run that changes the mirror regenerates this description.\n' "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            printf '\n## Verification\n\n### Completed checks\n\n- The [`Standards sync` run](%s) that wrote this description ran no checks. The required checks on this pull request test the synced files. Each sync run that changes the mirrored files rewrites this description.\n' "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           } > "$RUNNER_TEMP/standards-sync-pr-body.md"
 
       # The workflow owns the `standards-sync/` branch namespace and keeps one

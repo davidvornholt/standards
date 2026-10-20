@@ -20,10 +20,10 @@ const COMMIT_LIMIT = 30;
 const PATH_LIMIT = 50;
 const COMPARE = `## Upstream changes\n\n[Compare \`3821c61...2daab29\`](https://github.com/${UPSTREAM}/compare/${PREVIOUS}...${CURRENT})`;
 const VERIFICATION =
-  '## Verification\n\n### Completed checks\n\n- None in the [`Standards sync` run](https://github.com/owner/repo/actions/runs/42) that generated this description; the required checks on this pull request validate the synced files. Each run that changes the mirror regenerates this description.';
+  '## Verification\n\n### Completed checks\n\n- The [`Standards sync` run](https://github.com/owner/repo/actions/runs/42) that wrote this description ran no checks. The required checks on this pull request test the synced files. Each sync run that changes the mirrored files rewrites this description.';
 const BEFORE_MERGING =
-  '## Before merging\n\n`.github/settings.json` changed. With admin-authenticated `gh`, run `bun standards github --apply` on this branch, then re-run the `check` job; it fails until the declared settings are live.';
-const OUT_OF_DATE = `**Before.** This repository mirrors \`${UPSTREAM}\` at \`3821c61\`. Upstream is now at \`2daab29\`, so the mirrored files here are out of date.`;
+  '## Before merging\n\nThis sync changes `.github/settings.json`. The `check` job fails until GitHub uses the new settings. To apply them, run `bun standards github --apply` on this branch while `gh` is logged in as a repository admin. Then re-run the `check` job.';
+const OUT_OF_DATE = `**Before.** This repository mirrors \`${UPSTREAM}\` at \`3821c61\`. Upstream is now at \`2daab29\`. Some files mirrored here are out of date.`;
 const MATCHED = `**Now.** The mirrored files match \`${UPSTREAM}\` at \`2daab29\`.`;
 
 const lock = (sha: string): string =>
@@ -73,8 +73,8 @@ const scenarios: Array<Scenario> = [
       'fix(turbo): rerun the standards tests when the root README or docs change (#447)\n\nBody text.',
     ]),
     expected: body(
-      `**Before.** This repository mirrors \`${UPSTREAM}\` at \`3821c61\`. Upstream is now at \`2daab29\`, but none of its changes touch the files mirrored here.`,
-      '**Now.** The lock records `2daab29`; no mirrored file changes.',
+      `**Before.** This repository mirrors \`${UPSTREAM}\` at \`3821c61\`. Upstream is now at \`2daab29\`. None of the new upstream changes affect the files mirrored here.`,
+      '**Now.** `sync-standards.lock` points to `2daab29`. No mirrored files change.',
       COMPARE,
       `- fix(turbo): rerun the standards tests when the root README or docs change (${UPSTREAM}#447)`,
       VERIFICATION,
@@ -135,7 +135,7 @@ const scenarios: Array<Scenario> = [
     base: { 'canonical.txt': 'one\n', 'sync-standards.lock': lock(CURRENT) },
     head: { 'canonical.txt': 'restored\n' },
     expected: body(
-      `**Before.** Mirrored files here differ from \`${UPSTREAM}\` at \`2daab29\`, the commit the lock already records.`,
+      `**Before.** \`sync-standards.lock\` already points to \`${UPSTREAM}\` at \`2daab29\`, but some mirrored files here no longer match that commit.`,
       MATCHED,
       changedFiles(['canonical.txt']),
       VERIFICATION,
@@ -147,7 +147,7 @@ const scenarios: Array<Scenario> = [
     base: { 'README.md': 'consumer\n' },
     head: { 'canonical.txt': 'one\n', 'sync-standards.lock': lock(CURRENT) },
     expected: body(
-      '**Before.** The base branch records no upstream commit in `sync-standards.lock`.',
+      '**Before.** `sync-standards.lock` on the base branch does not say which upstream commit this repository mirrors.',
       MATCHED,
       changedFiles(['canonical.txt', 'sync-standards.lock']),
       VERIFICATION,
