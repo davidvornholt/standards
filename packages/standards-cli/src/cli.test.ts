@@ -3865,20 +3865,6 @@ describe('standards sync workflow ordering', () => {
     ]);
     expect(localActionIndexes.every((index) => index < syncIndex)).toBe(true);
   });
-
-  it('orders generated migration guidance before merge', () => {
-    const openPullRequest = workflowRunScript('Reconcile sync pull requests');
-    const applyIndex = openPullRequest.indexOf('bun standards github --apply');
-    const mergeIndex = openPullRequest.indexOf(
-      'Merge only after every required check passes',
-    );
-
-    expect(openPullRequest).toContain('allow_merge_commit');
-    expect(openPullRequest).toContain('allow_rebase_merge');
-    expect(openPullRequest).toContain('allow_squash_merge');
-    expect(applyIndex).toBeGreaterThan(-1);
-    expect(mergeIndex).toBeGreaterThan(applyIndex);
-  });
 });
 
 describe('standards sync workflow policy', () => {

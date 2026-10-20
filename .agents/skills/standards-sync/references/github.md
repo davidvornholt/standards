@@ -13,13 +13,13 @@ bun standards github --check
 
 ## Automatic sync
 
-Repositories tracking `main` get one sync pull request from `standards-sync/update`, which each weekly run rebases and updates while canonical content differs. If no open pull request uses that branch, for example after its pull request was closed or merged, the run rebuilds the branch from the base branch instead. If the branch of an open pull request no longer rebases cleanly, the run fails and names the pull request to rebase or close. The workflow owns the `standards-sync/` branch namespace: it closes every other open same-repository pull request there, or all of them once the base branch already matches upstream. The workflow reads `ci.broker_app` from SOPS. After installing the repository owner's private broker App only on the selected repository, provision it with:
+Repositories tracking `main` get one sync pull request from `standards-sync/update`, which each weekly run rebases and updates while canonical content differs. If no open pull request uses that branch, for example after its pull request was closed or merged, the run rebuilds the branch from the base branch instead. If the branch of an open pull request no longer rebases cleanly, the run fails and names the pull request to rebase or close. The workflow owns the `standards-sync/` branch namespace: it closes every other open same-repository pull request there, or all of them once the base branch already matches upstream. Each run that changes the branch rewrites the pull request description from the upstream commit range and the changed files, and adds the `--apply` step when `.github/settings.json` changes. The workflow reads `ci.broker_app` from SOPS. After installing the repository owner's private broker App only on the selected repository, provision it with:
 
 ```sh
 bun standards creds add github --dest ci:ci.broker_app
 ```
 
-The workflow mints two short-lived tokens for the current repository: a branch writer for contents and workflows, and a pull-request writer that opens the sync pull request and closes superseded ones. Neither token enters the sync process, and there is no fallback credential. A repository with `autoSync: false` does not need these permissions until automatic sync is re-enabled.
+The workflow mints two short-lived tokens for the current repository: a branch writer for contents and workflows, and a pull-request writer that opens or updates the sync pull request and closes superseded ones. Neither token enters the sync process, and there is no fallback credential. A repository with `autoSync: false` does not need these permissions until automatic sync is re-enabled.
 
 Canonical sync branches contain trusted upstream code and may run consumer CI before the generated PR is reviewed.
 

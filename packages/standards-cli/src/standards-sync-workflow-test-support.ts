@@ -12,6 +12,10 @@ const MODE = 0o755;
 const WORKFLOW = join(ACTUAL_UPSTREAM, '.github/workflows/standards-sync.yml');
 export const SYNC_BRANCH = 'standards-sync/update';
 export const RECONCILE_STEP = 'Reconcile sync pull requests';
+export const DESCRIBE_STEP = 'Describe sync pull request';
+export const PR_BODY_FILE = 'standards-sync-pr-body.md';
+// `fakeGitHub` seeds the description so the reconcile step runs on its own.
+export const FIXTURE_BODY = 'fixture body';
 
 export type FakePullRequest = {
   readonly number: number;
@@ -43,7 +47,9 @@ export const runSyncStep = (
 
 // Open pull requests live in a JSON file. `pr list` applies the caller's
 // `--jq` filter with real jq, `pr create` opens the reusable branch's PR with
-// the next number, and `pr close` removes a PR and records its comment.
+// the next number and records its description, `pr edit` records the new
+// description, `pr close` removes a PR and records its comment, and `api`
+// records its path and prints the fixture comparison.
 const FAKE_GH = `#!/usr/bin/env bash
 set -euo pipefail
 state=$PR_STATE
@@ -55,16 +61,26 @@ case "$1 $2" in
     jq -c "$2" "$state"
     ;;
   'pr create')
-    if [ "$FAIL_CREATE" = true ] || [ "$4" != ${SYNC_BRANCH} ]; then exit 1; fi
+    if [ "$FAIL_CREATE" = true ] || [ "$4" != ${SYNC_BRANCH} ] || [ "$7" != --body-file ]; then exit 1; fi
     number=$(jq '[.[].number, 6] | max + 1' "$state")
     update --argjson number "$number" '. + [{number: $number, headRefName: "${SYNC_BRANCH}", isCrossRepository: false}]'
     echo created >> "$PR_CREATIONS"
+    printf 'create %s\\n' "$(cat "$8")" >> "$PR_BODIES"
     echo "https://github.com/owner/repo/pull/$number"
+    ;;
+  'pr edit')
+    if [ "$4" != --body-file ]; then exit 1; fi
+    printf 'edit %s %s\\n' "$3" "$(cat "$5")" >> "$PR_BODIES"
     ;;
   'pr close')
     if [ "$FAIL_CLOSE" = true ]; then exit 1; fi
     update --argjson number "$3" 'map(select(.number != $number))'
     printf '%s %s\\n' "$3" "$5" >> "$PR_CLOSURES"
+    ;;
+  'api '*)
+    echo "$2" >> "$API_CALLS"
+    if [ "$FAIL_COMPARE" = true ]; then exit 1; fi
+    cat "$COMPARE_RESPONSE"
     ;;
   *) exit 1 ;;
 esac
@@ -76,13 +92,19 @@ export const fakeGitHub = (
 ): Record<string, string> => {
   write(root, 'bin/gh', FAKE_GH);
   chmodSync(join(root, 'bin/gh'), MODE);
+  write(root, PR_BODY_FILE, FIXTURE_BODY);
   return Object.fromEntries([
     ['GH_TOKEN', 'pr-fixture'],
     ['PATH', `${join(root, 'bin')}:${inheritedPath}`],
     ['PR_STATE', join(root, 'pr-state')],
     ['PR_CREATIONS', join(root, 'pr-creations')],
     ['PR_CLOSURES', join(root, 'pr-closures')],
+    ['PR_BODIES', join(root, 'pr-bodies')],
+    ['API_CALLS', join(root, 'api-calls')],
+    ['COMPARE_RESPONSE', join(root, 'compare.json')],
+    ['RUNNER_TEMP', root],
     ['FAIL_CREATE', 'false'],
     ['FAIL_CLOSE', 'false'],
+    ['FAIL_COMPARE', 'false'],
   ]);
 };
