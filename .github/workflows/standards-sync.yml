@@ -442,8 +442,7 @@ jobs:
       # canonical state, so that PR supersedes every other open same-repository
       # PR in the namespace. When the base branch already matches upstream,
       # all of them are superseded. Closing keeps each head branch for
-      # recovery, and a failed close fails the job. Creating and reusing the
-      # PR both apply the generated description.
+      # recovery, and a failed close fails the job.
       #
       # `gh pr create` is left to default `--base` to the repository's default
       # branch: the `schedule` event carries no payload, so expressions like
