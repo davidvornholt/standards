@@ -408,6 +408,7 @@ jobs:
               before="$before, so the mirrored files here are out of date."
             fi
           fi
+          # shellcheck disable=SC2016 # Markdown backticks in printf formats are literal on purpose.
           {
             printf '**Before.** %s\n\n' "$before"
             if [ "$mirrored" -eq 0 ]; then
