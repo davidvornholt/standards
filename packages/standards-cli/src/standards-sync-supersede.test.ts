@@ -5,6 +5,7 @@ import process from 'node:process';
 import { cleanupTmpDirs, mkTmp, write } from './cli-test-support';
 import {
   type FakePullRequest,
+  FIXTURE_BODY,
   fakeGitHub,
   RECONCILE_STEP,
   runSyncStep,
@@ -64,6 +65,7 @@ const reconcile = (
     open: JSON.parse(read('pr-state')) as Array<FakePullRequest>,
     closures: read('pr-closures'),
     creations: read('pr-creations'),
+    bodies: read('pr-bodies'),
   };
 };
 const workflowEnv = (
@@ -93,6 +95,11 @@ it.each([
       pullRequest(current, SYNC_BRANCH),
     ]);
     expect(outcome.creations).toBe(reusableOpen ? '' : 'created\n');
+    expect(outcome.bodies).toBe(
+      reusableOpen
+        ? `edit ${REUSABLE_NUMBER} ${FIXTURE_BODY}\n`
+        : `create ${FIXTURE_BODY}\n`,
+    );
     expect(outcome.closures).toBe(closures(LEGACY, supersededBy(current)));
   },
 );
@@ -106,6 +113,7 @@ it('closes every sync PR when the base branch already matches upstream', () => {
   expect(outcome.status).toBe(0);
   expect(outcome.open).toEqual(UNRELATED);
   expect(outcome.creations).toBe('');
+  expect(outcome.bodies).toBe('');
   expect(outcome.closures).toBe(
     closures([...LEGACY, REUSABLE], SUPERSEDED_BY_BASE),
   );
