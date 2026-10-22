@@ -3497,7 +3497,7 @@ describe('canonical standards workflow Nix steps', () => {
     expect(vmSteps).toEqual([
       {
         name: 'Run app-release VM test',
-        if: "matrix.system == 'x86_64-linux'",
+        if: "matrix.system == 'x86_64-linux' && steps.vm-test.outputs.selected != 'false'",
         run: 'nix build ".#checks.x86_64-linux.app-release-vm" -L',
       },
     ]);
