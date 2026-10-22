@@ -725,8 +725,29 @@ jobs:
       - name: Build app-release check
         run: nix build ".#checks.${{ matrix.system }}.app-release" -L
 
-      - name: Run app-release VM test
+      # The VM test takes most of this job, and only these paths can change its
+      # result. A base that can't be fetched or diffed selects the test.
+      - name: Select app-release VM test
+        id: vm-test
         if: matrix.system == 'x86_64-linux'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          selected=true
+          if [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]] &&
+            git fetch --quiet --no-tags --depth=1 origin "$BASE_SHA" &&
+            changed=$(git diff --name-only "$BASE_SHA" HEAD --); then
+            status=0
+            grep -Eq '^(flake\.(nix|lock)|nix/app-release/.+|\.github/workflows/standards\.yml)$' <<<"$changed" || status=$?
+            if [ "$status" -eq 1 ]; then
+              selected=false
+            fi
+          fi
+          echo "selected=$selected" >> "$GITHUB_OUTPUT"
+
+      - name: Run app-release VM test
+        if: matrix.system == 'x86_64-linux' && steps.vm-test.outputs.selected != 'false'
         run: nix build ".#checks.x86_64-linux.app-release-vm" -L
 
   # Keep the stable required-check name while making all independent gates
