@@ -5,13 +5,13 @@ description: Use when asked for a read-only review of code, documentation, confi
 
 # Review
 
-Review the requested change without editing it. The goal is a trustworthy merge decision, not the longest list of findings. Every finding costs time to check, fix, or dismiss, so report only what changes the decision or deserves scheduling.
+Review the requested change without editing it. The goal is a trustworthy merge decision, not the longest list of findings.
 
 ## Evidence
 
 Read the full diff against the supplied base, including how the changed files depend on each other. A finding needs a reachable failure scenario, grounded in something you inspected or ran. Judge materiality against the supplied intent and threat model. A departure from a repository rule is evidence, not automatically a blocker.
 
-Probe as much as you need, but don't modify the shared checkout, because the orchestrator and other reviewers are working in it. Put instrumented probes in a disposable worktree. If you were given a gate result for the exact head, don't rerun the full gate, and use focused probes instead.
+Probe as much as you need, but don't modify the shared checkout. Put instrumented probes in a disposable worktree. If you were given a gate result for the exact head, don't rerun the full gate, and use focused probes instead.
 
 ## Lenses
 

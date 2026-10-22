@@ -7,19 +7,19 @@ description: Use when asked to review a pull request and fix its findings in the
 
 Review-fix runs one bounded review-and-fix cycle on a pull request, then reports and stops.
 
-The bound is deliberate. Every review of a fix finds something in the fix, so reviewing until the pull request comes back clean never converges and keeps growing the change. Don't start another cycle for findings this cycle created, and don't give the final repair a fresh review.
+Every review of a fix finds something in the fix, so reviewing until the pull request comes back clean never converges. Don't start another cycle for findings this cycle created, and don't give the final repair a fresh review.
 
-Work in a dedicated worktree on a draft pull request. Add new commits rather than amending or force-pushing, so the fix and repair deltas each stay reviewable on their own.
+Work in a dedicated worktree on a draft pull request. Add new commits rather than amending or force-pushing.
 
 ## Reviewer model
 
 Reviewers use GPT-6 Astra at high effort unless the user names another model. That model runs every review and verification lens. The orchestrating session and the fix workers stay on the current model.
 
-Start each lens as a native subagent when the harness can run the reviewer model, and set the model and effort explicitly on every spawn so it doesn't inherit the session's model. When the harness can't run it, as Claude Code can't run GPT, delegate the lens with T3 Code `delegate_task`. Include the lens brief, the review skill's path, and the read-only constraint in the delegated task. If neither route can start the reviewer model, stop before reviewing and report which model couldn't start and why. Never substitute another model.
+Start each lens as a native subagent when the harness can run the reviewer model, and set the model and effort explicitly on every spawn. When the harness can't run it, as Claude Code can't run GPT, delegate the lens with T3 Code `delegate_task`. Include the lens brief, the review skill's path, and the read-only constraint in the delegated task. If neither route can start the reviewer model, stop before reviewing and report which model couldn't start and why. Never substitute another model.
 
 ## Scope
 
-Before any finding exists, post one scope comment on the pull request with the intent, threat model, out-of-scope work, and the selected lenses. Findings are judged against it, so writing it first keeps the merge bar from drifting toward whatever the reviewers find. Its timestamp starts the cycle. Ask about splitting the pull request only when it contains independent product outcomes.
+Before any finding exists, post one scope comment on the pull request with the intent, threat model, out-of-scope work, and the selected lenses. Its timestamp starts the cycle. Ask about splitting the pull request only when it contains independent product outcomes.
 
 Choose the number of lenses from the diff:
 
@@ -39,13 +39,13 @@ Add a third or fourth lens only for a material risk that would otherwise have no
 
 ## Baseline
 
-Establish the gate state first, so reviewers don't rerun the gate and pre-existing failures aren't charged to the pull request. Reuse a successful gate that already finished on an equivalent exact head. Otherwise run the repository gate locally once rather than waiting for CI. Repair only mechanical failures the pull request introduced, and record pre-existing ones.
+Reuse a successful gate that already finished on an equivalent exact head. Otherwise run the repository gate locally once rather than waiting for CI. Repair only mechanical failures the pull request introduced, and record pre-existing ones.
 
 ## Review
 
 Run every lens as a separate read-only subagent on the reviewer model, using the [review skill](../review/SKILL.md). Give each one the range from the pull request's base to its initial head, the scope comment, the gate result, its lens and exclusions, and any model override. Retry a lens that doesn't report once. If coverage is still incomplete, stop instead of fixing from a partial review.
 
-Merge duplicate findings, keeping every lens that reported each one, and give each merged finding one decision as the review skill defines them. Collect every remaining `ask` into one decision brief with the options, their consequences, and a recommendation, so the user decides once.
+Merge duplicate findings, keeping every lens that reported each one, and give each merged finding one decision as the review skill defines them. Collect every remaining `ask` into one decision brief with the options, their consequences, and a recommendation.
 
 ## Fix
 
@@ -55,9 +55,9 @@ Keep each fix the size of its finding, without new machinery, because new machin
 
 ## Verify
 
-Review only the fix commits, from the pre-fix head, with one targeted lens, or two when the fixes touch two independent invariant families. These lenses run on the reviewer model as separate read-only subagents, like the review lenses. Skip this review when the fixes are prose or static copy, or isolated tests that don't change shared test infrastructure, because such changes can't alter the behavior under review.
+Review only the fix commits, from the pre-fix head, with one targeted lens, or two when the fixes touch two independent invariant families. Skip this review when the fixes are prose or static copy, or isolated tests that don't change shared test infrastructure.
 
-A verification finding triggers one repair round only if it is an original blocker that remains unresolved, or a defect the fixes introduced. Defer or discard a defect that already exists at the pre-fix head, however real, because fixing it here pulls new scope into the cycle. Fresh-review the repair, with the same lens limit, only when it touches high-risk behavior such as authorization, persistence, or concurrency.
+A verification finding triggers one repair round only if it is an original blocker that remains unresolved, or a defect the fixes introduced. Defer or discard a defect that already exists at the pre-fix head. Fresh-review the repair, with the same lens limit, only when it touches high-risk behavior such as authorization, persistence, or concurrency.
 
 If that review finds a material defect, make one final repair, verify it mechanically only, and stop repairing. Then run the full deterministic gate locally once, after the last change. Fix gate failures the cycle introduced mechanically, without another review pass. Resolve the blocker threads once their verification and the final gate pass.
 
