@@ -19,7 +19,7 @@ When you're given a lens, report only its failure class and respect its exclusio
 
 ## Decisions
 
-Give each finding exactly one decision, without a separate severity:
+Give each finding exactly one decision:
 
 - `block`: demonstrated, within the intent, material under the threat model, and serious enough to stop this merge.
 - `defer`: real and actionable, but outside this pull request or below the merge bar.
@@ -28,14 +28,9 @@ Give each finding exactly one decision, without a separate severity:
 
 Reserve `ask` for that case, and decide inferable or reversible choices yourself. Recommend the smallest correction within scope, and defer optional machinery.
 
+Also record each finding's `impact`: `breakage`, `weakening`, or `polish`. This is the consequence if the change ships as it is, not the size of the fix.
+
 Documentation, comments, or instructions that break the documentation rule, whether the diff adds them or leaves them stale, are `block` findings with impact `polish`. Quote the passages to cut.
-
-Record two more fields for each finding:
-
-- `impact`: `breakage`, `weakening`, or `polish`. This is the consequence if the change ships as it is, not the size of the fix.
-- `evidenceStatus`: `reproduced`, `demonstrated`, or `unverified`.
-
-Use `unverified` only for observations outside the checkout, such as production state. Such a finding normally becomes `defer`, not `block`.
 
 ## Test recommendations
 
@@ -43,4 +38,4 @@ Recommend at most one minimal regression test per failure class, preferably by e
 
 ## Output
 
-When you're given a schema, return only findings and coverage that conform to it. Otherwise group findings by `block`, `ask`, `defer`, and the `discard` decisions worth keeping on record. If nothing qualifies, say so and summarize the surfaces you inspected and the focused checks you ran.
+Group findings by `block`, `ask`, `defer`, and the `discard` decisions worth keeping on record. If nothing qualifies, say so and summarize the surfaces you inspected and the focused checks you ran.
