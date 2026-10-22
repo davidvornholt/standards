@@ -5,7 +5,7 @@ description: Use when changing continuous integration, GitHub Actions workflows,
 
 # CI pipelines
 
-The shape of a job graph is a cost decision, and every shortcut that saves work must fail closed: a skip, self-cancel, or proof that errors selects the full path or fails the run. A shortcut that can turn an error into a passing check is a defect, whatever it saves.
+The shape of a job graph is a cost decision, and every shortcut that saves work must fail closed: a skip, self-cancel, or proof that errors selects the full path or fails the run.
 
 Canonical workflows reference external actions by their maintained major-version tag, such as `actions/checkout@v7`, not by commit SHA. The owner accepts the small risk that an upstream tag is retargeted, so don't propose SHA pins.
 
@@ -19,13 +19,13 @@ A runner bills while it waits. When an expensive job depends on other gates, wai
 
 ## Skip work only with proof
 
-Skip an expensive gate only when a cheap job has shown it has nothing to check: classify the checked-out diff against the files the gate reads, and select the gate whenever the result is uncertain, such as after a failed checkout, a missing commit, or no merge base. A workflow-level `paths` filter can't decide this, because GitHub evaluates it against a bounded list of changed files.
+Skip an expensive gate only when a cheap job has shown it has nothing to check: classify the checked-out diff against the files the gate reads, and select the gate whenever the result is uncertain. A workflow-level `paths` filter can't decide this, because GitHub evaluates it against a bounded list of changed files.
 
 A run that decides there is nothing to do and cancels itself must first prove why: the artifacts it relies on exist and were published for a proven parent commit.
 
-When a trusted publisher has already built and signed an output, verify the signature instead of rebuilding it. Check each output separately and rebuild only the misses. An evaluation failure, a missing or wrong-key signature, and a failed query all count as misses.
+When a trusted publisher has already built and signed an output, verify the signature instead of rebuilding it. Check each output separately and rebuild only the misses.
 
-Such proofs only hit when an output's identity stays stable across commits that don't touch it, so pin each check's inputs to exactly the files it reads. An input that folds in the whole repository changes on every commit, and the proof never hits.
+Such proofs only hit when an output's identity stays stable across commits that don't touch it, so pin each check's inputs to exactly the files it reads.
 
 Draft pull requests skip the expensive gates, and `ready_for_review` runs them on the current head. GitHub counts a skipped job as a passing required check, so on drafts the job that reports the required check must use another name, leaving the check missing until the ready run reports it. `standards.yml` names its aggregator `check` only on non-draft runs. Give draft and ready runs separate concurrency groups too: GitHub can start a draft run after the ready run that followed it, and in a shared group the draft run cancels the ready one.
 
