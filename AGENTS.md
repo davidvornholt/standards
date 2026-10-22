@@ -6,7 +6,7 @@ Don't weaken a quality gate to make a change pass. Explain every inline suppress
 
 ## Change policy
 
-Don't build backwards compatibility by default. Code in these repositories has no consumers outside them, so migrate every call site and delete the old shape in the same change, without deprecated aliases, versioned copies, or compatibility-only optional parameters. Durable boundaries are the exception: when a change breaks persisted data, a wire format, a deployed configuration or secret shape, or an external consumer, say what breaks and let the user decide instead of building a migration path.
+Don't build backwards compatibility by default. Code in these repositories has no consumers outside them, so migrate every call site and delete the old shape in the same change.
 
 Ask before choosing product intent or another costly, durable direction, because those choices are the user's and expensive to reverse. Write the question for someone with no background who hasn't read the code: explain what's at stake and where each option leads, and recommend one before presenting technical evidence.
 
@@ -35,19 +35,20 @@ A workspace-wide exception to these rules needs an architectural reason in `AGEN
 
 ## Writing style
 
-Write plainly and directly, in literal wording and complete sentences that are easy to follow. Avoid mannered prose, decorative metaphors, and stock phrases, and don't compress sentences into fragments or semicolon chains to save words.
+Write plainly and directly, in literal wording and complete sentences that are easy to follow. Avoid mannered prose and stock phrases, and don't compress sentences into fragments to save words.
 
-Use sentence case for reader-facing text, such as UI copy, labels, command-style actions, and Markdown headings. Keep proper nouns, acronyms, filenames, package names, and domain terms as they are.
+Use sentence case for reader-facing text, including Markdown headings.
 
 Don't hard-wrap Markdown prose. Keep each paragraph or list item on one logical line.
 
 ## Documentation and instructions
 
-Agents are the main readers of documentation, skills, and instructions, and every word costs tokens on each read. Write only what code, configuration, command help, error messages, types, and tests can't carry: operational procedures, external constraints, and reasons for non-obvious decisions. State each fact once and link to it. Keep change history, implementation summaries, study and test-run logs, and status notes in PRs or issues. When a change makes documentation stale or derivable, cut it in the same change. Read only the documentation relevant to the current task.
+Agents are the main readers of documentation, skills, and instructions, and every word costs tokens on each read. Write only what the code and its tooling can't carry, such as procedures, external constraints, and the reasons for non-obvious decisions. State each fact once and link to it. Keep history and status in PRs and issues. When a change makes documentation stale or derivable, cut it in the same change. Read only the documentation relevant to the current task.
 
 Write skills and instructions for a capable model:
 
-- Leave out what it does without being told. Spend words on what it can't know: decisions, conventions, environment facts, and pitfalls that actually happened.
+- Leave out what it does without being told, and spend words on what it can't know.
+- Skip examples it can infer. When a rule is unclear without one, one example is usually enough.
 - Give the reason for any rule that isn't self-evident, so the model can apply it to cases the text doesn't name.
 - Use prose for workflows and reasoning, lists for independent items, tables for lookups, and numbered steps only where order matters.
 - State each rule calmly and once. Capitals, bold, and "never" or "always" make capable models over-apply a rule, so save absolutes for hard constraints.
