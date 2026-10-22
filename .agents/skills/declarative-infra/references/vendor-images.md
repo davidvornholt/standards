@@ -1,6 +1,6 @@
 # Vendor image updates
 
-For third-party containers whose publisher the infrastructure owner does not control; first-party apps use [App releases](app-release.md). Every update is a reviewed, digest-pinned manifest change deployed with the host.
+This covers third-party containers whose publisher the infrastructure owner does not control. First-party apps use [App releases](app-release.md). Every update is a reviewed, digest-pinned manifest change deployed with the host.
 
 ## Manifest
 
@@ -18,7 +18,7 @@ For third-party containers whose publisher the infrastructure owner does not con
 - The updater opens a manifest-only PR with the previous and proposed references, version, publisher, and release notes. Its candidate identity includes the full repository-to-digest map. Reruns reuse the open candidate; a closed one stays closed.
 - Never run vendor source or image contents in a workflow that holds a write token.
 - Review authorizes the publisher and release; a pullable image proves neither authenticity nor compatibility. Verify signatures or attestations when the publisher policy requires them, and review migrations and backups for data-bearing upgrades.
-- No automatic merge, scheduled drift detector, or deployment deadline; later automatic merge needs its own explicit release policy. A new version is informational until merged. Report failed discovery separately from failed deployment.
+- There is no automatic merge, scheduled drift detector, or deployment deadline. Adding automatic merge later needs its own explicit release policy. A new version is informational until merged. Report failed discovery separately from failed deployment.
 
 ## Superseding older candidates
 

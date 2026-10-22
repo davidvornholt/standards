@@ -1,10 +1,10 @@
 # Pull request previews
 
-Web hosts get previews by default; omitting them is a decision recorded in the host repo. A same-repository PR labeled `pr-preview` gets `https://<pr>.pr.<domain>` with its own container, database, and virtual host, built from the production flake and modules and destroyed when the PR closes. Copy the pattern into the host repo; improve it upstream in this skill.
+A same-repository PR labeled `pr-preview` gets `https://<pr>.pr.<domain>` with its own container, database, and virtual host, built from the production flake and modules and destroyed when the PR closes. Copy the pattern into the host repo and improve it upstream, here.
 
 ## Convergence model
 
-- Previews are the one exception to keeping desired state in git. The only runtime state is the active preview set in host-local `/var/lib/<repo>/pr-previews/active.json`. Only the forced SSH command changes it, then runs `nixos-rebuild switch` on the production flake. Each switch replays the whole set, so an interrupted deploy heals on the next one.
+- Previews are the one exception to keeping desired state in git. Their only runtime state is the active preview set in host-local `/var/lib/<repo>/pr-previews/active.json`. Only the forced SSH command changes it, and then runs `nixos-rebuild switch` on the production flake. Each switch replays the whole set, so an interrupted deploy heals on the next one.
 - The file is a JSON array of `{ number, image, headSha, updatedAt }`. Validate it fully on every read (unique, positive, bounded PR numbers; digest-pinned references to the allowed image), write it atomically (temp file, validate, rename), and serialize changes with an exclusive `flock`.
 - The flake reads the file path from an environment variable with `builtins.getEnv`, defaults to an empty set, and passes the set through `specialArgs`. `nix flake check` therefore sees no previews; the host rebuild sets the variable and runs with `--impure`.
 
@@ -15,7 +15,7 @@ Web hosts get previews by default; omitting them is a decision recorded in the h
 - `workflow_run.pull_requests` can be empty; require a PR number instead of assuming `[0]` exists.
 - Deploy secrets live in a `pr-preview` GitHub Environment whose SOPS file holds only the preview deploy SSH key, under an age key distinct from production's. It never holds production deploy keys or cloud credentials.
 - Preview and production deploy jobs share the concurrency group `<repo>-<host>-deploy` with `cancel-in-progress: false`. The host lock covers only preview calls, so this group is what keeps their switches from interleaving.
-- Create each secret file with `mktemp` and each artifact directory with `mktemp -d`, using distinct templates; a shared fixed basename makes the artifact `mkdir` collide with the SSH key file. Keep a contract test over the SSH helper and deploy workflow that rejects reused temp paths.
+- Create each secret file with `mktemp` and each artifact directory with `mktemp -d`, using distinct templates, because a shared fixed basename makes the artifact `mkdir` collide with the SSH key file. Keep a contract test over the SSH helper and deploy workflow that rejects reused temp paths.
 
 ## Transfer artifacts
 
@@ -34,11 +34,21 @@ command="/run/current-system/sw/bin/<repo>-pr-preview-deploy",restrict ssh-ed255
 
 - Accept only `deploy <pr-number> <app-image> <migration-image> <head-sha>` or `destroy <pr-number>` in `SSH_ORIGINAL_COMMAND`. Reject multi-line input, extra arguments, PR numbers outside `1..999999`, SHAs that are not 40 hex characters, and images that are not `<allowed-name>@sha256:<64-hex>`.
 - Package it with `pkgs.writeShellApplication` in a module that asserts previews are enabled and at least one key is authorized.
-- The rebuild evaluates the flake from the deployed system, so every store path the command reads later, such as the flake source, image manifest, and validator, must be in the command's own closure. Embed paths with their string context through `pkgs.replaceVars`, `pkgs.writeText`, or the package's `text`. Never `toString` a path first, or `nix gc` can delete it. `system.extraDependencies` is no substitute; it can keep a different realization than the one the command names.
+- The rebuild evaluates the flake from the deployed system, so every store path the command reads later, such as the flake source, image manifest, and validator, must be in the command's own closure. Embed paths with their string context through `pkgs.replaceVars`, `pkgs.writeText`, or the package's `text`. Never `toString` a path first, or `nix gc` can delete it. `system.extraDependencies` is no substitute, because it can keep a different realization than the one the command names.
 - Add a flake check that every store path the command names, including sourced helper packages, is in its closure.
-- Deploy: take the lock; verify that production's active slot tag names the exact digest in its [app-release](app-release.md) state and that the running image is that image or content-equivalent under [app-release's comparison](https://github.com/davidvornholt/standards/blob/main/nix/app-release/src/app_release/podman.py); upsert the preview; `switch`; run migrations; restart the preview container. Release state, not the flake, picks the production digest, so the rebuild never moves production. Content-identical releases update state and the slot tag without restarting production.
-- On any failure, remove the preview from state, converge again, and drop its database. Destroy is idempotent: an unknown PR number succeeds.
-- Migrations run as a one-shot container under the preview's UID against its own database over the host Postgres socket, with `--network=none`, dropped capabilities, and resource caps.
+
+A deploy runs these steps in order:
+
+1. Take the lock.
+2. Verify that production's active slot tag names the exact digest in its [app-release](app-release.md) state, and that the running image is that image or content-equivalent under [app-release's comparison](https://github.com/davidvornholt/standards/blob/main/nix/app-release/src/app_release/podman.py).
+3. Upsert the preview.
+4. Run `switch`.
+5. Run migrations.
+6. Restart the preview container.
+
+Release state, not the flake, picks the production digest, so the rebuild never moves production. Content-identical releases update state and the slot tag without restarting production.
+
+Migrations run as a one-shot container under the preview's UID, against its own database over the host Postgres socket, with `--network=none`, dropped capabilities, and resource caps. On any failure, remove the preview from state, converge again, and drop its database. Destroy is idempotent: an unknown PR number succeeds.
 
 ## Isolation
 

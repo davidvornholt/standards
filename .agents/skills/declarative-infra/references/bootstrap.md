@@ -1,9 +1,10 @@
 # Bootstrapping a host repo
 
-- Bootstrap only when a host or zone has no infrastructure home. Connecting an app to an existing server is an app module plus an [app-release](app-release.md) unit in that host's home repo.
-- Inspect existing infrastructure first and preserve working host definitions, state, secrets, and workflows.
-- Copy these patterns into the host repo and adapt them. Do not create or depend on infrastructure flakes or modules shared across repos; improve the patterns upstream in this skill. The only shared module is app-release, imported from the standards flake.
-- A dedicated infra repo is a full standards consumer: run `standards init` before laying out infrastructure. There is no partial consumer profile; the synced TypeScript payload stays inert. Put Nix and OpenTofu Dependabot update blocks in `.github/dependabot.local.yml`.
+Bootstrap only when a host or zone has no infrastructure home yet. Connecting an app to an existing server is not a bootstrap: it is an app module plus an [app-release](app-release.md) unit in that host's home repo. Before laying anything out, inspect the existing infrastructure and keep its working host definitions, state, secrets, and workflows.
+
+Reuse means copying. Copy the patterns below into the host repo and adapt them, and improve the patterns here, upstream, instead of creating infrastructure flakes or modules that several repos depend on. The one shared module is app-release, which hosts import from the standards flake.
+
+A dedicated infra repo is a full standards consumer, so run `standards init` before laying out the infrastructure. There is no partial consumer profile: the synced TypeScript payload stays in the repo, inert, instead of the contract splitting by repo type. Put the Nix and OpenTofu Dependabot update blocks in `.github/dependabot.local.yml`.
 
 ## Layout
 
@@ -26,7 +27,7 @@ infra/
 
 ## Host names
 
-- Name each host `<env>-<index>`, such as `prod-1`, even in a single-server repo, and never after the repo or product. Replace a host by building `prod-2` beside it, migrating, and retiring `prod-1`, with no rename.
+- Name each host `<env>-<index>`, such as `prod-1`, even in a single-server repo. A repo or product name distinguishes nothing inside its own repo and is ambiguous in a dedicated infra repo. The index makes replacement routine: build `prod-2` beside `prod-1`, migrate, and retire `prod-1`, with no rename.
 - Use the same name for `nixosConfigurations.<name>`, `deploy.nodes.<name>`, `hosts/<name>/`, and `networking.hostName`. It is also the `just secrets` target of the host's `secrets.yaml`, so it must start with an ASCII letter or digit and contain only letters, digits, dots, underscores, and hyphens.
 - Set `networking.domain` to the primary domain the host serves. Manage a DNS record `<name>.<domain>` for the machine in the tofu stack and use it as `deploy.nodes.<name>.hostname`.
 - Do not add a stable machine alias such as `server.<domain>`. Product domains are the durable names and repoint at cutover; per-machine names keep two live hosts distinct in logs and SSH targets during a migration.
@@ -156,13 +157,21 @@ Workflows read private GHCR packages with their job-scoped `GITHUB_TOKEN`; a hos
 - A `podman-ghcr-login` oneshot reads the PAT from stdin, logs in to a `0600` temporary file in the same directory, and renames it to `/run/containers/auth/ghcr-private.json` only after login succeeds. The secret's `restartUnits` include this oneshot.
 - The host also creates the root-owned `0600` file `/run/containers/auth/anonymous.json` containing exactly `{"auths":{}}`.
 - Every pull names its auth file, private or anonymous, so Podman never falls back to ambient Podman or Docker credentials. Container and migration units that pull set `REGISTRY_AUTH_FILE` and pass `--authfile`. App-release containers run local tags and never pull, so an app-release unit sets only `registryAuthFile`, plus the login unit in `serviceDependencies` for private images. Public images never depend on the login unit.
-- Rotate in this order: create a replacement PAT with only `read:packages`; re-check which packages its owner can read; replace `registry.github_token`; deploy and confirm the login unit rewrote the private auth file; force an uncached authenticated pull through that file; then revoke the old PAT. GitHub has no API for classic PATs, so `bun standards creds` does not manage this one.
+
+GitHub has no API for classic PATs, so `bun standards creds` does not manage this PAT. Rotate it by hand, in this order:
+
+1. Create a replacement PAT with only `read:packages`.
+2. Re-check which packages its owner can read.
+3. Replace `registry.github_token`.
+4. Deploy, and confirm the login unit rewrote the private auth file.
+5. Force an uncached authenticated pull through that file.
+6. Revoke the old PAT.
 
 ## Install and convergence
 
 - First install: nixos-anywhere with the disko layout, or a NixOS installer plus `disko`. Capture `hardware-configuration.nix` from the target, then collect the host key and re-encrypt secrets for it.
-- A main-branch workflow converges: `nix run .#deploy-rs` with a deploy SSH key only CI holds, only to hosts whose system closure changed, and `tofu apply` gated on the plan job. App releases do not pass through it ([app-release](app-release.md)).
+- A main-branch workflow converges the hosts. It runs `nix run .#deploy-rs` with a deploy SSH key that only CI holds, only against hosts whose system closure changed, and runs `tofu apply` gated on the plan job. App releases do not pass through it ([app-release](app-release.md)).
 - deploy-rs rolls back inside its SSH session, and that rollback dies when deploy-rs disconnects, which can leave a host half-switched with units stopped. After a failed deployment the workflow therefore waits for deploy-rs on the host to exit, points the system profile back at the pre-deployment system if deploy-rs did not, and activates it again in a `systemd-run` unit, which outlives the session. The job still fails.
 - After a successful deployment to a host with app-release units, the workflow runs `app-release check` there with the deploy key. A failing check fails the job without a restore, because the activation succeeded. It is also the only deployment signal for a running recreate app that fails its health check, which the activation's reconcile does not restart.
 - PR workflows run only the validation gates, with read-only credentials or `-backend=false`.
-- Synced GitHub settings bring branch protection; require the infra PR gates as status checks through `.github/settings.local.json`.
+- Synced GitHub settings bring branch protection. Add the infra PR gates as required status checks in `.github/settings.local.json`.
