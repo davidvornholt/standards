@@ -2,27 +2,35 @@
 
 ## Repository settings
 
-Change declarations, never the GitHub UI:
+Repository settings, rulesets, and labels are declared in `.github/settings.json` and the project's `.github/settings.local.json`. Change the declarations, never the GitHub UI: the required `check` job compares the live repository with them and fails on drift.
 
 ```sh
-bun standards github --apply
-bun standards github --check
+bun standards github --apply   # converge the live repository; needs admin authentication
+bun standards github --check   # compare the live repository with the declarations
 ```
 
-`--apply` needs admin authentication. Run it from a declaration-changing branch before merge. CI uses a restricted workflow token and fails when it cannot verify declared state. A non-empty ruleset bypass list therefore requires a local admin-authenticated check. `{"rulesetEnforcement":"unavailable-on-plan"}` is allowed only when the repository plan cannot enforce rulesets.
+Run `--apply` from the branch that changes the declarations, before it merges. That pull request's own `check` already compares the live repository with the new declarations.
+
+CI checks with its restricted workflow token, which can't see who may bypass a ruleset. It can verify a declared-empty bypass list, but fails on a non-empty one, so verify a non-empty list with a local, admin-authenticated `--check`. Declare `{"rulesetEnforcement":"unavailable-on-plan"}` only when the repository's plan can't enforce rulesets.
 
 ## Automatic sync
 
-Repositories tracking `main` get one sync pull request from `standards-sync/update`, which each weekly run rebases and updates while canonical content differs. If no open pull request uses that branch, for example after its pull request was closed or merged, the run rebuilds the branch from the base branch instead. If the branch of an open pull request no longer rebases cleanly, the run fails and names the pull request to rebase or close. The workflow owns the `standards-sync/` branch namespace: it closes every other open same-repository pull request there, or all of them once the base branch already matches upstream. Each run that changes the branch overwrites manual edits to the pull request description. The workflow reads `ci.broker_app` from SOPS. After installing the repository owner's private broker App only on the selected repository, provision it with:
+Unless `sync-standards.local.json` sets `"autoSync": false`, a weekly run keeps one sync pull request open from the branch `standards-sync/update` while canonical content differs. Each run rebases that branch and updates it, so commits you add to adapt the consumer, such as changes at an extension point, survive. The pull request description doesn't: every run that changes the branch rewrites it.
+
+When no open pull request uses the branch, for example after the last one merged or closed, the run rebuilds the branch from the base branch instead of rebasing the old one. When the branch of an open pull request no longer rebases cleanly, the run fails and names the pull request to rebase or close. The workflow owns the `standards-sync/` branch namespace. It closes every other open same-repository pull request there, and closes all of them once the base branch already matches upstream.
+
+Sync branches contain trusted upstream code, so consumer CI may run on them before anyone reviews the generated pull request.
+
+The workflow mints two short-lived tokens for the current repository from the broker GitHub App in `ci.broker_app` of the SOPS-encrypted CI secrets. One pushes the branch and needs contents and workflows permissions, because synced files include workflows. The other opens or updates the sync pull request and closes superseded ones. Neither token reaches the sync process, and there is no fallback credential. To provision the App, install the repository owner's private broker App on this repository only, then run:
 
 ```sh
 bun standards creds add github --dest ci:ci.broker_app
 ```
 
-The workflow mints two short-lived tokens for the current repository: a branch writer for contents and workflows, and a pull-request writer that opens or updates the sync pull request and closes superseded ones. Neither token enters the sync process, and there is no fallback credential. A repository with `autoSync: false` does not need these permissions until automatic sync is re-enabled.
-
-Canonical sync branches contain trusted upstream code and may run consumer CI before the generated PR is reviewed.
+A repository with `"autoSync": false` doesn't need the App until automatic sync is turned back on.
 
 ## Environment-scoped bootstrap key
 
-`Standards sync` selects the GitHub Environment named by the repository or organization Actions variable `CI_SECRETS_ENVIRONMENT`. Set it to the existing environment that owns `SOPS_AGE_KEY`, for example `gh variable set CI_SECRETS_ENVIRONMENT --body production`. Declare the variable at repository or organization scope so GitHub can resolve it before starting the job; an environment-level variable is too late. Environment protection rules still apply. Leave it unset when the bootstrap key is repository-scoped; the job then selects no environment. Missing keys still fail at the SOPS action. Do not copy an environment-scoped key into repository secrets to work around a missing environment selection.
+The sync job reads its SOPS key, `SOPS_AGE_KEY`, from the GitHub Environment named by the Actions variable `CI_SECRETS_ENVIRONMENT`. When that key is scoped to an environment, set the variable to that environment, for example `gh variable set CI_SECRETS_ENVIRONMENT --body production`. Set it at repository or organization scope: GitHub resolves the job's environment before the job starts, so an environment-level variable comes too late. The environment's protection rules still apply. When the key is a repository secret, leave the variable unset, and the job selects no environment.
+
+Don't copy an environment-scoped key into repository secrets to work around a missing environment selection; fix the variable instead.
