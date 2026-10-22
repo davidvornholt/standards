@@ -1,25 +1,25 @@
 # Pull request previews
 
-A same-repository PR labeled `pr-preview` gets `https://<pr>.pr.<domain>` with its own container, database, and virtual host, built from the production flake and modules and destroyed when the PR closes. Copy the pattern into the host repo and improve it upstream, here.
+A same-repository PR labeled `pr-preview` gets `https://<pr>.pr.<domain>` with its own container, database, and virtual host, built from the production flake and modules and destroyed when the PR closes.
 
 ## Convergence model
 
 - Previews are the one exception to keeping desired state in git. Their only runtime state is the active preview set in host-local `/var/lib/<repo>/pr-previews/active.json`. Only the forced SSH command changes it, and then runs `nixos-rebuild switch` on the production flake. Each switch replays the whole set, so an interrupted deploy heals on the next one.
-- The file is a JSON array of `{ number, image, headSha, updatedAt }`. Validate it fully on every read (unique, positive, bounded PR numbers; digest-pinned references to the allowed image), write it atomically (temp file, validate, rename), and serialize changes with an exclusive `flock`.
-- The flake reads the file path from an environment variable with `builtins.getEnv`, defaults to an empty set, and passes the set through `specialArgs`. `nix flake check` therefore sees no previews; the host rebuild sets the variable and runs with `--impure`.
+- The file is a JSON array of `{ number, image, headSha, updatedAt }`. Validate it fully on every read (unique, positive, bounded PR numbers and digest-pinned references to the allowed image), write it atomically, and serialize changes with an exclusive `flock`.
+- The flake reads the file path from an environment variable with `builtins.getEnv`, defaults to an empty set, and passes the set through `specialArgs`. `nix flake check` therefore sees no previews. The host rebuild sets the variable and runs with `--impure`.
 
 ## Workflows
 
-- Build (`pull_request`) runs only for same-repository, non-draft, labeled PRs. It checks out the head, runs the full quality gate, builds the app image (and migration image, if any) as archives, and uploads them with metadata JSON (repo, PR number, head SHA, image names and tags). No secrets, no registry access, only `contents: read`.
+- Build (`pull_request`) runs only for same-repository, non-draft, labeled PRs. It checks out the head, runs the full quality gate, builds the app image (and migration image, if any) as archives, and uploads them with metadata JSON (repo, PR number, head SHA, image names and tags). It has no secrets or registry access, only `contents: read`.
 - Deploy (`workflow_run` on build success) runs with secrets, so it checks out the default branch, never the head, and takes only the artifact from the build. It finds the artifact by head SHA through the API, re-validates the metadata against the expected image names, and re-checks that the PR is still open, non-draft, same-repository, and labeled. Then it pushes the digest-pinned images and calls the forced command.
-- `workflow_run.pull_requests` can be empty; require a PR number instead of assuming `[0]` exists.
-- Deploy secrets live in a `pr-preview` GitHub Environment whose SOPS file holds only the preview deploy SSH key, under an age key distinct from production's. It never holds production deploy keys or cloud credentials.
+- `workflow_run.pull_requests` can be empty, so require a PR number instead of assuming `[0]` exists.
+- Deploy secrets live in a `pr-preview` GitHub Environment whose SOPS file holds only the preview deploy SSH key, under an age key distinct from production's.
 - Preview and production deploy jobs share the concurrency group `<repo>-<host>-deploy` with `cancel-in-progress: false`. The host lock covers only preview calls, so this group is what keeps their switches from interleaving.
 - Create each secret file with `mktemp` and each artifact directory with `mktemp -d`, using distinct templates, because a shared fixed basename makes the artifact `mkdir` collide with the SSH key file. Keep a contract test over the SSH helper and deploy workflow that rejects reused temp paths.
 
 ## Transfer artifacts
 
-- Preview archives share the Actions artifact quota with production, so stale ones can block production publication. Size the archive limit for the expected concurrent transfers; a per-archive limit does not bound the total.
+- Preview archives share the Actions artifact quota with production, so stale ones can block production publication. Size the archive limit for the expected concurrent transfers, because a per-archive limit does not bound the total.
 - Trusted default-branch control deletes archives of closed PRs and superseded heads after querying PR state, and deletes a consumed archive after public verification succeeds. Scope deletion to the preview namespace, fail closed on API errors or invalid state, and keep deployment proofs and current unconsumed retry inputs. The PR build never gets deletion rights.
 - Expire unconsumed archives after about one day as a fallback for interrupted cleanup.
 - Document that a retry after its archive was deleted needs a fresh build. The running container and registry digest do not depend on the archive.
@@ -64,7 +64,7 @@ Also:
 
 - Assert in the module: unique bounded PR numbers, digest-pinned images of the allowed name, and enough addresses in the reserved range.
 - The preview UID overrides the image's user, so every non-secret runtime file and its directories must be readable and traversable by any unprivileged UID. In the build workflow, smoke-test the image with `--user=<base-uid>:<base-gid>` and the host's read-only root, tmpfs mounts, capabilities, and security options.
-- With Caddy's admin API `off`, set `services.caddy.enableReload = false`, or the reload fails an otherwise healthy activation. Changes then restart Caddy; record that interruption in the host profile.
+- With Caddy's admin API `off`, set `services.caddy.enableReload = false`, or the reload fails an otherwise healthy activation. Changes then restart Caddy, so record that interruption in the host profile.
 
 ## Lifecycle
 
@@ -72,7 +72,7 @@ Destroy the preview when:
 
 - The PR is closed or merged, loses the label, or becomes a draft. Use `pull_request_target` with a trusted default-branch checkout and a same-repository guard.
 - The build fails, is cancelled, or times out. Not when it is skipped: that means no preview was requested, and a `conclusion != 'success'` guard would fire on every unlabeled PR.
-- Post-deploy `curl --retry` against the public URL fails; the deploy then reports failure.
+- Post-deploy `curl --retry` against the public URL fails. The deploy then reports failure.
 
 Reporting:
 

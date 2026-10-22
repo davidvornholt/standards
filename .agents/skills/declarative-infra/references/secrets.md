@@ -6,7 +6,7 @@ This applies to every repo with encrypted secrets, with or without hosts. Host r
 
 - A personal identity is a standalone age key at `~/.config/sops/age/keys.txt`, one per person and machine. Create it with `just secrets age-create`.
 - Each automation recipient (CI, PR preview) is a keypair for one purpose in one repo, so a leaked runner key unlocks no other repo. Its private key lives only in the consumer's secret store, which for GitHub Actions is the `SOPS_AGE_KEY` secret. Losing one is recoverable, because the personal identities can re-encrypt the files to a replacement with `updatekeys`.
-- In `.sops.yaml`, give each recipient a named anchor and a comment saying what it is. The anchor alone must identify the key: person and machine for a personal identity, purpose for automation. Use a hostname verbatim when it already names the owner (`&dana-fw13-nixos`); otherwise prefix the person (`&alice-work-laptop`).
+- In `.sops.yaml`, give each recipient a named anchor and a comment saying what it is. The anchor alone must identify the key: person and machine for a personal identity, purpose for automation. Use a hostname verbatim when it already names the owner (`&dana-fw13-nixos`), and otherwise prefix the person (`&alice-work-laptop`).
 - Every creation rule includes all personal identities. Automation recipients go only on the files that automation reads.
 
 Create an automation keypair in a temporary directory, because `age-keygen` refuses to overwrite a file. Store the private key only in the secret store and keep only the recipient:
@@ -20,18 +20,18 @@ rm -rf "$d"
 
 ## Secrets files
 
-The root `justfile` and `secrets.just` are synced, so editing them in a consumer is drift; repo-specific recipes go in `local.just`. `secrets.just` documents its recipes and how it resolves targets. A target name binds `infra/hosts/<target>/secrets.yaml` or `secrets/<target>.yaml`, and there is no per-repo target map.
+`secrets.just` documents its recipes and how it resolves targets. A target name binds `infra/hosts/<target>/secrets.yaml` or `secrets/<target>.yaml`, and there is no per-repo target map.
 
 ## GitHub Actions
 
 - `SOPS_AGE_KEY` is the repo's only native Actions secret. Every other CI secret lives in SOPS targets and is decrypted at runtime.
 - Decrypt with the synced [`sops-secret` action](../../../../.github/actions/sops-secret/action.yml), which pins and checksums sops and masks values. Any other decryption must use a version- and checksum-pinned sops and mask every value with `::add-mask::`, because SOPS output gets no automatic masking.
-- The weekly Standards sync reads `ci.broker_app`, provisioned with `bun standards creds add github --dest ci:ci.broker_app`, and mints two current-repository tokens: a branch writer with Contents write and Workflows write, and a PR writer with Contents read and Pull requests write. There is no durable sync token or workflow-token fallback; see [automatic sync](../../standards-sync/references/github.md).
+- The weekly Standards sync reads `ci.broker_app`, provisioned with `bun standards creds add github --dest ci:ci.broker_app`, and mints two current-repository tokens: a branch writer with Contents write and Workflows write, and a PR writer with Contents read and Pull requests write. There is no durable sync token or workflow-token fallback. See [automatic sync](../../standards-sync/references/github.md).
 - The Standards gate's settings check holds no credential and reads with the workflow token. Do not add one: a probe showed that an installation token sees the same state.
 
 ## Brokered provider credentials
 
-Cloudflare API tokens and cross-repo GitHub credentials come from `bun standards creds`, which writes values straight into SOPS targets and never prints them. Its help and error messages cover the scoping flags. Do not hand-create a dashboard credential for a need the broker covers.
+Cloudflare API tokens and cross-repo GitHub credentials come from `bun standards creds`, which writes values straight into SOPS targets and never prints them. `bun standards creds help` and its error messages cover the scoping flags. Do not hand-create a dashboard credential for a need the broker covers.
 
 ### Minting
 
@@ -58,7 +58,7 @@ An R2 S3 pair (`--s3`) is used against `https://<account_id>.r2.cloudflarestorag
 - For same-name duplicates left by an interrupted renewal, keep the stored key and revoke each unused duplicate ID. `revoke` refuses the stored one.
 - For a token brokered to a repository that was renamed, transferred, or deleted, use `--force`, because nothing reconciles that token any more.
 
-Each machine creates its own `standards-broker` bootstrap token. Cloudflare allows duplicate names, and login requires this name (case-insensitive). Never reuse, roll, rename, or revoke another machine's `standards-broker` token, because renaming one removes its name-based protection. Retire a superseded bootstrap token in the Cloudflare dashboard after confirming whose it is. Nothing overrides `revoke`'s refusal of bootstrap tokens.
+Each machine creates its own `standards-broker` bootstrap token. Cloudflare allows duplicate names, and login requires this name (case-insensitive). Leave other machines' `standards-broker` tokens alone, because renaming one removes its name-based protection. Retire a superseded bootstrap token in the Cloudflare dashboard after confirming whose it is. Nothing overrides `revoke`'s refusal of bootstrap tokens.
 
 ## Rotation
 

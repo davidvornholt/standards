@@ -7,19 +7,19 @@ description: Use when changing NixOS, OpenTofu, cloud resources, infrastructure 
 
 ## Ownership and mutation
 
-Each host's infrastructure has exactly one home: the `infra/` directory of the repository it serves, or a dedicated infrastructure repository. Virtual hosts, databases, DNS records, buckets, and deployments for that host change in that home, even when the work starts in another repository.
+Each host's infrastructure has exactly one home: the `infra/` directory of the repository it serves, or a dedicated infrastructure repository. Everything for that host changes in that home, even when the work starts in another repository.
 
-Live state changes only through the home's reviewed main-branch automation, so production always matches a reviewed commit and the next automated run has no manual change to undo. Running `deploy-rs`, `tofu apply`, or `nixos-rebuild switch` by hand is an emergency measure. If you do it, say so explicitly in your report.
+Live state changes only through the home's reviewed main-branch automation, so production always matches a reviewed commit. Running `deploy-rs`, `tofu apply`, or `nixos-rebuild switch` by hand is an emergency measure. If you do it, say so in your report.
 
 ## Changing existing infrastructure
 
-Restructure OpenTofu resources with `moved` blocks and adopt existing ones with `import` blocks. Keep both in the repository afterwards as the record of what happened. A migration or refactor is ready to merge only when its plan is a no-op, because that proves it changes nothing in production.
+Restructure OpenTofu resources with `moved` blocks and adopt existing ones with `import` blocks. Keep both in the repository afterwards as the record of what happened. A migration or refactor is ready to merge only when its plan is a no-op.
 
-Data-bearing resources carry `prevent_destroy`, so deleting one takes two changes: the first lifts the guard, the second destroys the resource. Never let a deletion arrive as a side effect of another plan.
+Data-bearing resources carry `prevent_destroy`, so deleting one takes two changes: the first lifts the guard, the second destroys the resource.
 
 ## Validation
 
-Before pushing, run `nix flake check`, build each host's toplevel, run `tofu fmt -check`, and run `tofu init -backend=false && tofu validate`. Where credentials are available, also produce a plan. Validation stops at the plan; applying is the job of the main-branch automation.
+Before pushing, run `nix flake check`, build each host's toplevel, run `tofu fmt -check`, and run `tofu init -backend=false && tofu validate`. Where credentials are available, also produce a plan.
 
 ## References
 
