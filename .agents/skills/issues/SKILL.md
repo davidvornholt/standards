@@ -17,4 +17,4 @@ The outcome says when the issue is done, not how. Name an implementation only wh
 
 Put the support for the problem under `## Evidence`: observations, reproduction steps, measurements, code references, or sources, without restating the opening.
 
-Add `## Decision` only when work can't start until someone makes a choice, and present the choice as the change policy in `AGENTS.md` describes.
+Add `## Decision` only when work can't start until someone makes a choice.

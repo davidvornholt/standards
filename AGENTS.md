@@ -8,7 +8,7 @@ Don't weaken a quality gate to make a change pass. Explain every inline suppress
 
 Don't build backwards compatibility by default. Code in these repositories has no consumers outside them, so migrate every call site and delete the old shape in the same change.
 
-Ask before choosing product intent or another costly, durable direction, because those choices are the user's and expensive to reverse. Write the question for someone with no background who hasn't read the code: explain what's at stake and where each option leads, and recommend one before presenting technical evidence.
+Ask before choosing product intent or another costly, durable direction. Write the question for someone with no background who hasn't read the code: explain what's at stake and where each option leads, and recommend one before presenting technical evidence.
 
 ## Package management
 

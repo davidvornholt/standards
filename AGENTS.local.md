@@ -8,7 +8,7 @@ This repository is not a `standards structure` consumer. Its root gate runs the 
 
 ## Standards CLI bootstrap architecture
 
-`packages/standards-cli` is exempt from the Effect standards. It must run through `bunx` before a consumer installs dependencies, so it uses plain async TypeScript and minimal runtime dependencies. Revisit this only if that bootstrap premise changes.
+`packages/standards-cli` is exempt from the Effect standards. It must run through `bunx` before a consumer installs dependencies, so it uses plain async TypeScript and minimal runtime dependencies.
 
 ## Standards CLI subcommand vs. justfile recipe
 

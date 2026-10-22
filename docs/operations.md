@@ -10,7 +10,7 @@ A canonical sync workflow can require a newer CLI than the repository has instal
 
 ## Test an unpublished canonical change
 
-Sync from a local standards checkout, because an unpushed ref does not exist remotely:
+Sync from a local standards checkout:
 
 ```sh
 bun standards sync --from ../standards
