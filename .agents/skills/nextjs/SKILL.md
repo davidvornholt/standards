@@ -5,7 +5,6 @@ description: Use when changing pages, layouts, Server Components, Route Handlers
 
 # Next.js
 
-## Caching and rendering
+Next.js apps use Cache Components (`cacheComponents: true`). Cache async data with `'use cache'` plus `cacheLife` and `cacheTag`, and read request-time data inside a `<Suspense>` boundary, so the rest of the page still prerenders. Don't export the route segment options `dynamic`, `dynamicParams`, `revalidate`, `fetchCache`, or `runtime`, because Cache Components doesn't support them.
 
-- Use Next.js Cache Components patterns: `'use cache'` plus `cacheLife`/`cacheTag` for cacheable async data, and Suspense/request-time APIs for genuinely dynamic content.
-- Do not add route segment config (`runtime`, `dynamic`, `revalidate`, etc.).
+Read the documentation for the installed version in `node_modules/next/dist/docs/` rather than relying on memory, starting with `01-app/02-guides/migrating-to-cache-components.md`. Moving an app that doesn't enable Cache Components yet is a change of its own.
