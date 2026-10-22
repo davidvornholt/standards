@@ -5,7 +5,7 @@ description: Use when changing continuous integration, GitHub Actions workflows,
 
 # CI pipelines
 
-The shape of a job graph is a cost decision, and every shortcut that saves work must fail closed: a skip, self-cancel, or proof that errors selects the full path or fails the run.
+Every shortcut that saves work must fail closed: a skip, self-cancel, or proof that errors selects the full path or fails the run.
 
 Canonical workflows reference external actions by their maintained major-version tag, such as `actions/checkout@v7`, not by commit SHA. The owner accepts the small risk that an upstream tag is retargeted, so don't propose SHA pins.
 
@@ -29,7 +29,7 @@ Such proofs only hit when an output's identity stays stable across commits that 
 
 Draft pull requests skip the expensive gates, and `ready_for_review` runs them on the current head. GitHub counts a skipped job as a passing required check, so on drafts the job that reports the required check must use another name, leaving the check missing until the ready run reports it. `standards.yml` names its aggregator `check` only on non-draft runs. Give draft and ready runs separate concurrency groups too: GitHub can start a draft run after the ready run that followed it, and in a shared group the draft run cancels the ready one.
 
-A push to the default branch may reuse a pull request's result instead of repeating the gate, because squash-merging an up-to-date branch pushes exactly the tree the pull request run validated. Reuse only when that run recorded the tree it validated and the record matches the pushed tree. Before trusting the record, confirm that it comes from a successful `pull_request` run of the same workflow, for a head in the same repository, with successful gate jobs. Fork runs never qualify, because a fork's code could print a false record.
+A push to the default branch may reuse a pull request's result instead of repeating the gate, because squash-merging an up-to-date branch pushes exactly the tree the pull request run validated. Reuse only when that run recorded the tree it validated and the record matches the pushed tree. Before trusting the record, confirm that it comes from a successful `pull_request` run of the same workflow, for a head in the same repository, with successful gate jobs.
 
 ## Caches
 
@@ -47,4 +47,4 @@ Leave executable stores, such as package caches and browser downloads, at their 
 
 Deploy a commit only after the quality gate passed for that exact commit. A missing or failed lookup fails the deployment.
 
-Serialize deployments with FIFO queueing (`concurrency.queue: max`). Otherwise a late-finishing run for an older commit can evict the pending run for the newest one. Also guard the deployment itself against stale commits, so an ordering mistake costs latency, never correctness.
+Serialize deployments with FIFO queueing (`concurrency.queue: max`). Otherwise a late-finishing run for an older commit can evict the pending run for the newest one. Also guard the deployment itself against stale commits.
