@@ -35,7 +35,7 @@ Each lens is a separate reviewer with its own context. Independent attention cat
 1. Behavior and invariants: correctness, error paths, state transitions, edge cases, and meaningful tests.
 2. Premise and integration: whether the change solves the stated problem and preserves architecture, compatibility, and operational contracts. This lens also owns documentation that `AGENTS.md` doesn't allow, and any material finding no other lens owns.
 
-Add a third or fourth lens only for a material risk that would otherwise have no owner, such as authorization, persistence, concurrency, deployment provenance, untrusted output, or complex accessibility. Name that failure class in the scope comment.
+Add a third or fourth lens only for a material risk that would otherwise have no owner, such as authorization or concurrency. Name that failure class in the scope comment.
 
 ## Baseline
 
