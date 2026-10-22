@@ -9,7 +9,7 @@ A pull request delivers one coherent outcome, together with the migrations, test
 
 ## Draft and ready
 
-CI runs the full gate only on pull requests marked ready, because running it on every intermediate push was costly. Keep a pull request in draft while work continues, and mark it ready with `gh pr ready` once the repository gate passes locally on the final commit. Each move to ready starts a full run, so convert it back with `gh pr ready --undo` before pushing more changes. Unless you are about to merge, report that run as pending instead of waiting for it.
+CI runs the full gate only on pull requests marked ready. Keep a pull request in draft while work continues, and mark it ready with `gh pr ready` once the repository gate passes locally on the final commit. Each move to ready starts a full run, so convert it back with `gh pr ready --undo` before pushing more changes. Unless you are about to merge, report that run as pending instead of waiting for it.
 
 ## Title and description
 
@@ -27,7 +27,7 @@ For a new capability, `Before` names the missing ability, the current workaround
 
 When the pull request resolves an issue, the issue already holds the problem and its evidence. Summarize the problem in a sentence and link the issue with `Closes #<number>` instead of restating it.
 
-Add further sections only when the change needs them, and don't repeat what another section says:
+Add further sections only when the change needs them:
 
 - `## Implementation` gives the details needed to review the implementation.
 - `## Breaking change` names the affected consumers and the migration each must make.
@@ -35,6 +35,6 @@ Add further sections only when the change needs them, and don't repeat what anot
 
 ## Verification
 
-Always include `## Verification` with `### Completed checks`: one line per check with its exact result. The decider relies on these lines instead of rerunning the checks, so name what ran and how much of it passed, including partial runs and failures.
+Always include `## Verification` with `### Completed checks`: one line per check, naming what ran and how much of it passed, including partial runs and failures.
 
 Add `### Check it yourself` only when a reviewer can confirm the behavior interactively or visually. Give the exact `gh pr checkout <number-or-branch>` command, the shortest steps, and the expected result.
