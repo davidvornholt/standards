@@ -5,9 +5,9 @@ description: Use when asked to review a pull request and fix its findings in the
 
 # Review and fix
 
-Review-fix runs one bounded cycle on a pull request: check the baseline, review the diff, fix what blocks the merge, verify the fixes, run the final gate, report, and stop.
+Review-fix runs one bounded review-and-fix cycle on a pull request, then reports and stops.
 
-The bound is deliberate. Every review of a fix finds something in the fix, so reviewing until the pull request comes back clean never converges and keeps growing the change. This cycle reviews the original diff once, checks the fixes with a narrower review, and reports the remaining risk to the user instead. Don't start another cycle for findings this cycle created, and don't give the final repair a fresh review.
+The bound is deliberate. Every review of a fix finds something in the fix, so reviewing until the pull request comes back clean never converges and keeps growing the change. Don't start another cycle for findings this cycle created, and don't give the final repair a fresh review.
 
 Work in a dedicated worktree on a draft pull request. Add new commits rather than amending or force-pushing, so the fix and repair deltas each stay reviewable on their own.
 
@@ -15,7 +15,7 @@ Work in a dedicated worktree on a draft pull request. Add new commits rather tha
 
 Reviewers use GPT-6 Astra at high effort unless the user names another model. That model runs every review and verification lens. The orchestrating session and the fix workers stay on the current model.
 
-Start each lens as a native subagent when the harness can run the reviewer model, and set the model and effort explicitly on every spawn so it doesn't inherit the session's model. When the harness can't run it, as Claude Code can't run GPT, delegate the lens with T3 Code `delegate_task`. The delegated agent starts without this context, so include the lens brief, the review skill's path, and the read-only constraint in the task. If neither route can start the reviewer model, stop before reviewing and report which model couldn't start and why. Never substitute another model: the report would present a weaker review as the one the user asked for.
+Start each lens as a native subagent when the harness can run the reviewer model, and set the model and effort explicitly on every spawn so it doesn't inherit the session's model. When the harness can't run it, as Claude Code can't run GPT, delegate the lens with T3 Code `delegate_task`. Include the lens brief, the review skill's path, and the read-only constraint in the delegated task. If neither route can start the reviewer model, stop before reviewing and report which model couldn't start and why. Never substitute another model.
 
 ## Scope
 
@@ -30,10 +30,10 @@ Choose the number of lenses from the diff:
 | One high-risk family or large cross-system change | 3 |
 | Several independent high-risk families | 4 maximum |
 
-Each lens is a separate reviewer with its own context. Independent attention catches what a single reviewer misses, but overlapping lenses spend whole contexts on the same findings. Give every lens a distinct failure class and explicit exclusions. The default pair is:
+Each lens is a separate reviewer with its own context, a distinct failure class, and explicit exclusions. The default pair is:
 
 1. Behavior and invariants: correctness, error paths, state transitions, edge cases, and meaningful tests.
-2. Premise and integration: whether the change solves the stated problem and preserves architecture, compatibility, and operational contracts. This lens also owns documentation that `AGENTS.md` doesn't allow, and any material finding no other lens owns.
+2. Premise and integration: whether the change solves the stated problem and preserves architecture, compatibility, and operational contracts. This lens also owns documentation that breaks the documentation rule, and any material finding no other lens owns.
 
 Add a third or fourth lens only for a material risk that would otherwise have no owner, such as authorization or concurrency. Name that failure class in the scope comment.
 
@@ -49,23 +49,21 @@ Merge duplicate findings, keeping every lens that reported each one, and give ea
 
 ## Fix
 
-Give each blocker its own self-contained review thread on the pull request, and fix it with a worker subagent. The worker reproduces the failure first, makes the smallest correction, and runs focused checks. If it can't reproduce the failure, it leaves the thread unresolved and the finding is reclassified rather than fixed on speculation. A documentation blocker needs no reproduction: cut the quoted passages. Never resolve a finding by adding documentation that code, command help, or an error message could carry. Change those instead.
+Give each blocker its own self-contained review thread on the pull request, and fix it with a worker subagent. The worker reproduces the failure first, makes the smallest correction, and runs focused checks. If it can't reproduce the failure, it leaves the thread unresolved and the finding is reclassified rather than fixed on speculation. A documentation blocker needs no reproduction: cut the quoted passages.
 
-Keep each fix the size of its finding. New machinery attracts findings of its own, and chasing them is how a small fix becomes a large pull request. Add the regression test the review skill describes, at most one per failure class, ideally one that fails on the pre-fix behavior. Don't add a dependency, parser, fixture framework, generic harness, or shared guard for a single finding.
-
-Keep blocker threads unresolved until their verification and the final gate pass.
+Keep each fix the size of its finding, without new machinery, because new machinery attracts findings of its own. Add the regression test the review skill describes, at most one per failure class, ideally one that fails on the pre-fix behavior.
 
 ## Verify
 
-Review only the fix commits, from the pre-fix head, with one targeted lens, or two when the fixes touch two independent invariant families. These lenses run on the reviewer model as separate read-only subagents, like the review lenses. Skip this review when the fixes are prose or static copy, or isolated tests that don't change shared fixtures, schemas, workflows, seeded or generated data, global mocks, or test infrastructure, because such changes can't alter the behavior under review.
+Review only the fix commits, from the pre-fix head, with one targeted lens, or two when the fixes touch two independent invariant families. These lenses run on the reviewer model as separate read-only subagents, like the review lenses. Skip this review when the fixes are prose or static copy, or isolated tests that don't change shared test infrastructure, because such changes can't alter the behavior under review.
 
-A verification finding triggers one repair round only if it is an original blocker that remains unresolved, or a defect the fixes introduced. A defect that already exists at the pre-fix head predates the fixes. Defer or discard it, however real, because fixing it here pulls new scope into the cycle. Fresh-review the repair, with the same lens limit, only when it touches secrets or authorization, persistence or migrations, recovery, concurrency, retries, transaction boundaries, cache identity, artifact provenance, or untrusted output crossing an authoritative or persisted boundary.
+A verification finding triggers one repair round only if it is an original blocker that remains unresolved, or a defect the fixes introduced. Defer or discard a defect that already exists at the pre-fix head, however real, because fixing it here pulls new scope into the cycle. Fresh-review the repair, with the same lens limit, only when it touches high-risk behavior such as authorization, persistence, or concurrency.
 
 If that review finds a material defect, make one final repair, verify it mechanically only, and stop repairing. Then run the full deterministic gate locally once, after the last change. Fix gate failures the cycle introduced mechanically, without another review pass. Resolve the blocker threads once their verification and the final gate pass.
 
 ## Report and stop
 
-Post the report on the pull request and mark it ready with `gh pr ready`, unless an `ask` is still open. Marking it ready starts its CI run; report that run as pending rather than waiting for it. Open the report with this table, with a row for every phase, including skipped ones:
+Post the report on the pull request and mark it ready with `gh pr ready`, unless an `ask` is still open. Report the CI run that this starts as pending rather than waiting for it. Open the report with this table, with a row for every phase, including skipped ones:
 
 | Phase | Scope | Model / lenses | Findings | Outcome | Duration |
 | --- | --- | --- | --- | --- | ---: |

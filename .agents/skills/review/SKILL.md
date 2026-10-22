@@ -9,13 +9,13 @@ Review the requested change without editing it. The goal is a trustworthy merge 
 
 ## Evidence
 
-Read the full diff against the supplied base, including how the changed files depend on each other. A finding needs a reachable failure scenario, grounded in something you inspected or ran: code, a repository contract, a test, command output, or documented framework behavior. A suspicious pattern or a theoretical possibility isn't a finding. Judge materiality against the supplied intent and threat model. A departure from a repository rule is evidence, not automatically a blocker.
+Read the full diff against the supplied base, including how the changed files depend on each other. A finding needs a reachable failure scenario, grounded in something you inspected or ran. Judge materiality against the supplied intent and threat model. A departure from a repository rule is evidence, not automatically a blocker.
 
-Probe as much as you need, but don't modify the shared checkout, because the orchestrator and other reviewers are working in it. Put instrumented probes in a disposable worktree. If you were given a gate result for the exact head, don't rerun the full gate; use focused probes instead.
+Probe as much as you need, but don't modify the shared checkout, because the orchestrator and other reviewers are working in it. Put instrumented probes in a disposable worktree. If you were given a gate result for the exact head, don't rerun the full gate, and use focused probes instead.
 
 ## Lenses
 
-When you're given a lens, report only its failure class and respect its exclusions. Other reviewers own the rest. Within your lens, go through every surface it owns rather than sampling. Read files outside the lens when they prove an in-lens finding.
+When you're given a lens, report only its failure class and respect its exclusions. Within your lens, go through every surface it owns rather than sampling. Read files outside the lens when they prove an in-lens finding.
 
 ## Decisions
 
@@ -26,20 +26,20 @@ Give each finding exactly one decision, without a separate severity:
 - `discard`: refuted, speculative, already accepted, or not worth scheduling.
 - `ask`: the repository can't choose between materially different, durable product or architecture outcomes, and choosing wrong would be expensive to reverse.
 
-Reserve `ask` for that case. Implementation details you can infer, reversible choices, local refactors, naming, and test shape aren't questions. Recommend the smallest correction within scope, and defer optional machinery.
+Reserve `ask` for that case, and decide inferable or reversible choices yourself. Recommend the smallest correction within scope, and defer optional machinery.
 
-Documentation, comments, or instructions that the diff adds, or leaves stale, against the documentation rule in `AGENTS.md` are `block` findings with impact `polish`, because agents pay for that text every time they load it. Quote the passages to cut.
+Documentation, comments, or instructions that break the documentation rule, whether the diff adds them or leaves them stale, are `block` findings with impact `polish`. Quote the passages to cut.
 
 Record two more fields for each finding:
 
 - `impact`: `breakage`, `weakening`, or `polish`. This is the consequence if the change ships as it is, not the size of the fix.
 - `evidenceStatus`: `reproduced`, `demonstrated`, or `unverified`.
 
-Use `unverified` only for observations outside the checkout, such as external systems, production state, or someone's intent. Such a finding normally becomes `defer`, not `block`.
+Use `unverified` only for observations outside the checkout, such as production state. Such a finding normally becomes `defer`, not `block`.
 
 ## Test recommendations
 
-Recommend at most one minimal regression test per failure class, preferably by extending an existing or table-driven test. Don't ask for tests of trivial copy, static literals, states the types rule out, or cases a stronger test already covers. Propose browser tests only for browser-specific behavior, and never a new fixture or test mechanism for a single finding.
+Recommend at most one minimal regression test per failure class, preferably by extending an existing test. Propose browser tests only for browser-specific behavior, and never a new fixture or test mechanism for a single finding.
 
 ## Output
 
