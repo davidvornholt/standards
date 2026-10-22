@@ -29,9 +29,7 @@ Operational scripts belong in the owning workspace's `package.json`. Root script
 
 ## Effect standards
 
-Use Effect wherever it makes code more robust, and keep simple synchronous logic and UI components plain, integrating Effect at their boundaries. Service contracts expose typed errors and requirements, so callers see every expected failure in the type. Represent expected failures with `Schema.TaggedError`, a stable `_tag`, and an actionable `message` instead of throwing. In an Effect v4 workspace, the agent guide shipped at `node_modules/effect/AGENTS.md` covers idioms this section doesn't.
-
-A workspace-wide exception to these rules needs an architectural reason in `AGENTS.local.md`. Within one workspace, stay consistent.
+Use Effect extensively wherever it makes sense, because it helps agents write more robust code. In an Effect v4 workspace, follow the agent guide shipped at `node_modules/effect/AGENTS.md`, because v4's API differs from the v3 most models learned.
 
 ## Writing style
 
@@ -39,19 +37,11 @@ Write plainly and directly, in literal wording and complete sentences that are e
 
 Use sentence case for reader-facing text, including Markdown headings.
 
-Don't hard-wrap Markdown prose. Keep each paragraph or list item on one logical line.
+Don't hard-wrap Markdown prose.
 
 ## Documentation and instructions
 
-Agents are the main readers of documentation, skills, and instructions, and every word costs tokens on each read. Write only what the code and its tooling can't carry, such as procedures, external constraints, and the reasons for non-obvious decisions. State each fact once and link to it. Keep history and status in PRs and issues. When a change makes documentation stale or derivable, cut it in the same change. Read only the documentation relevant to the current task.
-
-Write skills and instructions for a capable model:
-
-- Leave out what it does without being told, and spend words on what it can't know.
-- Skip examples it can infer. When a rule is unclear without one, one example is usually enough.
-- Give the reason for any rule that isn't self-evident, so the model can apply it to cases the text doesn't name.
-- Use prose for workflows and reasoning, lists for independent items, tables for lookups, and numbered steps only where order matters.
-- State each rule calmly and once. Capitals, bold, and "never" or "always" make capable models over-apply a rule, so save absolutes for hard constraints.
+Agents are the main readers of documentation, skills, and instructions, and every word costs tokens on each read. Write only what a capable model can't learn from the code or infer on its own, give the reason for a rule that isn't obvious, and state each fact once. Keep history and status in PRs and issues, and cut documentation in the same change that makes it stale.
 
 ## Project-specific rules
 
