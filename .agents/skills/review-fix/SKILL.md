@@ -63,7 +63,7 @@ If that review finds a material defect, make one final repair, verify it mechani
 
 ## Report and stop
 
-Post the report on the pull request and mark it ready with `gh pr ready`, unless an `ask` is still open. Report the CI run that this starts as pending rather than waiting for it. Open the report with this table, with a row for every phase, including skipped ones:
+Post the report on the pull request and mark it ready with `gh pr ready`, unless an `ask` is still open. Open the report with this table, with a row for every phase, including skipped ones:
 
 | Phase | Scope | Model / lenses | Findings | Outcome | Duration |
 | --- | --- | --- | --- | --- | ---: |
@@ -75,4 +75,4 @@ Post the report on the pull request and mark it ready with `gh pr ready`, unless
 
 After the table, link each finding with its decision, impact, and reporting lenses. Then report lens yield, assumptions, tests added or extended, any new test machinery, deferred work, residual risk, and any final repair that no fresh reviewer saw. Measure the total wall-clock duration from the scope comment to the report.
 
-Then stop, whatever the outcome. The merge decision belongs to the user.
+If the user asked you to merge when you're confident and you are, with no `ask` open, wait for CI and merge once it passes. Otherwise report the CI run as pending rather than waiting for it. Then stop.
