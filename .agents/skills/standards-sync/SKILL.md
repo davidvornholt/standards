@@ -13,7 +13,7 @@ The canonical files live in davidvornholt/standards and are mirrored into every 
 | Project-owned | Seeded once by `init` from `template/`, or an extension point below | The consumer, freely |
 | Generated | Rebuilt by the CLI, such as `.github/dependabot.yml` and `sync-standards.lock` | Its inputs, then regenerate |
 
-A change every consumer should get belongs upstream. A change for one consumer belongs in that consumer's extension point. Don't copy canonical logic into a project-owned file to change it locally; the copy silently stops receiving upstream fixes.
+A change every consumer should get belongs upstream. A change for one consumer belongs in that consumer's extension point. Don't copy canonical logic into a project-owned file to change it locally.
 
 ## Extension points
 
@@ -30,7 +30,5 @@ A change every consumer should get belongs upstream. A change for one consumer b
 | `nix/standards-bun.nix` | `flake.nix` and `dev-shell.local.nix` |
 
 An extension adds to its canonical file and doesn't replace it. GitHub settings can only add stricter settings, rulesets, and labels.
-
-`bun standards help` lists the commands and options.
 
 Before changing declared repository settings or the automatic sync workflow, read [GitHub settings and automatic sync](references/github.md).

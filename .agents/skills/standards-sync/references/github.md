@@ -15,9 +15,9 @@ CI checks with its restricted workflow token, which can't see who may bypass a r
 
 ## Automatic sync
 
-Unless `sync-standards.local.json` sets `"autoSync": false`, a weekly run keeps one sync pull request open from the branch `standards-sync/update` while canonical content differs. Each run rebases that branch and updates it, so commits you add to adapt the consumer, such as changes at an extension point, survive. The pull request description doesn't: every run that changes the branch rewrites it.
+Unless `sync-standards.local.json` sets `"autoSync": false`, a weekly run keeps one sync pull request open from the branch `standards-sync/update` while canonical content differs. Each run rebases that branch and updates it, so commits you add to adapt the consumer survive. The pull request description doesn't: every run that changes the branch rewrites it.
 
-When no open pull request uses the branch, for example after the last one merged or closed, the run rebuilds the branch from the base branch instead of rebasing the old one. When the branch of an open pull request no longer rebases cleanly, the run fails and names the pull request to rebase or close. The workflow owns the `standards-sync/` branch namespace. It closes every other open same-repository pull request there, and closes all of them once the base branch already matches upstream.
+When no open pull request uses the branch, the run rebuilds the branch from the base branch instead of rebasing the old one. When the branch of an open pull request no longer rebases cleanly, the run fails and names the pull request to rebase or close. The workflow owns the `standards-sync/` branch namespace. It closes every other open same-repository pull request there, and closes all of them once the base branch already matches upstream.
 
 Sync branches contain trusted upstream code, so consumer CI may run on them before anyone reviews the generated pull request.
 
@@ -31,6 +31,6 @@ A repository with `"autoSync": false` doesn't need the App until automatic sync 
 
 ## Environment-scoped bootstrap key
 
-The sync job reads its SOPS key, `SOPS_AGE_KEY`, from the GitHub Environment named by the Actions variable `CI_SECRETS_ENVIRONMENT`. When that key is scoped to an environment, set the variable to that environment, for example `gh variable set CI_SECRETS_ENVIRONMENT --body production`. Set it at repository or organization scope: GitHub resolves the job's environment before the job starts, so an environment-level variable comes too late. The environment's protection rules still apply. When the key is a repository secret, leave the variable unset, and the job selects no environment.
+The sync job reads its SOPS key, `SOPS_AGE_KEY`, from the GitHub Environment named by the Actions variable `CI_SECRETS_ENVIRONMENT`. When that key is scoped to an environment, set the variable to that environment's name at repository or organization scope. An environment-level variable comes too late, because GitHub resolves the job's environment before the job starts. The environment's protection rules still apply. When the key is a repository secret, leave the variable unset, and the job selects no environment.
 
-Don't copy an environment-scoped key into repository secrets to work around a missing environment selection; fix the variable instead.
+Fix a missing environment selection through the variable, not by copying the key into repository secrets.
