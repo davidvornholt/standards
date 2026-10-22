@@ -31,4 +31,6 @@ A change every consumer should get belongs upstream. A change for one consumer b
 
 An extension adds to its canonical file and doesn't replace it. GitHub settings can only add stricter settings, rulesets, and labels.
 
+`bun standards help` lists the commands and options.
+
 Before changing declared repository settings or the automatic sync workflow, read [GitHub settings and automatic sync](references/github.md).

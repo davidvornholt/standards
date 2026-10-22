@@ -31,6 +31,6 @@ A repository with `"autoSync": false` doesn't need the App until automatic sync 
 
 ## Environment-scoped bootstrap key
 
-The sync job reads its SOPS key, `SOPS_AGE_KEY`, from the GitHub Environment named by the Actions variable `CI_SECRETS_ENVIRONMENT`. When that key is scoped to an environment, set the variable to that environment's name at repository or organization scope. An environment-level variable comes too late, because GitHub resolves the job's environment before the job starts. The environment's protection rules still apply. When the key is a repository secret, leave the variable unset, and the job selects no environment.
+The sync job reads its SOPS key, `SOPS_AGE_KEY`, from the GitHub Environment named by the Actions variable `CI_SECRETS_ENVIRONMENT`. When that key is scoped to an environment, set the variable to that environment's name at repository or organization scope, for example with `gh variable set CI_SECRETS_ENVIRONMENT --body production`. An environment-level variable comes too late, because GitHub resolves the job's environment before the job starts. The environment's protection rules still apply. When the key is a repository secret, leave the variable unset, and the job selects no environment.
 
 Fix a missing environment selection through the variable, not by copying the key into repository secrets.
