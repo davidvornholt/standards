@@ -1,12 +1,16 @@
 ---
 name: ux-ui
-description: Use when creating or changing a user-facing interface. Applies the project's theme ownership and browser accessibility-test contracts.
+description: Use when creating or changing a user-facing interface. Applies the project's styling, component placement, theme, icon, and accessibility-test conventions.
 ---
 
 # UX/UI
 
-- Style components with Tailwind utilities. Share repeated UI through components and variants, not CSS class bundles. Use custom CSS for generated content, document-level rules, or complex effects where utilities would obscure the implementation.
-- Reuse existing components. Keep feature-specific UI within its feature, components shared across features in `src/shared/ui`, and components shared across apps in `packages/ui`. Extract shared components when their consumers should share behavior and styling.
-- Shared visual values live in each application's established theme. Components consume semantic tokens instead of raw palette values; author theme colors in `oklch(...)`.
-- Prefer Lucide React (`lucide-react`) for icons in React interfaces.
-- Browser-rendered apps use Playwright and `@davidvornholt/a11y-testing` for automated accessibility checks. Add or update coverage for routes and meaningful interaction states affected by the change.
+Style with Tailwind utilities in the markup. When UI repeats, share it as a component with variants rather than a CSS class bundle such as an `@apply` rule. A component shares the markup and behavior along with the styling, and its styles stay visible where they apply. Custom CSS is fine where utilities would obscure the intent: generated content, document-level rules, and complex effects.
+
+Reuse existing components before writing new ones. Where a component lives follows the dependency rules in `AGENTS.md`. UI for one feature stays in that feature. UI shared across features of one app goes in `src/shared/ui`, because features can't import each other. UI shared across apps goes in `packages/ui`. Extract a shared component when its consumers should behave and look the same.
+
+Visual values belong to the app's existing theme. Components use its semantic tokens, such as a surface or muted-text color, rather than raw palette values like `zinc-100`, so dark mode and later design changes happen in the theme alone. Author theme colors in `oklch(...)`. Its lightness channel is perceptually uniform, which keeps contrast predictable across hues.
+
+Use Lucide (`lucide-react`) for icons in React interfaces, so icons keep one style across projects.
+
+Browser-rendered apps check accessibility with Playwright and `@davidvornholt/a11y-testing`, which provides the axe scanner and the shared Playwright configuration. Each app lists the routes and interaction states it scans in `a11y/*.a11y.ts`. When a change adds or alters a route or a meaningful state, such as an open dialog or a form error, add or update its coverage there.
