@@ -15,15 +15,17 @@ CI runs the full gate only on pull requests marked ready, because running it on 
 
 Pull requests squash into main with the title as the commit subject and the description as the commit body, so keep both accurate until the merge. The title is a Conventional Commit subject, `type(scope): description`, with an optional scope and an imperative description.
 
-Write the description for whoever decides on the merge, who has no background on the problem and hasn't read the code. Open with exactly these two short paragraphs and nothing above them, because they should be enough to decide on:
+Write the description for whoever decides on the merge, who has no background on the problem and hasn't read the code. Open with these two short paragraphs and nothing above them, because they should be enough to decide on:
 
 ```md
-**Before.** The existing behavior, who or what it affects, and its concrete cost or risk.
+**Before.** The current state, who or what it affects, and its concrete cost or risk.
 
-**Now.** The resulting behavior and how it resolves that problem.
+**Now.** The resulting state and how it resolves that problem.
 ```
 
-For a new capability, `Before` names the missing ability, the current workaround, or the cost or risk of going without it. That the feature didn't exist gives the decider nothing to weigh.
+For a new capability, `Before` names the missing ability, the current workaround, or the cost or risk of going without it. That the feature didn't exist gives the decider nothing to weigh. When behavior stays the same, as in a refactor, `Before` gives the reason for the change and `Now` says that behavior is unchanged.
+
+When the pull request resolves an issue, the issue already holds the problem and its evidence. Summarize the problem in a sentence and link the issue with `Closes #<number>` instead of restating it.
 
 Add further sections only when the change needs them, and don't repeat what another section says:
 
