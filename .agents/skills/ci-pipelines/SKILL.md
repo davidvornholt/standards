@@ -1,37 +1,30 @@
 ---
 name: ci-pipelines
-description: Use when changing continuous integration, GitHub Actions workflows, runners, caches, or deployment pipelines. Keeps cost-saving shortcuts fail-closed.
+description: Use when changing continuous integration, GitHub Actions workflows, runners, caches, or deployment pipelines. Keeps CI fail-closed.
 ---
 
 # CI pipelines
 
-Canonical workflows use maintained major-version tags for external actions.
+CI fails closed. A step that can't establish what it relies on, such as a diff, a signature, or a gate result, takes the full path or fails the run.
 
-## Billing shapes the job graph
+Reference external actions by their major-version tag, such as `actions/checkout@v7`, not by commit SHA. The owner accepts the risk that a tag is retargeted, so don't propose SHA pins.
 
-- Jobs bill per minute, rounded up, minimum one. Fold sub-minute checks into an existing job on the same trust level instead of giving them their own.
-- Included minutes bill x64 and ARM at the same 1x rate; changing runner architecture for a job inside the allowance saves nothing.
-- Runners bill while they sleep. Put gate-waiting in a preflight job on the cheapest runner and start the expensive job once the gates are settled; keep security-relevant re-verification inline in the job that acts on it.
+Each job bills at least one minute, so fold sub-minute checks into an existing job that runs at the same trust level.
 
-## Skip work only with proof
+## GitHub behavior
 
-- Before skipping an expensive gate, classify the checked-out diff against the file set the gate reads; any uncertainty selects the gate. The workflow-level `paths` filter reads a bounded list and cannot make this decision — classify in a cheap job.
-- A run that concludes "nothing to do" must first prove its precondition — the artifacts it relies on exist and were published for a proven parent — before cancelling itself.
-- When a trusted publisher already signed an output, verify the signature instead of rebuilding. Verify per output, rebuild only the misses, and treat every evaluation, signature, or query failure as a miss.
-- Proofs only hit when identities are stable: pin each check's inputs to exactly the files it reads. An input that folds in the whole repository invalidates on every commit and makes the proof permanently useless.
-- Skip expensive gates on draft pull requests and run them on `ready_for_review`. GitHub reports a skipped job as a passing required check, so a draft run must report the required check under another name instead of skipping it.
-- A default-branch push may reuse a pull-request result instead of repeating the gate only when that run recorded the exact tree it validated and the pushed tree matches. Verify the recording run's workflow, event, same-repository head, and job conclusions.
+A workflow-level `paths` filter can't prove that a gate has nothing to check, because GitHub evaluates it against a bounded list of changed files. Classify the checked-out diff in a job instead.
+
+GitHub counts a skipped job as a passing required check. On runs that skip a gate, the job that reports its required check needs another name.
 
 ## Caches
 
-- Restore on every run; publish only from a successful default-branch run; bound the size before saving.
-- A default-branch run that reuses a result publishes nothing, so bound the staleness it causes without letting it decide reuse: when trusted snapshots for the current lock are missing or per-commit snapshots are old, request a separate default-branch publication run that nothing on the release path waits for.
-- Publishable snapshots must not accumulate history: build them from an empty store so they contain only what the current lockfile reaches. Do not rely on a tool's own garbage collection — it is version-asymmetric; an older tool cannot recognize a newer release's artifacts.
-- Large caches such as container layers belong in owned object storage behind a purpose-scoped credential, not in the shared Actions quota, where eviction churn costs more than the cache saves. Never use `type=gha` for image layers. A repository without owned object storage uses a registry cache, `type=registry,ref=ghcr.io/<owner>/<image>:buildcache`: every build reads it, and only default-branch push builds write it, with `mode=max,image-manifest=true,oci-mediatypes=true`. Registry retention must keep the `:buildcache` tag.
-- Executable stores stay at their tool-default paths; strict-env task runners hide relocated paths from exactly the subprocesses that need them.
+Save caches only from successful default-branch runs. Other runs only restore them.
 
-## Ordering and failure
+Leave package and browser stores at their tools' default paths. Turbo's strict environment hides the variables that relocate a store from the tools a task spawns.
 
-- Deployment requires a passing quality gate for the exact commit deployed. A missing or failed lookup fails the deployment.
-- Serialize deployments with FIFO queueing (`concurrency.queue: max`) so a late-finishing run for an older commit cannot evict the pending run for the newest one, and guard the deployment itself against stale commits, so ordering mistakes cost latency, never correctness.
-- Every shortcut above fails closed: a skip, self-cancel, or proof that errors selects the full path or fails the run — never a green.
+Never cache image layers with `type=gha`, because their churn in the shared Actions cache quota costs more than the cache saves. Cache them in the image's registry instead, as `type=registry,ref=ghcr.io/<owner>/<image>:buildcache`. Every build reads it, and only default-branch push builds write it, with `mode=max,image-manifest=true,oci-mediatypes=true`. Registry retention must keep the `:buildcache` tag.
+
+## Deployment
+
+Deploy a commit only after the quality gate passed for that exact commit. Serialize deployments with FIFO queueing (`concurrency.queue: max`), because otherwise a late run for an older commit can evict the pending run for the newest one.
