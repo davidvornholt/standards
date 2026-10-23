@@ -4,20 +4,16 @@ This covers third-party containers whose publisher the infrastructure owner does
 
 ## Manifest
 
-- The infra repo owns a strict manifest holding, per release family, the approved image repositories, tag or version policy, release-notes URL, selected version, and per-image digest. Reject unknown fields, malformed references, duplicate ownership, and credentials.
+- The infra repo owns a strict manifest holding, per release family, the approved image repositories, tag or version policy, release-notes URL, selected version, and per-image digest. It holds no credentials.
 - Derive every deployed reference only from the manifest, as `repository@sha256:digest`, and pin each image in exactly one place.
 - Prefer the official publisher. A fork you own is still a vendor image. It needs a documented concrete reason, such as a server customization, and an owner who keeps it current.
-- Changing publishers is a reviewed change that checks compatibility first.
 - Existing production pins may be adopted unchanged, by showing that the evaluated container references stay the same.
 
 ## Discovery and review
 
-- A trusted scheduled or manual workflow discovers versions only within the approved repositories and tag policy. Prefer stable release tags. If upstream has only a moving tag, record that and resolve it to a digest per proposal.
-- Supported registries are public GHCR and Docker Hub. Normalize Docker Hub names only for registry requests. Use anonymous pull-scoped tokens, keep pagination on the same registry and repository, bound requests, and validate returned digests.
+- A trusted scheduled or manual workflow discovers versions only within the approved repositories and tag policy, reading public GHCR and Docker Hub with anonymous pull-scoped tokens. Prefer stable release tags. If upstream has only a moving tag, record that and resolve it to a digest per proposal.
 - Resolve every family member before writing anything. Any failure, including an ambiguous selection, fails discovery, without a partial update or a reported no-op.
 - The updater opens a manifest-only PR with the previous and proposed references, version, publisher, and release notes. Its candidate identity includes the full repository-to-digest map. Reruns reuse the open candidate, and a closed one stays closed.
-- Never run vendor source or image contents in a workflow that holds a write token.
-- Review authorizes the publisher and release. Verify signatures or attestations when the publisher policy requires them, and review migrations and backups for data-bearing upgrades.
 - There is no automatic merge, scheduled drift detector, or deployment deadline. Adding automatic merge later needs its own explicit release policy. A new version is informational until merged. Report failed discovery separately from failed deployment.
 
 ## Superseding older candidates

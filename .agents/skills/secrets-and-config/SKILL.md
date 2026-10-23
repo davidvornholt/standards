@@ -13,7 +13,7 @@ SOPS identities, recipients, CI secrets, and brokered provider credentials are c
 
 ## Development environments
 
-Each workspace's `.env.local` is generated from three layers, keyed by workspace (`apps.<name>`, `packages.<name>`):
+`just dev-env-generate` (`bun standards dev-env`) generates each workspace's `.env.local` from three layers, keyed by workspace (`apps.<name>`, `packages.<name>`). `just dev-refresh` edits the dev secrets and then regenerates.
 
 | Layer | File | Notes |
 | --- | --- | --- |
@@ -21,6 +21,6 @@ Each workspace's `.env.local` is generated from three layers, keyed by workspace
 | Secret | `secrets/dev.yaml` | Tracked and encrypted; values are strings |
 | Local | `config/dev.local.yaml` | Gitignored; overrides both tracked layers, including secret values |
 
-A key lives in at most one of the two tracked layers. Generate with `just dev-env-generate` (`bun standards dev-env`), or run `just dev-refresh` to edit the dev secrets and then regenerate. Don't edit `.env.local` by hand: the next generation rewrites the whole file, so local changes belong in `config/dev.local.yaml`.
+A key lives in at most one of the two tracked layers. Local changes belong in `config/dev.local.yaml`, because generation rewrites the whole `.env.local`.
 
-A plain layer can reference one half of a broker-owned S3 credential pair instead of copying it, so the value never goes stale after the broker rotates it: `{ brokeredS3: <target>, key: <dotted.key>, part: access_key_id | secret_access_key }`. The target must contain both halves. The reference resolves only when encrypted `secrets/dev.yaml` authorizes that pair in its reserved top-level `brokeredReferences` list as `<target>:<dotted.key>`.
+A plain layer can reference one half of a broker-owned S3 credential pair instead of copying it, so the value never goes stale after the broker rotates it: `{ brokeredS3: <target>, key: <dotted.key>, part: access_key_id | secret_access_key }`. The reference resolves only when encrypted `secrets/dev.yaml` authorizes that pair in its reserved top-level `brokeredReferences` list as `<target>:<dotted.key>`.

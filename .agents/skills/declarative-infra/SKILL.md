@@ -13,7 +13,7 @@ Live state changes only through the home's reviewed main-branch automation, so p
 
 ## Changing existing infrastructure
 
-Restructure OpenTofu resources with `moved` blocks and adopt existing ones with `import` blocks. Keep both in the repository afterwards as the record of what happened. A migration or refactor is ready to merge only when its plan is a no-op.
+Keep OpenTofu `moved` and `import` blocks in the repository after they apply, as the record of what happened. A migration or refactor is ready to merge only when its plan is a no-op.
 
 Data-bearing resources carry `prevent_destroy`, so deleting one takes two changes: the first lifts the guard, the second destroys the resource.
 
@@ -23,11 +23,9 @@ Before pushing, run `nix flake check`, build each host's toplevel, run `tofu fmt
 
 ## References
 
-Read the reference that matches the change:
-
 | Change | Reference |
 | --- | --- |
-| A new infrastructure home, host layout, Podman and Caddy, PostgreSQL, Nix caching, or deployment behavior | [Bootstrapping a host repo](references/bootstrap.md) |
+| A new infrastructure home, host layout, PostgreSQL, Nix caching, private registry access, or host deployment | [Bootstrapping a host repo](references/bootstrap.md) |
 | SOPS identities and recipients, CI secrets, or brokered provider credentials | [Secrets bootstrap](references/secrets.md) |
 | Preview environments | [Pull request previews](references/pr-previews.md) |
 | Releasing, rolling back, or hosting a first-party app's container images | [App releases](references/app-release.md) |

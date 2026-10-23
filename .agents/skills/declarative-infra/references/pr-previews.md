@@ -4,14 +4,13 @@ A same-repository PR labeled `pr-preview` gets `https://<pr>.pr.<domain>` with i
 
 ## Convergence model
 
-- Previews are the one exception to keeping desired state in git. Their only runtime state is the active preview set in host-local `/var/lib/<repo>/pr-previews/active.json`. Only the forced SSH command changes it, and then runs `nixos-rebuild switch` on the production flake. Each switch replays the whole set, so an interrupted deploy heals on the next one.
-- The file is a JSON array of `{ number, image, headSha, updatedAt }`. Validate it fully on every read (unique, positive, bounded PR numbers and digest-pinned references to the allowed image), write it atomically, and serialize changes with an exclusive `flock`.
+- Previews are the one exception to keeping desired state in git. Their only runtime state is the active preview set in host-local `/var/lib/<repo>/pr-previews/active.json`, a JSON array of `{ number, image, headSha, updatedAt }`. Only the forced SSH command changes it, under an exclusive `flock`, and then runs `nixos-rebuild switch` on the production flake. Each switch replays the whole set, so an interrupted deploy heals on the next one.
 - The flake reads the file path from an environment variable with `builtins.getEnv`, defaults to an empty set, and passes the set through `specialArgs`. `nix flake check` therefore sees no previews. The host rebuild sets the variable and runs with `--impure`.
 
 ## Workflows
 
-- Build (`pull_request`) runs only for same-repository, non-draft, labeled PRs. It checks out the head, runs the full quality gate, builds the app image (and migration image, if any) as archives, and uploads them with metadata JSON (repo, PR number, head SHA, image names and tags). It has no secrets or registry access, only `contents: read`.
-- Deploy (`workflow_run` on build success) runs with secrets, so it checks out the default branch, never the head, and takes only the artifact from the build. It finds the artifact by head SHA through the API, re-validates the metadata against the expected image names, and re-checks that the PR is still open, non-draft, same-repository, and labeled. Then it pushes the digest-pinned images and calls the forced command.
+- Build (`pull_request`) runs only for same-repository, non-draft, labeled PRs, with only `contents: read` and no secrets or registry access. It runs the full quality gate on the head, builds the app image and any migration image as archives, and uploads them with metadata JSON (repo, PR number, head SHA, image names and tags).
+- Deploy (`workflow_run` on build success) holds secrets, so it checks out the default branch, never the head, and trusts nothing from the build but the artifact. It finds the artifact by head SHA, re-validates the metadata against the expected image names, and re-checks that the PR is still open, non-draft, same-repository, and labeled. Then it pushes the digest-pinned images and calls the forced command.
 - `workflow_run.pull_requests` can be empty, so require a PR number instead of assuming `[0]` exists.
 - Deploy secrets live in a `pr-preview` GitHub Environment whose SOPS file holds only the preview deploy SSH key, under an age key distinct from production's.
 - Preview and production deploy jobs share the concurrency group `<repo>-<host>-deploy` with `cancel-in-progress: false`. The host lock covers only preview calls, so this group is what keeps their switches from interleaving.
@@ -20,9 +19,8 @@ A same-repository PR labeled `pr-preview` gets `https://<pr>.pr.<domain>` with i
 ## Transfer artifacts
 
 - Preview archives share the Actions artifact quota with production, so stale ones can block production publication. Size the archive limit for the expected concurrent transfers, because a per-archive limit does not bound the total.
-- Trusted default-branch control deletes archives of closed PRs and superseded heads after querying PR state, and deletes a consumed archive after public verification succeeds. Scope deletion to the preview namespace, fail closed on API errors or invalid state, and keep deployment proofs and current unconsumed retry inputs. The PR build never gets deletion rights.
-- Expire unconsumed archives after about one day as a fallback for interrupted cleanup.
-- Document that a retry after its archive was deleted needs a fresh build. The running container and registry digest do not depend on the archive.
+- Trusted default-branch control deletes archives of closed PRs and superseded heads, and deletes a consumed archive after public verification succeeds. The PR build never gets deletion rights.
+- Unconsumed archives expire after about one day, as a fallback for interrupted cleanup.
 
 ## Forced command
 
@@ -32,7 +30,7 @@ The only mutation channel is a key in root's `authorized_keys`:
 command="/run/current-system/sw/bin/<repo>-pr-preview-deploy",restrict ssh-ed25519 ...
 ```
 
-- Accept only `deploy <pr-number> <app-image> <migration-image> <head-sha>` or `destroy <pr-number>` in `SSH_ORIGINAL_COMMAND`. Reject multi-line input, extra arguments, PR numbers outside `1..999999`, SHAs that are not 40 hex characters, and images that are not `<allowed-name>@sha256:<64-hex>`.
+- `SSH_ORIGINAL_COMMAND` is exactly `deploy <pr-number> <app-image> <migration-image> <head-sha>` or `destroy <pr-number>`, with PR numbers in `1..999999`, 40-hex SHAs, and images of the form `<allowed-name>@sha256:<64-hex>`. Reject anything else.
 - Package it with `pkgs.writeShellApplication` in a module that asserts previews are enabled and at least one key is authorized.
 - The rebuild evaluates the flake from the deployed system, so every store path the command reads later, such as the flake source, image manifest, and validator, must be in the command's own closure. Embed paths with their string context through `pkgs.replaceVars`, `pkgs.writeText`, or the package's `text`. Never `toString` a path first, or `nix gc` can delete it. `system.extraDependencies` is no substitute, because it can keep a different realization than the one the command names.
 - Add a flake check that every store path the command names, including sourced helper packages, is in its closure.
@@ -46,15 +44,15 @@ A deploy runs these steps in order:
 5. Run migrations.
 6. Restart the preview container.
 
-Release state, not the flake, picks the production digest, so the rebuild never moves production. Content-identical releases update state and the slot tag without restarting production.
+Release state, not the flake, picks the production digest, so the rebuild never moves production.
 
-Migrations run as a one-shot container under the preview's UID, against its own database over the host Postgres socket, with `--network=none`, dropped capabilities, and resource caps. On any failure, remove the preview from state, converge again, and drop its database. Destroy is idempotent: an unknown PR number succeeds.
+Migrations run as a one-shot container under the preview's UID, against its own database over the host PostgreSQL socket, with `--network=none`. On any failure, remove the preview from state, converge again, and drop its database. Destroy is idempotent: an unknown PR number succeeds.
 
 ## Isolation
 
 Each preview gets, from the modules:
 
-- A system user and group in a reserved UID/GID range, such as 200000 plus index. The container runs as that identity with `--cap-drop=ALL`, `--security-opt=no-new-privileges`, CPU, memory, and pids caps, and a tmpfs `/tmp`.
+- A system user and group in a reserved UID/GID range, such as 200000 plus index. The container runs as that identity with all capabilities dropped, `no-new-privileges`, CPU, memory, and pids caps, and a tmpfs `/tmp`.
 - Its own database `<app>_pr_<number>`, peer-mapped only to that user through the PostgreSQL module's `databaseSystemUsers`.
 - An internal Podman network with a non-overlapping, host-reachable subnet and a fixed container address, so previews reach neither each other nor the internet.
 - A Caddy virtual host `<pr>.pr.<domain>` that proxies the container address directly and sends `X-Robots-Tag: noindex, nofollow, noarchive`. Never publish a host port: rootful Podman's internal bridge disables the forwarding it needs. Never restore forwarding or outbound access to make one work.
@@ -62,9 +60,8 @@ Each preview gets, from the modules:
 
 Also:
 
-- Assert in the module: unique bounded PR numbers, digest-pinned images of the allowed name, and enough addresses in the reserved range.
 - The preview UID overrides the image's user, so every non-secret runtime file and its directories must be readable and traversable by any unprivileged UID. In the build workflow, smoke-test the image with `--user=<base-uid>:<base-gid>` and the host's read-only root, tmpfs mounts, capabilities, and security options.
-- With Caddy's admin API `off`, set `services.caddy.enableReload = false`, or the reload fails an otherwise healthy activation. Changes then restart Caddy, so record that interruption in the host profile.
+- With Caddy's admin API `off`, set `services.caddy.enableReload = false`, or the reload fails an otherwise healthy activation. Changes then restart Caddy, which is the interruption [Deploy downtime](bootstrap.md#deploy-downtime) accepts.
 
 ## Lifecycle
 
@@ -74,11 +71,7 @@ Destroy the preview when:
 - The build fails, is cancelled, or times out. Not when it is skipped: that means no preview was requested, and a `conclusion != 'success'` guard would fire on every unlabeled PR.
 - Post-deploy `curl --retry` against the public URL fails. The deploy then reports failure.
 
-Reporting:
-
-- A successful deploy upserts one PR comment with the URL and state. A failed deploy reports its failure and source without a live URL. A destroy updates an existing comment but never creates one.
-- Cleanup for a PR that never requested a preview posts nothing, but the workflow run still reports cleanup failures.
-- A daily host timer prunes unused preview images (`podman image prune --filter until=168h`).
+A successful deploy upserts one PR comment with the URL and state. A failed deploy reports its failure and source without a live URL. A destroy updates an existing comment but never creates one, so cleanup for a PR that never requested a preview posts nothing. The workflow run still reports cleanup failures.
 
 ## DNS
 
