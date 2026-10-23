@@ -33,7 +33,7 @@ Add further sections only when the change needs them:
 - `## Breaking change` names the affected consumers and the migration each must make.
 - `## Screenshots` belongs to the `screenshots-in-prs` skill, which applies to any change to rendered UI.
 
-End the description with one line naming what opened the pull request: the model with its exact ID, the agent harness, and any app that wraps the harness, such as `Opened by Claude Opus 5.5 (claude-opus-5-5) in Claude Code via T3 Code.` Take each from your own context, and write `unknown` for anything it doesn't state rather than guessing. Keep the line when another agent updates the description.
+End the description with one line naming what opened the pull request: the model with its exact ID, its reasoning effort, the agent harness, and any app that wraps the harness, such as `Opened by Claude Opus 5.5 (claude-opus-5-5) at xhigh effort in Claude Code via T3 Code.` Take each from your context or your tools, and write `unknown` for anything they don't report rather than guessing. In T3 Code, `orchestrator_capabilities` reports the effort in `inheritedOptions`. Keep the line when another agent updates the description.
 
 ## Verification
 
