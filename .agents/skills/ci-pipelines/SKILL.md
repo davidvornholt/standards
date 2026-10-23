@@ -23,7 +23,7 @@ Save caches only from successful default-branch runs. Other runs only restore th
 
 Leave package and browser stores at their tools' default paths. Turbo's strict environment hides the variables that relocate a store from the tools a task spawns.
 
-Never cache image layers with `type=gha`, because their churn in the shared Actions cache quota costs more than the cache saves. Cache them in the image's registry instead, as `type=registry,ref=ghcr.io/<owner>/<image>:buildcache`, unless the repository already keeps them in object storage. Every build reads it, and only default-branch push builds write it, with `mode=max,image-manifest=true,oci-mediatypes=true`. Registry retention must keep the `:buildcache` tag.
+Never cache image layers with `type=gha`, because their churn in the shared Actions cache quota costs more than the cache saves. Cache them in the image's registry instead, as `type=registry,ref=ghcr.io/<owner>/<image>:buildcache`. Every build reads it, and only default-branch push builds write it, with `mode=max,image-manifest=true,oci-mediatypes=true`. Registry retention must keep the `:buildcache` tag.
 
 ## Deployment
 
