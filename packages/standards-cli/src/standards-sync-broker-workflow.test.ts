@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import {
-  appIdOutput,
   assertSecuritySensitiveSteps,
   clientIdOutput,
-  clientIdPresence,
-  detectClientIdName,
   expression,
   type MutableWorkflow,
   namedStep,
@@ -13,7 +10,6 @@ import {
   prMintName,
   prToken,
   resolveClientIdName,
-  resolveIdName,
   syncName,
   syncPolicyRefName,
   type TokenConsumerContracts,
@@ -158,7 +154,6 @@ describe('Standards sync broker credential contract', () => {
 
   it('rejects softened mappings, token reuse, and unsafe ordering', () => {
     const sensitiveNames = [
-      detectClientIdName,
       resolveClientIdName,
       writerMintName,
       prMintName,
@@ -188,9 +183,7 @@ describe('Standards sync broker credential contract', () => {
       ),
       addTokenConsumer(compactExpression('steps.pr-token.outputs.token')),
       addTokenConsumer(expression("steps['pr-token'].outputs['token']")),
-      addTokenConsumer(appIdOutput),
       addTokenConsumer(clientIdOutput),
-      addTokenConsumer(expression(clientIdPresence)),
       addTokenConsumer(privateKeyOutput),
       addTokenConsumer(
         compactExpression('steps.broker-app-private-key.outputs.value'),
@@ -205,10 +198,10 @@ describe('Standards sync broker credential contract', () => {
         };
       },
       (workflow) => {
-        const resolver = mutableStep(workflow, resolveIdName);
+        const resolver = mutableStep(workflow, resolveClientIdName);
         resolver.with = {
           ...(resolver.with as Record<string, string>),
-          'env-name': 'BROKER_APP_ID',
+          'env-name': 'BROKER_APP_CLIENT_ID',
         };
       },
       (workflow) =>
@@ -216,27 +209,21 @@ describe('Standards sync broker credential contract', () => {
           name: 'Run an action between resolving and minting',
           uses: 'example/action@v1',
         }),
-      (workflow) => moveStepAfterSync(workflow, resolveIdName),
       (workflow) => moveStepAfterSync(workflow, resolveClientIdName),
       (workflow) => {
-        Reflect.deleteProperty(
-          mutableStep(workflow, resolveClientIdName),
-          'if',
-        );
-      },
-      (workflow) => {
-        mutableStep(workflow, detectClientIdName).env = { secretsFile: 'x' };
+        mutableStep(workflow, resolveClientIdName).if = 'always()';
       },
       dropMintInput(writerMintName, 'client-id'),
-      dropMintInput(prMintName, 'app-id'),
+      dropMintInput(prMintName, 'client-id'),
     );
+    // The deprecated App ID input must not return as a second identity.
     for (const name of [writerMintName, prMintName]) {
       mutations.push((workflow) => {
         const inputs = mutableStep(workflow, name).with as Record<
           string,
           string
         >;
-        inputs['app-id'] = appIdOutput;
+        inputs['app-id'] = expression('steps.broker-app-id.outputs.value');
       });
     }
     const rejected = mutations.map(rejectsMutation);

@@ -67,16 +67,12 @@ export const writerToken = expression(
   'steps.branch-writer-token.outputs.token',
 );
 export const prToken = expression('steps.pr-token.outputs.token');
-export const appIdOutput = expression('steps.broker-app-id.outputs.value');
 export const clientIdOutput = expression(
   'steps.broker-app-client-id.outputs.value',
 );
-export const clientIdPresence = 'steps.client-id-presence.outputs.present';
 export const privateKeyOutput = expression(
   'steps.broker-app-private-key.outputs.value',
 );
-export const resolveIdName = 'Resolve broker App ID';
-export const detectClientIdName = 'Detect broker App client ID';
 export const resolveClientIdName = 'Resolve broker App client ID';
 const resolveKeyName = 'Resolve broker App private key';
 export const writerMintName = 'Mint current-repository branch writer token';
@@ -122,9 +118,6 @@ const mintedTokenStep = (
   uses: 'actions/create-github-app-token@v3',
   with: {
     'client-id': clientIdOutput,
-    'app-id': expression(
-      `${clientIdPresence} == 'false' && steps.broker-app-id.outputs.value || ''`,
-    ),
     'private-key': privateKeyOutput,
     'permission-contents': contents,
     [permission]: 'write',
@@ -152,42 +145,19 @@ const assertOnlyConsumers = (
   }
 };
 
-// The presence check reads only key names, so its script is covered by
-// behavior tests. Its shape is pinned here: an added `continue-on-error`,
-// `if`, or `env` would change when the client ID resolver runs.
-const assertPresenceStep = (workflow: ParsedWorkflow): void => {
-  const step = namedStep(workflow, detectClientIdName);
-  const keys = Object.keys(step).sort((left, right) =>
-    left.localeCompare(right),
-  );
-  if (
-    !isDeepStrictEqual(keys, ['id', 'name', 'run']) ||
-    step.id !== 'client-id-presence'
-  ) {
-    throw new Error(
-      `${detectClientIdName} must be a plain run step with id client-id-presence`,
-    );
-  }
-};
-
 export const assertSecuritySensitiveSteps = (
   workflow: ParsedWorkflow,
   consumers: TokenConsumerContracts,
 ): void => {
   assertExactStep(
     workflow,
-    resolveIdName,
-    resolvedSecretStep(resolveIdName, 'broker-app-id', 'broker_app.app_id'),
-  );
-  assertPresenceStep(workflow);
-  assertExactStep(workflow, resolveClientIdName, {
-    ...resolvedSecretStep(
+    resolveClientIdName,
+    resolvedSecretStep(
       resolveClientIdName,
       'broker-app-client-id',
       'broker_app.client_id',
     ),
-    if: `${clientIdPresence} == 'true'`,
-  });
+  );
   assertExactStep(
     workflow,
     resolveKeyName,
@@ -217,8 +187,6 @@ export const assertSecuritySensitiveSteps = (
 
   const syncIndex = stepIndex(workflow, syncName);
   const block = [
-    resolveIdName,
-    detectClientIdName,
     resolveClientIdName,
     resolveKeyName,
     writerMintName,
@@ -233,11 +201,6 @@ export const assertSecuritySensitiveSteps = (
     throw new Error('Broker credentials must form a contiguous pre-sync block');
   }
   const mintNames = [writerMintName, prMintName];
-  assertOnlyConsumers(workflow, resolveIdName, 'broker-app-id', mintNames);
-  assertOnlyConsumers(workflow, detectClientIdName, 'client-id-presence', [
-    resolveClientIdName,
-    ...mintNames,
-  ]);
   assertOnlyConsumers(
     workflow,
     resolveClientIdName,

@@ -32,7 +32,6 @@ import {
   CI_EXAMPLE_YAML,
   CI_SECRETS_YAML,
   ROOT_LINT_SCRIPTS,
-  TEMPLATE_CI_SECRETS_YAML,
   turboJson,
 } from './structure-test-support';
 
@@ -63,7 +62,10 @@ const SOPS_ARCHITECTURE_PIN =
 const SOPS_RELEASE_URL = /github\.com\/getsops\/sops\/releases\/download\//gu;
 const ACTIONLINT_ASSET_PATTERN =
   /actionlint_\$\{version\}_linux_\$\{arch\}\.tar\.gz/u;
+// actionlint 1.7.12 knows only the deprecated app-id of the v3 App token
+// action, so the gate ignores exactly these two false positives for it.
 const CLIENT_ID_LINT_IGNORE = String.raw`-ignore '^input "client-id" is not defined in action "actions/create-github-app-token@v3"\. '`;
+const APP_ID_LINT_IGNORE = String.raw`-ignore '^missing input "app-id" which is required by action "actions/create-github-app-token@v3"\. '`;
 const PINNED_STANDARDS_VERSION_PATTERN =
   /standards_version=(?<version>\d+\.\d+\.\d+)/u;
 const MINIMUM_STANDARDS_VERSION_PATTERN =
@@ -1177,11 +1179,7 @@ const initConsumer = (up: string): { consumer: string; result: RunResult } => {
   const consumer = mkTmp('sync-cons-');
   git(consumer, ['init', '--quiet']);
   const result = run(consumer, ['init', '--from', up, '--dir', consumer]);
-  write(
-    consumer,
-    'secrets/ci.yaml',
-    up === ACTUAL_UPSTREAM ? TEMPLATE_CI_SECRETS_YAML : CI_SECRETS_YAML,
-  );
+  write(consumer, 'secrets/ci.yaml', CI_SECRETS_YAML);
   return { consumer, result };
 };
 const sync = (
@@ -2775,11 +2773,14 @@ describe('canonical standards workflow settings credential', () => {
     expect(workflow).not.toContain('sops-secret');
     expect(workflow).not.toContain('secrets/ci.yaml');
     expect(workflow).not.toContain('SOPS_AGE_KEY');
-    // The pinned client-id lint ignore is the one place the gate may name the
-    // App token action.
-    expect(workflow.replace(CLIENT_ID_LINT_IGNORE, '')).not.toContain(
-      'create-github-app-token',
-    );
+    // The pinned App token lint ignores are the one place the gate may name
+    // the App token action.
+    expect(
+      [CLIENT_ID_LINT_IGNORE, APP_ID_LINT_IGNORE].reduce(
+        (remaining, ignore) => remaining.replace(ignore, ''),
+        workflow,
+      ),
+    ).not.toContain('create-github-app-token');
     // No silent degradation path: there is one credential, so a green result
     // never means "verified with something weaker than intended".
     expect(settingsRun).not.toContain('::warning::');
@@ -2811,9 +2812,12 @@ describe('canonical standards workflow settings credential', () => {
     expect(lintStep).not.toContain(' latest ');
   });
 
-  it('ignores only the known client-id false positive in workflow lint', () => {
+  it('ignores only the known App token false positives in workflow lint', () => {
     const lintStep = yamlStep(STANDARDS_WORKFLOW, 'Lint workflows');
-    expect(lintStep.match(/-ignore\b.*$/gmu)).toEqual([CLIENT_ID_LINT_IGNORE]);
+    expect(lintStep.match(/-ignore\b.*$/gmu)).toEqual([
+      `${CLIENT_ID_LINT_IGNORE} \\`,
+      APP_ID_LINT_IGNORE,
+    ]);
   });
 
   it('installs a version-pinned just for the canonical justfile gate tests', () => {
@@ -3829,7 +3833,6 @@ describe('standards sync workflow ordering', () => {
         ? step.name
         : null,
     );
-    const resolveAppIdIndex = stepNames.indexOf('Resolve broker App ID');
     const resolveClientIdIndex = stepNames.indexOf(
       'Resolve broker App client ID',
     );
@@ -3848,8 +3851,7 @@ describe('standards sync workflow ordering', () => {
         ? [index]
         : [],
     );
-    expect(resolveAppIdIndex).toBeGreaterThan(-1);
-    expect(resolveClientIdIndex).toBeGreaterThan(resolveAppIdIndex);
+    expect(resolveClientIdIndex).toBeGreaterThan(-1);
     expect(resolvePrivateKeyIndex).toBeGreaterThan(resolveClientIdIndex);
     expect(mintIndex).toBeGreaterThan(resolvePrivateKeyIndex);
     expect(syncIndex).toBeGreaterThan(mintIndex);
@@ -3859,7 +3861,6 @@ describe('standards sync workflow ordering', () => {
       'run: bun install --lockfile-only --ignore-scripts',
     );
     expect(localActionIndexes).toEqual([
-      resolveAppIdIndex,
       resolveClientIdIndex,
       resolvePrivateKeyIndex,
     ]);

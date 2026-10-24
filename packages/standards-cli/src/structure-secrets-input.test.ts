@@ -38,16 +38,16 @@ describe('CI secret structural identity', () => {
     write(
       dir,
       'secrets/ci.yaml',
-      `"ci.broker_app.app_id": ${FAKE_ENC}\n"ci.broker_app.private_key": ${FAKE_ENC}\n${CI_SOPS_METADATA_YAML}`,
+      `"ci.broker_app.client_id": ${FAKE_ENC}\n"ci.broker_app.private_key": ${FAKE_ENC}\n${CI_SOPS_METADATA_YAML}`,
     );
     write(
       dir,
       'secrets/ci.example.yaml',
-      '"ci.broker_app.app_id": placeholder\n"ci.broker_app.private_key": placeholder\n',
+      '"ci.broker_app.client_id": placeholder\n"ci.broker_app.private_key": placeholder\n',
     );
     const problems = await collectCiSecretsProblems(dir);
     expect(problems).toContain(
-      'secrets/ci.yaml: missing required key "ci.broker_app.app_id" — the synced Standards sync workflow mints a branch token with Contents write and Workflows write plus a pull request token with Contents read and Pull requests write from ci.broker_app; provision it with "bun standards creds add github --dest ci:ci.broker_app"',
+      'secrets/ci.yaml: missing required key "ci.broker_app.client_id" — the synced Standards sync workflow mints a branch token with Contents write and Workflows write plus a pull request token with Contents read and Pull requests write from ci.broker_app; provision it with "bun standards creds add github --dest ci:ci.broker_app"',
     );
     expect(problems).toHaveLength(REQUIRED_KEY_COUNT);
   });
@@ -58,7 +58,7 @@ describe('CI secret structural identity', () => {
     write(
       dir,
       'secrets/ci.yaml',
-      `ci:\n  "broker_app.private_key": ${leaked}\n  broker_app:\n    app_id: ${FAKE_ENC}\n    private_key: ${FAKE_ENC}\n${CI_SOPS_METADATA_YAML}`,
+      `ci:\n  "broker_app.private_key": ${leaked}\n  broker_app:\n    client_id: ${FAKE_ENC}\n    private_key: ${FAKE_ENC}\n${CI_SOPS_METADATA_YAML}`,
     );
     const problems = await collectCiSecretsProblems(dir);
     expect(problems).toContain(
@@ -150,7 +150,7 @@ describe('CI secret ciphertext and metadata shape', () => {
     );
   });
 
-  it.each(['app_id', 'private_key'])(
+  it.each(['client_id', 'private_key'])(
     'requires workflow key %s to be an encrypted string scalar',
     async (key) => {
       const dir = buildSecrets();

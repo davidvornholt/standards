@@ -299,14 +299,16 @@ jobs:
           curl -sSfLo "$archive" --retry 3 --retry-all-errors --connect-timeout 10 --max-time 60 "https://github.com/rhysd/actionlint/releases/download/v${version}/actionlint_${version}_linux_${arch}.tar.gz"
           echo "$sha  $archive" | sha256sum --check --quiet
           tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
-          # The v3 GitHub App token action accepts client-id, but actionlint
-          # 1.7.12 still lists only the deprecated app-id. The synced
-          # standards-sync.yml passes client-id, and consumers own their
-          # actionlint config, so the canonical gate carries this one ignore.
-          # Remove it once a pinned release knows the input:
+          # The v3 GitHub App token action takes client-id in place of the
+          # deprecated app-id, but actionlint 1.7.12 still lists only app-id,
+          # as a required input. The synced standards-sync.yml passes only
+          # client-id, and consumers own their actionlint config, so the
+          # canonical gate carries these two ignores for that one action.
+          # Remove them once a pinned release knows the input:
           # https://github.com/rhysd/actionlint/issues/669
           "$RUNNER_TEMP/actionlint" -color \
-            -ignore '^input "client-id" is not defined in action "actions/create-github-app-token@v3"\. '
+            -ignore '^input "client-id" is not defined in action "actions/create-github-app-token@v3"\. ' \
+            -ignore '^missing input "app-id" which is required by action "actions/create-github-app-token@v3"\. '
 
       # A fixed 127.0.0.1 database URL only works where the job shares the
       # service's published loopback — true on GitHub-hosted runners, false on

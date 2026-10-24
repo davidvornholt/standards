@@ -15,7 +15,7 @@ afterEach(cleanupStructureTmps);
 
 const SOPS_METADATA = /sops:[\s\S]*$/u;
 const REQUIRED_KEYS = [
-  ['app_id', 'ci.broker_app.app_id'],
+  ['client_id', 'ci.broker_app.client_id'],
   ['private_key', 'ci.broker_app.private_key'],
 ] as const;
 const NON_STRING_TYPES = ['bool', 'bytes', 'comment', 'float', 'int'] as const;
