@@ -1,4 +1,4 @@
 interface:
   display_name: "Standards sync"
-  short_description: "Sync and validate canonical repository standards"
-  default_prompt: "Use $standards-sync to update or validate this repository's canonical standards safely."
+  short_description: "Route changes to standards-managed files to their owner"
+  default_prompt: "Use $standards-sync to sync this repository with the standards, or to decide where a change to a standards-managed file belongs."

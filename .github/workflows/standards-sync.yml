@@ -352,6 +352,91 @@ jobs:
           git push --force-with-lease="refs/heads/$branch:$EXPECTED_SYNC_HEAD" --set-upstream origin "$branch"
           echo "branch=$branch" >> "$GITHUB_OUTPUT"
 
+      # The description becomes the squash commit body, so every run that
+      # changes the mirror regenerates it from the base and branch locks. It
+      # holds no broker token: the read-only job token reads the public upstream
+      # comparison, and a failed comparison drops only the commit list. Commit
+      # subjects and paths reach the file through jq and printf arguments only.
+      - name: Describe sync pull request
+        if: steps.mirror.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SYNC_BASE_REF: ${{ github.ref_name }}
+        run: |
+          set -o pipefail
+          git() { command git -c core.hooksPath=/dev/null -c core.fsmonitor=false "$@"; }
+          sha_pattern='^[0-9a-f]{40}$'
+          commit_limit=30
+          path_limit=50
+          upstream="$(jq -er '.upstream | strings | select(length > 0)' "$STANDARDS_SYNC_RUNTIME/sync-standards.json")"
+          repo=
+          if [[ "$upstream" =~ ^github:([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)$ ]]; then
+            repo=${BASH_REMATCH[1]}
+          fi
+          source=${repo:-$upstream}
+          current=$(jq -r '.sha // empty' sync-standards.lock)
+          if [[ ! "$current" =~ $sha_pattern ]]; then
+            echo "::error::sync-standards.lock does not record the synced upstream commit"
+            exit 1
+          fi
+          previous=$(git show "origin/$SYNC_BASE_REF:sync-standards.lock" 2>/dev/null | jq -r '.sha // empty' 2>/dev/null || true)
+          [[ "$previous" =~ $sha_pattern ]] || previous=
+          paths=$(git diff --name-only -z "origin/$SYNC_BASE_REF" HEAD | jq -Rs 'split("\u0000") | map(select(length > 0))')
+          mirrored=$(jq '[.[] | select(. != "sync-standards.lock")] | length' <<<"$paths")
+          compare_url=
+          commits=
+          if [ -n "$previous" ] && [ "$previous" != "$current" ] && [ -n "$repo" ]; then
+            compare_url="https://github.com/$repo/compare/$previous...$current"
+            # Upstream issue numbers would otherwise link to this repository.
+            if ! commits=$(gh api "repos/$repo/compare/$previous...$current" | jq -r --arg repo "$repo" --argjson limit "$commit_limit" '
+              ((.total_commits // (.commits | length)) - ([.commits[-$limit:][]] | length)) as $earlier
+              | (if $earlier > 0 then "- Earlier commits not listed here: \($earlier)." else empty end),
+                (.commits[-$limit:][] | "- " + (.commit.message | split("\n")[0] | gsub("(?<![\\w/])#(?<n>[0-9]+)"; "\($repo)#\(.n)")))'); then
+              echo "::warning::Could not list upstream commits. The description links to the comparison instead."
+              commits=
+            fi
+          fi
+          if [ -z "$previous" ]; then
+            before="\`sync-standards.lock\` on the base branch does not say which upstream commit this repository mirrors."
+          elif [ "$previous" = "$current" ]; then
+            before="\`sync-standards.lock\` already points to \`$source\` at \`${current:0:7}\`, but"
+            if [ "$mirrored" -eq 0 ]; then
+              before="$before its list of mirrored files is out of date."
+            else
+              before="$before some mirrored files here no longer match that commit."
+            fi
+          else
+            before="This repository mirrors \`$source\` at \`${previous:0:7}\`. Upstream is now at \`${current:0:7}\`."
+            if [ "$mirrored" -eq 0 ]; then
+              before="$before None of the new upstream changes affect the files mirrored here."
+            else
+              before="$before Some files mirrored here are out of date."
+            fi
+          fi
+          # shellcheck disable=SC2016 # Markdown backticks in printf formats are literal on purpose.
+          {
+            printf '**Before.** %s\n\n' "$before"
+            if [ "$mirrored" -eq 0 ]; then
+              printf '**Now.** `sync-standards.lock` points to `%s`. No mirrored files change.\n' "${current:0:7}"
+            else
+              printf '**Now.** The mirrored files match `%s` at `%s`.\n' "$source" "${current:0:7}"
+            fi
+            if [ -n "$compare_url" ]; then
+              printf '\n## Upstream changes\n\n[Compare `%s...%s`](%s)\n' "${previous:0:7}" "${current:0:7}" "$compare_url"
+              if [ -n "$commits" ]; then
+                printf '\n%s\n' "$commits"
+              fi
+            fi
+            if [ "$mirrored" -gt 0 ]; then
+              printf '\n## Changed files\n\n'
+              jq -r --argjson limit "$path_limit" '(.[:$limit][] | "- `\(.)`"), (if length > $limit then "- Files not listed here: \(length - $limit)." else empty end)' <<<"$paths"
+            fi
+            if jq -e 'any(.[]; . == ".github/settings.json")' <<<"$paths" > /dev/null; then
+              printf '\n## Before merging\n\nThis sync changes `.github/settings.json`. The `check` job fails until GitHub uses the new settings. To apply them, run `bun standards github --apply` on this branch while `gh` is logged in as a repository admin. Then re-run the `check` job.\n'
+            fi
+            printf '\n## Verification\n\n### Completed checks\n\n- The [`Standards sync` run](%s) that wrote this description ran no checks. The required checks on this pull request test the synced files. Each sync run that changes the mirrored files rewrites this description.\n' "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          } > "$RUNNER_TEMP/standards-sync-pr-body.md"
+
       # The workflow owns the `standards-sync/` branch namespace and keeps one
       # open sync PR, from `standards-sync/update`. A sync mirrors the complete
       # canonical state, so that PR supersedes every other open same-repository
@@ -373,12 +458,13 @@ jobs:
           if [ "$MIRROR_CHANGED" = true ]; then
             current=$(jq -r '[.[] | select(.headRefName == "standards-sync/update")][0].number // empty' <<<"$open")
             if [ -n "$current" ]; then
+              gh pr edit "$current" --body-file "$RUNNER_TEMP/standards-sync-pr-body.md"
               echo "Updated existing standards sync PR #$current"
             else
               url=$(gh pr create \
                 --head "${{ steps.sync-branch.outputs.branch }}" \
                 --title "chore: sync standards from upstream" \
-                --body "Automated sync from davidvornholt/standards. These are canonical (read-only) files. Before merging, check out this sync branch; remove \`allow_merge_commit\`, \`allow_rebase_merge\`, and \`allow_squash_merge\` from \`.github/settings.local.json\` if that repo-owned seam still declares them; run \`bun standards github --apply\` with admin auth; push any seam cleanup; and wait for or rerun the GitHub settings gate. Merge only after every required check passes. Generated by the \`Standards sync\` workflow.")
+                --body-file "$RUNNER_TEMP/standards-sync-pr-body.md")
               current=${url##*/}
             fi
             comment="Superseded by #$current, the current standards sync pull request."

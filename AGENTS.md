@@ -2,49 +2,46 @@
 
 ## Quality gates
 
-Do not weaken quality gates to make a change pass. Explain inline suppressions. Use configuration exceptions only where a rule cannot apply, scoped to the affected path and rule.
+Don't weaken a quality gate to make a change pass. Explain every inline suppression where it appears. Use a configuration exception only where a rule can't apply, scoped to the affected path and rule.
 
 ## Change policy
 
-- Do not build backwards compatibility by default. Migrate every call site and delete the old shape in the same change. Do not add deprecated aliases, versioned copies, or compatibility-only optional parameters.
-- Ask before choosing product intent or another costly, durable direction. Assume no background knowledge or familiarity with the code; explain what is at stake, where each option leads, and recommend one before presenting technical evidence.
+Don't build backwards compatibility by default. Code in these repositories has no consumers outside them, so migrate every call site and delete the old shape in the same change.
+
+Ask before choosing product intent or another costly, durable direction. Write the question for someone with no background who hasn't read the code: explain what's at stake and where each option leads, and recommend one before presenting technical evidence.
 
 ## Package management
 
-- Use Bun only, at the exact version declared by the root `packageManager`.
-- Workspaces using Bun runtime or `bun:test` types must declare `@types/bun`.
+Use Bun only, at the exact version declared by the root `packageManager`. Workspaces that use the Bun runtime or `bun:test` types declare `@types/bun` themselves.
 
 ## Architecture
 
-- App code lives in `apps/*`. Business logic belongs in `src/features/<domain>` and app-wide infrastructure in `src/shared`. Keep single-app code in the app unless it has an intentional shared contract.
-- Shared code lives in `packages/*` and defaults to `src/<capability>.ts(x)` plus colocated tests, with deeper folders only when the capability needs them.
+- App code lives in `apps/*`. Business logic belongs in `src/features/<domain>` and app-wide infrastructure in `src/shared`. Code used by one app stays in that app unless it has an intentional shared contract.
+- Shared code lives in `packages/*`, by default as `src/<capability>.ts(x)` with colocated tests, and with deeper folders only when the capability needs them.
 - Package names use the project alias `@<actual-project-name>/<package-name>`. Canonical packages use `@davidvornholt` and change in the standards repository.
-- Entrypoints route, parse initial inputs, wire Effect layers, and bridge to runtime or UI.
-- Dependency flow is `entrypoint -> features -> shared -> packages`. Features do not import sibling features, and cross-package imports use package aliases rather than relative paths.
+- Entrypoints route, parse initial inputs, wire Effect layers, and bridge to the runtime or UI.
+- Dependencies flow `entrypoint -> features -> shared -> packages`. Features don't import sibling features, and cross-package imports use package aliases rather than relative paths.
 - A cohesive boundary file may exceed the 400-line lint limit through a scoped `biome.jsonc` override and an entry in `docs/quality/no-excessive-lines-per-file-exceptions.md`.
 
 ## Workspace scripts
 
-- Operational scripts belong to the owning workspace's `package.json`. Keep root scripts minimal: the quality gates, including `lint` and `lint:fix`, plus narrowly useful filtered Turbo convenience aliases.
-- Biome lints the whole repository once from the root, so workspaces do not declare lint scripts.
-- Canonical repo-spanning workflows and convenience recipes live in the root `justfile`; project-specific recipes live in `local.just`.
+Operational scripts belong in the owning workspace's `package.json`. Root scripts stay minimal: the quality gates, including `lint` and `lint:fix`, plus a few filtered Turbo aliases that are actually useful. Biome lints the whole repository once from the root, so workspaces don't declare lint scripts. Canonical repo-spanning workflows and convenience recipes live in the root `justfile`, and project-specific recipes in `local.just`.
 
 ## Effect standards
 
-- Use Effect extensively where it makes code more robust. Keep simple synchronous logic and UI components plain, integrating Effect at boundaries.
-- Service contracts expose typed errors and requirements. Represent expected failures with `Schema.TaggedError`, a stable `_tag`, and an actionable `message` instead of throwing.
-- In an Effect v4 workspace, follow the agent guide that ships with the package at `node_modules/effect/AGENTS.md` for idioms this section does not cover.
-- Workspace-wide exceptions require an architectural reason in `AGENTS.local.md`; keep each workspace consistent.
+Use Effect extensively wherever it makes sense, because it helps agents write more robust code. In an Effect v4 workspace, follow the agent guide shipped at `node_modules/effect/AGENTS.md`, because v4's API differs from the v3 most models learned.
 
 ## Writing style
 
-- Write plainly and directly. Avoid mannered prose, decorative metaphors, and stock phrases. Prefer literal wording and sentences that are easy to follow.
-- Use sentence case for reader-facing text — UI copy, labels, command-style actions, Markdown headings — preserving proper nouns, acronyms, filenames, package names, and domain terms.
-- Do not hard-wrap Markdown prose; keep each paragraph or list item on one logical line.
+Write plainly and directly, in literal wording and complete sentences that are easy to follow. Avoid mannered prose and stock phrases, and don't compress sentences into fragments to save words.
 
-## Documentation
+Use sentence case for reader-facing text, including Markdown headings.
 
-Agents are the main readers of documentation, skills, and instructions, and every word costs tokens on each read. Write only what code, configuration, command help, error messages, types, and tests cannot carry: operational procedures, external constraints, and reasons for non-obvious decisions. State each fact once and link to it. Keep change history, implementation summaries, study and test-run logs, and status notes in PRs or issues. When a change makes documentation stale or derivable, cut it in the same change. Read only documentation relevant to the current task.
+Don't hard-wrap Markdown prose.
+
+## Documentation and instructions
+
+Agents are the main readers of documentation, skills, and instructions, and every word costs tokens on each read. Write only what a capable model can't learn from the code or infer on its own, give the reason for a rule that isn't obvious, and state each fact once. Keep history and status in PRs and issues, and cut documentation in the same change that makes it stale.
 
 ## Project-specific rules
 

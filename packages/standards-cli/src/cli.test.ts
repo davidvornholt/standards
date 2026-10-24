@@ -3497,7 +3497,7 @@ describe('canonical standards workflow Nix steps', () => {
     expect(vmSteps).toEqual([
       {
         name: 'Run app-release VM test',
-        if: "matrix.system == 'x86_64-linux'",
+        if: "matrix.system == 'x86_64-linux' && steps.vm-test.outputs.selected != 'false'",
         run: 'nix build ".#checks.x86_64-linux.app-release-vm" -L',
       },
     ]);
@@ -3864,20 +3864,6 @@ describe('standards sync workflow ordering', () => {
       resolvePrivateKeyIndex,
     ]);
     expect(localActionIndexes.every((index) => index < syncIndex)).toBe(true);
-  });
-
-  it('orders generated migration guidance before merge', () => {
-    const openPullRequest = workflowRunScript('Reconcile sync pull requests');
-    const applyIndex = openPullRequest.indexOf('bun standards github --apply');
-    const mergeIndex = openPullRequest.indexOf(
-      'Merge only after every required check passes',
-    );
-
-    expect(openPullRequest).toContain('allow_merge_commit');
-    expect(openPullRequest).toContain('allow_rebase_merge');
-    expect(openPullRequest).toContain('allow_squash_merge');
-    expect(applyIndex).toBeGreaterThan(-1);
-    expect(mergeIndex).toBeGreaterThan(applyIndex);
   });
 });
 

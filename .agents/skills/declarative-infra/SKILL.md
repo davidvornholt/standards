@@ -7,23 +7,30 @@ description: Use when changing NixOS, OpenTofu, cloud resources, infrastructure 
 
 ## Ownership and mutation
 
-Infrastructure has one home per host: the serving repository's `infra/` directory or a dedicated infrastructure repository. Make virtual host, database, DNS, bucket, and deployment changes in that owner.
+Each host's infrastructure has exactly one home: the `infra/` directory of the repository it serves, or a dedicated infrastructure repository. Everything for that host changes in that home, even when the work starts in another repository.
 
-Apply live changes only through reviewed main-branch automation. Direct `deploy-rs`, `tofu apply`, or `nixos-rebuild switch` is an emergency action and must be reported as such.
+Live state changes only through the home's reviewed main-branch automation, so production always matches a reviewed commit. Running `deploy-rs`, `tofu apply`, or `nixos-rebuild switch` by hand is an emergency measure. If you do it, say so in your report.
 
 ## Changing existing infrastructure
 
-- Restructuring tofu resources uses `moved` blocks; adopting existing resources uses `import` blocks; both stay in the repo as history. Any migration or refactor must show a no-op plan before merging.
-- Removing a data-bearing resource is a deliberate two-step: lift `prevent_destroy`, then destroy. Never make deletion a plan side effect.
+Keep OpenTofu `moved` and `import` blocks in the repository after they apply, as the record of what happened. A migration or refactor is ready to merge only when its plan is a no-op.
+
+Data-bearing resources carry `prevent_destroy`, so deleting one takes two changes: the first lifts the guard, the second destroys the resource.
 
 ## Validation
 
-Before pushing, run `nix flake check`, build the host toplevel, run `tofu fmt -check` and `tofu init -backend=false && tofu validate`, and obtain a plan where credentials exist. Validation never applies changes.
+Before pushing, run `nix flake check`, build each host's toplevel, run `tofu fmt -check`, and run `tofu init -backend=false && tofu validate`. Where credentials are available, also produce a plan.
 
 ## References
 
-- For a new infrastructure home or changes to host layout, Podman/Caddy, PostgreSQL, Nix caching, or deployment behavior, read [Bootstrapping a host repo](references/bootstrap.md).
-- For SOPS, development environments, CI secrets, or provider credentials, read [Secrets bootstrap](references/secrets.md).
-- For preview environments, read [Pull request previews](references/pr-previews.md). They are the default for web-host adoption; omitting them requires a recorded decision in the host repository.
-- For releasing, rolling back, or hosting a first-party app's container images, read [App releases](references/app-release.md).
-- For third-party container updates whose publisher is outside the infrastructure owner's control, read [Vendor image updates](references/vendor-images.md).
+| Change | Reference |
+| --- | --- |
+| A new infrastructure home, host layout, PostgreSQL, Nix caching, private registry access, or host deployment | [Bootstrapping a host repo](references/bootstrap.md) |
+| SOPS identities and recipients, CI secrets, or brokered provider credentials | [Secrets bootstrap](references/secrets.md) |
+| Preview environments | [Pull request previews](references/pr-previews.md) |
+| Releasing, rolling back, or hosting a first-party app's container images | [App releases](references/app-release.md) |
+| Third-party container updates whose publisher the infrastructure owner doesn't control | [Vendor image updates](references/vendor-images.md) |
+
+Web hosts get pull request previews by default. Leaving them out takes a decision recorded in the host repository.
+
+Development environment layers and where each value is documented belong to the secrets-and-config skill.

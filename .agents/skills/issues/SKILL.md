@@ -5,18 +5,16 @@ description: Use when opening an issue or changing its title or description. Pro
 
 # Issues
 
-Use a plain-language title that names the problem or desired outcome.
-
-Open with exactly:
+Whoever decides on an issue or picks it up, often an agent, reads it later without your context. Give it a plain-language title that names the problem or the desired outcome, and open the description with exactly these two paragraphs:
 
 ```md
-**Problem.** Describe the current behavior or missing ability, who or what it affects, and its concrete cost or risk.
+**Problem.** The current behavior or missing ability, who or what it affects, and its concrete cost or risk.
 
-**Outcome.** State the observable result or decision that closes the issue without prescribing an implementation unless one is already decided.
+**Outcome.** The observable result or decision that closes the issue.
 ```
 
-## Evidence
+The outcome says when the issue is done, not how. Name an implementation only when one is already decided, because whoever picks up the issue will treat a suggested approach as settled.
 
-Support the problem with concrete observations, reproduction steps, measurements, code references, or sources. Do not repeat the opening.
+Put the support for the problem under `## Evidence`: observations, reproduction steps, measurements, code references, or sources, without restating the opening.
 
-Add `## Decision` only when work cannot start without a choice. Follow `Change policy` in `AGENTS.md`.
+Add `## Decision` only when work can't start until someone makes a choice.

@@ -1,4 +1,4 @@
 interface:
   display_name: "Declarative Infrastructure"
-  short_description: "Operating contract for NixOS/OpenTofu infrastructure"
+  short_description: "Change NixOS and OpenTofu infrastructure through its owning repository"
   default_prompt: "Use $declarative-infra when touching infrastructure, even if its home is another repo."

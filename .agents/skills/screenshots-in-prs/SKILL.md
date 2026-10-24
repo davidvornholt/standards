@@ -5,10 +5,10 @@ description: Use when opening or editing a pull request for a change to rendered
 
 # Screenshots in PRs
 
-- If `config/screenshots.yaml` is absent, state in the PR that screenshot publishing is not enabled and continue without screenshots. Do not use another host.
-- Capture the states needed to review the change. Include responsive variants when they clarify it.
-- For every change to an existing UI's visible presentation, capture matched `Before` and `After` screenshots. Render `Before` from the PR's base revision and `After` from its head with the same viewport, route, demo data, and UI state, then present the pair side by side. Omit `Before` only for wholly new UI or when a still image cannot show the changed behavior, and state why in `## Screenshots`.
-- Default to a 1280x800 viewport. Use descriptive kebab-case PNG filenames; the filename becomes the alt text.
-- Published URLs are public and permanent. Use demo data and exclude secrets and personal data.
-- From the repository root, run `bun standards screenshots publish <files...>`.
-- Put the printed Markdown in a `## Screenshots` section with short captions. Use a two-column table when comparing images side by side helps the review.
+Publish screenshots with `bun standards screenshots publish <files...>` from the repository root. Without `config/screenshots.yaml`, publishing isn't enabled: say so in the pull request and continue without screenshots. Don't fall back to another host.
+
+Published images are public to anyone with the link and kept indefinitely, so use demo data and keep secrets and personal data out of frame.
+
+Capture the states a reviewer needs to judge the change, at a 1280x800 viewport by default, with responsive variants when they help. When the change alters how an existing UI looks, capture a matched pair. Render `Before` from the base revision and `After` from the head, with the same viewport, route, demo data, and UI state. Leave out `Before` only for wholly new UI or when a still image can't show the behavior, and say why in `## Screenshots`.
+
+Give each file a descriptive kebab-case PNG name, which the command turns into the alt text. Put the Markdown it prints in a `## Screenshots` section with a short caption per image, and show each pair side by side, for example in a two-column table.
