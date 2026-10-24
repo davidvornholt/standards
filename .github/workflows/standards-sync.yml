@@ -285,12 +285,6 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # The branch-writer and PR-opening tokens are short-lived installation
-      # tokens for only this repository. Their App credentials come from
-      # ci.broker_app in the SOPS-encrypted secrets/ci.yaml, resolved through
-      # the trusted pre-sync action. A missing credential, an unapproved App
-      # permission update, or failed token minting stops the job.
-
       # This workflow deliberately runs no inline `bun run check`: the synced
       # result is validated by the required Standards gate on the PR it opens,
       # like any other change. An inline gate would duplicate the gate's
