@@ -111,17 +111,12 @@ describe('Standards sync broker documentation contract', () => {
     const templateExample = readFileSync(TEMPLATE_EXAMPLE_PATH, 'utf8');
     const structureSecrets = readFileSync(STRUCTURE_SECRETS_PATH, 'utf8');
 
-    for (const document of [adoptionGuide, secretsReference]) {
+    for (const document of [adoptionGuide, syncGithubReference]) {
       expect(document).toContain(BROKER_DESTINATION);
       expect(document).toContain(PROVISION_BROKER_COMMAND);
     }
 
-    for (const document of [
-      secretsReference,
-      sourceExample,
-      templateExample,
-      structureSecrets,
-    ]) {
+    for (const document of [sourceExample, templateExample, structureSecrets]) {
       expect(document).toContain(BROKER_DESTINATION);
       expect(document).toContain(WRITER_PERMISSIONS);
       expect(document).toContain(PR_PERMISSIONS);
