@@ -43,7 +43,7 @@ const cleanupReplacement = async (
   const cleanup = await deleteAccountToken(accountId, token, replacementId);
   return cleanup.ok
     ? `${context}; deleted replacement ${replacementId} and preserved old token ${oldId}`
-    : `${context}; cleanup of replacement ${replacementId} also failed: ${cleanup.problem}; old token ${oldId} remains active`;
+    : `${context}; cleanup of replacement ${replacementId} also failed: ${cleanup.problem}; old token ${oldId} was not revoked`;
 };
 
 const inspectRenewDestinations = async (
@@ -124,7 +124,7 @@ const renewWhileLocked = async (
   if (unverifiable.length > 0) {
     const detail = unverifiable.join('; ');
     return renewalResult(
-      `${action.name}: ${written.ok ? detail : `${written.problem}; ${detail}`}; account ${accountId} replacement ${replacementId} and old token ${action.tokenId} remain active because the stored value is unverifiable`,
+      `${action.name}: ${written.ok ? detail : `${written.problem}; ${detail}`}; account ${accountId} replacement ${replacementId} remains active and old token ${action.tokenId} was not revoked because the stored value is unverifiable`,
       refreshEvidence(action, 'unsafe'),
     );
   }

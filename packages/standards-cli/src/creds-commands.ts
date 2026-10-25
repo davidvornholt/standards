@@ -22,7 +22,7 @@ Commands:
   add cloudflare    Mint a scoped, expiring account token and write it into a SOPS target
   add github        Select the repository owner's App, verify its installation, and write it into SOPS
   plan              Reconcile SOPS keys against brokered tokens: show revocations, rotations, and the live account tokens nothing reconciles here
-  apply             Execute the plan: revoke brokered tokens whose SOPS key is gone, roll expiring ones into SOPS
+  apply             Execute the plan: revoke brokered tokens whose SOPS key is gone, roll expiring or expired ones into SOPS
   revoke            Delete one Cloudflare token named by --token-id; bootstrap credentials and brokered tokens are refused
   permissions       List Cloudflare permission group names for --permissions
   status            Show the broker store location and configured providers

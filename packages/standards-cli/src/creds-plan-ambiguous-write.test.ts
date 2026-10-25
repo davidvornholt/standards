@@ -140,7 +140,7 @@ describe('creds renewal ambiguous SOPS outcomes', () => {
     expect(deletes).toEqual(['old']);
   });
 
-  it('leaves both tokens active when post-write verification fails', async () => {
+  it('keeps both tokens when post-write verification fails', async () => {
     const consumer = initialize(
       'if [ "$1" = "edit" ]; then eval "$SOPS_EDITOR \\"$2\\""; exit $?; fi\nexit 1',
     );
@@ -149,7 +149,7 @@ describe('creds renewal ambiguous SOPS outcomes', () => {
     expect(deletes).toEqual([]);
     expect(error).toHaveBeenCalledWith(
       expect.stringContaining(
-        `account ${ACCOUNT} replacement replacement and old token old`,
+        `account ${ACCOUNT} replacement replacement remains active and old token old was not revoked`,
       ),
     );
   });

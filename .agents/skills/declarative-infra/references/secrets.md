@@ -41,7 +41,7 @@ An R2 S3 pair (`--s3`) is used against `https://<account_id>.r2.cloudflarestorag
 
 ### Reconciliation
 
-- `creds apply` renews expiring tokens and retires each brokered token whose SOPS key you deleted (both derived keys for an S3 pair).
+- `creds apply` renews expiring and expired tokens and retires each brokered token whose SOPS key you deleted (both derived keys for an S3 pair).
 - The unmanaged-token and other-repository reports never block. The unmanaged report is an account-wide inventory, so unrelated tokens repeat in every repository and run, and a nonempty report is not a failure. Still assess unfamiliar entries. A hand-made credential you replaced stays live until you run the `revoke` command its row prints.
 - `creds revoke` is only for tokens that reconciliation does not retire, such as same-name duplicates left by an interrupted renewal, or a token brokered to a repository that was renamed, transferred, or deleted. Its refusals print the remedy.
 
