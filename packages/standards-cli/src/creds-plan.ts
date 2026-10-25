@@ -1,12 +1,3 @@
-// Pure reconciliation between a repository's SOPS key structure and the
-// Cloudflare tokens the broker minted for it (matched by the deterministic
-// naming scheme). A brokered token whose secret key vanished from SOPS is
-// revoked; one nearing expiry, or already expired, is replaced while copying
-// its live policy and lifetime. Secret keys without a brokered token are simply unmanaged — most
-// secrets are — and are never touched. Tokens the broker did not mint, and
-// tokens it minted for another repository, are reported
-// (creds-plan-unmanaged.ts) but never mutated. Execution lives in
-// creds-plan-run.ts.
 // Live policy is preserved, not compared with a separate desired-policy manifest.
 // Adding policy-drift enforcement would require a new source of truth.
 
