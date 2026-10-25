@@ -132,6 +132,65 @@ describe('creds plan safeguards', () => {
     expect(plan.findings).toEqual([expect.stringContaining('status disabled')]);
   });
 
+  it('renews an expired token with copied policies and its original lifetime', () => {
+    const expired = {
+      ...token(`standards/${REPO}/ci/ci.dns_token`, '2026-07-01T00:00:00Z'),
+      status: 'expired',
+    };
+    const plan = computeCredsPlan({
+      repo: REPO,
+      keysByTarget: keys({ ci: ['ci.dns_token'] }),
+      tokens: [{ accountId: 'a', token: expired }],
+      now: NOW,
+    });
+    expect(plan.findings).toEqual([]);
+    expect(plan.actions).toEqual([
+      expect.objectContaining({
+        kind: 'renew',
+        tokenId: expired.id,
+        target: 'ci',
+        key: 'ci.dns_token',
+        policies: POLICIES,
+        replacementExpiresOn: '2026-10-20T00:00:00Z',
+        reason: 'expired 2026-07-01T00:00:00Z',
+      }),
+    ]);
+  });
+
+  it('revokes an expired token whose secret key vanished from SOPS', () => {
+    const expired = {
+      ...token(`standards/${REPO}/ci/ci.dns_token`, '2026-07-01T00:00:00Z'),
+      status: 'expired',
+    };
+    const plan = computeCredsPlan({
+      repo: REPO,
+      keysByTarget: keys({ ci: ['ci.other_key'] }),
+      tokens: [{ accountId: 'a', token: expired }],
+      now: NOW,
+    });
+    expect(plan.actions).toEqual([
+      expect.objectContaining({ kind: 'revoke', tokenId: expired.id }),
+    ]);
+  });
+
+  it('surfaces an expired token without an expiry date instead of counting it healthy', () => {
+    const expired = {
+      ...token(`standards/${REPO}/ci/ci.dns_token`, null),
+      status: 'expired',
+    };
+    const plan = computeCredsPlan({
+      repo: REPO,
+      keysByTarget: keys({ ci: ['ci.dns_token'] }),
+      tokens: [{ accountId: 'a', token: expired }],
+      now: NOW,
+    });
+    expect(plan.actions).toEqual([]);
+    expect(plan.healthy).toBe(0);
+    expect(plan.findings).toEqual([
+      expect.stringContaining('no expires_on value'),
+    ]);
+  });
+
   it('fails closed on duplicate destinations across accounts', () => {
     const name = `standards/${REPO}/ci/ci.dns_token`;
     const plan = computeCredsPlan({

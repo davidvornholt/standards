@@ -1,8 +1,8 @@
 // Pure reconciliation between a repository's SOPS key structure and the
 // Cloudflare tokens the broker minted for it (matched by the deterministic
 // naming scheme). A brokered token whose secret key vanished from SOPS is
-// revoked; one nearing expiry is replaced while copying its live policy and
-// lifetime. Secret keys without a brokered token are simply unmanaged — most
+// revoked; one nearing expiry, or already expired, is replaced while copying
+// its live policy and lifetime. Secret keys without a brokered token are simply unmanaged — most
 // secrets are — and are never touched. Tokens the broker did not mint, and
 // tokens it minted for another repository, are reported
 // (creds-plan-unmanaged.ts) but never mutated. Execution lives in
@@ -45,7 +45,11 @@ const dispositionOf = (
 ): Disposition => {
   const { accountId, token, ref } = entry;
   const base = { accountId, tokenId: token.id, name: token.name };
-  if (token.status !== 'active') {
+  // An expired token grants nothing, so replacing it is as safe as renewing
+  // one that is about to expire. Any other status, such as disabled, may be
+  // deliberate and stays a finding.
+  const expired = token.status === 'expired';
+  if (!(token.status === 'active' || expired)) {
     return {
       kind: 'finding',
       finding: `${token.name} (${accountId}/${token.id}) has status ${token.status}; it is not healthy and will not be mutated automatically`,
@@ -78,7 +82,12 @@ const dispositionOf = (
     };
   }
   if (token.expiresOn === null) {
-    return { kind: 'healthy' };
+    return expired
+      ? {
+          kind: 'finding',
+          finding: `${token.name} has status expired but no expires_on value`,
+        }
+      : { kind: 'healthy' };
   }
   const expiry = Date.parse(token.expiresOn);
   if (!Number.isFinite(expiry)) {
@@ -116,7 +125,7 @@ const dispositionOf = (
       replacementExpiresOn: cloudflareExpiresOn(
         input.now.getTime() + expiry - issued,
       ),
-      reason: `expires ${token.expiresOn}`,
+      reason: `${expired ? 'expired' : 'expires'} ${token.expiresOn}`,
     },
   };
 };
