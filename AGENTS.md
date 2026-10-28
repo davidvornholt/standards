@@ -4,6 +4,10 @@
 
 Don't weaken a quality gate to make a change pass. Explain every inline suppression where it appears. Use a configuration exception only where a rule can't apply, scoped to the affected path and rule.
 
+## Tests
+
+The gate runs every workspace's tests at the same time as type checks, builds, and browser suites, so each test gets a small and varying share of the runner, and starting a process costs many times what it does on an idle machine. Test a program's arguments, help, output, and errors by calling its entry function in-process. Spawn a process only for behavior that needs one, such as exit status, signal handling, or a smoke test that the executable starts. A command-line entry point imports its heavy modules, such as database clients, only after its arguments parse. When a test times out in the gate, make it do less work rather than raising its timeout or retrying it.
+
 ## Change policy
 
 Don't build backwards compatibility by default. Code in these repositories has no consumers outside them, so migrate every call site and delete the old shape in the same change.
