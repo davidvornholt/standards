@@ -545,11 +545,6 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/google-chrome.list /etc/apt/sources.list.d/google-chrome.sources
           "$playwright" install --with-deps chromium
 
-      # Gate tasks on CodeBuild sometimes stall together for over a minute,
-      # and the log alone can't tell memory, IO, CPU, or a paused machine
-      # apart. This samples the machine in the background until the summary
-      # after the Turbo table stops it. A file this kernel or container
-      # doesn't provide leaves its column empty.
       - name: Start the runner resource probe
         run: |
           set -euo pipefail
@@ -644,8 +639,7 @@ jobs:
       # A machine that stops altogether shows as a long gap between samples,
       # one short of memory as memory pressure and major page faults, and a
       # crowded host as CPU steal. Pressure is the share of an interval in
-      # which some or all tasks waited for the resource. The raw samples
-      # stay in the log for a closer look.
+      # which some or all tasks waited for the resource.
       - name: Summarize runner resources
         if: "!cancelled()"
         run: |

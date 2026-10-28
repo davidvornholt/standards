@@ -1,7 +1,3 @@
-// The quality job samples the runner's memory, CPU, and pressure while the
-// gate runs, then summarizes the samples. These tests run both workflow
-// scripts against fixture /proc and cgroup files and fixture samples.
-
 import { afterEach, describe, expect, it } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -72,7 +68,6 @@ const qualitySteps = (): ReadonlyArray<QualityStep> =>
     }
   ).jobs.quality.steps;
 
-// The tests sample fixture files forty times as often as CI does.
 const startScript = (fixture: string): string =>
   yamlRunScript(WORKFLOW, START_STEP)
     .replace('interval=2', 'interval=0.05')
