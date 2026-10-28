@@ -557,8 +557,8 @@ jobs:
           proc=/proc
           cgroup=/sys/fs/cgroup
           samples="$RUNNER_TEMP/runner-resources.tsv"
-          files=("$proc/stat" "$proc/meminfo" "$proc/vmstat")
-          for file in "$cgroup/memory.current" "$cgroup/memory.max" "$proc/pressure/cpu" "$proc/pressure/memory" "$proc/pressure/io"; do
+          files=()
+          for file in "$proc/stat" "$proc/meminfo" "$proc/vmstat" "$cgroup/memory.current" "$cgroup/memory.max" "$proc/pressure/cpu" "$proc/pressure/memory" "$proc/pressure/io"; do
             if cat -- "$file" > /dev/null 2>&1; then
               files+=("$file")
             fi

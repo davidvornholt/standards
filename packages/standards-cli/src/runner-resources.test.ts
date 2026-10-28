@@ -3,7 +3,7 @@
 // scripts against fixture /proc and cgroup files and fixture samples.
 
 import { afterEach, describe, expect, it } from 'bun:test';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
 import { parse } from 'yaml';
@@ -167,24 +167,49 @@ describe('runner resource probe', () => {
     }
   });
 
-  it('leaves the columns of missing sources empty', async () => {
-    const fixture = mkTmp('runner-resources-missing-');
-    writeProc(fixture, false);
-    write(fixture, 'cgroup/memory.max', 'max\n');
+  it.each([
+    ['', '10240000,16384000,,,621,450,50,8,,,,,,42,3'],
+    ['stat', '10240000,16384000,,,,,,,,,,,,42,3'],
+    ['meminfo', ',,,,621,450,50,8,,,,,,42,3'],
+    ['vmstat', '10240000,16384000,,,621,450,50,8,,,,,,,'],
+  ])(
+    'leaves the columns of missing sources empty: %s',
+    async (missing, values) => {
+      const fixture = mkTmp('runner-resources-missing-');
+      writeProc(fixture, false);
+      write(fixture, 'cgroup/memory.max', 'max\n');
+      if (missing) {
+        rmSync(join(fixture, 'proc', missing));
+      }
 
-    expect(runStep(fixture, startScript(fixture)).status).toBe(0);
-    await waitForSamples(fixture, 2);
-    const result = runStep(fixture);
+      expect(runStep(fixture, startScript(fixture)).status).toBe(0);
+      let result: RunResult;
+      try {
+        await waitForSamples(fixture, 2);
+      } finally {
+        result = runStep(fixture);
+      }
 
-    expect(result.status).toBe(0);
-    expect(sampleRows(fixture)[0]?.slice(1).join(',')).toBe(
-      '10240000,16384000,,,621,450,50,8,,,,,,42,3',
-    );
-    expect(result.stdout).toContain('| Memory pressure, full | n/a | | n/a |');
-    expect(result.stdout).toContain(
-      '| Cgroup memory with page cache | n/a | | n/a |',
-    );
-  });
+      expect(result.status).toBe(0);
+      expect(sampleRows(fixture)[0]?.slice(1).join(',')).toBe(values);
+      expect(result.stdout).toContain(
+        missing === 'meminfo'
+          ? '| Memory in use | n/a | |  |'
+          : '| Memory in use | 0.0 GiB | 0 s | of 0.0 GiB |',
+      );
+      expect(result.stdout).toContain(
+        missing === 'vmstat'
+          ? '| Major page faults | n/a | | n/a |'
+          : '| Major page faults | 0/s | 0 s | 0 |',
+      );
+      expect(result.stdout).toContain(
+        '| Memory pressure, full | n/a | | n/a |',
+      );
+      expect(result.stdout).toContain(
+        '| Cgroup memory with page cache | n/a | | n/a |',
+      );
+    },
+  );
 });
 
 describe('runner resource summary', () => {
