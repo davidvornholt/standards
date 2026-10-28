@@ -545,6 +545,63 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/google-chrome.list /etc/apt/sources.list.d/google-chrome.sources
           "$playwright" install --with-deps chromium
 
+      # Gate tasks on CodeBuild sometimes stall together for over a minute,
+      # and the log alone can't tell memory, IO, CPU, or a paused machine
+      # apart. This samples the machine in the background until the summary
+      # after the Turbo table stops it. A file this kernel or container
+      # doesn't provide leaves its column empty.
+      - name: Start the runner resource probe
+        run: |
+          set -euo pipefail
+          interval=2
+          proc=/proc
+          cgroup=/sys/fs/cgroup
+          samples="$RUNNER_TEMP/runner-resources.tsv"
+          files=("$proc/stat" "$proc/meminfo" "$proc/vmstat")
+          for file in "$cgroup/memory.current" "$cgroup/memory.max" "$proc/pressure/cpu" "$proc/pressure/memory" "$proc/pressure/io"; do
+            if cat -- "$file" > /dev/null 2>&1; then
+              files+=("$file")
+            fi
+          done
+          # Pressure totals are microseconds in which some or all tasks waited.
+          # Numbers go through %.0f because awk prints large integers in
+          # exponent notation otherwise.
+          # shellcheck disable=SC2016 # The field references belong to the awk program.
+          sample='
+            function number(value) { return value == "" ? "" : sprintf("%.0f", value) }
+            function waited(line) { sub(/.*total=/, "", line); return line }
+            FILENAME == proc "/stat" && $1 == "cpu" {
+              for (field = 2; field <= 9; field++) cpu_total += $field
+              cpu_idle = $5 + $6; cpu_iowait = $6; cpu_steal = $9
+            }
+            FILENAME == proc "/meminfo" && $1 == "MemTotal:" { memory_total = $2 * 1024 }
+            FILENAME == proc "/meminfo" && $1 == "MemAvailable:" { memory_available = $2 * 1024 }
+            FILENAME == proc "/vmstat" && $1 == "pgmajfault" { major_faults = $2 }
+            FILENAME == proc "/vmstat" && $1 == "oom_kill" { oom_kills = $2 }
+            FILENAME == cgroup "/memory.current" { cgroup_memory = $1 }
+            FILENAME == cgroup "/memory.max" && $1 != "max" { cgroup_limit = $1 }
+            FILENAME == proc "/pressure/cpu" && $1 == "some" { cpu_some = waited($0) }
+            FILENAME == proc "/pressure/memory" { pressure["memory_" $1] = waited($0) }
+            FILENAME == proc "/pressure/io" { pressure["io_" $1] = waited($0) }
+            END {
+              memory_used = memory_available == "" ? "" : memory_total - memory_available
+              printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", time_ms,
+                number(memory_used), number(memory_total), number(cgroup_memory), number(cgroup_limit),
+                number(cpu_total), number(cpu_idle), number(cpu_iowait), number(cpu_steal), number(cpu_some),
+                number(pressure["memory_some"]), number(pressure["memory_full"]),
+                number(pressure["io_some"]), number(pressure["io_full"]), number(major_faults), number(oom_kills)
+            }'
+          printf 'time_ms\tmemory_used\tmemory_total\tcgroup_memory\tcgroup_limit\tcpu_total\tcpu_idle\tcpu_iowait\tcpu_steal\tcpu_some_us\tmemory_some_us\tmemory_full_us\tio_some_us\tio_full_us\tmajor_faults\toom_kills\n' > "$samples"
+          probe() {
+            while :; do
+              awk -v time_ms="$(date +%s%3N)" -v proc="$proc" -v cgroup="$cgroup" "$sample" "${files[@]}" >> "$samples" || true
+              sleep "$interval"
+            done
+          }
+          # Without its own streams the sampler can't hold the step's output open.
+          probe < /dev/null > /dev/null 2>&1 &
+          echo "$!" > "$RUNNER_TEMP/runner-resources.pid"
+
       - name: Check
         env:
           # The isolated `check` aggregator job owns this live check
@@ -583,6 +640,93 @@ jobs:
               "| --- | --- | ---: |",
               ($tasks | sort_by(-.seconds)[] | "| `\(.id)` | \(.cache) | \((.seconds * 10 | round) / 10) |")
           ' "${summaries[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # A machine that stops altogether shows as a long gap between samples,
+      # one short of memory as memory pressure and major page faults, and a
+      # crowded host as CPU steal. Pressure is the share of an interval in
+      # which some or all tasks waited for the resource. The raw samples
+      # stay in the log for a closer look.
+      - name: Summarize runner resources
+        if: "!cancelled()"
+        run: |
+          set -euo pipefail
+          samples="$RUNNER_TEMP/runner-resources.tsv"
+          pid_file="$RUNNER_TEMP/runner-resources.pid"
+          if [ -s "$pid_file" ]; then
+            kill "$(< "$pid_file")" 2> /dev/null || true
+          fi
+          [ -s "$samples" ] || exit 0
+          echo "::group::Runner resource samples"
+          cat "$samples"
+          echo "::endgroup::"
+          first_ms=$(awk -F '\t' 'NR == 2 { print $1 }' "$samples")
+          started=$(date -u -d "@$(( ${first_ms:-0} / 1000 ))" '+%H:%M:%S UTC')
+          awk -F '\t' -v started="$started" '
+            function worst(key, value, at) {
+              if (!(key in peak) || value > peak[key]) { peak[key] = value; peak_at[key] = at }
+            }
+            function known(field) { return $field != "" && previous[field] != "" }
+            function row(label, key, format, whole) {
+              if (key in peak) {
+                printf "| %s | " format " | %.0f s | %s |\n", label, peak[key], peak_at[key], whole
+              } else {
+                printf "| %s | n/a | | %s |\n", label, whole
+              }
+            }
+            function share(field, scale) {
+              return first[field] == "" || $field == "" ? "n/a" : sprintf("%.1f %%", 100 * ($field - first[field]) / scale)
+            }
+            function gib(bytes) { return sprintf("%.1f GiB", bytes / 1073741824) }
+            NR == 1 { next }
+            {
+              seconds = $1 / 1000
+              if (NR == 2) {
+                start = seconds
+                for (field = 1; field <= NF; field++) first[field] = $field
+              } else {
+                at = previous[1] / 1000 - start
+                elapsed = seconds - previous[1] / 1000
+                worst("gap", elapsed, at)
+                if (known(6) && $6 > previous[6]) {
+                  ticks = $6 - previous[6]
+                  worst("busy", 100 - 100 * ($7 - previous[7]) / ticks, at)
+                  worst("iowait", 100 * ($8 - previous[8]) / ticks, at)
+                  worst("steal", 100 * ($9 - previous[9]) / ticks, at)
+                }
+                for (field = 10; field <= 14; field++) {
+                  if (known(field) && elapsed > 0) worst(field, ($field - previous[field]) / 10000 / elapsed, at)
+                }
+                if (known(15) && elapsed > 0) worst("faults", ($15 - previous[15]) / elapsed, at)
+              }
+              if ($2 != "") worst("memory", $2 / 1073741824, seconds - start)
+              if ($4 != "") worst("cgroup", $4 / 1073741824, seconds - start)
+              for (field = 1; field <= NF; field++) previous[field] = $field
+              total = $3; limit = $5
+            }
+            END {
+              print "### Runner resources"
+              print ""
+              if (NR < 3) { print "The probe took fewer than two samples."; exit }
+              duration = seconds - start
+              ticks = previous[6] - first[6]
+              printf "%d samples over %.0f s from %s. The worst column shows the worst interval between two samples.\n\n", NR - 1, duration, started
+              print "| Measure | Worst | At | Whole check |"
+              print "| --- | ---: | ---: | ---: |"
+              row("Time between samples", "gap", "%.1f s", "")
+              row("CPU busy", "busy", "%.1f %%", ticks > 0 ? sprintf("%.1f %%", 100 - 100 * (previous[7] - first[7]) / ticks) : "n/a")
+              row("CPU iowait", "iowait", "%.1f %%", ticks > 0 ? share(8, ticks) : "n/a")
+              row("CPU steal", "steal", "%.1f %%", ticks > 0 ? share(9, ticks) : "n/a")
+              row("CPU pressure, some", 10, "%.1f %%", share(10, duration * 1000000))
+              row("Memory pressure, some", 11, "%.1f %%", share(11, duration * 1000000))
+              row("Memory pressure, full", 12, "%.1f %%", share(12, duration * 1000000))
+              row("IO pressure, some", 13, "%.1f %%", share(13, duration * 1000000))
+              row("IO pressure, full", 14, "%.1f %%", share(14, duration * 1000000))
+              row("Major page faults", "faults", "%.0f/s", first[15] == "" ? "n/a" : sprintf("%.0f", previous[15] - first[15]))
+              row("Memory in use", "memory", "%.1f GiB", total == "" ? "" : "of " gib(total))
+              row("Cgroup memory with page cache", "cgroup", "%.1f GiB", first[4] == "" ? "n/a" : limit == "" ? "no limit" : "of " gib(limit))
+              printf "| OOM kills | | | %s |\n", first[16] == "" ? "n/a" : sprintf("%.0f", previous[16] - first[16])
+            }
+          ' "$samples" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Save the Bun package cache
         if: success() && github.ref == 'refs/heads/main' && steps.bun-cache.outputs.cache-hit != 'true'
