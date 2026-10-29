@@ -344,11 +344,16 @@ jobs:
           else
             candidates=(127.0.0.1)
           fi
+          # A password such as one with `/`, `#`, `?`, or `%` is not a valid
+          # URL user part until it is percent-encoded. Drivers decode the user
+          # and password; postgres.js keeps the database path as written.
+          user=$(jq -rn --arg value "$CI_POSTGRES_USER" '$value | @uri')
+          password=$(jq -rn --arg value "$CI_POSTGRES_PASSWORD" '$value | @uri')
           for candidate in "${candidates[@]}"; do
             if [ -n "$candidate" ] && reachable "$candidate"; then
               echo "Database endpoint: $candidate:5432"
               printf 'DATABASE_URL=postgresql://%s:%s@%s:5432/%s\n' \
-                "$CI_POSTGRES_USER" "$CI_POSTGRES_PASSWORD" "$candidate" "$CI_POSTGRES_DB" \
+                "$user" "$password" "$candidate" "$CI_POSTGRES_DB" \
                 >> "$GITHUB_ENV"
               exit 0
             fi

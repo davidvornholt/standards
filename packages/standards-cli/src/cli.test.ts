@@ -2836,7 +2836,7 @@ it('requires database resolution before dependency installation', () => {
 });
 
 describe('canonical standards workflow database resolver', () => {
-  it('keeps shell-significant coordinates literal and prefers the CodeBuild service', () => {
+  it('keeps shell-significant coordinates inert, encodes credentials, and prefers the CodeBuild service', () => {
     const workflow = parseWorkflow(STANDARDS_WORKFLOW);
     const resolverStep = qualityStep(workflow, DATABASE_RESOLVER_STEP_NAME);
     expect(resolverStep.env).toEqual(DATABASE_RESOLVER_ENV);
@@ -2893,7 +2893,7 @@ describe('canonical standards workflow database resolver', () => {
     const environmentPath = join(fixture, 'github-env');
     const marker = join(fixture, 'command-substitution-ran');
     const user = 'app;printf unsafe';
-    const password = ['pa$$word$(touch ', marker, ')'].join('');
+    const password = ['p@ss:w%rd$(touch ', marker, ')'].join('');
     const database = 'app$(printf unsafe)';
     const result = runExecutable(
       'bash',
@@ -2917,17 +2917,13 @@ describe('canonical standards workflow database resolver', () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toBe('Database endpoint: 127.0.0.2:5432\n');
-    expect(readFileSync(environmentPath, 'utf8')).toBe(
-      [
-        'DATABASE_URL=postgresql://',
-        user,
-        ':',
-        password,
-        '@127.0.0.2:5432/',
-        database,
-        '\n',
-      ].join(''),
-    );
+    const assignment = readFileSync(environmentPath, 'utf8');
+    expect(assignment).toStartWith('DATABASE_URL=postgresql://');
+    expect(assignment).toEndWith(`@127.0.0.2:5432/${database}\n`);
+    const url = new URL(assignment.trimEnd().slice('DATABASE_URL='.length));
+    expect(url.host).toBe('127.0.0.2:5432');
+    expect(decodeURIComponent(url.username)).toBe(user);
+    expect(decodeURIComponent(url.password)).toBe(password);
     expect(existsSync(marker)).toBe(false);
   });
 });
