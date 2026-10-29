@@ -119,6 +119,3 @@ export const filteredTurboAliasProblem = (
   };
   return `package.json: root script "${name}" ${details[violation]}`;
 };
-
-export const isSafeFilteredTurboAlias = (script: string): boolean =>
-  filteredTurboAliasViolation(script) === null;

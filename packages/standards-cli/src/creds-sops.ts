@@ -90,22 +90,6 @@ export const inspectSopsScalarDestination = async (
   }
 };
 
-export const verifySopsScalarLeaf = async (
-  consumer: string,
-  rel: string,
-  dottedPath: string,
-): Promise<SopsWriteResult> => {
-  const result = await inspectSopsScalarDestination(consumer, rel, dottedPath);
-  return result.ok && result.state === 'scalar'
-    ? { ok: true }
-    : {
-        ok: false,
-        problem: result.ok
-          ? `SOPS write did not create ${dottedPath} in ${rel}`
-          : result.problem,
-      };
-};
-
 const editorCommand = (): string => {
   const editor = fileURLToPath(
     new URL('./creds-sops-editor.ts', import.meta.url),
