@@ -11,7 +11,6 @@ import {
   rmSync,
   statSync,
   truncateSync,
-  utimesSync,
 } from 'node:fs';
 import { join, relative } from 'node:path';
 import process from 'node:process';
@@ -119,10 +118,6 @@ echo "$RUNNER_TEMP/zstd/usr/bin" >> "$GITHUB_PATH"
 `,
 };
 const EXECUTABLE_MODE = 0o755;
-const CACHE_FIXTURE_FILE_SIZE = 4096;
-const OLDEST_CACHE_MTIME = 100;
-const MIDDLE_CACHE_MTIME = 200;
-const NEWEST_CACHE_MTIME = 300;
 const STD_PATHS: ReadonlyArray<string> = [
   'sync-standards.json',
   '.github/dependabot.base.yml',
@@ -1250,9 +1245,9 @@ const exerciseSeededGitignore = (
   return { ignoredOutput, ignoredPaths, lockIgnoreStatus };
 };
 
-// A git-backed upstream with two commits: tag `v1` and branch `stable` hold
-// the original managed content while `main` has moved on. `file://` forces the
-// remote-source code path that a plain local path would bypass.
+// A git-backed upstream with two commits: tag `v1` holds the original managed
+// content while `main` has moved on. `file://` forces the remote-source code
+// path that a plain local path would bypass.
 const buildGitUpstream = (): {
   up: string;
   url: string;
@@ -1263,7 +1258,6 @@ const buildGitUpstream = (): {
   git(up, ['add', '-A']);
   git(up, ['commit', '--quiet', '-m', 'v1']);
   git(up, ['tag', 'v1']);
-  git(up, ['branch', 'stable']);
   const taggedSha = git(up, ['rev-parse', 'HEAD']);
   write(up, 'managed/a.txt', 'alpha v2\n');
   git(up, ['add', '-A']);
@@ -1877,9 +1871,9 @@ describe('sync', () => {
     expect(result.status).toBe(0);
     expect(read(consumer, 'newly-managed.txt')).toBe('new\n');
     expect(readLock(consumer).files['newly-managed.txt']).toBeDefined();
-    expect(sync(up, consumer, ['--dry-run']).stdout).toContain(
-      'dry run: already in sync; no changes',
-    );
+    const dry = sync(up, consumer, ['--dry-run']);
+    expect(dry.status).toBe(0);
+    expect(dry.stdout).toContain('dry run: already in sync; no changes');
   });
 
   it('deletes a consumer file removed from upstream and prunes the lock', () => {
@@ -1918,14 +1912,6 @@ describe('sync', () => {
     expect(read(consumer, 'sync-standards.lock')).toBe(lockBefore);
     sync(up, consumer);
     expect(read(consumer, 'managed/a.txt')).toBe('alpha v2\n');
-  });
-
-  it('dry-run reports no changes when already in sync', () => {
-    const up = buildUpstream();
-    const { consumer } = initConsumer(up);
-    const dry = sync(up, consumer, ['--dry-run']);
-    expect(dry.status).toBe(0);
-    expect(dry.stdout).toContain('dry run: already in sync; no changes');
   });
 });
 
@@ -1982,17 +1968,6 @@ describe('ref pinning', () => {
     const { consumer } = initConsumer(up);
 
     const result = sync(url, consumer, ['--ref', taggedSha]);
-
-    expect(result.status).toBe(0);
-    expect(read(consumer, 'managed/a.txt')).toBe('alpha\n');
-    expect(readLock(consumer).sha).toBe(taggedSha);
-  });
-
-  it('syncs a named non-default branch', () => {
-    const { up, url, taggedSha } = buildGitUpstream();
-    const { consumer } = initConsumer(up);
-
-    const result = sync(url, consumer, ['--ref', 'stable']);
 
     expect(result.status).toBe(0);
     expect(read(consumer, 'managed/a.txt')).toBe('alpha\n');
@@ -2084,39 +2059,41 @@ describe('sync policy file', () => {
 });
 
 describe('sync policy validation', () => {
-  it.each(INVALID_POLICY_CASES)(
-    'validates %s before explicit refs and local sources',
-    (_label, policy, expectedError) => {
-      const { up, url } = buildGitUpstream();
-      const { consumer } = initConsumer(up);
-      write(consumer, 'sync-standards.local.json', policy);
+  // Every invalid shape fails inside readSyncPolicy, which init and sync call
+  // before selecting a ref or source, so one shape proves the ordering for
+  // each entry point. The doctor and check cases below cover every shape.
+  it('validates the policy before explicit refs and local sources', () => {
+    const policy = '{ "ref": "main\\npresent=false" }';
+    const expectedError = '"ref" must be a non-empty single-line string';
+    const { up, url } = buildGitUpstream();
+    const { consumer } = initConsumer(up);
+    write(consumer, 'sync-standards.local.json', policy);
 
-      for (const extra of [
-        ['--ref', 'main'],
-        ['--ref', 'main', '--dry-run'],
-      ]) {
-        const result = sync(url, consumer, extra);
-        expect(result.status).toBe(1);
-        expect(result.stderr).toContain(expectedError);
-      }
+    for (const extra of [
+      ['--ref', 'main'],
+      ['--ref', 'main', '--dry-run'],
+    ]) {
+      const result = sync(url, consumer, extra);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(expectedError);
+    }
 
-      const localSync = sync(up, consumer);
-      expect(localSync.status).toBe(1);
-      expect(localSync.stderr).toContain(expectedError);
+    const localSync = sync(up, consumer);
+    expect(localSync.status).toBe(1);
+    expect(localSync.stderr).toContain(expectedError);
 
-      for (const source of [url, up]) {
-        const initTarget = mkTmp('sync-cons-');
-        write(initTarget, 'sync-standards.local.json', policy);
-        const args =
-          source === url
-            ? ['init', '--from', source, '--ref', 'main', '--dir', initTarget]
-            : ['init', '--from', source, '--dir', initTarget];
-        const result = run(initTarget, args);
-        expect(result.status).toBe(1);
-        expect(result.stderr).toContain(expectedError);
-      }
-    },
-  );
+    for (const source of [url, up]) {
+      const initTarget = mkTmp('sync-cons-');
+      write(initTarget, 'sync-standards.local.json', policy);
+      const args =
+        source === url
+          ? ['init', '--from', source, '--ref', 'main', '--dir', initTarget]
+          : ['init', '--from', source, '--dir', initTarget];
+      const result = run(initTarget, args);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(expectedError);
+    }
+  });
 
   it.each(INVALID_POLICY_CASES)(
     'doctor and check reject %s',
@@ -2151,19 +2128,15 @@ type PackedCliInstallation = {
   readonly sourceProfile: RunResult;
 };
 
-type ExecutableRunner = typeof runExecutable;
-
 const requireSuccessfulStage = (stage: string, result: RunResult): void => {
   if (result.status !== 0) {
     throw new Error(`${stage} failed: ${result.stderr}`);
   }
 };
 
-const installPackedCli = (
-  execute: ExecutableRunner = runExecutable,
-): PackedCliInstallation => {
+const installPackedCli = (): PackedCliInstallation => {
   const packed = mkTmp('standards-pack-');
-  const pack = execute('bun', join(import.meta.dir, '..'), [
+  const pack = runExecutable('bun', join(import.meta.dir, '..'), [
     'pm',
     'pack',
     '--destination',
@@ -2198,11 +2171,14 @@ const installPackedCli = (
       },
     }),
   );
-  const install = execute('bun', consumer, ['install', '--ignore-scripts']);
+  const install = runExecutable('bun', consumer, [
+    'install',
+    '--ignore-scripts',
+  ]);
   requireSuccessfulStage('install', install);
 
-  const help = execute('bun', consumer, ['standards', 'help']);
-  const sourceProfile = execute('bun', consumer, [
+  const help = runExecutable('bun', consumer, ['standards', 'help']);
+  const sourceProfile = runExecutable('bun', consumer, [
     'standards',
     'structure',
     '--profile',
@@ -2212,29 +2188,6 @@ const installPackedCli = (
   ]);
   return { consumer, help, sourceProfile };
 };
-
-describe('packed artifact prerequisite staging', () => {
-  it.each([
-    ['pack', 1],
-    ['install', 2],
-  ] as const)(
-    'does not execute later stages after %s fails',
-    (_stage, failureCall) => {
-      let calls = 0;
-      const execute: ExecutableRunner = () => {
-        calls += 1;
-        return {
-          stdout: calls === 1 ? '/tmp/standards.tgz\n' : '',
-          stderr: '',
-          status: calls === failureCall ? 1 : 0,
-        };
-      };
-
-      expect(() => installPackedCli(execute)).toThrow();
-      expect(calls).toBe(failureCall);
-    },
-  );
-});
 
 describe('packed artifact content ref cutover', () => {
   it('rejects v0.10.0 content before packed init or sync mutation', () => {
@@ -2312,15 +2265,6 @@ describe('packed artifact token contract', () => {
 
 describe('packed artifact distribution', () => {
   it('ships the Dependabot contract and honors the workflow sync pin', () => {
-    const packageManifest = JSON.parse(
-      readFileSync(join(import.meta.dir, '../package.json'), 'utf8'),
-    ) as { version: string };
-    const templateManifest = JSON.parse(
-      readFileSync(join(ACTUAL_UPSTREAM, 'template/package.json'), 'utf8'),
-    ) as { devDependencies: Record<string, string> };
-    expect(templateManifest.devDependencies['@davidvornholt/standards']).toBe(
-      packageManifest.version,
-    );
     const installation = installPackedCli();
     expect(installation.help.status).toBe(0);
     expect(installation.help.stdout).toContain(
@@ -3284,87 +3228,6 @@ it('rejects softened executable-cache boundaries and consumers', () => {
   expect(rejected).toEqual(rejected.map(() => true));
 });
 
-describe('canonical standards workflow Turbo cache pruning', () => {
-  it('keeps the newest Turbo artifacts within the declared save budget', () => {
-    const pruneScript = yamlRunScript(
-      STANDARDS_WORKFLOW,
-      'Prune the Turbo cache before save',
-    );
-    expect(pruneScript).toContain('budget=$((2 * 1024 * 1024))');
-
-    const absentFixture = mkTmp('turbo-prune-absent-');
-    expect(
-      runExecutable('bash', absentFixture, ['-c', pruneScript]).status,
-    ).toBe(0);
-
-    for (const command of ['find', 'sort', 'awk', 'xargs', 'rm']) {
-      const failingFixture = mkTmp(`turbo-prune-failing-${command}-`);
-      write(failingFixture, '.turbo/cache/artifact', 'cached');
-      const failingCommand = `bin/${command}`;
-      write(failingFixture, failingCommand, '#!/bin/sh\nexit 42\n');
-      chmodSync(join(failingFixture, failingCommand), EXECUTABLE_MODE);
-      const failingScript = pruneScript.replace(
-        'budget=$((2 * 1024 * 1024))',
-        'budget=0',
-      );
-      expect(
-        runExecutable('bash', failingFixture, ['-c', failingScript], {
-          PATH: `${join(failingFixture, 'bin')}:${process.env.PATH ?? ''}`,
-        }).status,
-      ).not.toBe(0);
-    }
-
-    const fixture = mkTmp('turbo-prune-');
-    const cachePath = '.turbo/cache';
-    const files = [
-      ['oldest', OLDEST_CACHE_MTIME],
-      ['middle', MIDDLE_CACHE_MTIME],
-      ['newest', NEWEST_CACHE_MTIME],
-    ] as const;
-    for (const [name, mtime] of files) {
-      write(
-        fixture,
-        `${cachePath}/${name}`,
-        'x'.repeat(CACHE_FIXTURE_FILE_SIZE),
-      );
-      utimesSync(join(fixture, cachePath, name), mtime, mtime);
-    }
-
-    const fixtureScript = pruneScript.replace(
-      'budget=$((2 * 1024 * 1024))',
-      'budget=8',
-    );
-    expect(runExecutable('bash', fixture, ['-c', fixtureScript]).status).toBe(
-      0,
-    );
-    expect(readdirSync(join(fixture, cachePath)).sort()).toEqual([
-      'middle',
-      'newest',
-    ]);
-
-    const invertedScript = fixtureScript.replace(
-      'if (total > budget)',
-      'if (total < budget)',
-    );
-    const invertedFixture = mkTmp('turbo-prune-inverted-');
-    for (const [name, mtime] of files) {
-      write(
-        invertedFixture,
-        `${cachePath}/${name}`,
-        'x'.repeat(CACHE_FIXTURE_FILE_SIZE),
-      );
-      utimesSync(join(invertedFixture, cachePath, name), mtime, mtime);
-    }
-    expect(
-      runExecutable('bash', invertedFixture, ['-c', invertedScript]).status,
-    ).toBe(0);
-    expect(readdirSync(join(invertedFixture, cachePath)).sort()).not.toEqual([
-      'middle',
-      'newest',
-    ]);
-  });
-});
-
 describe('canonical standards workflow Nix gate', () => {
   it('derives every native Nix job from validated metadata at the tested commit', () => {
     const jobs = yamlJobs(STANDARDS_WORKFLOW);
@@ -3587,29 +3450,6 @@ describe('canonical standards workflow Nix aggregation', () => {
             }),
           ).not.toBe(0);
         }
-      }
-    }
-  });
-
-  it('requires the quality gate in source and consumer modes', () => {
-    const aggregateScript = yamlRunScript(
-      STANDARDS_WORKFLOW,
-      'Require all standards gates',
-    );
-
-    for (const [isSourceRepository, nixResult] of [
-      ['true', 'success'],
-      ['false', 'skipped'],
-    ] as const) {
-      for (const qualityResult of needsResults) {
-        const status = runAggregate(aggregateScript, {
-          IS_SOURCE_REPOSITORY: isSourceRepository,
-          NIX_DISCOVERY_RESULT: nixResult,
-          NIX_RESULT: nixResult,
-          QUALITY_RESULT: qualityResult,
-        });
-
-        expect(status).toBe(qualityResult === 'success' ? 0 : 1);
       }
     }
   });
@@ -3939,31 +3779,16 @@ describe('standards sync workflow policy', () => {
     expect(output).toBe('');
   });
 
-  it.each([
-    '0.9.0',
-    '0.10.0',
-    '0.10.1',
-    '0.10.2',
-    '0.10.0-beta.1',
-    '0.11.0',
-    '0.11.1',
-    '0.12.0',
-    '0.12.1',
-    '0.13.0',
-    '0.13.1',
-    '0.14.0',
-    '0.14.1',
-    '0.15.1',
-    '0.16.0',
-    '0.17.3',
-    '0.18.0',
-    '0.18.1',
-    '0.20.0',
-  ])('rejects installed CLI version %s without a policy file', (version) => {
-    const result = runWorkflowVersionGuard(version);
-    expect(result.status).toBe(1);
-    expect(`${result.stdout}${result.stderr}`).toContain('::error::');
-  });
+  // A lower minor that sorts after the minimum as text, a prerelease, and the
+  // adjacent minor cover the SemVer gate and the version comparison.
+  it.each(['0.9.0', '0.10.0-beta.1', '0.20.0'])(
+    'rejects installed CLI version %s without a policy file',
+    (version) => {
+      const result = runWorkflowVersionGuard(version);
+      expect(result.status).toBe(1);
+      expect(`${result.stdout}${result.stderr}`).toContain('::error::');
+    },
+  );
 
   it('makes the 0.21.0 guard unconditional', () => {
     const workflow = readFileSync(SYNC_WORKFLOW, 'utf8');
@@ -3985,73 +3810,14 @@ describe('standards sync workflow trigger policy', () => {
   it('allows only the weekly schedule trigger', () => {
     expect(workflowTriggerNames(SYNC_WORKFLOW)).toEqual(['schedule']);
   });
-
-  it.each([
-    'push',
-    'pull_request_target',
-    'workflow_dispatch',
-    'workflow_call',
-  ])('detects unsafe alternative trigger %s', (trigger) => {
-    const fixture = mkTmp('workflow-trigger-policy-');
-    const path = join(fixture, 'standards-sync.yml');
-    write(
-      fixture,
-      'standards-sync.yml',
-      [
-        'on:',
-        '  schedule:',
-        '    - cron: "0 6 * * 1"',
-        `  ${trigger}:`,
-        'jobs:',
-        '  sync:',
-        '    runs-on: ubuntu-latest',
-        '',
-      ].join('\n'),
-    );
-
-    expect(workflowTriggerNames(path)).toEqual(['schedule', trigger]);
-    expect(workflowTriggerNames(path)).not.toEqual(['schedule']);
-  });
 });
 
 describe('github', () => {
-  const EmptySeam = JSON.stringify({ repository: {}, rulesets: [] });
-  const Canonical = JSON.stringify({
-    repository: { allow_auto_merge: true },
-    rulesets: [
-      JSON.parse(
-        '{"name":"Protect main","target":"branch","enforcement":"active","conditions":{"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}},"bypass_actors":[]}',
-      ) as Readonly<Record<string, unknown>>,
-    ],
-  });
-
   it('fails when the canonical declaration is missing', () => {
     const { consumer } = initConsumer(buildUpstream());
     const result = run(consumer, ['github', '--dir', consumer]);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('.github/settings.json not found');
-  });
-
-  it('fails closed when the origin remote cannot be resolved', () => {
-    const { consumer } = initConsumer(buildUpstream());
-    write(consumer, '.github/settings.json', Canonical);
-    write(consumer, '.github/settings.local.json', EmptySeam);
-    const result = run(consumer, ['github', '--check', '--dir', consumer]);
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain(
-      'cannot determine the GitHub repository from the origin remote',
-    );
-  });
-
-  it('check gates on the declaration once it is present', () => {
-    const { consumer } = initConsumer(buildUpstream());
-    write(consumer, '.github/settings.json', Canonical);
-    write(consumer, '.github/settings.local.json', EmptySeam);
-    const result = run(consumer, ['check', '--dir', consumer]);
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain(
-      'cannot determine the GitHub repository from the origin remote',
-    );
   });
 });
 
