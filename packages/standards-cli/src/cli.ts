@@ -13,10 +13,11 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, posix, resolve } from 'node:path';
 import process from 'node:process';
+import { isContainedPath } from './contained-path';
 import { runCredsCommand } from './creds-commands';
 import {
   composeDependabot,
@@ -903,10 +904,41 @@ const dependabotProblems = async (
   return [];
 };
 
+const lstatIfPresent = (path: string) =>
+  lstat(path).catch((error: unknown) => {
+    if (isRecord(error) && error.code === 'ENOENT') {
+      return null;
+    }
+    throw error;
+  });
+
+// The generated file is written in place, so a symlinked `.github` or
+// dependabot.yml would redirect the write outside the consumer.
+const assertDependabotDestination = async (consumer: string): Promise<void> => {
+  const dir = dirname(DEPENDABOT_FILE);
+  if (
+    (await lstatIfPresent(join(consumer, dir))) !== null &&
+    !isContainedPath(consumer, dir, 'directory')
+  ) {
+    throw new Error(
+      `${dir} must be a contained directory; symlinked paths are not allowed`,
+    );
+  }
+  if (
+    (await lstatIfPresent(join(consumer, DEPENDABOT_FILE))) !== null &&
+    !isContainedPath(consumer, DEPENDABOT_FILE, 'file')
+  ) {
+    throw new Error(
+      `${DEPENDABOT_FILE} must be a contained regular file; symlinked paths are not allowed`,
+    );
+  }
+};
+
 const writeComposedDependabot = async (
   consumer: string,
   composed: string,
 ): Promise<void> => {
+  await assertDependabotDestination(consumer);
   const dest = join(consumer, DEPENDABOT_FILE);
   await mkdir(dirname(dest), { recursive: true });
   await writeFile(dest, composed);
@@ -934,6 +966,7 @@ const prepareProspectiveDependabot = async (
   consumer: string,
   localSeed: ManagedEntry | null,
 ): Promise<ProspectiveDependabot> => {
+  await assertDependabotDestination(consumer);
   const base = incoming.get(DEPENDABOT_BASE_FILE);
   if (base === undefined || base.kind !== 'file') {
     throw new Error(
