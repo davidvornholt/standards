@@ -17,7 +17,7 @@ CI checks with its restricted workflow token, which can't see who may bypass a r
 
 Unless `sync-standards.local.json` sets `"autoSync": false`, a weekly run keeps one sync pull request open from the branch `standards-sync/update` while canonical content differs. Each run rebases that branch and updates it, so commits you add to adapt the consumer survive. The pull request description doesn't: every run that changes the branch rewrites it.
 
-When no open pull request uses the branch, the run rebuilds the branch from the base branch instead of rebasing the old one. When the branch of an open pull request no longer rebases cleanly, the run fails and names the pull request to rebase or close. The workflow owns the `standards-sync/` branch namespace. It closes every other open same-repository pull request there, and closes all of them once the base branch already matches upstream.
+When no open pull request uses the branch, the run rebuilds the branch from the base branch instead of rebasing the old one. The workflow owns the `standards-sync/` branch namespace. It closes every other open same-repository pull request there, and closes all of them once the base branch already matches upstream.
 
 Sync branches contain trusted upstream code, so consumer CI may run on them before anyone reviews the generated pull request.
 
