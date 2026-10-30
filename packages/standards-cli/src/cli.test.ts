@@ -8,8 +8,10 @@ import {
   existsSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
+  symlinkSync,
   truncateSync,
 } from 'node:fs';
 import { join, relative } from 'node:path';
@@ -1503,6 +1505,19 @@ describe('doctor', () => {
     expect(doctor.stderr).toContain('@davidvornholt/standards');
     expect(doctor.stderr).toContain('script "check"');
     expect(doctor.stderr).toContain('script "check:fix"');
+  });
+
+  it('rejects a biome.jsonc that names the base without extending it', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    for (const biome of [
+      '{\n  // "extends": ["./biome.base.jsonc"]\n  "linter": { "enabled": false }\n}\n',
+      '{ "extends": [], "files": { "includes": ["./biome.base.jsonc"] } }\n',
+    ]) {
+      write(consumer, 'biome.jsonc', biome);
+      const doctor = run(consumer, ['doctor', '--dir', consumer]);
+      expect(doctor.status).toBe(1);
+      expect(doctor.stderr).toContain('biome.jsonc must extend');
+    }
   });
 
   it('rejects non-executing standards check scripts', () => {
@@ -4012,6 +4027,49 @@ describe('path safety', () => {
     expect(result.stderr).toContain(
       'managed path must be a normalized repository-relative path',
     );
+  });
+
+  it('refuses to write the generated Dependabot file through a symlink', () => {
+    const up = buildUpstream();
+    const { consumer } = initConsumer(up);
+    const outside = mkTmp('sync-outside-');
+    write(outside, 'owned.txt', 'consumer-owned content\n');
+    rmSync(join(consumer, '.github/dependabot.yml'));
+    symlinkSync(
+      join(outside, 'owned.txt'),
+      join(consumer, '.github/dependabot.yml'),
+    );
+
+    for (const args of [
+      ['sync', '--from', up, '--dir', consumer],
+      ['dependabot', '--write', '--dir', consumer],
+    ]) {
+      const result = run(consumer, args);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        '.github/dependabot.yml must be a contained regular file',
+      );
+    }
+    expect(read(outside, 'owned.txt')).toBe('consumer-owned content\n');
+  });
+
+  it('refuses to generate the Dependabot file below a symlinked .github', () => {
+    const up = buildUpstream();
+    const { consumer } = initConsumer(up);
+    const outside = join(mkTmp('sync-outside-'), 'github');
+    renameSync(join(consumer, '.github'), outside);
+    write(outside, 'dependabot.yml', 'consumer-owned content\n');
+    symlinkSync(outside, join(consumer, '.github'));
+
+    for (const args of [
+      ['dependabot', '--write', '--dir', consumer],
+      ['sync', '--from', up, '--dir', consumer],
+    ]) {
+      const result = run(consumer, args);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('.github must be a contained directory');
+    }
+    expect(read(outside, 'dependabot.yml')).toBe('consumer-owned content\n');
   });
 });
 

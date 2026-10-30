@@ -13,10 +13,11 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, posix, resolve } from 'node:path';
 import process from 'node:process';
+import { isContainedPath } from './contained-path';
 import { runCredsCommand } from './creds-commands';
 import {
   composeDependabot,
@@ -903,10 +904,41 @@ const dependabotProblems = async (
   return [];
 };
 
+const lstatIfPresent = (path: string) =>
+  lstat(path).catch((error: unknown) => {
+    if (isRecord(error) && error.code === 'ENOENT') {
+      return null;
+    }
+    throw error;
+  });
+
+// The generated file is written in place, so a symlinked `.github` or
+// dependabot.yml would redirect the write outside the consumer.
+const assertDependabotDestination = async (consumer: string): Promise<void> => {
+  const dir = dirname(DEPENDABOT_FILE);
+  if (
+    (await lstatIfPresent(join(consumer, dir))) !== null &&
+    !isContainedPath(consumer, dir, 'directory')
+  ) {
+    throw new Error(
+      `${dir} must be a contained directory; symlinked paths are not allowed`,
+    );
+  }
+  if (
+    (await lstatIfPresent(join(consumer, DEPENDABOT_FILE))) !== null &&
+    !isContainedPath(consumer, DEPENDABOT_FILE, 'file')
+  ) {
+    throw new Error(
+      `${DEPENDABOT_FILE} must be a contained regular file; symlinked paths are not allowed`,
+    );
+  }
+};
+
 const writeComposedDependabot = async (
   consumer: string,
   composed: string,
 ): Promise<void> => {
+  await assertDependabotDestination(consumer);
   const dest = join(consumer, DEPENDABOT_FILE);
   await mkdir(dirname(dest), { recursive: true });
   await writeFile(dest, composed);
@@ -934,6 +966,7 @@ const prepareProspectiveDependabot = async (
   consumer: string,
   localSeed: ManagedEntry | null,
 ): Promise<ProspectiveDependabot> => {
+  await assertDependabotDestination(consumer);
   const base = incoming.get(DEPENDABOT_BASE_FILE);
   if (base === undefined || base.kind !== 'file') {
     throw new Error(
@@ -1046,10 +1079,25 @@ const inspectPackageJson = (packageRaw: string): ReadonlyArray<string> => {
   return problems;
 };
 
+// Parse rather than search the text, so a comment or another field that names
+// the base cannot stand in for inheriting it.
+const extendsBiomeBase = (raw: string): boolean => {
+  try {
+    const parsed: unknown = globalThis.Bun.JSONC.parse(raw);
+    return (
+      isRecord(parsed) &&
+      Array.isArray(parsed.extends) &&
+      parsed.extends.includes('./biome.base.jsonc')
+    );
+  } catch {
+    return false;
+  }
+};
+
 const runDoctor = async (consumer: string): Promise<boolean> => {
   const problems: Array<string> = [];
   const biome = await readTextIfPresent(join(consumer, 'biome.jsonc'));
-  if (biome === null || !biome.includes('"./biome.base.jsonc"')) {
+  if (biome === null || !extendsBiomeBase(biome)) {
     problems.push('biome.jsonc must extend "./biome.base.jsonc"');
   }
 
