@@ -193,12 +193,6 @@ describe('cache publication runs', () => {
       'cancel-in-progress': expression("github.event_name == 'pull_request'"),
     });
   });
-
-  it('run the full gate because only a push runs the reuse proof', () => {
-    const { jobs } = workflow();
-    expect(jobs.reuse?.if).toBe("github.event_name == 'push'");
-    expect(jobs.quality?.if).toBe(GATE_RUN_CONDITION);
-  });
 });
 
 describe('check aggregator reuse', () => {

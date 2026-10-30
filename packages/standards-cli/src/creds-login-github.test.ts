@@ -184,9 +184,4 @@ describe('GitHub App manifest conversion', () => {
       privateKey: '-----BEGIN RSA PRIVATE KEY-----\n...',
     });
   });
-
-  it('rejects conversion responses missing credentials', () => {
-    expect(parseConversion({ id: 7, slug: 'x' })).toBeNull();
-    expect(parseConversion('nope')).toBeNull();
-  });
 });

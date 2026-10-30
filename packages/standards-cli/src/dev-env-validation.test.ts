@@ -98,41 +98,39 @@ describe('dev env input validation aggregation', () => {
     expect(readFileSync(fixture.destination, 'utf8')).toBe('existing-value\n');
   });
 
-  for (const secretFailure of ['decrypt', 'json'] as const) {
-    for (const localFailure of [
-      'malformed',
-      'unreadable',
-      'dangling',
-    ] as const) {
-      it(`reports ${secretFailure} and ${localFailure} local failures together`, async () => {
-        const fixture = setup(secretFailure, localFailure);
-        const error = spyOn(console, 'error').mockImplementation(
-          () => undefined,
-        );
-        const log = spyOn(console, 'log').mockImplementation(() => undefined);
+  // Each layer is read independently, so every secrets and local failure
+  // appears once rather than in every combination.
+  for (const [secretFailure, localFailure] of [
+    ['decrypt', 'malformed'],
+    ['json', 'unreadable'],
+    ['decrypt', 'dangling'],
+  ] as const) {
+    it(`reports ${secretFailure} and ${localFailure} local failures together`, async () => {
+      const fixture = setup(secretFailure, localFailure);
+      const error = spyOn(console, 'error').mockImplementation(() => undefined);
+      const log = spyOn(console, 'log').mockImplementation(() => undefined);
 
-        expect(await runDevEnv(fixture.consumer)).toBe(false);
+      expect(await runDevEnv(fixture.consumer)).toBe(false);
 
-        const reported = error.mock.calls.flat().join('\n');
-        expect(reported).toContain(
-          secretFailure === 'decrypt'
-            ? 'could not decrypt secrets/dev.yaml: decrypt failed'
-            : 'could not parse decrypted secrets/dev.yaml as JSON',
-        );
-        expect(reported).toContain('config/dev.yaml must contain valid YAML');
-        expect(reported).toContain(
-          localFailure === 'malformed'
-            ? 'config/dev.local.yaml must contain valid YAML'
-            : 'could not read config/dev.local.yaml',
-        );
-        expect(reported).toContain(
-          'config/dev.local.yaml is not gitignored; ignore it before generating dev env files',
-        );
-        expect(readFileSync(fixture.destination, 'utf8')).toBe(
-          'existing-value\n',
-        );
-        expect(log).not.toHaveBeenCalled();
-      });
-    }
+      const reported = error.mock.calls.flat().join('\n');
+      expect(reported).toContain(
+        secretFailure === 'decrypt'
+          ? 'could not decrypt secrets/dev.yaml: decrypt failed'
+          : 'could not parse decrypted secrets/dev.yaml as JSON',
+      );
+      expect(reported).toContain('config/dev.yaml must contain valid YAML');
+      expect(reported).toContain(
+        localFailure === 'malformed'
+          ? 'config/dev.local.yaml must contain valid YAML'
+          : 'could not read config/dev.local.yaml',
+      );
+      expect(reported).toContain(
+        'config/dev.local.yaml is not gitignored; ignore it before generating dev env files',
+      );
+      expect(readFileSync(fixture.destination, 'utf8')).toBe(
+        'existing-value\n',
+      );
+      expect(log).not.toHaveBeenCalled();
+    });
   }
 });

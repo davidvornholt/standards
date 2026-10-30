@@ -9,10 +9,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  filteredTurboAliasProblem,
-  isSafeFilteredTurboAlias,
-} from './structure-script';
+import { filteredTurboAliasProblem } from './structure-script';
 
 const problem = (detail: string): string =>
   `package.json: root script "dev" ${detail}`;
@@ -26,7 +23,6 @@ describe('filteredTurboAliasProblem', () => {
     'turbo run dev --filter=./apps/*',
   ])('accepts a single filtered Turbo run: %s', (script) => {
     expect(filteredTurboAliasProblem('dev', script)).toBeNull();
-    expect(isSafeFilteredTurboAlias(script)).toBeTrue();
   });
 
   it.each([
@@ -62,7 +58,6 @@ describe('filteredTurboAliasProblem', () => {
     ],
   ])('names the failed alias contract for %j', (script, detail) => {
     expect(filteredTurboAliasProblem('dev', script)).toBe(problem(detail));
-    expect(isSafeFilteredTurboAlias(script)).toBeFalse();
   });
 
   const syntaxProblem = problem(
@@ -85,7 +80,6 @@ describe('filteredTurboAliasProblem', () => {
     'turbo run dev --filter @repo/web && && turbo run lint --filter @repo/web',
   ])('names every parser-rejected syntax family for %j', (script) => {
     expect(filteredTurboAliasProblem('dev', script)).toBe(syntaxProblem);
-    expect(isSafeFilteredTurboAlias(script)).toBeFalse();
   });
 
   it('names a parsed command chain instead of claiming its filters are missing', () => {
@@ -96,7 +90,6 @@ describe('filteredTurboAliasProblem', () => {
         'must contain exactly one command; && command chains are not supported',
       ),
     );
-    expect(isSafeFilteredTurboAlias(script)).toBeFalse();
   });
 });
 

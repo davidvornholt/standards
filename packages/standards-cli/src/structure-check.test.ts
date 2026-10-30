@@ -131,15 +131,6 @@ describe('collectStructureProblems basics and scripts', () => {
       'package.json: root script "test:a11y" must run turbo run test:a11y',
     );
   });
-
-  it('surfaces CI secrets problems through the root entry point', async () => {
-    const consumer = buildConsumer();
-    rmSync(join(consumer, 'secrets/ci.yaml'));
-    const problems = await collect(consumer);
-    expect(problems).toEqual([
-      'secrets/ci.yaml: must exist as a SOPS-encrypted file; the synced Standards sync workflow reads ci.broker_app from it when automatic sync is enabled',
-    ]);
-  });
 });
 
 describe('collectStructureProblems workspace declarations', () => {

@@ -195,32 +195,42 @@ describe('exact Turbo prune', () => {
     ]);
   });
 
-  it('caps the used artifacts at the byte budget, newest first', () => {
-    const fixture = mkTmp('turbo-prune-exact-budget-');
-    writeSummary(fixture, 'run', [
-      usedTask('oldest'),
-      usedTask('middle'),
-      usedTask('newest'),
-    ]);
-    writeArtifact(fixture, 'oldest.tar.zst', OLDEST_MTIME);
-    writeArtifact(fixture, 'middle.tar.zst', MIDDLE_MTIME);
-    writeArtifact(fixture, 'newest.tar.zst', NEWEST_MTIME);
-    writeArtifact(fixture, 'unused.tar.zst', NEWEST_MTIME);
-    const script = yamlRunScript(WORKFLOW, PRUNE_STEP);
-    expect(script).toContain(BUDGET_ASSIGNMENT);
+  // Without run summaries, as when Turbo never ran, only the cap applies.
+  it.each([true, false])(
+    'caps the cache at the byte budget, newest first, with a run summary: %p',
+    (withSummary) => {
+      const fixture = mkTmp('turbo-prune-budget-');
+      if (withSummary) {
+        writeSummary(fixture, 'run', [
+          usedTask('oldest'),
+          usedTask('middle'),
+          usedTask('newest'),
+        ]);
+        writeArtifact(fixture, 'unused.tar.zst', NEWEST_MTIME);
+      }
+      writeArtifact(fixture, 'oldest.tar.zst', OLDEST_MTIME);
+      writeArtifact(fixture, 'middle.tar.zst', MIDDLE_MTIME);
+      writeArtifact(fixture, 'newest.tar.zst', NEWEST_MTIME);
+      const script = yamlRunScript(WORKFLOW, PRUNE_STEP);
+      expect(script).toContain(BUDGET_ASSIGNMENT);
 
-    const result = runStep(
-      PRUNE_STEP,
-      fixture,
-      [],
-      script.replace(BUDGET_ASSIGNMENT, TWO_ARTIFACT_BUDGET),
-    );
+      const result = runStep(
+        PRUNE_STEP,
+        fixture,
+        [],
+        script.replace(BUDGET_ASSIGNMENT, TWO_ARTIFACT_BUDGET),
+      );
 
-    expect(result.status).toBe(0);
-    expect(cacheContents(fixture)).toEqual([
-      'middle.tar.zst',
-      'newest.tar.zst',
-    ]);
+      expect(result.status).toBe(0);
+      expect(cacheContents(fixture)).toEqual([
+        'middle.tar.zst',
+        'newest.tar.zst',
+      ]);
+    },
+  );
+
+  it('succeeds without a Turbo cache directory', () => {
+    expect(runStep(PRUNE_STEP, mkTmp('turbo-prune-absent-')).status).toBe(0);
   });
 
   it('fails without pruning on an unreadable run summary', () => {
@@ -232,8 +242,8 @@ describe('exact Turbo prune', () => {
     expect(cacheContents(fixture)).toEqual(['aaaa.tar.zst']);
   });
 
-  it.each(['jq', 'find', 'awk', 'xargs', 'rm'])(
-    'fails when %s fails while pruning to the run summaries',
+  it.each(['jq', 'find', 'sort', 'awk', 'xargs', 'rm'])(
+    'fails when %s fails while pruning',
     (command) => {
       const fixture = mkTmp(`turbo-prune-exact-failing-${command}-`);
       writeSummary(fixture, 'run', [usedTask('kept')]);

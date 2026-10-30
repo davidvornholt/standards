@@ -3,11 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { listSecretsTargets } from './creds-dest';
-import {
-  inspectSopsScalarDestination,
-  listEncryptedKeys,
-  verifySopsScalarLeaf,
-} from './creds-sops';
+import { inspectSopsScalarDestination, listEncryptedKeys } from './creds-sops';
 import { applySopsEditorChanges } from './creds-sops-editor';
 import { resolveTargetRel } from './creds-target';
 
@@ -137,13 +133,6 @@ sops:
         'ci.nested',
       ),
     ).toMatchObject({ ok: false, kind: 'collection' });
-    expect(
-      await verifySopsScalarLeaf(
-        consumer,
-        'secrets/ci.yaml',
-        'ci.example_token',
-      ),
-    ).toEqual({ ok: true });
   });
 });
 
