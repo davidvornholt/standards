@@ -1513,6 +1513,19 @@ describe('doctor', () => {
     expect(doctor.stderr).toContain('script "check:fix"');
   });
 
+  it('rejects a biome.jsonc that names the base without extending it', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    for (const biome of [
+      '{\n  // "extends": ["./biome.base.jsonc"]\n  "linter": { "enabled": false }\n}\n',
+      '{ "extends": [], "files": { "includes": ["./biome.base.jsonc"] } }\n',
+    ]) {
+      write(consumer, 'biome.jsonc', biome);
+      const doctor = run(consumer, ['doctor', '--dir', consumer]);
+      expect(doctor.status).toBe(1);
+      expect(doctor.stderr).toContain('biome.jsonc must extend');
+    }
+  });
+
   it('rejects non-executing standards check scripts', () => {
     const { consumer } = initConsumer(buildUpstream());
     const manifest = JSON.parse(read(consumer, 'package.json')) as {
