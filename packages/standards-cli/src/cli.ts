@@ -1046,10 +1046,25 @@ const inspectPackageJson = (packageRaw: string): ReadonlyArray<string> => {
   return problems;
 };
 
+// Parse rather than search the text, so a comment or another field that names
+// the base cannot stand in for inheriting it.
+const extendsBiomeBase = (raw: string): boolean => {
+  try {
+    const parsed: unknown = globalThis.Bun.JSONC.parse(raw);
+    return (
+      isRecord(parsed) &&
+      Array.isArray(parsed.extends) &&
+      parsed.extends.includes('./biome.base.jsonc')
+    );
+  } catch {
+    return false;
+  }
+};
+
 const runDoctor = async (consumer: string): Promise<boolean> => {
   const problems: Array<string> = [];
   const biome = await readTextIfPresent(join(consumer, 'biome.jsonc'));
-  if (biome === null || !biome.includes('"./biome.base.jsonc"')) {
+  if (biome === null || !extendsBiomeBase(biome)) {
     problems.push('biome.jsonc must extend "./biome.base.jsonc"');
   }
 
