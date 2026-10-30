@@ -200,12 +200,8 @@ jobs:
       # Without an open PR, no review depends on that history: a closed or
       # merged PR leaves its branch behind for recovery, and rebasing it onto
       # a newer base conflicts on the files every sync rewrites. Rebuild the
-      # branch from the base instead. An open PR whose branch conflicts is
-      # rebuilt the same way when the bot authored and committed every commit
-      # on it, because the next sync rewrites all of that content. A merge or
-      # any other identity, including a maintainer's hand rebase, stops the
-      # run. A concurrent push is guarded by the exact head lease in the
-      # writer step.
+      # branch from the base instead. A concurrent push is guarded by the
+      # exact head lease in the writer step.
       - name: Prepare reusable sync branch
         id: sync-base
         env:
@@ -231,6 +227,9 @@ jobs:
             git switch -c "$branch" "$previous"
             if ! git rebase "origin/$SYNC_BASE_REF"; then
               git rebase --abort
+              # Commits the bot both authored and committed hold only content
+              # the next sync rewrites, so a rebuild may drop them. A hand
+              # rebase makes the maintainer the committer.
               bot="$(git config user.name) <$(git config user.email)>"
               # Steps run without pipefail, so a failed log must stop the step
               # here rather than reach the loop as an empty list.
