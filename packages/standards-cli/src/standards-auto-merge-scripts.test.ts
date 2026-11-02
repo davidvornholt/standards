@@ -4,10 +4,13 @@ import { cleanupTmpDirs } from './cli-test-support';
 import {
   APP,
   AUTO_MERGE,
+  autoMergeGate,
   type Env,
   HEAD,
   PR_URL,
   type Run,
+  readAutoMergeSetting,
+  readRequiredChecks,
   SYNC,
   stepRunner,
 } from './standards-auto-merge-test-support';
@@ -207,25 +210,41 @@ describe('auto-merge branch updates', () => {
   });
 });
 
-describe('sync pull request auto-merge', () => {
-  const pullRequest = (enabledBy: string | null) => ({
-    'pull-request.json': {
-      autoMergeRequest:
-        enabledBy === null ? null : { enabledBy: { login: enabledBy } },
-    },
-  });
-  const enable = (
-    syncPr: string,
-    enabledBy: string | null,
-    { created = false, manual = false } = {},
-  ): Run =>
-    run(SYNC, 'Enable sync pull request auto-merge', pullRequest(enabledBy), [
+const pullRequest = (enabledBy: string | null) => ({
+  'pull-request.json': {
+    autoMergeRequest:
+      enabledBy === null ? null : { enabledBy: { login: enabledBy } },
+  },
+});
+const enable = (
+  syncPr: string,
+  enabledBy: string | null,
+  {
+    created = false,
+    manual = false,
+    gate = autoMergeGate(),
+  }: {
+    readonly created?: boolean;
+    readonly manual?: boolean;
+    readonly gate?: Readonly<Record<string, unknown>>;
+  } = {},
+): Run =>
+  run(
+    SYNC,
+    'Enable sync pull request auto-merge',
+    { ...pullRequest(enabledBy), ...gate },
+    [
       ['APP_SLUG', APP],
+      ['REPOSITORY', 'owner/repo'],
+      ['BASE_REF', 'main'],
       ['PR_NUMBER', syncPr],
       ['PR_CREATED', String(created)],
       ['SYNC_HEAD', HEAD],
       ['SYNC_MANUAL', String(manual)],
-    ]);
+    ],
+  );
+
+describe('sync pull request auto-merge', () => {
   const view = (pr: string): string =>
     `pr view ${pr} --json autoMergeRequest --jq .autoMergeRequest.enabledBy.login // ""\n`;
 
@@ -234,7 +253,7 @@ describe('sync pull request auto-merge', () => {
       created: true,
       enabledBy: null,
       manual: false,
-      calls: `pr merge 7 --auto --squash --match-head-commit ${HEAD}\n`,
+      calls: `${readAutoMergeSetting}${readRequiredChecks}pr merge 7 --auto --squash --match-head-commit ${HEAD}\n`,
     },
     {
       created: false,
@@ -292,4 +311,41 @@ describe('sync pull request auto-merge', () => {
       expect(result.calls).toBe(calls);
     },
   );
+});
+
+describe('sync pull request auto-merge gate', () => {
+  // gh merges a pull request that nothing holds at once instead of turning
+  // its auto-merge on, so the sync pull request merges itself only where a
+  // rule makes it wait for `check`.
+  it.each([
+    [
+      "doesn't allow auto-merge",
+      autoMergeGate({ allowed: false }),
+      readAutoMergeSetting,
+      "This repository doesn't allow auto-merge, so standards sync PR #7 stays manual.",
+    ],
+    [
+      'has no rule that requires check',
+      autoMergeGate({ required: [] }),
+      `${readAutoMergeSetting}${readRequiredChecks}`,
+      'No active rule on main requires check, so standards sync PR #7 stays manual.',
+    ],
+  ])(
+    'keeps a new sync pull request manual where the repository %s',
+    (_label, gate, calls, message) => {
+      const result = enable('7', null, { created: true, gate });
+      expect(result.status).toBe(0);
+      expect(result.calls).toBe(calls);
+      expect(result.stdout).toContain(message);
+    },
+  );
+
+  it('fails without turning auto-merge on when the branch rules are unreadable', () => {
+    const result = enable('7', null, {
+      created: true,
+      gate: { 'repository.json': { autoMergeAllowed: true } },
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.calls).toBe(`${readAutoMergeSetting}${readRequiredChecks}`);
+  });
 });

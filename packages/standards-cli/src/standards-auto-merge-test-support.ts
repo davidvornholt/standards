@@ -44,11 +44,38 @@ export const disableRecord = (disabled: boolean) => ({
 export const readDisables = (number: number): string =>
   `api graphql -f owner=owner -f name=repo -F number=${number}\n`;
 
+// Whether owner/repo allows auto-merge, and the active rules on its main
+// branch, which may require `check`. A missing fixture fails the call.
+export const autoMergeGate = ({
+  allowed = true,
+  required = ['check'],
+}: {
+  readonly allowed?: boolean;
+  readonly required?: ReadonlyArray<string>;
+} = {}) => ({
+  'repository.json': { autoMergeAllowed: allowed },
+  'rules.json': [
+    { type: 'deletion' },
+    {
+      type: 'required_status_checks',
+      parameters: {
+        // biome-ignore lint/style/useNamingConvention: GitHub's rule field is snake_case.
+        required_status_checks: required.map((context) => ({ context })),
+      },
+    },
+  ],
+});
+export const readAutoMergeSetting =
+  'repo view owner/repo --json autoMergeAllowed --jq .autoMergeAllowed\n';
+export const readRequiredChecks =
+  'api repos/owner/repo/rules/branches/main --paginate --jq .[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context\n';
+
 // `pr view` applies the caller's `--jq` filter to the fixture pull request,
-// `api graphql` applies it to the fixture pages and records the variables
-// without the query, `api --paginate` prints the fixture commit pages one
-// after another as gh does, and `api --include` answers a merge with the
-// fixture status for its base branch. Every call is recorded.
+// `repo view` and the branch rules read apply it to the fixture repository
+// and rules, `api graphql` applies it to the fixture pages and records the
+// variables without the query, `api --paginate` prints the fixture commit
+// pages one after another as gh does, and `api --include` answers a merge
+// with the fixture status for its base branch. Every call is recorded.
 const FAKE_GH = `#!/usr/bin/env bash
 set -euo pipefail
 case "$1 $2" in
@@ -58,6 +85,13 @@ case "$1 $2" in
     jq -r "$2" "$FIXTURE_DIR/pull-request.json"
     ;;
   'pr merge') echo "$*" >> "$GH_CALLS" ;;
+  'repo view' | 'api repos/'*'/rules/branches/'*)
+    echo "$*" >> "$GH_CALLS"
+    fixture=repository.json
+    [ "$1" = repo ] || fixture=rules.json
+    while [ "$1" != --jq ]; do shift; done
+    jq -r "$2" "$FIXTURE_DIR/$fixture"
+    ;;
   'api graphql')
     call='api graphql' filter=.
     shift 2

@@ -98,6 +98,9 @@ done
       [['APP', 'SLUG'].join('_')]: expression(
         'steps.merge-token.outputs.app-slug',
       ),
+      // biome-ignore lint/style/useNamingConvention: workflow environment names are upper case.
+      REPOSITORY: expression('github.repository'),
+      [['BASE', 'REF'].join('_')]: expression('github.ref_name'),
       [['PR', 'NUMBER'].join('_')]: expression(
         'steps.reconcile.outputs.number',
       ),
@@ -125,8 +128,23 @@ if [ "$SYNC_MANUAL" = true ]; then
     echo "Standards sync PR #$PR_NUMBER has commits the sync bot did not write, so the App leaves its auto-merge as it is."
   fi
 elif [ "$PR_CREATED" = true ]; then
-  gh pr merge "$PR_NUMBER" --auto --squash --match-head-commit "$SYNC_HEAD"
-  echo "Enabled auto-merge for standards sync PR #$PR_NUMBER"
+  # gh merges a pull request that nothing holds at once, so auto-merge
+  # starts only where an active rule on the base branch requires
+  # \`check\`. A repository whose plan has no rulesets doesn't allow
+  # auto-merge, and GitHub refuses to list its rules.
+  allowed=$(gh repo view "$REPOSITORY" --json autoMergeAllowed --jq .autoMergeAllowed)
+  if [ "$allowed" != true ]; then
+    echo "This repository doesn't allow auto-merge, so standards sync PR #$PR_NUMBER stays manual."
+    exit 0
+  fi
+  required=$(gh api "repos/$REPOSITORY/rules/branches/$BASE_REF" --paginate \\
+    --jq '.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context')
+  if grep -qx check <<<"$required"; then
+    gh pr merge "$PR_NUMBER" --auto --squash --match-head-commit "$SYNC_HEAD"
+    echo "Enabled auto-merge for standards sync PR #$PR_NUMBER"
+  else
+    echo "No active rule on $BASE_REF requires check, so standards sync PR #$PR_NUMBER stays manual."
+  fi
 else
   echo "An earlier run opened standards sync PR #$PR_NUMBER, so the App leaves its auto-merge as it is."
 fi

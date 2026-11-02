@@ -8,7 +8,10 @@ name: Standards auto-merge
 # and every other pull request stay manual. Once auto-merge on a bot pull
 # request is turned off, by a person, by GitHub, or by these workflows,
 # including when the pull request is closed, the App never turns it on again;
-# a person merges the pull request or turns auto-merge back on. Synced from
+# a person merges the pull request or turns auto-merge back on. Where the
+# repository doesn't allow auto-merge or no active rule on the base branch
+# requires `check`, as on a plan without rulesets, they stay manual too:
+# gh would merge them at once instead of waiting. Synced from
 # davidvornholt/standards.
 #
 # The broker App in ci.broker_app, not the workflow token, enables auto-merge
@@ -130,6 +133,7 @@ jobs:
           METADATA_OUTCOME: ${{ steps.metadata.outcome }}
           UPDATE_TYPE: ${{ steps.metadata.outputs.update-type }}
           REPOSITORY: ${{ github.repository }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
@@ -174,13 +178,29 @@ jobs:
                   -f query='query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) {
                     pullRequest(number: $number) { timelineItems(itemTypes: [AUTO_MERGE_DISABLED_EVENT], first: 1) { nodes { __typename } } } } }' \
                   --jq '.data.repository.pullRequest.timelineItems.nodes | length')
-                if [ "$disabled" = 0 ]; then
-                  # Auto-merge starts only at the head whose commits passed.
-                  gh pr merge "$PR_URL" --auto --squash --match-head-commit "$head"
-                  echo "Enabled auto-merge for a $UPDATE_TYPE update."
-                  exit 0
+                if [ "$disabled" != 0 ]; then
+                  reason="its auto-merge was turned off before"
+                else
+                  # gh merges a pull request that nothing holds at once, so
+                  # auto-merge starts only where an active rule on the base
+                  # branch requires `check`. A repository whose plan has no
+                  # rulesets doesn't allow auto-merge, and GitHub refuses to
+                  # list its rules.
+                  allowed=$(gh repo view "$REPOSITORY" --json autoMergeAllowed --jq .autoMergeAllowed)
+                  if [ "$allowed" != true ]; then
+                    reason="this repository doesn't allow auto-merge"
+                  else
+                    required=$(gh api "repos/$REPOSITORY/rules/branches/$BASE_REF" --paginate \
+                      --jq '.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context')
+                    if grep -qx check <<<"$required"; then
+                      # Auto-merge starts only at the head whose commits passed.
+                      gh pr merge "$PR_URL" --auto --squash --match-head-commit "$head"
+                      echo "Enabled auto-merge for a $UPDATE_TYPE update."
+                      exit 0
+                    fi
+                    reason="no active rule on $BASE_REF requires check"
+                  fi
                 fi
-                reason="its auto-merge was turned off before"
                 ;;
               *) reason="its update type is ${UPDATE_TYPE:-not a semantic version}" ;;
             esac

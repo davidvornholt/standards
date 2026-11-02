@@ -4,12 +4,15 @@ import { cleanupTmpDirs } from './cli-test-support';
 import {
   APP,
   AUTO_MERGE,
+  autoMergeGate,
   disableRecord,
   type Env,
   HEAD,
   PR_URL,
   type Run,
+  readAutoMergeSetting,
   readDisables,
+  readRequiredChecks,
   stepRunner,
 } from './standards-auto-merge-test-support';
 
@@ -55,13 +58,15 @@ const SELF_COMMITTED_APP_MERGE = listedCommit({
 
 const view = `pr view ${PR_URL} --json state,headRefOid,autoMergeRequest --jq [.state, .headRefOid, (.autoMergeRequest.enabledBy.login // "")] | @tsv\n`;
 const list = 'api --paginate repos/owner/repo/pulls/12/commits\n';
-const enable = `${readDisables(12)}pr merge ${PR_URL} --auto --squash --match-head-commit ${HEAD}\n`;
+const readGate = `${readDisables(12)}${readAutoMergeSetting}${readRequiredChecks}`;
+const enable = `${readGate}pr merge ${PR_URL} --auto --squash --match-head-commit ${HEAD}\n`;
 const disable = `pr merge ${PR_URL} --disable-auto\n`;
 const decisionEnv: Env = [
   ['APP_SLUG', APP],
   ['METADATA_OUTCOME', 'success'],
   ['UPDATE_TYPE', 'version-update:semver-minor'],
   ['REPOSITORY', 'owner/repo'],
+  ['BASE_REF', 'main'],
   ['PR_NUMBER', '12'],
   ['PR_URL', PR_URL],
 ];
@@ -72,10 +77,12 @@ const decide = (
     pullRequest = {},
     commitPages = [[DEPENDABOT_COMMIT, SELF_COMMITTED_APP_MERGE], [APP_MERGE]],
     disabled = false,
+    gate = autoMergeGate(),
   }: {
     readonly pullRequest?: Readonly<Record<string, string>>;
     readonly commitPages?: ReadonlyArray<ReadonlyArray<unknown>>;
     readonly disabled?: boolean;
+    readonly gate?: Readonly<Record<string, unknown>>;
   } = {},
 ): Run =>
   run(
@@ -91,6 +98,7 @@ const decide = (
       },
       'commit-pages.json': commitPages,
       ...disableRecord(disabled),
+      ...gate,
     },
     [...decisionEnv, ...values],
   );
@@ -205,5 +213,43 @@ describe('Dependabot auto-merge decision', () => {
     });
     expect(result.status).toBe(0);
     expect(result.calls).toBe(view);
+  });
+});
+
+describe('Dependabot auto-merge gate', () => {
+  // gh merges a pull request that nothing holds at once instead of turning
+  // its auto-merge on, so an update merges itself only where a rule makes it
+  // wait for `check`.
+  it.each([
+    [
+      "doesn't allow auto-merge",
+      autoMergeGate({ allowed: false }),
+      `${readDisables(12)}${readAutoMergeSetting}`,
+      "this repository doesn't allow auto-merge",
+    ],
+    [
+      'has no rule that requires check',
+      autoMergeGate({ required: ['lint'] }),
+      readGate,
+      'no active rule on main requires check',
+    ],
+  ])(
+    'keeps an eligible update manual where the repository %s',
+    (_label, gate, reads, reason) => {
+      const result = decide(null, [], { gate });
+      expect(result.status).toBe(0);
+      expect(result.calls).toBe(`${view}${list}${reads}`);
+      expect(result.stdout).toContain(
+        `Left this pull request manual because ${reason}.`,
+      );
+    },
+  );
+
+  it('fails without turning auto-merge on when the branch rules are unreadable', () => {
+    const result = decide(null, [], {
+      gate: { 'repository.json': { autoMergeAllowed: true } },
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.calls).toBe(`${view}${list}${readGate}`);
   });
 });
