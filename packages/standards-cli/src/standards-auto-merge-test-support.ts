@@ -23,10 +23,21 @@ const SHA_LENGTH = 40;
 export const HEAD = 'a'.repeat(SHA_LENGTH);
 const MODE = 0o755;
 
+// GitHub's record of how often anyone turned a pull request's auto-merge off,
+// and the call that reads it for pull request `number` of owner/repo.
+export const disableRecord = (totalCount: number) => ({
+  'pages.json': {
+    data: { repository: { pullRequest: { timelineItems: { totalCount } } } },
+  },
+});
+export const readDisables = (number: number): string =>
+  `api graphql -f owner=owner -f name=repo -F number=${number}\n`;
+
 // `pr view` applies the caller's `--jq` filter to the fixture pull request,
-// `api graphql` prints the fixture pages, `api --paginate` prints the fixture
-// commit pages one after another as gh does, and `api --include` answers a
-// merge with the fixture status for its base branch. Every call is recorded.
+// `api graphql` applies it to the fixture pages and records the variables
+// without the query, `api --paginate` prints the fixture commit pages one
+// after another as gh does, and `api --include` answers a merge with the
+// fixture status for its base branch. Every call is recorded.
 const FAKE_GH = `#!/usr/bin/env bash
 set -euo pipefail
 case "$1 $2" in
@@ -37,8 +48,18 @@ case "$1 $2" in
     ;;
   'pr merge') echo "$*" >> "$GH_CALLS" ;;
   'api graphql')
-    echo 'api graphql' >> "$GH_CALLS"
-    cat "$FIXTURE_DIR/pages.json"
+    call='api graphql' filter=.
+    shift 2
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --jq) filter=$2; shift ;;
+        -f | -F) [[ "$2" == query=* ]] || call="$call $1 $2"; shift ;;
+        *) call="$call $1" ;;
+      esac
+      shift
+    done
+    echo "$call" >> "$GH_CALLS"
+    jq -r "$filter" "$FIXTURE_DIR/pages.json"
     ;;
   'api --paginate')
     echo "$*" >> "$GH_CALLS"

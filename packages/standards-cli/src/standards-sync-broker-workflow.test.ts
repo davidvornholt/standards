@@ -93,7 +93,11 @@ echo "number=$current" >> "$GITHUB_OUTPUT"
       [['APP', 'SLUG'].join('_')]: expression(
         'steps.merge-token.outputs.app-slug',
       ),
-      [['SYNC', 'PR'].join('_')]: expression('steps.reconcile.outputs.number'),
+      // biome-ignore lint/style/useNamingConvention: GitHub Actions passes upper-case environment names.
+      REPOSITORY: expression('github.repository'),
+      [['PR', 'NUMBER'].join('_')]: expression(
+        'steps.reconcile.outputs.number',
+      ),
       [['SYNC', 'HEAD'].join('_')]: expression(
         'steps.sync-branch.outputs.head',
       ),
@@ -102,21 +106,30 @@ echo "number=$current" >> "$GITHUB_OUTPUT"
       ),
     },
     run: `set -euo pipefail
-if [[ ! "$SYNC_PR" =~ ^[0-9]+$ ]]; then
+if [[ ! "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
   echo "::error::Reconcile sync pull requests reported no current pull request"
   exit 1
 fi
-enabled_by=$(gh pr view "$SYNC_PR" --json autoMergeRequest --jq '.autoMergeRequest.enabledBy.login // ""')
+enabled_by=$(gh pr view "$PR_NUMBER" --json autoMergeRequest --jq '.autoMergeRequest.enabledBy.login // ""')
 if [ "$SYNC_MANUAL" = true ]; then
   if [ "$enabled_by" = "$APP_SLUG" ]; then
-    gh pr merge "$SYNC_PR" --disable-auto
-    echo "Turned auto-merge off for standards sync PR #$SYNC_PR"
+    gh pr merge "$PR_NUMBER" --disable-auto
+    echo "Turned auto-merge off for standards sync PR #$PR_NUMBER"
   fi
 elif [ -n "$enabled_by" ]; then
-  echo "Auto-merge is already enabled for standards sync PR #$SYNC_PR"
+  echo "Auto-merge is already enabled for standards sync PR #$PR_NUMBER"
 else
-  gh pr merge "$SYNC_PR" --auto --squash --match-head-commit "$SYNC_HEAD"
-  echo "Enabled auto-merge for standards sync PR #$SYNC_PR"
+  # GitHub's record of each disable survives every push and rebase.
+  disabled=$(gh api graphql -f owner="\${REPOSITORY%/*}" -f name="\${REPOSITORY#*/}" -F number="$PR_NUMBER" \\
+    -f query='query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) {
+      pullRequest(number: $number) { timelineItems(itemTypes: [AUTO_MERGE_DISABLED_EVENT]) { totalCount } } } }' \\
+    --jq .data.repository.pullRequest.timelineItems.totalCount)
+  if [ "$disabled" = 0 ]; then
+    gh pr merge "$PR_NUMBER" --auto --squash --match-head-commit "$SYNC_HEAD"
+    echo "Enabled auto-merge for standards sync PR #$PR_NUMBER"
+  else
+    echo "Standards sync PR #$PR_NUMBER stays manual because its auto-merge was turned off before."
+  fi
 fi
 `,
   },

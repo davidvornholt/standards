@@ -4,10 +4,12 @@ import { cleanupTmpDirs } from './cli-test-support';
 import {
   APP,
   AUTO_MERGE,
+  disableRecord,
   type Env,
   HEAD,
   PR_URL,
   type Run,
+  readDisables,
   SYNC,
   stepRunner,
 } from './standards-auto-merge-test-support';
@@ -218,13 +220,20 @@ describe('sync pull request auto-merge', () => {
     syncPr: string,
     enabledBy: string | null,
     manual: boolean,
+    disabled = 0,
   ): Run =>
-    run(SYNC, 'Enable sync pull request auto-merge', pullRequest(enabledBy), [
-      ['APP_SLUG', APP],
-      ['SYNC_PR', syncPr],
-      ['SYNC_HEAD', HEAD],
-      ['SYNC_MANUAL', String(manual)],
-    ]);
+    run(
+      SYNC,
+      'Enable sync pull request auto-merge',
+      { ...pullRequest(enabledBy), ...disableRecord(disabled) },
+      [
+        ['APP_SLUG', APP],
+        ['REPOSITORY', 'owner/repo'],
+        ['PR_NUMBER', syncPr],
+        ['SYNC_HEAD', HEAD],
+        ['SYNC_MANUAL', String(manual)],
+      ],
+    );
   const view = (pr: string): string =>
     `pr view ${pr} --json autoMergeRequest --jq .autoMergeRequest.enabledBy.login // ""\n`;
 
@@ -232,7 +241,7 @@ describe('sync pull request auto-merge', () => {
     [
       null,
       false,
-      `${view('7')}pr merge 7 --auto --squash --match-head-commit ${HEAD}\n`,
+      `${view('7')}${readDisables(7)}pr merge 7 --auto --squash --match-head-commit ${HEAD}\n`,
     ],
     [APP, false, view('7')],
     [APP, true, `${view('7')}pr merge 7 --disable-auto\n`],
@@ -245,6 +254,15 @@ describe('sync pull request auto-merge', () => {
       expect(result.calls).toBe(calls);
     },
   );
+
+  // A clean rebase rewrites the committer that showed a maintainer's commit,
+  // so the next run sees only bot commits. GitHub's record of the disable
+  // stays.
+  it('keeps a sync pull request manual once its auto-merge was turned off', () => {
+    const result = enable('7', null, false, 1);
+    expect(result.status).toBe(0);
+    expect(result.calls).toBe(`${view('7')}${readDisables(7)}`);
+  });
 
   it('fails without a current sync pull request', () => {
     const result = enable('', null, false);

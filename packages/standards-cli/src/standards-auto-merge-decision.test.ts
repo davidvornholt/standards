@@ -4,10 +4,12 @@ import { cleanupTmpDirs } from './cli-test-support';
 import {
   APP,
   AUTO_MERGE,
+  disableRecord,
   type Env,
   HEAD,
   PR_URL,
   type Run,
+  readDisables,
   stepRunner,
 } from './standards-auto-merge-test-support';
 
@@ -40,43 +42,49 @@ const DEPENDABOT_COMMIT = listedCommit({
 });
 const APP_MERGE = listedCommit({ sha: HEAD, login: `${APP}[bot]`, parents: 2 });
 
-describe('Dependabot auto-merge decision', () => {
-  const view = `pr view ${PR_URL} --json state,headRefOid,autoMergeRequest --jq [.state, .headRefOid, (.autoMergeRequest.enabledBy.login // "")] | @tsv\n`;
-  const list = 'api --paginate repos/owner/repo/pulls/12/commits\n';
-  const enable = `pr merge ${PR_URL} --auto --squash --match-head-commit ${HEAD}\n`;
-  const disable = `pr merge ${PR_URL} --disable-auto\n`;
-  const decisionEnv: Env = [
-    ['APP_SLUG', APP],
-    ['METADATA_OUTCOME', 'success'],
-    ['UPDATE_TYPE', 'version-update:semver-minor'],
-    ['REPOSITORY', 'owner/repo'],
-    ['PR_NUMBER', '12'],
-    ['PR_URL', PR_URL],
-  ];
-  const decide = (
-    enabledBy: string | null,
-    values: Env,
-    pullRequest: Readonly<Record<string, string>> = {},
-    commitPages: ReadonlyArray<ReadonlyArray<unknown>> = [
-      [DEPENDABOT_COMMIT],
-      [APP_MERGE],
-    ],
-  ): Run =>
-    run(
-      AUTO_MERGE,
-      'Apply the auto-merge decision',
-      {
-        'pull-request.json': {
-          state: 'OPEN',
-          headRefOid: HEAD,
-          autoMergeRequest:
-            enabledBy === null ? null : { enabledBy: { login: enabledBy } },
-          ...pullRequest,
-        },
-        'commit-pages.json': commitPages,
+const view = `pr view ${PR_URL} --json state,headRefOid,autoMergeRequest --jq [.state, .headRefOid, (.autoMergeRequest.enabledBy.login // "")] | @tsv\n`;
+const list = 'api --paginate repos/owner/repo/pulls/12/commits\n';
+const enable = `${readDisables(12)}pr merge ${PR_URL} --auto --squash --match-head-commit ${HEAD}\n`;
+const disable = `pr merge ${PR_URL} --disable-auto\n`;
+const decisionEnv: Env = [
+  ['APP_SLUG', APP],
+  ['METADATA_OUTCOME', 'success'],
+  ['UPDATE_TYPE', 'version-update:semver-minor'],
+  ['REPOSITORY', 'owner/repo'],
+  ['PR_NUMBER', '12'],
+  ['PR_URL', PR_URL],
+];
+const decide = (
+  enabledBy: string | null,
+  values: Env,
+  {
+    pullRequest = {},
+    commitPages = [[DEPENDABOT_COMMIT], [APP_MERGE]],
+    disabled = 0,
+  }: {
+    readonly pullRequest?: Readonly<Record<string, string>>;
+    readonly commitPages?: ReadonlyArray<ReadonlyArray<unknown>>;
+    readonly disabled?: number;
+  } = {},
+): Run =>
+  run(
+    AUTO_MERGE,
+    'Apply the auto-merge decision',
+    {
+      'pull-request.json': {
+        state: 'OPEN',
+        headRefOid: HEAD,
+        autoMergeRequest:
+          enabledBy === null ? null : { enabledBy: { login: enabledBy } },
+        ...pullRequest,
       },
-      [...decisionEnv, ...values],
-    );
+      'commit-pages.json': commitPages,
+      ...disableRecord(disabled),
+    },
+    [...decisionEnv, ...values],
+  );
+
+describe('Dependabot auto-merge decision', () => {
   const major: Env = [['UPDATE_TYPE', 'version-update:semver-major']];
   const cases: ReadonlyArray<readonly [string, string | null, Env, string]> = [
     ['a minor update', null, [], enable],
@@ -125,10 +133,9 @@ describe('Dependabot auto-merge decision', () => {
       }),
       listedCommit({ sha: '1'.repeat(40), login: `${APP}[bot]` }),
     ];
-    const result = decide(APP, [], {}, [
-      [DEPENDABOT_COMMIT, ...others],
-      [APP_MERGE],
-    ]);
+    const result = decide(APP, [], {
+      commitPages: [[DEPENDABOT_COMMIT, ...others], [APP_MERGE]],
+    });
     expect(result.status).toBe(0);
     expect(result.calls).toBe(`${view}${list}${disable}`);
     expect(result.stdout).toContain(
@@ -136,15 +143,28 @@ describe('Dependabot auto-merge decision', () => {
     );
   });
 
+  // A clean rebase or a later update can make every commit look like the
+  // bots' again, but it cannot erase GitHub's record of the disable.
+  it('keeps an eligible update manual once its auto-merge was turned off', () => {
+    const result = decide(null, [], { disabled: 1 });
+    expect(result.status).toBe(0);
+    expect(result.calls).toBe(`${view}${list}${readDisables(12)}`);
+    expect(result.stdout).toContain(
+      'Left this pull request manual because its auto-merge was turned off before.',
+    );
+  });
+
   it('leaves a pull request manual when its commit list does not end at its head', () => {
-    const result = decide(APP, [], { headRefOid: 'b'.repeat(40) });
+    const result = decide(APP, [], {
+      pullRequest: { headRefOid: 'b'.repeat(40) },
+    });
     expect(result.status).toBe(0);
     expect(result.calls).toBe(`${view}${list}${disable}`);
   });
 
   it('does nothing for a closed pull request', () => {
     const result = decide(APP, [['METADATA_OUTCOME', 'failure']], {
-      state: 'CLOSED',
+      pullRequest: { state: 'CLOSED' },
     });
     expect(result.status).toBe(0);
     expect(result.calls).toBe(view);
