@@ -220,7 +220,7 @@ describe('sync pull request auto-merge', () => {
     syncPr: string,
     enabledBy: string | null,
     manual: boolean,
-    disabled = 0,
+    disabled = false,
   ): Run =>
     run(
       SYNC,
@@ -259,7 +259,7 @@ describe('sync pull request auto-merge', () => {
   // so the next run sees only bot commits. GitHub's record of the disable
   // stays.
   it('keeps a sync pull request manual once its auto-merge was turned off', () => {
-    const result = enable('7', null, false, 1);
+    const result = enable('7', null, false, true);
     expect(result.status).toBe(0);
     expect(result.calls).toBe(`${view('7')}${readDisables(7)}`);
   });

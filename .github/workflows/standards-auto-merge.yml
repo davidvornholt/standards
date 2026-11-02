@@ -166,11 +166,12 @@ jobs:
                   echo "Auto-merge is already enabled by $enabled_by."
                   exit 0
                 fi
-                # GitHub's record of each disable survives every push and rebase.
+                # GitHub's record of each disable survives every push and rebase. Its
+                # totalCount ignores itemTypes, so only the filtered nodes count.
                 disabled=$(gh api graphql -f owner="${REPOSITORY%/*}" -f name="${REPOSITORY#*/}" -F number="$PR_NUMBER" \
                   -f query='query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) {
-                    pullRequest(number: $number) { timelineItems(itemTypes: [AUTO_MERGE_DISABLED_EVENT]) { totalCount } } } }' \
-                  --jq .data.repository.pullRequest.timelineItems.totalCount)
+                    pullRequest(number: $number) { timelineItems(itemTypes: [AUTO_MERGE_DISABLED_EVENT], first: 1) { nodes { __typename } } } } }' \
+                  --jq '.data.repository.pullRequest.timelineItems.nodes | length')
                 if [ "$disabled" = 0 ]; then
                   # Auto-merge starts only at the head whose commits passed.
                   gh pr merge "$PR_URL" --auto --squash --match-head-commit "$head"

@@ -71,11 +71,11 @@ const decide = (
   {
     pullRequest = {},
     commitPages = [[DEPENDABOT_COMMIT, SELF_COMMITTED_APP_MERGE], [APP_MERGE]],
-    disabled = 0,
+    disabled = false,
   }: {
     readonly pullRequest?: Readonly<Record<string, string>>;
     readonly commitPages?: ReadonlyArray<ReadonlyArray<unknown>>;
-    readonly disabled?: number;
+    readonly disabled?: boolean;
   } = {},
 ): Run =>
   run(
@@ -157,7 +157,7 @@ describe('Dependabot auto-merge decision', () => {
   // A clean rebase or a later update can make every commit look like the
   // bots' again, but it cannot erase GitHub's record of the disable.
   it('keeps an eligible update manual once its auto-merge was turned off', () => {
-    const result = decide(null, [], { disabled: 1 });
+    const result = decide(null, [], { disabled: true });
     expect(result.status).toBe(0);
     expect(result.calls).toBe(`${view}${list}${readDisables(12)}`);
     expect(result.stdout).toContain(

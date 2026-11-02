@@ -23,11 +23,22 @@ const SHA_LENGTH = 40;
 export const HEAD = 'a'.repeat(SHA_LENGTH);
 const MODE = 0o755;
 
-// GitHub's record of how often anyone turned a pull request's auto-merge off,
-// and the call that reads it for pull request `number` of owner/repo.
-export const disableRecord = (totalCount: number) => ({
+// GitHub's record of whether anyone turned a pull request's auto-merge off,
+// and the call that reads it for pull request `number` of owner/repo. As on
+// GitHub, totalCount ignores the itemTypes filter and also counts the pull
+// request's commit; only the nodes are filtered.
+export const disableRecord = (disabled: boolean) => ({
   'pages.json': {
-    data: { repository: { pullRequest: { timelineItems: { totalCount } } } },
+    data: {
+      repository: {
+        pullRequest: {
+          timelineItems: {
+            totalCount: disabled ? 2 : 1,
+            nodes: disabled ? [{ __typename: 'AutoMergeDisabledEvent' }] : [],
+          },
+        },
+      },
+    },
   },
 });
 export const readDisables = (number: number): string =>
