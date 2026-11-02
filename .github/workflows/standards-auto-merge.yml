@@ -162,6 +162,81 @@ jobs:
             echo "Left this pull request manual because $reason."
           fi
 
+  # Turns off the auto-merge that standards-sync.yml enabled when anyone but
+  # the broker App pushes to the sync pull request, so the new commits wait
+  # for review. The next sync run keeps such a pull request manual. Every push
+  # needs its own decision, so no run cancels or replaces another.
+  sync:
+    if: >-
+      github.event_name == 'pull_request_target' &&
+      github.event.action == 'synchronize' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'standards-sync/update'
+    # Repository/organization variable; empty keeps repository-scoped secrets.
+    # See the standards-sync skill reference for environment-scoped bootstrap.
+    environment: ${{ vars.CI_SECRETS_ENVIRONMENT }}
+    permissions:
+      contents: read
+    runs-on: ${{ vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-small', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    steps:
+      - name: Checkout trusted secret inputs
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github/actions/sops-secret
+            secrets/ci.yaml
+          sparse-checkout-cone-mode: false
+
+      - name: Resolve broker App client ID
+        id: broker-app-client-id
+        uses: ./.github/actions/sops-secret
+        with:
+          age-key: ${{ secrets.SOPS_AGE_KEY }}
+          secret-file: secrets/ci.yaml
+          secret-key: broker_app.client_id
+
+      - name: Resolve broker App private key
+        id: broker-app-private-key
+        uses: ./.github/actions/sops-secret
+        with:
+          age-key: ${{ secrets.SOPS_AGE_KEY }}
+          secret-file: secrets/ci.yaml
+          secret-key: broker_app.private_key
+
+      # The token also names the App, whose own pushes keep auto-merge on.
+      - name: Mint current-repository auto-merge token
+        id: auto-merge-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ steps.broker-app-client-id.outputs.value }}
+          private-key: ${{ steps.broker-app-private-key.outputs.value }}
+          # Omitting owner and repositories is the action's exact
+          # current-repository scope; never derive either from event payload.
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Turn sync auto-merge off after a push by anyone else
+        env:
+          GH_TOKEN: ${{ steps.auto-merge-token.outputs.token }}
+          APP_SLUG: ${{ steps.auto-merge-token.outputs.app-slug }}
+          EVENT_SENDER: ${{ github.event.sender.login }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_SENDER" = "$APP_SLUG[bot]" ]; then
+            echo "The broker App pushed this update."
+            exit 0
+          fi
+          enabled_by=$(gh pr view "$PR_URL" --json autoMergeRequest --jq '.autoMergeRequest.enabledBy.login // ""')
+          if [ "$enabled_by" = "$APP_SLUG" ]; then
+            gh pr merge "$PR_URL" --disable-auto
+            echo "::notice::Turned auto-merge off because $EVENT_SENDER pushed to the sync branch."
+          else
+            echo "The broker App has not enabled auto-merge for this pull request."
+          fi
+
   # Lists the pull requests that the update job may bring up to date, with the
   # workflow token, so a push without any skips the broker App entirely. Pull
   # requests whose checks failed wait for a person instead of rerunning them.

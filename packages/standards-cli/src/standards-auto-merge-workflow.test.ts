@@ -110,6 +110,7 @@ describe('Standards auto-merge workflow contract', () => {
     expect(workflow.permissions).toEqual({ contents: 'read' });
     expect(Object.keys(workflow.jobs)).toEqual([
       'dependabot',
+      'sync',
       'pending',
       'update',
     ]);
@@ -185,7 +186,7 @@ describe('Standards auto-merge workflow contract', () => {
   });
 
   it('passes App credentials only to mint steps and event data only through env', () => {
-    for (const jobName of ['dependabot', 'update']) {
+    for (const jobName of ['dependabot', 'sync', 'update']) {
       const mint = job(jobName).steps[3]?.name ?? '';
       for (const producer of [
         'broker-app-client-id',
@@ -205,6 +206,39 @@ describe('Standards auto-merge workflow contract', () => {
     const checkouts = Object.values(workflow.jobs).flatMap(({ steps }) =>
       steps.filter(({ uses }) => uses?.startsWith('actions/checkout') === true),
     );
-    expect(checkouts).toEqual([TRUSTED_CHECKOUT, TRUSTED_CHECKOUT]);
+    expect(checkouts).toEqual([
+      TRUSTED_CHECKOUT,
+      TRUSTED_CHECKOUT,
+      TRUSTED_CHECKOUT,
+    ]);
+  });
+});
+
+describe('Standards sync auto-merge revocation contract', () => {
+  it('revokes sync auto-merge after every push to the same-repository sync branch', () => {
+    const sync = job('sync');
+    expect(sync.if).toBe(
+      [
+        "github.event_name == 'pull_request_target'",
+        "github.event.action == 'synchronize'",
+        'github.event.pull_request.head.repo.full_name == github.repository',
+        "github.event.pull_request.head.ref == 'standards-sync/update'",
+      ].join(' && '),
+    );
+    // A cancelled run could leave a person's commits set to auto-merge.
+    expect(sync.concurrency).toBeUndefined();
+    expect(sync.permissions).toEqual({ contents: 'read' });
+    expect(sync.steps.slice(0, 4)).toEqual(
+      brokerSteps(
+        minted('Mint current-repository auto-merge token', 'auto-merge-token', {
+          'permission-contents': 'write',
+          'permission-pull-requests': 'write',
+        }),
+      ),
+    );
+    expect(sync.steps).toHaveLength(5);
+    expect(readersOf('sync', 'auto-merge-token')).toEqual([
+      'Turn sync auto-merge off after a push by anyone else',
+    ]);
   });
 });

@@ -44,7 +44,10 @@ if ! git diff --cached --quiet; then
   git commit -m "chore: sync standards from upstream"
 fi
 git push --force-with-lease="refs/heads/$branch:$EXPECTED_SYNC_HEAD" --set-upstream origin "$branch"
-echo "branch=$branch" >> "$GITHUB_OUTPUT"
+{
+  echo "branch=$branch"
+  echo "head=$(git rev-parse HEAD)"
+} >> "$GITHUB_OUTPUT"
 `,
   },
   pullRequest: {
@@ -87,18 +90,32 @@ echo "number=$current" >> "$GITHUB_OUTPUT"
     if: "steps.mirror.outputs.changed == 'true'",
     env: {
       [prTokenName]: mergeToken,
+      [['APP', 'SLUG'].join('_')]: expression(
+        'steps.merge-token.outputs.app-slug',
+      ),
       [['SYNC', 'PR'].join('_')]: expression('steps.reconcile.outputs.number'),
+      [['SYNC', 'HEAD'].join('_')]: expression(
+        'steps.sync-branch.outputs.head',
+      ),
+      [['SYNC', 'MANUAL'].join('_')]: expression(
+        'steps.sync-base.outputs.manual',
+      ),
     },
     run: `set -euo pipefail
 if [[ ! "$SYNC_PR" =~ ^[0-9]+$ ]]; then
   echo "::error::Reconcile sync pull requests reported no current pull request"
   exit 1
 fi
-enabled=$(gh pr view "$SYNC_PR" --json autoMergeRequest --jq '.autoMergeRequest != null')
-if [ "$enabled" = true ]; then
+enabled_by=$(gh pr view "$SYNC_PR" --json autoMergeRequest --jq '.autoMergeRequest.enabledBy.login // ""')
+if [ "$SYNC_MANUAL" = true ]; then
+  if [ "$enabled_by" = "$APP_SLUG" ]; then
+    gh pr merge "$SYNC_PR" --disable-auto
+    echo "Turned auto-merge off for standards sync PR #$SYNC_PR"
+  fi
+elif [ -n "$enabled_by" ]; then
   echo "Auto-merge is already enabled for standards sync PR #$SYNC_PR"
 else
-  gh pr merge "$SYNC_PR" --auto --squash
+  gh pr merge "$SYNC_PR" --auto --squash --match-head-commit "$SYNC_HEAD"
   echo "Enabled auto-merge for standards sync PR #$SYNC_PR"
 fi
 `,

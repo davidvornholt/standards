@@ -350,32 +350,69 @@ describe('auto-merge branch updates', () => {
 });
 
 describe('sync pull request auto-merge', () => {
-  const enable = (syncPr: string, enabled: boolean): Run =>
-    run(
-      SYNC,
-      'Enable sync pull request auto-merge',
-      {
-        'pull-request.json': {
-          autoMergeRequest: enabled ? { enabledBy: { login: APP } } : null,
-        },
-      },
-      [['SYNC_PR', syncPr]],
-    );
-  const view =
-    'pr view 7 --json autoMergeRequest --jq .autoMergeRequest != null\n';
+  const pullRequest = (enabledBy: string | null) => ({
+    'pull-request.json': {
+      autoMergeRequest:
+        enabledBy === null ? null : { enabledBy: { login: enabledBy } },
+    },
+  });
+  const enable = (
+    syncPr: string,
+    enabledBy: string | null,
+    manual: boolean,
+  ): Run =>
+    run(SYNC, 'Enable sync pull request auto-merge', pullRequest(enabledBy), [
+      ['APP_SLUG', APP],
+      ['SYNC_PR', syncPr],
+      ['SYNC_HEAD', HEAD],
+      ['SYNC_MANUAL', String(manual)],
+    ]);
+  const view = (pr: string): string =>
+    `pr view ${pr} --json autoMergeRequest --jq .autoMergeRequest.enabledBy.login // ""\n`;
 
   it.each([
-    [false, `${view}pr merge 7 --auto --squash\n`],
-    [true, view],
-  ])('enables auto-merge once (already enabled: %p)', (enabled, calls) => {
-    const result = enable('7', enabled);
-    expect(result.status).toBe(0);
-    expect(result.calls).toBe(calls);
-  });
+    [
+      null,
+      false,
+      `${view('7')}pr merge 7 --auto --squash --match-head-commit ${HEAD}\n`,
+    ],
+    [APP, false, view('7')],
+    [APP, true, `${view('7')}pr merge 7 --disable-auto\n`],
+    ['maintainer', true, view('7')],
+  ] as const)(
+    'decides the sync run (enabled by %p, manual: %p)',
+    (enabledBy, manual, calls) => {
+      const result = enable('7', enabledBy, manual);
+      expect(result.status).toBe(0);
+      expect(result.calls).toBe(calls);
+    },
+  );
 
   it('fails without a current sync pull request', () => {
-    const result = enable('', false);
+    const result = enable('', null, false);
     expect(result.status).toBe(1);
     expect(result.calls).toBe('');
   });
+
+  it.each([
+    [`${APP}[bot]`, APP, ''],
+    ['maintainer', APP, `${view(PR_URL)}pr merge ${PR_URL} --disable-auto\n`],
+    ['maintainer', 'maintainer', view(PR_URL)],
+  ])(
+    'decides after a push by %s (enabled by %s)',
+    (sender, enabledBy, calls) => {
+      const result = run(
+        AUTO_MERGE,
+        'Turn sync auto-merge off after a push by anyone else',
+        pullRequest(enabledBy),
+        [
+          ['APP_SLUG', APP],
+          ['EVENT_SENDER', sender],
+          ['PR_URL', PR_URL],
+        ],
+      );
+      expect(result.status).toBe(0);
+      expect(result.calls).toBe(calls);
+    },
+  );
 });

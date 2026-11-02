@@ -22,6 +22,7 @@ import {
 } from './standards-sync-workflow-test-support';
 
 const MODE = 0o755;
+const PREVIOUS_OUTPUT = /^previous=(?<previous>.*)$/mu;
 const git = (cwd: string, ...args: Array<string>): string =>
   execFileSync('git', args, {
     cwd,
@@ -73,9 +74,9 @@ it.each([false, true])(
       const output = join(root, `outputs-${index}`);
       const runEnv = { ...values, [['GITHUB', 'OUTPUT'].join('_')]: output };
       expect(shell(cwd, 'Prepare reusable sync branch', runEnv).status).toBe(0);
-      const previous = readFileSync(output, 'utf8')
-        .trim()
-        .slice('previous='.length);
+      const previous =
+        PREVIOUS_OUTPUT.exec(readFileSync(output, 'utf8'))?.groups?.previous ??
+        '';
       write(cwd, 'canonical.txt', `revision ${index}\n`);
       expect(
         shell(cwd, 'Commit and push mirror changes', {

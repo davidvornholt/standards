@@ -30,6 +30,7 @@ describe('automation bootstrap secret scope', () => {
     expect(sync.jobs.sync?.environment).toBe(selectedEnvironment);
     expect(sync.jobs.policy?.environment).toBeUndefined();
     expect(autoMerge.jobs.dependabot?.environment).toBe(selectedEnvironment);
+    expect(autoMerge.jobs.sync?.environment).toBe(selectedEnvironment);
     expect(autoMerge.jobs.update?.environment).toBe(selectedEnvironment);
     expect(autoMerge.jobs.pending?.environment).toBeUndefined();
   });

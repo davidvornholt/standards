@@ -836,7 +836,7 @@ const canonicalWorkflowPaths = (
 // This merge-time ratchet keeps configurable routing on the exact compatible
 // canonical jobs. It catches accidental workflow drift after review; it does
 // not authorize a request before CodeBuild starts a runner for the queued job.
-const CONFIGURABLE_RUNNER_VARIABLE_OCCURRENCES = 21;
+const CONFIGURABLE_RUNNER_VARIABLE_OCCURRENCES = 23;
 const QUALITY_JOB_NAME = 'quality';
 const CODEBUILD_JOB_TIMEOUT_MINUTES = 30;
 const REUSE_JOB_TIMEOUT_MINUTES = 5;
@@ -859,6 +859,10 @@ const QUALITY_POSTGRES_IMAGE = githubExpression(
 );
 const CONFIGURABLE_RUNNER_CONTRACTS = {
   '.github/workflows/standards-auto-merge.yml:dependabot': {
+    runner: CODEBUILD_RUNNER,
+    timeoutMinutes: AUTO_MERGE_JOB_TIMEOUT_MINUTES,
+  },
+  '.github/workflows/standards-auto-merge.yml:sync': {
     runner: CODEBUILD_RUNNER,
     timeoutMinutes: AUTO_MERGE_JOB_TIMEOUT_MINUTES,
   },
