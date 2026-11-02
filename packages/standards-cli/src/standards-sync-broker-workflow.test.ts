@@ -61,6 +61,7 @@ git push --force-with-lease="refs/heads/$branch:$EXPECTED_SYNC_HEAD" --set-upstr
     },
     run: `open=$(gh pr list --state open --limit 1000 --json number,headRefName,isCrossRepository --jq '[.[] | select((.isCrossRepository | not) and (.headRefName | startswith("standards-sync/")))]')
 current=
+created=false
 if [ "$MIRROR_CHANGED" = true ]; then
   current=$(jq -r '[.[] | select(.headRefName == "standards-sync/update")][0].number // empty' <<<"$open")
   if [ -n "$current" ]; then
@@ -72,6 +73,7 @@ if [ "$MIRROR_CHANGED" = true ]; then
       --title "chore: sync standards from upstream" \\
       --body-file "$RUNNER_TEMP/standards-sync-pr-body.md")
     current=\${url##*/}
+    created=true
   fi
   comment="Superseded by #$current, the current standards sync pull request."
 else
@@ -82,7 +84,10 @@ for number in $superseded; do
   gh pr close "$number" --comment "$comment"
   echo "Closed superseded standards sync PR #$number"
 done
-echo "number=$current" >> "$GITHUB_OUTPUT"
+{
+  echo "number=$current"
+  echo "created=$created"
+} >> "$GITHUB_OUTPUT"
 `,
   },
   autoMerge: {
@@ -93,10 +98,11 @@ echo "number=$current" >> "$GITHUB_OUTPUT"
       [['APP', 'SLUG'].join('_')]: expression(
         'steps.merge-token.outputs.app-slug',
       ),
-      // biome-ignore lint/style/useNamingConvention: GitHub Actions passes upper-case environment names.
-      REPOSITORY: expression('github.repository'),
       [['PR', 'NUMBER'].join('_')]: expression(
         'steps.reconcile.outputs.number',
+      ),
+      [['PR', 'CREATED'].join('_')]: expression(
+        'steps.reconcile.outputs.created',
       ),
       [['SYNC', 'HEAD'].join('_')]: expression(
         'steps.sync-branch.outputs.head',
@@ -110,27 +116,19 @@ if [[ ! "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
   echo "::error::Reconcile sync pull requests reported no current pull request"
   exit 1
 fi
-enabled_by=$(gh pr view "$PR_NUMBER" --json autoMergeRequest --jq '.autoMergeRequest.enabledBy.login // ""')
 if [ "$SYNC_MANUAL" = true ]; then
+  enabled_by=$(gh pr view "$PR_NUMBER" --json autoMergeRequest --jq '.autoMergeRequest.enabledBy.login // ""')
   if [ "$enabled_by" = "$APP_SLUG" ]; then
     gh pr merge "$PR_NUMBER" --disable-auto
     echo "Turned auto-merge off for standards sync PR #$PR_NUMBER"
-  fi
-elif [ -n "$enabled_by" ]; then
-  echo "Auto-merge is already enabled for standards sync PR #$PR_NUMBER"
-else
-  # GitHub's record of each disable survives every push and rebase. Its
-  # totalCount ignores itemTypes, so only the filtered nodes count.
-  disabled=$(gh api graphql -f owner="\${REPOSITORY%/*}" -f name="\${REPOSITORY#*/}" -F number="$PR_NUMBER" \\
-    -f query='query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) {
-      pullRequest(number: $number) { timelineItems(itemTypes: [AUTO_MERGE_DISABLED_EVENT], first: 1) { nodes { __typename } } } } }' \\
-    --jq '.data.repository.pullRequest.timelineItems.nodes | length')
-  if [ "$disabled" = 0 ]; then
-    gh pr merge "$PR_NUMBER" --auto --squash --match-head-commit "$SYNC_HEAD"
-    echo "Enabled auto-merge for standards sync PR #$PR_NUMBER"
   else
-    echo "Standards sync PR #$PR_NUMBER stays manual because its auto-merge was turned off before."
+    echo "Standards sync PR #$PR_NUMBER has commits the sync bot did not write, so the App leaves its auto-merge as it is."
   fi
+elif [ "$PR_CREATED" = true ]; then
+  gh pr merge "$PR_NUMBER" --auto --squash --match-head-commit "$SYNC_HEAD"
+  echo "Enabled auto-merge for standards sync PR #$PR_NUMBER"
+else
+  echo "An earlier run opened standards sync PR #$PR_NUMBER, so the App leaves its auto-merge as it is."
 fi
 `,
   },

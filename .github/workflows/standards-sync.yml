@@ -469,6 +469,7 @@ jobs:
         run: |
           open=$(gh pr list --state open --limit 1000 --json number,headRefName,isCrossRepository --jq '[.[] | select((.isCrossRepository | not) and (.headRefName | startswith("standards-sync/")))]')
           current=
+          created=false
           if [ "$MIRROR_CHANGED" = true ]; then
             current=$(jq -r '[.[] | select(.headRefName == "standards-sync/update")][0].number // empty' <<<"$open")
             if [ -n "$current" ]; then
@@ -480,6 +481,7 @@ jobs:
                 --title "chore: sync standards from upstream" \
                 --body-file "$RUNNER_TEMP/standards-sync-pr-body.md")
               current=${url##*/}
+              created=true
             fi
             comment="Superseded by #$current, the current standards sync pull request."
           else
@@ -490,7 +492,10 @@ jobs:
             gh pr close "$number" --comment "$comment"
             echo "Closed superseded standards sync PR #$number"
           done
-          echo "number=$current" >> "$GITHUB_OUTPUT"
+          {
+            echo "number=$current"
+            echo "created=$created"
+          } >> "$GITHUB_OUTPUT"
 
       # The sync PR merges itself once its required checks pass, so `check`
       # stays its only gate. A failing check, such as one that waits for
@@ -499,19 +504,21 @@ jobs:
       # would start no push run on the base branch. Standards auto-merge keeps
       # the branch up to date after later pushes to the base branch.
       #
-      # Commits the sync bot did not write need review, so their PR stays
-      # manual. Auto-merge starts only at the head this run pushed, and
-      # Standards auto-merge turns it off when anyone else pushes later. Once
-      # auto-merge was turned off, the App never turns it on again for that
-      # PR, because a clean rebase makes a maintainer's commit look like the
-      # bot's. A person merges the PR or turns auto-merge back on.
+      # Only the run that opens the sync PR turns auto-merge on, at the head it
+      # pushed. A later run can't tell whether auto-merge was ever on or who
+      # turned it off, because a clean rebase makes a maintainer's commit look
+      # like the bot's. So a reused PR keeps its auto-merge as it is. Commits
+      # the sync bot did not write need review: a run that finds them never
+      # turns auto-merge on, and turns off the auto-merge the App turned on in
+      # case Standards auto-merge missed the push. A person merges the PR or
+      # turns auto-merge back on.
       - name: Enable sync pull request auto-merge
         if: steps.mirror.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ steps.merge-token.outputs.token }}
           APP_SLUG: ${{ steps.merge-token.outputs.app-slug }}
-          REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ steps.reconcile.outputs.number }}
+          PR_CREATED: ${{ steps.reconcile.outputs.created }}
           SYNC_HEAD: ${{ steps.sync-branch.outputs.head }}
           SYNC_MANUAL: ${{ steps.sync-base.outputs.manual }}
         run: |
@@ -520,25 +527,17 @@ jobs:
             echo "::error::Reconcile sync pull requests reported no current pull request"
             exit 1
           fi
-          enabled_by=$(gh pr view "$PR_NUMBER" --json autoMergeRequest --jq '.autoMergeRequest.enabledBy.login // ""')
           if [ "$SYNC_MANUAL" = true ]; then
+            enabled_by=$(gh pr view "$PR_NUMBER" --json autoMergeRequest --jq '.autoMergeRequest.enabledBy.login // ""')
             if [ "$enabled_by" = "$APP_SLUG" ]; then
               gh pr merge "$PR_NUMBER" --disable-auto
               echo "Turned auto-merge off for standards sync PR #$PR_NUMBER"
-            fi
-          elif [ -n "$enabled_by" ]; then
-            echo "Auto-merge is already enabled for standards sync PR #$PR_NUMBER"
-          else
-            # GitHub's record of each disable survives every push and rebase. Its
-            # totalCount ignores itemTypes, so only the filtered nodes count.
-            disabled=$(gh api graphql -f owner="${REPOSITORY%/*}" -f name="${REPOSITORY#*/}" -F number="$PR_NUMBER" \
-              -f query='query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) {
-                pullRequest(number: $number) { timelineItems(itemTypes: [AUTO_MERGE_DISABLED_EVENT], first: 1) { nodes { __typename } } } } }' \
-              --jq '.data.repository.pullRequest.timelineItems.nodes | length')
-            if [ "$disabled" = 0 ]; then
-              gh pr merge "$PR_NUMBER" --auto --squash --match-head-commit "$SYNC_HEAD"
-              echo "Enabled auto-merge for standards sync PR #$PR_NUMBER"
             else
-              echo "Standards sync PR #$PR_NUMBER stays manual because its auto-merge was turned off before."
+              echo "Standards sync PR #$PR_NUMBER has commits the sync bot did not write, so the App leaves its auto-merge as it is."
             fi
+          elif [ "$PR_CREATED" = true ]; then
+            gh pr merge "$PR_NUMBER" --auto --squash --match-head-commit "$SYNC_HEAD"
+            echo "Enabled auto-merge for standards sync PR #$PR_NUMBER"
+          else
+            echo "An earlier run opened standards sync PR #$PR_NUMBER, so the App leaves its auto-merge as it is."
           fi

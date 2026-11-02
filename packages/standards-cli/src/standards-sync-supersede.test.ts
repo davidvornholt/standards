@@ -102,8 +102,11 @@ it.each([
         : `create ${FIXTURE_BODY}\n`,
     );
     expect(outcome.closures).toBe(closures(LEGACY, supersededBy(current)));
-    // The auto-merge step enables auto-merge on exactly this pull request.
-    expect(outcome.output).toBe(`number=${current}\n`);
+    // The auto-merge step turns auto-merge on only for a pull request this
+    // run opened.
+    expect(outcome.output).toBe(
+      `number=${current}\ncreated=${!reusableOpen}\n`,
+    );
   },
 );
 
@@ -120,7 +123,7 @@ it('closes every sync PR when the base branch already matches upstream', () => {
   expect(outcome.closures).toBe(
     closures([...LEGACY, REUSABLE], SUPERSEDED_BY_BASE),
   );
-  expect(outcome.output).toBe('number=\n');
+  expect(outcome.output).toBe('number=\ncreated=false\n');
 });
 
 it('fails instead of leaving a superseded sync PR open', () => {
