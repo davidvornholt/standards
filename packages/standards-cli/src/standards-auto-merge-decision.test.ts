@@ -20,17 +20,21 @@ const run = stepRunner(process.env);
 type ListedCommit = {
   readonly sha: string;
   readonly login: string;
+  readonly committer?: string;
   readonly parents?: number;
   readonly verified?: boolean;
 };
+// GitHub commits Dependabot's commits as web-flow.
 const listedCommit = ({
   sha,
   login,
+  committer = 'web-flow',
   parents = 1,
   verified = true,
 }: ListedCommit) => ({
   sha,
   author: { login },
+  committer: { login: committer },
   commit: { verification: { verified } },
   parents: Array.from({ length: parents }, (_, index) => ({
     sha: String(index).repeat(40),
@@ -40,7 +44,14 @@ const DEPENDABOT_COMMIT = listedCommit({
   sha: 'd'.repeat(40),
   login: 'dependabot[bot]',
 });
+// The App's merges from main may name GitHub or the App as committer.
 const APP_MERGE = listedCommit({ sha: HEAD, login: `${APP}[bot]`, parents: 2 });
+const SELF_COMMITTED_APP_MERGE = listedCommit({
+  sha: 'c'.repeat(40),
+  login: `${APP}[bot]`,
+  committer: `${APP}[bot]`,
+  parents: 2,
+});
 
 const view = `pr view ${PR_URL} --json state,headRefOid,autoMergeRequest --jq [.state, .headRefOid, (.autoMergeRequest.enabledBy.login // "")] | @tsv\n`;
 const list = 'api --paginate repos/owner/repo/pulls/12/commits\n';
@@ -59,7 +70,7 @@ const decide = (
   values: Env,
   {
     pullRequest = {},
-    commitPages = [[DEPENDABOT_COMMIT], [APP_MERGE]],
+    commitPages = [[DEPENDABOT_COMMIT, SELF_COMMITTED_APP_MERGE], [APP_MERGE]],
     disabled = 0,
   }: {
     readonly pullRequest?: Readonly<Record<string, string>>;
@@ -151,6 +162,32 @@ describe('Dependabot auto-merge decision', () => {
     expect(result.calls).toBe(`${view}${list}${readDisables(12)}`);
     expect(result.stdout).toContain(
       'Left this pull request manual because its auto-merge was turned off before.',
+    );
+  });
+
+  // A maintainer who amends or cherry-picks a bot's commit and signs it with
+  // their own key keeps the bot as author but becomes the committer.
+  it('keeps a pull request manual when someone else committed a bot commit', () => {
+    const recommitted = [
+      listedCommit({
+        sha: 'e'.repeat(40),
+        login: 'dependabot[bot]',
+        committer: 'maintainer',
+      }),
+      listedCommit({
+        sha: 'f'.repeat(40),
+        login: `${APP}[bot]`,
+        committer: 'maintainer',
+        parents: 2,
+      }),
+    ];
+    const result = decide(APP, [], {
+      commitPages: [[DEPENDABOT_COMMIT, ...recommitted], [APP_MERGE]],
+    });
+    expect(result.status).toBe(0);
+    expect(result.calls).toBe(`${view}${list}${disable}`);
+    expect(result.stdout).toContain(
+      `nor broker App merges: ${recommitted.map(({ sha }) => sha).join(' ')}.`,
     );
   });
 

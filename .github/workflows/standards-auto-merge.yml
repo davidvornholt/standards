@@ -140,15 +140,17 @@ jobs:
             echo "The pull request is no longer open; nothing to decide."
             exit 0
           fi
-          # GitHub signs Dependabot's commits and the broker App's merges from
-          # main. A signature proves the committer, not the author, but anyone
-          # who could forge an author here can already push and merge.
+          # A signature proves the committer, not the author, so a commit counts
+          # as Dependabot's only when GitHub committed it as web-flow. The App's
+          # merges count with either committer, because it is unconfirmed which
+          # one the merges API records for an installation token.
           pages=$(gh api --paginate "repos/$REPOSITORY/pulls/$PR_NUMBER/commits")
           last=$(jq -rs 'add // [] | last.sha // ""' <<<"$pages")
           foreign=$(jq -rs --arg app "$APP_SLUG[bot]" '[add // [] | .[]
             | select(.commit.verification.verified
-              and (.author.login == "dependabot[bot]"
-                or (.author.login == $app and (.parents | length) == 2))
+              and ((.author.login == "dependabot[bot]" and .committer.login == "web-flow")
+                or (.author.login == $app and (.parents | length) == 2
+                  and (.committer.login | IN("web-flow", $app))))
               | not)
             | .sha] | join(" ")' <<<"$pages")
           if [ "$last" != "$head" ]; then
