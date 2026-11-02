@@ -35,6 +35,13 @@ updates:
         patterns:
           - "effect"
           - "@effect/*"
+      # Dependabot puts an update in the first group it matches, so this group
+      # must stay after `effect` to keep every Effect update, majors included,
+      # in that group.
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
   - package-ecosystem: "github-actions"
     directory: "/"
     # Same supply-chain hold as the bun block above.
@@ -42,3 +49,8 @@ updates:
       default-days: 3
     schedule:
       interval: "weekly"
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"

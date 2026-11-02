@@ -19,12 +19,21 @@ updates:
         patterns:
           - "effect"
           - "@effect/*"
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
   - package-ecosystem: "github-actions"
     directory: "/"
     cooldown:
       default-days: 3
     schedule:
       interval: "weekly"
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
   - package-ecosystem: "nix"
     directory: "/"
     schedule:
