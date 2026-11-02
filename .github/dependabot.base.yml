@@ -28,7 +28,21 @@ updates:
         patterns:
           - "effect"
           - "@effect/*"
+      # All other minor and patch updates arrive together in one pull request
+      # per ecosystem. Dependabot puts an update in the first group it
+      # matches, so this group must stay after `effect` to keep every Effect
+      # update, majors included, in that group. Other majors match no group
+      # and keep their own pull request, one migration at a time.
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
