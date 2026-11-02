@@ -147,7 +147,7 @@ jobs:
           # one the merges API records for an installation token.
           pages=$(gh api --paginate "repos/$REPOSITORY/pulls/$PR_NUMBER/commits")
           last=$(jq -rs 'add // [] | last.sha // ""' <<<"$pages")
-          foreign=$(jq -rs --arg app "$APP_SLUG[bot]" '[add // [] | .[]
+          foreign=$(jq -rs --arg app "${APP_SLUG}[bot]" '[add // [] | .[]
             | select(.commit.verification.verified
               and ((.author.login == "dependabot[bot]" and .committer.login == "web-flow")
                 or (.author.login == $app and (.parents | length) == 2
@@ -169,6 +169,7 @@ jobs:
                 fi
                 # GitHub's record of each disable survives every push and rebase. Its
                 # totalCount ignores itemTypes, so only the filtered nodes count.
+                # shellcheck disable=SC2016 # GraphQL variables in the query are literal on purpose.
                 disabled=$(gh api graphql -f owner="${REPOSITORY%/*}" -f name="${REPOSITORY#*/}" -F number="$PR_NUMBER" \
                   -f query='query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) {
                     pullRequest(number: $number) { timelineItems(itemTypes: [AUTO_MERGE_DISABLED_EVENT], first: 1) { nodes { __typename } } } } }' \
@@ -254,7 +255,7 @@ jobs:
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
           set -euo pipefail
-          if [ "$EVENT_SENDER" = "$APP_SLUG[bot]" ]; then
+          if [ "$EVENT_SENDER" = "${APP_SLUG}[bot]" ]; then
             echo "The broker App pushed this update."
             exit 0
           fi
@@ -291,6 +292,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
+          # shellcheck disable=SC2016 # GraphQL variables in the query are literal on purpose.
           pages=$(gh api graphql --paginate \
             -f owner="$OWNER" -f name="$REPOSITORY" -f base="$BASE_REF" \
             -f query='
