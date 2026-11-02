@@ -13,7 +13,7 @@ name: Standards auto-merge
 # wait for, and its branch updates would leave the new head without `check`.
 #
 # The ruleset also requires a branch to be up to date with main, and
-# Dependabot rebases its pull requests only when they conflict. After each
+# Dependabot doesn't rebase a pull request that is merely behind. After each
 # push to main, the `update` job therefore merges main into every open pull
 # request whose auto-merge the broker App enabled, so `check` runs on the
 # updated head and the merge can proceed.

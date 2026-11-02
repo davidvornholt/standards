@@ -21,7 +21,7 @@ When no open pull request uses the branch, the run rebuilds the branch from the 
 
 Sync branches contain trusted upstream code, so consumer CI may run on them before anyone reviews the generated pull request.
 
-The workflow mints three short-lived tokens for the current repository from the broker GitHub App in `ci.broker_app` of the SOPS-encrypted CI secrets. One pushes the branch and needs contents and workflows permissions, because synced files include workflows. Another opens or updates the sync pull request and closes superseded ones. The third turns on auto-merge for the sync pull request; see [Auto-merge](#auto-merge). No token reaches the sync process, and there is no fallback credential. To provision the App, install the repository owner's private broker App on this repository only, then run:
+The workflow pushes the branch, manages the sync pull request, and turns on its auto-merge with short-lived tokens for the current repository from the broker GitHub App in `ci.broker_app` of the SOPS-encrypted CI secrets. The App needs Contents, Pull requests, and Workflows write, because synced files include workflows. No token reaches the sync process, and there is no fallback credential. To provision the App, install the repository owner's private broker App on this repository only, then run:
 
 ```sh
 bun standards creds add github --dest ci:ci.broker_app
@@ -40,7 +40,7 @@ Both turn auto-merge on with a merge token from the broker App with Contents wri
 
 The ruleset only merges a branch that is up to date with main, and Dependabot doesn't rebase a pull request that is merely behind. After each push to main, the workflow therefore merges main into every bot pull request that the App set to auto-merge and whose checks haven't failed, which runs `check` again. The merge commit message carries `[dependabot skip]`, so Dependabot still rebases the pull request later. The next sync run rebuilds the sync branch over such a merge. The workflow doesn't update a pull request whose checks failed. After a passing rerun, update it from the pull request page or wait for the next push to main. A pull request that conflicts with main waits for Dependabot or the next sync run to resolve it.
 
-When a person pushes to a Dependabot branch, the workflow turns auto-merge off if the App turned it on, and the pull request stays manual. To hold any bot pull request, turn its auto-merge off.
+A commit on a bot branch from anyone else, other than the App's merges from main, turns off the auto-merge the App turned on, and the pull request stays manual. Turning auto-merge off by hand holds a pull request only until Dependabot or the next sync run updates it. To keep it manual, push a commit to its branch.
 
 In a public repository without an Actions event policy, GitHub's default policy blocks `pull_request_target`, which the Dependabot job runs on. It only reports affected runs until December 2, 2026, and blocks them after that. Allow `pull_request_target` for the workflow path `.github/workflows/standards-auto-merge.yml` in an Actions event policy. If the policy also restricts actors, allow `dependabot[bot]`. The workflow never checks out pull request code: it reads the update metadata through the API and runs only files from main.
 

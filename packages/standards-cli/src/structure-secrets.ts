@@ -14,7 +14,7 @@ import { parseYaml } from './yaml-parse';
 const CI_SECRETS = 'secrets/ci.yaml';
 const CI_EXAMPLE = 'secrets/ci.example.yaml';
 const BROKER_REASON =
-  'the synced Standards sync workflow mints a branch token with Contents write and Workflows write plus a pull request token with Contents read and Pull requests write, and the synced Standards sync and Standards auto-merge workflows mint a merge token with Contents write, Pull requests write, and Workflows write from ci.broker_app; provision it with "bun standards creds add github --dest ci:ci.broker_app"';
+  'the synced Standards sync and Standards auto-merge workflows mint a branch token with Contents write and Workflows write, a pull request token with Contents read and Pull requests write, and a merge token with Contents write, Pull requests write, and Workflows write from ci.broker_app; provision it with "bun standards creds add github --dest ci:ci.broker_app"';
 const BROKER_REQUIREMENTS: ReadonlyArray<RequiredSecretLeaf> = [
   { path: ['ci', 'broker_app', 'client_id'], reason: BROKER_REASON },
   { path: ['ci', 'broker_app', 'private_key'], reason: BROKER_REASON },
