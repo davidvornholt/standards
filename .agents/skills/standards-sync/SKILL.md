@@ -33,4 +33,4 @@ An extension adds to its canonical file and doesn't replace it. GitHub settings 
 
 `bun standards help` lists the commands and options.
 
-Before changing declared repository settings or the automatic sync workflow, read [GitHub settings and automatic sync](references/github.md).
+Before changing declared repository settings, the automatic sync workflow, or Standards auto-merge, read [GitHub settings, automatic sync, and auto-merge](references/github.md).

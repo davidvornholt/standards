@@ -59,7 +59,7 @@ describe('contained structure inputs', () => {
     },
   );
 
-  it('does not let a symlinked sync policy disable credential checks', async () => {
+  it('rejects a symlinked sync policy', async () => {
     const external = newStructureTmp('structure-paths-external-');
     const consumer = newStructureTmp('structure-paths-consumer-');
     writeCiSecretsPair(consumer);

@@ -41,6 +41,10 @@ const SYNC_WORKFLOW = join(
   ACTUAL_UPSTREAM,
   '.github/workflows/standards-sync.yml',
 );
+const AUTO_MERGE_WORKFLOW = join(
+  ACTUAL_UPSTREAM,
+  '.github/workflows/standards-auto-merge.yml',
+);
 const STANDARDS_WORKFLOW = join(
   ACTUAL_UPSTREAM,
   '.github/workflows/standards.yml',
@@ -832,10 +836,11 @@ const canonicalWorkflowPaths = (
 // This merge-time ratchet keeps configurable routing on the exact compatible
 // canonical jobs. It catches accidental workflow drift after review; it does
 // not authorize a request before CodeBuild starts a runner for the queued job.
-const CONFIGURABLE_RUNNER_VARIABLE_OCCURRENCES = 15;
+const CONFIGURABLE_RUNNER_VARIABLE_OCCURRENCES = 21;
 const QUALITY_JOB_NAME = 'quality';
 const CODEBUILD_JOB_TIMEOUT_MINUTES = 30;
 const REUSE_JOB_TIMEOUT_MINUTES = 5;
+const AUTO_MERGE_JOB_TIMEOUT_MINUTES = 10;
 const WORKFLOW_JOB_HEADER_PATTERN = /^ {2}[a-z0-9-]+:\s*$/mu;
 const CODEBUILD_RUNNER = githubExpression(
   "vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-small', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || 'ubuntu-latest'",
@@ -853,6 +858,18 @@ const QUALITY_POSTGRES_IMAGE = githubExpression(
   `vars.CI_CODEBUILD_PROJECT != '' && '${PUBLIC_ECR_POSTGRES_IMAGE}' || '${DOCKER_HUB_POSTGRES_IMAGE}'`,
 );
 const CONFIGURABLE_RUNNER_CONTRACTS = {
+  '.github/workflows/standards-auto-merge.yml:dependabot': {
+    runner: CODEBUILD_RUNNER,
+    timeoutMinutes: AUTO_MERGE_JOB_TIMEOUT_MINUTES,
+  },
+  '.github/workflows/standards-auto-merge.yml:pending': {
+    runner: CODEBUILD_RUNNER,
+    timeoutMinutes: AUTO_MERGE_JOB_TIMEOUT_MINUTES,
+  },
+  '.github/workflows/standards-auto-merge.yml:update': {
+    runner: CODEBUILD_RUNNER,
+    timeoutMinutes: AUTO_MERGE_JOB_TIMEOUT_MINUTES,
+  },
   '.github/workflows/standards-sync.yml:policy': {
     runner: CODEBUILD_RUNNER,
     timeoutMinutes: CODEBUILD_JOB_TIMEOUT_MINUTES,
@@ -2403,6 +2420,7 @@ describe('canonical standards workflow security boundaries', () => {
       'The production workflow inventory no longer matches this list. If you added a workflow, add its path to the expected list below. If a path went missing, the shared workflow-file predicate stopped matching it and the workflow has fallen out of these security checks — restore the predicate instead of editing the list.',
     ).toEqual([
       '.github/workflows/publish-standards-cli.yml',
+      '.github/workflows/standards-auto-merge.yml',
       '.github/workflows/standards-sync.yml',
       '.github/workflows/standards.yml',
     ]);
@@ -3476,6 +3494,7 @@ describe('canonical workflow runner merge-time ratchets', () => {
       workflowPaths,
     } = inspectCanonicalWorkflowRunnerBoundaries(ACTUAL_UPSTREAM);
     expect(workflowPaths.toSorted()).toEqual([
+      '.github/workflows/standards-auto-merge.yml',
       '.github/workflows/standards-sync.yml',
       '.github/workflows/standards.yml',
     ]);
@@ -3606,7 +3625,10 @@ describe('canonical SOPS secret action wiring', () => {
       '';
     // The settings gate is deliberately absent: it resolves no SOPS secret, so
     // it must not check out or execute the resolver either.
-    const localActionWorkflows = [readFileSync(SYNC_WORKFLOW, 'utf8')];
+    const localActionWorkflows = [
+      readFileSync(SYNC_WORKFLOW, 'utf8'),
+      readFileSync(AUTO_MERGE_WORKFLOW, 'utf8'),
+    ];
     expect(action.match(SOPS_VERSION_ASSIGNMENT)).toHaveLength(1);
     expect(action.match(SOPS_CHECKSUM_ASSIGNMENT)).toHaveLength(2);
     // The action owns the SOPS pin. A workflow that installs SOPS itself is a

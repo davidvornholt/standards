@@ -152,7 +152,7 @@ jobs:
       # Resolve through the action from the trusted pre-sync checkout. Sync
       # replaces managed files, including this action, so no local action may
       # execute after the mirror changes. The App credentials are step outputs
-      # passed only to the two mint steps, never job environment variables.
+      # passed only to the mint steps, never job environment variables.
       - name: Resolve broker App client ID
         id: broker-app-client-id
         uses: ./.github/actions/sops-secret
@@ -169,11 +169,11 @@ jobs:
           secret-file: secrets/ci.yaml
           secret-key: broker_app.private_key
 
-      # Mint both tokens before sync as a cheap, fail-closed permission check,
-      # but expose them only to the post-sync operation that needs each one.
-      # The writer needs GitHub's separate Workflows grant because canonical
-      # files include .github/workflows/**; Contents write alone cannot push
-      # those files.
+      # Mint every token before sync as a cheap, fail-closed permission check,
+      # but expose each one only to the post-sync operation that needs it.
+      # The writer and the merge token need GitHub's separate Workflows grant
+      # because canonical files include .github/workflows/**; Contents write
+      # alone cannot push or merge those files.
       - name: Mint current-repository branch writer token
         id: branch-writer-token
         uses: actions/create-github-app-token@v3
@@ -195,6 +195,18 @@ jobs:
           # current-repository scope; never derive either from event payload.
           permission-contents: read
           permission-pull-requests: write
+
+      - name: Mint current-repository merge token
+        id: merge-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ steps.broker-app-client-id.outputs.value }}
+          private-key: ${{ steps.broker-app-private-key.outputs.value }}
+          # Omitting owner and repositories is the action's exact
+          # current-repository scope; never derive either from event payload.
+          permission-contents: write
+          permission-pull-requests: write
+          permission-workflows: write
 
       # Rebase the branch of the open sync PR so maintainer seam edits survive.
       # Without an open PR, no review depends on that history: a closed or
@@ -229,13 +241,22 @@ jobs:
               git rebase --abort
               # Commits the bot both authored and committed hold only content
               # the next sync rewrites, so a rebuild may drop them. A hand
-              # rebase makes the maintainer the committer.
+              # rebase makes the maintainer the committer. A clean merge from
+              # the base branch, which Standards auto-merge writes to keep the
+              # PR up to date, adds nothing a rebuild from the base lacks.
               bot="$(git config user.name) <$(git config user.email)>"
               # Steps run without pipefail, so a failed log must stop the step
               # here rather than reach the loop as an empty list.
               commits=$(git log --format='%H%x09%an <%ae>%x09%cn <%ce>%x09%P' "origin/$SYNC_BASE_REF..$previous")
               foreign=$(while IFS=$'\t' read -r commit author committer parents; do
-                if [ "$author" != "$bot" ] || [ "$committer" != "$bot" ] || [[ "$parents" == *" "* ]]; then
+                read -r first second extra <<<"$parents"
+                if [ -n "$second" ] && [ -z "$extra" ] \
+                  && git merge-base --is-ancestor "$second" "origin/$SYNC_BASE_REF" \
+                  && merged=$(git merge-tree --write-tree "$first" "$second") \
+                  && [ "$merged" = "$(git rev-parse "$commit^{tree}")" ]; then
+                  continue
+                fi
+                if [ "$author" != "$bot" ] || [ "$committer" != "$bot" ] || [ -n "$second" ]; then
                   echo "$commit"
                   echo "Commit $commit on $branch: author $author, committer $committer, parents $parents" >&2
                 fi
@@ -430,6 +451,7 @@ jobs:
       # `github.event.repository.default_branch` are empty here. Only the
       # non-secret branch name crosses from the writer-token process.
       - name: Reconcile sync pull requests
+        id: reconcile
         env:
           GH_TOKEN: ${{ steps.pr-token.outputs.token }}
           MIRROR_CHANGED: ${{ steps.mirror.outputs.changed }}
@@ -457,3 +479,29 @@ jobs:
             gh pr close "$number" --comment "$comment"
             echo "Closed superseded standards sync PR #$number"
           done
+          echo "number=$current" >> "$GITHUB_OUTPUT"
+
+      # The sync PR merges itself once its required checks pass, so `check`
+      # stays its only gate. A failing check, such as one that waits for
+      # `github --apply` after a settings change, holds it open as before. The
+      # broker App enables auto-merge because a merge by the workflow token
+      # would start no push run on the base branch. Standards auto-merge keeps
+      # the branch up to date after later pushes to the base branch.
+      - name: Enable sync pull request auto-merge
+        if: steps.mirror.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.merge-token.outputs.token }}
+          SYNC_PR: ${{ steps.reconcile.outputs.number }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$SYNC_PR" =~ ^[0-9]+$ ]]; then
+            echo "::error::Reconcile sync pull requests reported no current pull request"
+            exit 1
+          fi
+          enabled=$(gh pr view "$SYNC_PR" --json autoMergeRequest --jq '.autoMergeRequest != null')
+          if [ "$enabled" = true ]; then
+            echo "Auto-merge is already enabled for standards sync PR #$SYNC_PR"
+          else
+            gh pr merge "$SYNC_PR" --auto --squash
+            echo "Enabled auto-merge for standards sync PR #$SYNC_PR"
+          fi

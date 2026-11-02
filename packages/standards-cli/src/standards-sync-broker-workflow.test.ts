@@ -4,6 +4,8 @@ import {
   clientIdOutput,
   expression,
   type MutableWorkflow,
+  mergeMintName,
+  mergeToken,
   namedStep,
   parsedWorkflow,
   privateKeyOutput,
@@ -47,6 +49,7 @@ echo "branch=$branch" >> "$GITHUB_OUTPUT"
   },
   pullRequest: {
     name: 'Reconcile sync pull requests',
+    id: 'reconcile',
     env: {
       [prTokenName]: prToken,
       [['MIRROR', 'CHANGED'].join('_')]: expression(
@@ -76,6 +79,28 @@ for number in $superseded; do
   gh pr close "$number" --comment "$comment"
   echo "Closed superseded standards sync PR #$number"
 done
+echo "number=$current" >> "$GITHUB_OUTPUT"
+`,
+  },
+  autoMerge: {
+    name: 'Enable sync pull request auto-merge',
+    if: "steps.mirror.outputs.changed == 'true'",
+    env: {
+      [prTokenName]: mergeToken,
+      [['SYNC', 'PR'].join('_')]: expression('steps.reconcile.outputs.number'),
+    },
+    run: `set -euo pipefail
+if [[ ! "$SYNC_PR" =~ ^[0-9]+$ ]]; then
+  echo "::error::Reconcile sync pull requests reported no current pull request"
+  exit 1
+fi
+enabled=$(gh pr view "$SYNC_PR" --json autoMergeRequest --jq '.autoMergeRequest != null')
+if [ "$enabled" = true ]; then
+  echo "Auto-merge is already enabled for standards sync PR #$SYNC_PR"
+else
+  gh pr merge "$SYNC_PR" --auto --squash
+  echo "Enabled auto-merge for standards sync PR #$SYNC_PR"
+fi
 `,
   },
 };
@@ -131,6 +156,109 @@ const insertBeforeWriterMint = (
   workflow.jobs.sync.steps.splice(writerIndex, 0, step);
 };
 
+// Each mutation softens one guarantee that the contract must reject.
+const credentialMutations = (): ReadonlyArray<
+  (workflow: MutableWorkflow) => void
+> => {
+  const sensitiveNames = [
+    resolveClientIdName,
+    writerMintName,
+    prMintName,
+    mergeMintName,
+    'Commit and push mirror changes',
+    'Reconcile sync pull requests',
+    'Enable sync pull request auto-merge',
+  ];
+  const mutations: Array<(workflow: MutableWorkflow) => void> =
+    sensitiveNames.map((name) => (workflow) => {
+      mutableStep(workflow, name)['continue-on-error'] = true;
+    });
+  mutations.push(
+    (workflow) => {
+      Reflect.deleteProperty(mutableStep(workflow, writerMintName), 'id');
+    },
+    (workflow) => {
+      mutableStep(workflow, prMintName).id = 'changed';
+    },
+    (workflow) => {
+      mutableStep(workflow, mergeMintName).id = 'changed';
+    },
+    (workflow) => moveStepAfterSync(workflow, writerMintName),
+    (workflow) => moveStepAfterSync(workflow, prMintName),
+    (workflow) => moveStepAfterSync(workflow, mergeMintName),
+    addTokenConsumer(writerToken),
+    addTokenConsumer(prToken),
+    addTokenConsumer(mergeToken),
+    addTokenConsumer(compactExpression('steps.merge-token.outputs.token')),
+    (workflow) => {
+      // The PR token cannot merge, and the merge token must not edit PRs.
+      mutableStep(workflow, 'Reconcile sync pull requests').env = {
+        [prTokenName]: mergeToken,
+        [['MIRROR', 'CHANGED'].join('_')]: expression(
+          'steps.mirror.outputs.changed',
+        ),
+      };
+    },
+    (workflow) => {
+      const inputs = mutableStep(workflow, mergeMintName).with as Record<
+        string,
+        string
+      >;
+      inputs['permission-administration'] = 'write';
+    },
+    addTokenConsumer(
+      compactExpression('steps.branch-writer-token.outputs.token'),
+    ),
+    addTokenConsumer(
+      expression("steps['branch-writer-token'].outputs['token']"),
+    ),
+    addTokenConsumer(compactExpression('steps.pr-token.outputs.token')),
+    addTokenConsumer(expression("steps['pr-token'].outputs['token']")),
+    addTokenConsumer(clientIdOutput),
+    addTokenConsumer(privateKeyOutput),
+    addTokenConsumer(
+      compactExpression('steps.broker-app-private-key.outputs.value'),
+    ),
+    addTokenConsumer(
+      expression("steps['broker-app-private-key'].outputs['value']"),
+    ),
+    (workflow) => {
+      mutableStep(workflow, syncName).env = {
+        [syncPolicyRefName]: expression('needs.policy.outputs.ref'),
+        leakedKey: privateKeyOutput,
+      };
+    },
+    (workflow) => {
+      const resolver = mutableStep(workflow, resolveClientIdName);
+      resolver.with = {
+        ...(resolver.with as Record<string, string>),
+        'env-name': 'BROKER_APP_CLIENT_ID',
+      };
+    },
+    (workflow) =>
+      insertBeforeWriterMint(workflow, {
+        name: 'Run an action between resolving and minting',
+        uses: 'example/action@v1',
+      }),
+    (workflow) => moveStepAfterSync(workflow, resolveClientIdName),
+    (workflow) => {
+      mutableStep(workflow, resolveClientIdName).if = 'always()';
+    },
+    dropMintInput(writerMintName, 'client-id'),
+    dropMintInput(prMintName, 'client-id'),
+    dropMintInput(mergeMintName, 'client-id'),
+    dropMintInput(mergeMintName, 'permission-workflows'),
+  );
+  // The deprecated App ID input must not return as a second identity.
+  for (const name of [writerMintName, prMintName, mergeMintName]) {
+    mutations.push((workflow) => {
+      const inputs = mutableStep(workflow, name).with as Record<string, string>;
+      inputs['app-id'] = expression('steps.broker-app-id.outputs.value');
+    });
+  }
+  return mutations;
+};
+
 describe('Standards sync broker credential contract', () => {
   it('pins exact fail-closed mappings, token isolation, and ordering', () => {
     assertSecuritySensitiveSteps(parsedWorkflow, consumerContracts);
@@ -153,80 +281,7 @@ describe('Standards sync broker credential contract', () => {
   });
 
   it('rejects softened mappings, token reuse, and unsafe ordering', () => {
-    const sensitiveNames = [
-      resolveClientIdName,
-      writerMintName,
-      prMintName,
-      'Commit and push mirror changes',
-      'Reconcile sync pull requests',
-    ];
-    const mutations: Array<(workflow: MutableWorkflow) => void> =
-      sensitiveNames.map((name) => (workflow) => {
-        mutableStep(workflow, name)['continue-on-error'] = true;
-      });
-    mutations.push(
-      (workflow) => {
-        Reflect.deleteProperty(mutableStep(workflow, writerMintName), 'id');
-      },
-      (workflow) => {
-        mutableStep(workflow, prMintName).id = 'changed';
-      },
-      (workflow) => moveStepAfterSync(workflow, writerMintName),
-      (workflow) => moveStepAfterSync(workflow, prMintName),
-      addTokenConsumer(writerToken),
-      addTokenConsumer(prToken),
-      addTokenConsumer(
-        compactExpression('steps.branch-writer-token.outputs.token'),
-      ),
-      addTokenConsumer(
-        expression("steps['branch-writer-token'].outputs['token']"),
-      ),
-      addTokenConsumer(compactExpression('steps.pr-token.outputs.token')),
-      addTokenConsumer(expression("steps['pr-token'].outputs['token']")),
-      addTokenConsumer(clientIdOutput),
-      addTokenConsumer(privateKeyOutput),
-      addTokenConsumer(
-        compactExpression('steps.broker-app-private-key.outputs.value'),
-      ),
-      addTokenConsumer(
-        expression("steps['broker-app-private-key'].outputs['value']"),
-      ),
-      (workflow) => {
-        mutableStep(workflow, syncName).env = {
-          [syncPolicyRefName]: expression('needs.policy.outputs.ref'),
-          leakedKey: privateKeyOutput,
-        };
-      },
-      (workflow) => {
-        const resolver = mutableStep(workflow, resolveClientIdName);
-        resolver.with = {
-          ...(resolver.with as Record<string, string>),
-          'env-name': 'BROKER_APP_CLIENT_ID',
-        };
-      },
-      (workflow) =>
-        insertBeforeWriterMint(workflow, {
-          name: 'Run an action between resolving and minting',
-          uses: 'example/action@v1',
-        }),
-      (workflow) => moveStepAfterSync(workflow, resolveClientIdName),
-      (workflow) => {
-        mutableStep(workflow, resolveClientIdName).if = 'always()';
-      },
-      dropMintInput(writerMintName, 'client-id'),
-      dropMintInput(prMintName, 'client-id'),
-    );
-    // The deprecated App ID input must not return as a second identity.
-    for (const name of [writerMintName, prMintName]) {
-      mutations.push((workflow) => {
-        const inputs = mutableStep(workflow, name).with as Record<
-          string,
-          string
-        >;
-        inputs['app-id'] = expression('steps.broker-app-id.outputs.value');
-      });
-    }
-    const rejected = mutations.map(rejectsMutation);
+    const rejected = credentialMutations().map(rejectsMutation);
     expect(rejected).toEqual(rejected.map(() => true));
   });
 });

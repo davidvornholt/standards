@@ -28,7 +28,13 @@ const AS_BOT = [
   '-c',
   `user.email=${BOT_EMAIL}`,
 ];
-type BranchShape = 'bot' | 'person' | 'hand-rebased' | 'merge';
+type BranchShape =
+  | 'bot'
+  | 'person'
+  | 'hand-rebased'
+  | 'merge'
+  | 'base-merge'
+  | 'edited-base-merge';
 
 // Builds a sync branch whose commits conflict with a later main on the file
 // every sync rewrites, with commits in the given shape on top of the base.
@@ -72,6 +78,23 @@ const conflictingSyncBranch = (shape: BranchShape, open: boolean) => {
     git(maintainer, ...AS_BOT, 'merge', '--no-ff', '-m', 'merge side', 'side');
     stale = git(maintainer, 'rev-parse', 'HEAD');
   }
+  // Standards auto-merge brings the branch up to date with a merge from main,
+  // which the broker App writes under its own identity.
+  if (shape === 'base-merge' || shape === 'edited-base-merge') {
+    git(maintainer, 'switch', 'main');
+    write(maintainer, 'base-update.txt', 'earlier main\n');
+    git(maintainer, 'add', 'base-update.txt');
+    git(maintainer, 'commit', '-m', 'advance main');
+    git(maintainer, 'push', 'origin', 'main');
+    git(maintainer, 'switch', BRANCH);
+    git(maintainer, 'merge', '--no-ff', '--no-commit', 'main');
+    if (shape === 'edited-base-merge') {
+      write(maintainer, 'seam.txt', 'maintainer change inside the merge\n');
+      git(maintainer, 'add', 'seam.txt');
+    }
+    git(maintainer, 'commit', '-m', 'Merge main [dependabot skip]');
+    stale = git(maintainer, 'rev-parse', 'HEAD');
+  }
   git(maintainer, 'push', 'origin', BRANCH);
   git(maintainer, 'switch', 'main');
   const main = commit('later sync\n');
@@ -107,6 +130,8 @@ it.each([
   { shape: 'person', open: true, status: 1, message: foreignError },
   { shape: 'hand-rebased', open: true, status: 1, message: foreignError },
   { shape: 'merge', open: true, status: 1, message: foreignError },
+  { shape: 'base-merge', open: true, status: 0, message: rebuiltNotice },
+  { shape: 'edited-base-merge', open: true, status: 1, message: foreignError },
   {
     shape: 'person',
     open: false,

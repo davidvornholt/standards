@@ -23,6 +23,7 @@ type ParsedWorkflow = {
   };
 };
 export type TokenConsumerContracts = {
+  readonly autoMerge: WorkflowStep;
   readonly pullRequest: WorkflowStep;
   readonly writer: WorkflowStep;
 };
@@ -67,6 +68,7 @@ export const writerToken = expression(
   'steps.branch-writer-token.outputs.token',
 );
 export const prToken = expression('steps.pr-token.outputs.token');
+export const mergeToken = expression('steps.merge-token.outputs.token');
 export const clientIdOutput = expression(
   'steps.broker-app-client-id.outputs.value',
 );
@@ -77,9 +79,11 @@ export const resolveClientIdName = 'Resolve broker App client ID';
 const resolveKeyName = 'Resolve broker App private key';
 export const writerMintName = 'Mint current-repository branch writer token';
 export const prMintName = 'Mint current-repository PR token';
+export const mergeMintName = 'Mint current-repository merge token';
 export const syncName = 'Sync canonical files from upstream';
 const writerConsumerName = 'Commit and push mirror changes';
 const prConsumerName = 'Reconcile sync pull requests';
+const mergeConsumerName = 'Enable sync pull request auto-merge';
 export const syncPolicyRefName = ['SYNC', 'POLICY', 'REF'].join('_');
 
 // Any new field can change execution or failure semantics. Even safe metadata
@@ -110,8 +114,7 @@ const resolvedSecretStep = (
 const mintedTokenStep = (
   name: string,
   id: string,
-  contents: string,
-  permission: string,
+  permissions: Readonly<Record<string, string>>,
 ): WorkflowStep => ({
   name,
   id,
@@ -119,8 +122,7 @@ const mintedTokenStep = (
   with: {
     'client-id': clientIdOutput,
     'private-key': privateKeyOutput,
-    'permission-contents': contents,
-    [permission]: 'write',
+    ...permissions,
   },
 });
 // Matching the bare step id also catches bracket and spacing variants of the
@@ -170,20 +172,31 @@ export const assertSecuritySensitiveSteps = (
   assertExactStep(
     workflow,
     writerMintName,
-    mintedTokenStep(
-      writerMintName,
-      'branch-writer-token',
-      'write',
-      'permission-workflows',
-    ),
+    mintedTokenStep(writerMintName, 'branch-writer-token', {
+      'permission-contents': 'write',
+      'permission-workflows': 'write',
+    }),
   );
   assertExactStep(
     workflow,
     prMintName,
-    mintedTokenStep(prMintName, 'pr-token', 'read', 'permission-pull-requests'),
+    mintedTokenStep(prMintName, 'pr-token', {
+      'permission-contents': 'read',
+      'permission-pull-requests': 'write',
+    }),
+  );
+  assertExactStep(
+    workflow,
+    mergeMintName,
+    mintedTokenStep(mergeMintName, 'merge-token', {
+      'permission-contents': 'write',
+      'permission-pull-requests': 'write',
+      'permission-workflows': 'write',
+    }),
   );
   assertExactStep(workflow, writerConsumerName, consumers.writer);
   assertExactStep(workflow, prConsumerName, consumers.pullRequest);
+  assertExactStep(workflow, mergeConsumerName, consumers.autoMerge);
 
   const syncIndex = stepIndex(workflow, syncName);
   const block = [
@@ -191,16 +204,17 @@ export const assertSecuritySensitiveSteps = (
     resolveKeyName,
     writerMintName,
     prMintName,
+    mergeMintName,
   ].map((name) => stepIndex(workflow, name));
   const [firstIndex = 0] = block;
-  const prIndex = block.at(-1) ?? syncIndex;
+  const lastIndex = block.at(-1) ?? syncIndex;
   if (
     block.some((index, position) => index !== firstIndex + position) ||
-    prIndex >= syncIndex
+    lastIndex >= syncIndex
   ) {
     throw new Error('Broker credentials must form a contiguous pre-sync block');
   }
-  const mintNames = [writerMintName, prMintName];
+  const mintNames = [writerMintName, prMintName, mergeMintName];
   assertOnlyConsumers(
     workflow,
     resolveClientIdName,
@@ -217,4 +231,7 @@ export const assertSecuritySensitiveSteps = (
     writerConsumerName,
   ]);
   assertOnlyConsumers(workflow, prMintName, 'pr-token', [prConsumerName]);
+  assertOnlyConsumers(workflow, mergeMintName, 'merge-token', [
+    mergeConsumerName,
+  ]);
 };
