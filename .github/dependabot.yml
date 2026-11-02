@@ -5,6 +5,8 @@ version: 2
 updates:
   - package-ecosystem: "bun"
     directory: "/"
+    cooldown:
+      default-days: 3
     schedule:
       interval: "weekly"
     ignore:
@@ -19,6 +21,8 @@ updates:
           - "@effect/*"
   - package-ecosystem: "github-actions"
     directory: "/"
+    cooldown:
+      default-days: 3
     schedule:
       interval: "weekly"
   - package-ecosystem: "nix"

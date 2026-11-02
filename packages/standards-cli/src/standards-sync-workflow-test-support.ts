@@ -103,6 +103,7 @@ export const fakeGitHub = (
     ['API_CALLS', join(root, 'api-calls')],
     ['COMPARE_RESPONSE', join(root, 'compare.json')],
     ['RUNNER_TEMP', root],
+    ['GITHUB_OUTPUT', join(root, 'github-output')],
     ['FAIL_CREATE', 'false'],
     ['FAIL_CLOSE', 'false'],
     ['FAIL_COMPARE', 'false'],

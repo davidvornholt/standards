@@ -28,11 +28,18 @@ const AS_BOT = [
   '-c',
   `user.email=${BOT_EMAIL}`,
 ];
-type BranchShape = 'bot' | 'person' | 'hand-rebased' | 'merge';
+type BranchShape =
+  | 'bot'
+  | 'person'
+  | 'hand-rebased'
+  | 'merge'
+  | 'base-merge'
+  | 'edited-base-merge';
 
-// Builds a sync branch whose commits conflict with a later main on the file
-// every sync rewrites, with commits in the given shape on top of the base.
-const conflictingSyncBranch = (shape: BranchShape, open: boolean) => {
+// Builds a sync branch with commits in the given shape on top of the base. A
+// later main conflicts with them on the file every sync rewrites, unless it
+// only changes another file.
+const syncBranch = (shape: BranchShape, open: boolean, conflicting = true) => {
   const root = mkTmp('sync-conflict-');
   const remote = join(root, 'remote.git');
   git(root, 'init', '--bare', '--initial-branch=main', remote);
@@ -72,9 +79,33 @@ const conflictingSyncBranch = (shape: BranchShape, open: boolean) => {
     git(maintainer, ...AS_BOT, 'merge', '--no-ff', '-m', 'merge side', 'side');
     stale = git(maintainer, 'rev-parse', 'HEAD');
   }
+  // Standards auto-merge brings the branch up to date with a merge from main,
+  // which the broker App writes under its own identity.
+  if (shape === 'base-merge' || shape === 'edited-base-merge') {
+    git(maintainer, 'switch', 'main');
+    write(maintainer, 'base-update.txt', 'earlier main\n');
+    git(maintainer, 'add', 'base-update.txt');
+    git(maintainer, 'commit', '-m', 'advance main');
+    git(maintainer, 'push', 'origin', 'main');
+    git(maintainer, 'switch', BRANCH);
+    git(maintainer, 'merge', '--no-ff', '--no-commit', 'main');
+    if (shape === 'edited-base-merge') {
+      write(maintainer, 'seam.txt', 'maintainer change inside the merge\n');
+      git(maintainer, 'add', 'seam.txt');
+    }
+    git(maintainer, 'commit', '-m', 'Merge main [dependabot skip]');
+    stale = git(maintainer, 'rev-parse', 'HEAD');
+  }
   git(maintainer, 'push', 'origin', BRANCH);
   git(maintainer, 'switch', 'main');
-  const main = commit('later sync\n');
+  if (conflicting) {
+    commit('later sync\n');
+  } else {
+    write(maintainer, 'later-main.txt', 'later main\n');
+    git(maintainer, 'add', 'later-main.txt');
+    git(maintainer, 'commit', '-m', 'later main');
+  }
+  const main = git(maintainer, 'rev-parse', 'HEAD');
   git(maintainer, 'push', 'origin', 'main');
 
   const runner = join(root, 'runner');
@@ -107,6 +138,8 @@ it.each([
   { shape: 'person', open: true, status: 1, message: foreignError },
   { shape: 'hand-rebased', open: true, status: 1, message: foreignError },
   { shape: 'merge', open: true, status: 1, message: foreignError },
+  { shape: 'base-merge', open: true, status: 0, message: rebuiltNotice },
+  { shape: 'edited-base-merge', open: true, status: 1, message: foreignError },
   {
     shape: 'person',
     open: false,
@@ -117,7 +150,7 @@ it.each([
 ] as const)(
   'handles a sync branch that conflicts with main ($shape commits, open PR: $open)',
   ({ shape, open, status, message }) => {
-    const { root, remote, runner, stale, main, values } = conflictingSyncBranch(
+    const { root, remote, runner, stale, main, values } = syncBranch(
       shape,
       open,
     );
@@ -131,7 +164,7 @@ it.each([
     // The writer step leases the push on this head, so a rebuilt branch
     // replaces the stale one only if nobody pushed to it in between.
     expect(existsSync(output) ? readFileSync(output, 'utf8') : '').toBe(
-      status ? '' : `previous=${stale}\n`,
+      status ? '' : `previous=${stale}\nmanual=false\n`,
     );
     if (status) {
       return;
@@ -160,10 +193,7 @@ it.each([
 );
 
 it('keeps a maintainer commit pushed while a bot-only sync branch is rebuilt', () => {
-  const { remote, maintainer, runner, stale, values } = conflictingSyncBranch(
-    'bot',
-    true,
-  );
+  const { remote, maintainer, runner, stale, values } = syncBranch('bot', true);
   expect(shell(runner, 'Prepare reusable sync branch', values).status).toBe(0);
   git(maintainer, 'fetch', 'origin', BRANCH);
   git(maintainer, 'switch', BRANCH);
@@ -181,4 +211,26 @@ it('keeps a maintainer commit pushed while a bot-only sync branch is rebuilt', (
     }).status,
   ).toBe(1);
   expect(git(runner, '--git-dir', remote, 'rev-parse', BRANCH)).toBe(edited);
+});
+
+it('keeps a sync PR manual when a maintainer commit rebases cleanly onto main', () => {
+  const { maintainer, runner, main, values } = syncBranch('bot', true, false);
+  git(maintainer, 'switch', BRANCH);
+  write(maintainer, 'seam.txt', 'maintainer configuration\n');
+  git(maintainer, 'add', 'seam.txt');
+  git(maintainer, 'commit', '-m', 'adapt the consumer');
+  git(maintainer, 'push', 'origin', BRANCH);
+  const edited = git(maintainer, 'rev-parse', 'HEAD');
+
+  const result = shell(runner, 'Prepare reusable sync branch', values);
+  expect(result.status).toBe(0);
+  expect(result.stdout).toContain(
+    `::notice::${BRANCH} has commits the sync bot did not write: ${edited}. Standards sync PR #7 stays manual.`,
+  );
+  // The rebase keeps the commit, and the enable step leaves auto-merge off.
+  expect(git(runner, 'rev-parse', 'HEAD~2')).toBe(main);
+  expect(git(runner, 'show', 'HEAD:seam.txt')).toBe('maintainer configuration');
+  expect(readFileSync(values.GITHUB_OUTPUT ?? '', 'utf8')).toBe(
+    `previous=${edited}\nmanual=true\n`,
+  );
 });
