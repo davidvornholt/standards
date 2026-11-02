@@ -4,6 +4,7 @@ import { cleanupTmpDirs } from './cli-test-support';
 import {
   APP,
   AUTO_MERGE,
+  type Env,
   HEAD,
   PR_URL,
   type Run,
@@ -44,6 +45,20 @@ const listedPullRequest = ({
   },
 });
 
+const list = (nodes: ReadonlyArray<unknown>, values: Env = []): Run =>
+  run(
+    AUTO_MERGE,
+    'List bot auto-merge pull requests',
+    { 'pages.json': { data: { repository: { pullRequests: { nodes } } } } },
+    [
+      ['OWNER', 'owner'],
+      ['REPOSITORY', 'repo'],
+      ['BASE_REF', 'main'],
+      ['PR_NUMBER', ''],
+      ...values,
+    ],
+  );
+
 describe('auto-merge pull request listing', () => {
   it('lists open same-repository pull requests a bot enabled whose checks have not failed', () => {
     const nodes = [
@@ -78,16 +93,7 @@ describe('auto-merge pull request listing', () => {
         isCrossRepository: true,
       }),
     ];
-    const result = run(
-      AUTO_MERGE,
-      'List bot auto-merge pull requests',
-      { 'pages.json': { data: { repository: { pullRequests: { nodes } } } } },
-      [
-        ['OWNER', 'owner'],
-        ['REPOSITORY', 'repo'],
-        ['BASE_REF', 'main'],
-      ],
-    );
+    const result = list(nodes);
     expect(result.status).toBe(0);
     expect(result.output).toBe(
       `pull-requests=${JSON.stringify(
@@ -164,6 +170,23 @@ describe('auto-merge branch updates', () => {
     expect(result.stdout).toContain(
       '::notice::The branch of #4 no longer exists.',
     );
+  });
+
+  it('brings a pull request up to date when its auto-merge is enabled after the push scan', () => {
+    const listed = list(
+      [
+        listedPullRequest({ number: 1, headRefName: 'dependabot/bun/a' }),
+        listedPullRequest({ number: 2, headRefName: 'dependabot/bun/b' }),
+      ],
+      [['PR_NUMBER', '2']],
+    );
+    expect(listed.status).toBe(0);
+    const result = update(
+      JSON.parse(listed.output.slice('pull-requests='.length)),
+      { 'dependabot/bun/b': 201 },
+    );
+    expect(result.calls).toBe(merge('dependabot/bun/b'));
+    expect(result.status).toBe(0);
   });
 
   it('fails after trying every pull request when a merge errors', () => {

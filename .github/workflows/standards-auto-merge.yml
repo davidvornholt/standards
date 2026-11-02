@@ -28,6 +28,7 @@ on:
       - opened
       - reopened
       - synchronize
+      - auto_merge_enabled
   push:
     branches:
       - main
@@ -43,6 +44,7 @@ jobs:
   dependabot:
     if: >-
       github.event_name == 'pull_request_target' &&
+      github.event.action != 'auto_merge_enabled' &&
       github.event.pull_request.user.login == 'dependabot[bot]' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.base.ref == github.event.repository.default_branch
@@ -251,8 +253,10 @@ jobs:
   # Lists the pull requests that the update job may bring up to date, with the
   # workflow token, so a push without any skips the broker App entirely. Pull
   # requests whose checks failed wait for a person instead of rerunning them.
+  # Auto-merge enabled after the last push to main lists just that pull
+  # request, which would otherwise wait behind main for the next push.
   pending:
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || github.event.action == 'auto_merge_enabled'
     permissions:
       contents: read
       pull-requests: read
@@ -268,6 +272,7 @@ jobs:
           OWNER: ${{ github.repository_owner }}
           REPOSITORY: ${{ github.event.repository.name }}
           BASE_REF: ${{ github.ref_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
           pages=$(gh api graphql --paginate \
@@ -288,8 +293,9 @@ jobs:
                   }
                 }
               }')
-          pull_requests=$(jq -sc '[.[].data.repository.pullRequests.nodes[]
-            | select((.isCrossRepository | not)
+          pull_requests=$(jq -sc --arg number "$PR_NUMBER" '[.[].data.repository.pullRequests.nodes[]
+            | select(($number == "" or (.number | tostring) == $number)
+              and (.isCrossRepository | not)
               and .autoMergeRequest.enabledBy.__typename == "Bot"
               and ((.commits.nodes[0].commit.statusCheckRollup.state // "")
                 | IN("FAILURE", "ERROR") | not))
@@ -307,8 +313,10 @@ jobs:
     runs-on: ${{ vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-small', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || 'ubuntu-latest' }}
     timeout-minutes: 10
     # A newer push to main brings the same pull requests further up to date.
+    # A run for one pull request has its own group, so it never cancels a run
+    # for all of them.
     concurrency:
-      group: standards-auto-merge-update
+      group: standards-auto-merge-update-${{ github.event.pull_request.number || 'push' }}
       cancel-in-progress: true
     steps:
       - name: Checkout trusted secret inputs

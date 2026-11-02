@@ -101,10 +101,12 @@ const readersOf = (jobName: string, producerId: string): Array<string> =>
     .map((candidate) => candidate.name ?? '');
 
 describe('Standards auto-merge workflow contract', () => {
-  it('runs on Dependabot pull request events and main pushes with a read-only default token', () => {
+  it('runs on pull request events and main pushes with a read-only default token', () => {
     expect(workflow.on).toEqual({
       // biome-ignore lint/style/useNamingConvention: GitHub names this event in snake_case.
-      pull_request_target: { types: ['opened', 'reopened', 'synchronize'] },
+      pull_request_target: {
+        types: ['opened', 'reopened', 'synchronize', 'auto_merge_enabled'],
+      },
       push: { branches: ['main'] },
     });
     expect(workflow.permissions).toEqual({ contents: 'read' });
@@ -121,6 +123,7 @@ describe('Standards auto-merge workflow contract', () => {
     expect(dependabot.if).toBe(
       [
         "github.event_name == 'pull_request_target'",
+        "github.event.action != 'auto_merge_enabled'",
         "github.event.pull_request.user.login == 'dependabot[bot]'",
         'github.event.pull_request.head.repo.full_name == github.repository',
         'github.event.pull_request.base.ref == github.event.repository.default_branch',
@@ -148,38 +151,6 @@ describe('Standards auto-merge workflow contract', () => {
     expect(dependabot.steps).toHaveLength(6);
     expect(readersOf('dependabot', 'merge-token')).toEqual([
       'Apply the auto-merge decision',
-    ]);
-  });
-
-  it('updates branches only from a trusted push with a branch updater token', () => {
-    const pending = job('pending');
-    expect(pending.if).toBe("github.event_name == 'push'");
-    expect(pending.environment).toBeUndefined();
-    expect(JSON.stringify(pending)).not.toContain('secrets.');
-    expect(pending.permissions).toEqual({
-      contents: 'read',
-      'pull-requests': 'read',
-    });
-
-    const update = job('update');
-    expect(update.needs).toBe('pending');
-    expect(update.if).toBe("needs.pending.outputs.pull-requests != '[]'");
-    expect(update.permissions).toEqual({ contents: 'read' });
-    expect(update.steps.slice(0, 4)).toEqual(
-      brokerSteps(
-        minted(
-          'Mint current-repository branch updater token',
-          'updater-token',
-          {
-            'permission-contents': 'write',
-            'permission-workflows': 'write',
-          },
-        ),
-      ),
-    );
-    expect(update.steps).toHaveLength(5);
-    expect(readersOf('update', 'updater-token')).toEqual([
-      'Merge main into pull requests waiting to auto-merge',
     ]);
   });
 
@@ -237,6 +208,47 @@ describe('Standards sync auto-merge revocation contract', () => {
     expect(sync.steps).toHaveLength(5);
     expect(readersOf('sync', 'auto-merge-token')).toEqual([
       'Turn sync auto-merge off after a push by anyone else',
+    ]);
+  });
+});
+
+describe('Standards auto-merge branch update contract', () => {
+  it('updates branches only after a main push or an enable with a branch updater token', () => {
+    const pending = job('pending');
+    expect(pending.if).toBe(
+      "github.event_name == 'push' || github.event.action == 'auto_merge_enabled'",
+    );
+    expect(pending.environment).toBeUndefined();
+    expect(JSON.stringify(pending)).not.toContain('secrets.');
+    expect(pending.permissions).toEqual({
+      contents: 'read',
+      'pull-requests': 'read',
+    });
+
+    const update = job('update');
+    // A run for one pull request must not cancel a run for every one.
+    expect(update.concurrency).toEqual({
+      group: `standards-auto-merge-update-${expression("github.event.pull_request.number || 'push'")}`,
+      'cancel-in-progress': true,
+    });
+    expect(update.needs).toBe('pending');
+    expect(update.if).toBe("needs.pending.outputs.pull-requests != '[]'");
+    expect(update.permissions).toEqual({ contents: 'read' });
+    expect(update.steps.slice(0, 4)).toEqual(
+      brokerSteps(
+        minted(
+          'Mint current-repository branch updater token',
+          'updater-token',
+          {
+            'permission-contents': 'write',
+            'permission-workflows': 'write',
+          },
+        ),
+      ),
+    );
+    expect(update.steps).toHaveLength(5);
+    expect(readersOf('update', 'updater-token')).toEqual([
+      'Merge main into pull requests waiting to auto-merge',
     ]);
   });
 });
