@@ -66,6 +66,7 @@ const reconcile = (
     closures: read('pr-closures'),
     creations: read('pr-creations'),
     bodies: read('pr-bodies'),
+    output: read('github-output'),
   };
 };
 const workflowEnv = (
@@ -101,6 +102,11 @@ it.each([
         : `create ${FIXTURE_BODY}\n`,
     );
     expect(outcome.closures).toBe(closures(LEGACY, supersededBy(current)));
+    // The auto-merge step turns auto-merge on only for a pull request this
+    // run opened.
+    expect(outcome.output).toBe(
+      `number=${current}\ncreated=${!reusableOpen}\n`,
+    );
   },
 );
 
@@ -117,6 +123,7 @@ it('closes every sync PR when the base branch already matches upstream', () => {
   expect(outcome.closures).toBe(
     closures([...LEGACY, REUSABLE], SUPERSEDED_BY_BASE),
   );
+  expect(outcome.output).toBe('number=\ncreated=false\n');
 });
 
 it('fails instead of leaving a superseded sync PR open', () => {

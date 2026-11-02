@@ -1,0 +1,438 @@
+name: Standards auto-merge
+
+# Bot pull requests merge themselves once the ruleset's required `check`
+# passes: Dependabot minor and patch version updates, which this workflow
+# enables, and the Standards sync pull request, which the standards-sync.yml
+# run that opens it enables. Major updates, updates without a semantic version
+# such as Nix flake inputs, bot pull requests with commits from anyone else,
+# and every other pull request stay manual. Once auto-merge on a bot pull
+# request is turned off, by a person, by GitHub, or by these workflows,
+# including when the pull request is closed, the App never turns it on again;
+# a person merges the pull request or turns auto-merge back on. Where the
+# repository doesn't allow auto-merge or no active rule on the base branch
+# requires `check`, as on a plan without rulesets, they stay manual too:
+# gh would merge them at once instead of waiting. Synced from
+# davidvornholt/standards.
+#
+# The broker App in ci.broker_app, not the workflow token, enables auto-merge
+# and updates branches. GitHub starts no workflow for events the workflow token
+# causes, so its merges would start no push run on main, which release gates
+# wait for, and its branch updates would leave the new head without `check`.
+#
+# The ruleset also requires a branch to be up to date with main, and
+# Dependabot doesn't rebase a pull request that is merely behind. The `update`
+# job therefore merges main into the open pull requests whose auto-merge the
+# broker App enabled: into all of them after each push to main, and into one
+# when the App enables its auto-merge. `check` then runs on the updated head,
+# and the merge can proceed.
+
+on:
+  # pull_request_target runs this file from the default branch with access to
+  # secrets, and no job here checks out or runs pull request content. Public
+  # repositories must allow this event for this workflow in an Actions event
+  # policy; see the standards-sync skill's GitHub reference.
+  pull_request_target:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - auto_merge_enabled
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  # Decides auto-merge for each Dependabot update to the default branch from
+  # the pull request's whole commit list, whoever caused the event. A commit
+  # that is neither Dependabot's nor a broker App merge from main makes the
+  # pull request manual.
+  dependabot:
+    if: >-
+      github.event_name == 'pull_request_target' &&
+      github.event.action != 'auto_merge_enabled' &&
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.base.ref == github.event.repository.default_branch
+    # Repository/organization variable; empty keeps repository-scoped secrets.
+    # See the standards-sync skill reference for environment-scoped bootstrap.
+    environment: ${{ vars.CI_SECRETS_ENVIRONMENT }}
+    # The job token only lets dependabot/fetch-metadata read the pull request
+    # and its commits. The broker App token makes every change.
+    permissions:
+      contents: read
+      pull-requests: read
+    runs-on: ${{ vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-small', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    # A newer event for the same pull request decides from newer state, and
+    # every run checks every commit, so a cancelled run loses no decision.
+    concurrency:
+      group: standards-auto-merge-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
+      # The default ref of pull_request_target is the base branch, so this
+      # reads only trusted files: the secret action and the encrypted secrets.
+      - name: Checkout trusted secret inputs
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github/actions/sops-secret
+            secrets/ci.yaml
+          sparse-checkout-cone-mode: false
+
+      - name: Resolve broker App client ID
+        id: broker-app-client-id
+        uses: ./.github/actions/sops-secret
+        with:
+          age-key: ${{ secrets.SOPS_AGE_KEY }}
+          secret-file: secrets/ci.yaml
+          secret-key: broker_app.client_id
+
+      - name: Resolve broker App private key
+        id: broker-app-private-key
+        uses: ./.github/actions/sops-secret
+        with:
+          age-key: ${{ secrets.SOPS_AGE_KEY }}
+          secret-file: secrets/ci.yaml
+          secret-key: broker_app.private_key
+
+      # Enabling auto-merge needs the merge permissions themselves, and
+      # GitHub refuses App merges that change .github/workflows/** without
+      # the separate Workflows grant; GitHub Actions updates change exactly
+      # those files. The token is minted before the metadata check so a
+      # failed check can still turn auto-merge off below.
+      - name: Mint current-repository merge token
+        id: merge-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ steps.broker-app-client-id.outputs.value }}
+          private-key: ${{ steps.broker-app-private-key.outputs.value }}
+          # Omitting owner and repositories is the action's exact
+          # current-repository scope; never derive either from event payload.
+          permission-contents: write
+          permission-pull-requests: write
+          permission-workflows: write
+
+      # Fails unless Dependabot opened the pull request and wrote and signed
+      # its first commit. The decision below checks the other commits.
+      - name: Read Dependabot update metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@v3
+
+      # Runs after a failed metadata check too, and then turns auto-merge off.
+      # It turns off only auto-merge the broker App enabled, so a person's
+      # decision to merge a major update automatically stands.
+      - name: Apply the auto-merge decision
+        if: ${{ !cancelled() && steps.merge-token.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ steps.merge-token.outputs.token }}
+          APP_SLUG: ${{ steps.merge-token.outputs.app-slug }}
+          METADATA_OUTCOME: ${{ steps.metadata.outcome }}
+          UPDATE_TYPE: ${{ steps.metadata.outputs.update-type }}
+          REPOSITORY: ${{ github.repository }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          set -euo pipefail
+          live=$(gh pr view "$PR_URL" --json state,headRefOid,autoMergeRequest \
+            --jq '[.state, .headRefOid, (.autoMergeRequest.enabledBy.login // "")] | @tsv')
+          IFS=$'\t' read -r state head enabled_by <<<"$live"
+          if [ "$state" != OPEN ]; then
+            echo "The pull request is no longer open; nothing to decide."
+            exit 0
+          fi
+          # A signature proves the committer, not the author, so a commit counts
+          # as Dependabot's only when GitHub committed it as web-flow. The App's
+          # merges count with either committer, because it is unconfirmed which
+          # one the merges API records for an installation token.
+          pages=$(gh api --paginate "repos/$REPOSITORY/pulls/$PR_NUMBER/commits")
+          last=$(jq -rs 'add // [] | last.sha // ""' <<<"$pages")
+          foreign=$(jq -rs --arg app "${APP_SLUG}[bot]" '[add // [] | .[]
+            | select(.commit.verification.verified
+              and ((.author.login == "dependabot[bot]" and .committer.login == "web-flow")
+                or (.author.login == $app and (.parents | length) == 2
+                  and (.committer.login | IN("web-flow", $app))))
+              | not)
+            | .sha] | join(" ")' <<<"$pages")
+          if [ "$last" != "$head" ]; then
+            reason="its commit list does not end at its head $head"
+          elif [ -n "$foreign" ]; then
+            reason="it has commits that are neither verified Dependabot commits nor broker App merges: $foreign"
+          elif [ "$METADATA_OUTCOME" != success ]; then
+            reason="dependabot/fetch-metadata did not verify this Dependabot update"
+          else
+            case "$UPDATE_TYPE" in
+              version-update:semver-minor | version-update:semver-patch)
+                if [ -n "$enabled_by" ]; then
+                  echo "Auto-merge is already enabled by $enabled_by."
+                  exit 0
+                fi
+                # GitHub's record of each disable survives every push and rebase. Its
+                # totalCount ignores itemTypes, so only the filtered nodes count.
+                # shellcheck disable=SC2016 # GraphQL variables in the query are literal on purpose.
+                disabled=$(gh api graphql -f owner="${REPOSITORY%/*}" -f name="${REPOSITORY#*/}" -F number="$PR_NUMBER" \
+                  -f query='query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) {
+                    pullRequest(number: $number) { timelineItems(itemTypes: [AUTO_MERGE_DISABLED_EVENT], first: 1) { nodes { __typename } } } } }' \
+                  --jq '.data.repository.pullRequest.timelineItems.nodes | length')
+                if [ "$disabled" != 0 ]; then
+                  reason="its auto-merge was turned off before"
+                else
+                  # gh merges a pull request that nothing holds at once, so
+                  # auto-merge starts only where an active rule on the base
+                  # branch requires `check`. A repository whose plan has no
+                  # rulesets doesn't allow auto-merge, and GitHub refuses to
+                  # list its rules.
+                  allowed=$(gh repo view "$REPOSITORY" --json autoMergeAllowed --jq .autoMergeAllowed)
+                  if [ "$allowed" != true ]; then
+                    reason="this repository doesn't allow auto-merge"
+                  else
+                    required=$(gh api "repos/$REPOSITORY/rules/branches/$BASE_REF" --paginate \
+                      --jq '.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context')
+                    if grep -qx check <<<"$required"; then
+                      # Auto-merge starts only at the head whose commits passed.
+                      gh pr merge "$PR_URL" --auto --squash --match-head-commit "$head"
+                      echo "Enabled auto-merge for a $UPDATE_TYPE update."
+                      exit 0
+                    fi
+                    reason="no active rule on $BASE_REF requires check"
+                  fi
+                fi
+                ;;
+              *) reason="its update type is ${UPDATE_TYPE:-not a semantic version}" ;;
+            esac
+          fi
+          if [ "$enabled_by" = "$APP_SLUG" ]; then
+            gh pr merge "$PR_URL" --disable-auto
+            echo "::notice::Turned auto-merge off because $reason."
+          else
+            echo "Left this pull request manual because $reason."
+          fi
+
+  # Turns off the auto-merge that standards-sync.yml enabled when anyone but
+  # the broker App pushes to the sync pull request, so the new commits wait
+  # for review. Later sync runs then keep that pull request manual. Every push
+  # needs its own decision, so no run cancels or replaces another.
+  sync:
+    if: >-
+      github.event_name == 'pull_request_target' &&
+      github.event.action == 'synchronize' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'standards-sync/update'
+    # Repository/organization variable; empty keeps repository-scoped secrets.
+    # See the standards-sync skill reference for environment-scoped bootstrap.
+    environment: ${{ vars.CI_SECRETS_ENVIRONMENT }}
+    permissions:
+      contents: read
+    runs-on: ${{ vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-small', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    steps:
+      - name: Checkout trusted secret inputs
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github/actions/sops-secret
+            secrets/ci.yaml
+          sparse-checkout-cone-mode: false
+
+      - name: Resolve broker App client ID
+        id: broker-app-client-id
+        uses: ./.github/actions/sops-secret
+        with:
+          age-key: ${{ secrets.SOPS_AGE_KEY }}
+          secret-file: secrets/ci.yaml
+          secret-key: broker_app.client_id
+
+      - name: Resolve broker App private key
+        id: broker-app-private-key
+        uses: ./.github/actions/sops-secret
+        with:
+          age-key: ${{ secrets.SOPS_AGE_KEY }}
+          secret-file: secrets/ci.yaml
+          secret-key: broker_app.private_key
+
+      # The token also names the App, whose own pushes keep auto-merge on.
+      - name: Mint current-repository auto-merge token
+        id: auto-merge-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ steps.broker-app-client-id.outputs.value }}
+          private-key: ${{ steps.broker-app-private-key.outputs.value }}
+          # Omitting owner and repositories is the action's exact
+          # current-repository scope; never derive either from event payload.
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Turn sync auto-merge off after a push by anyone else
+        env:
+          GH_TOKEN: ${{ steps.auto-merge-token.outputs.token }}
+          APP_SLUG: ${{ steps.auto-merge-token.outputs.app-slug }}
+          EVENT_SENDER: ${{ github.event.sender.login }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_SENDER" = "${APP_SLUG}[bot]" ]; then
+            echo "The broker App pushed this update."
+            exit 0
+          fi
+          enabled_by=$(gh pr view "$PR_URL" --json autoMergeRequest --jq '.autoMergeRequest.enabledBy.login // ""')
+          if [ "$enabled_by" = "$APP_SLUG" ]; then
+            gh pr merge "$PR_URL" --disable-auto
+            echo "::notice::Turned auto-merge off because $EVENT_SENDER pushed to the sync branch."
+          else
+            echo "The broker App has not enabled auto-merge for this pull request."
+          fi
+
+  # Lists the pull requests that the update job may bring up to date, with the
+  # workflow token, so a push without any skips the broker App entirely. Pull
+  # requests whose checks failed wait for a person instead of rerunning them.
+  # Auto-merge enabled after the last push to main lists just that pull
+  # request, which would otherwise wait behind main for the next push.
+  pending:
+    if: github.event_name == 'push' || github.event.action == 'auto_merge_enabled'
+    permissions:
+      contents: read
+      pull-requests: read
+    runs-on: ${{ vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-small', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    outputs:
+      pull-requests: ${{ steps.list.outputs.pull-requests }}
+    steps:
+      - name: List bot auto-merge pull requests
+        id: list
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNER: ${{ github.repository_owner }}
+          REPOSITORY: ${{ github.event.repository.name }}
+          BASE_REF: ${{ github.ref_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2016 # GraphQL variables in the query are literal on purpose.
+          pages=$(gh api graphql --paginate \
+            -f owner="$OWNER" -f name="$REPOSITORY" -f base="$BASE_REF" \
+            -f query='
+              query($owner: String!, $name: String!, $base: String!, $endCursor: String) {
+                repository(owner: $owner, name: $name) {
+                  pullRequests(states: OPEN, baseRefName: $base, first: 100, after: $endCursor) {
+                    nodes {
+                      number
+                      headRefName
+                      isCrossRepository
+                      author { login }
+                      autoMergeRequest { enabledBy { __typename login } }
+                      commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+                    }
+                    pageInfo { hasNextPage endCursor }
+                  }
+                }
+              }')
+          pull_requests=$(jq -sc --arg number "$PR_NUMBER" '[.[].data.repository.pullRequests.nodes[]
+            | select(($number == "" or (.number | tostring) == $number)
+              and (.isCrossRepository | not)
+              and .autoMergeRequest.enabledBy.__typename == "Bot"
+              and ((.commits.nodes[0].commit.statusCheckRollup.state // "")
+                | IN("FAILURE", "ERROR") | not))
+            | {number, headRefName, author: (.author.login // ""), enabledBy: .autoMergeRequest.enabledBy.login}]' <<<"$pages")
+          echo "pull-requests=$pull_requests" >> "$GITHUB_OUTPUT"
+
+  update:
+    needs: pending
+    if: needs.pending.outputs.pull-requests != '[]'
+    # Repository/organization variable; empty keeps repository-scoped secrets.
+    # See the standards-sync skill reference for environment-scoped bootstrap.
+    environment: ${{ vars.CI_SECRETS_ENVIRONMENT }}
+    permissions:
+      contents: read
+    runs-on: ${{ vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-small', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    # A newer push to main brings the same pull requests further up to date.
+    # A run for one pull request has its own group, so it never cancels a run
+    # for all of them.
+    concurrency:
+      group: standards-auto-merge-update-${{ github.event.pull_request.number || 'push' }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout trusted secret inputs
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github/actions/sops-secret
+            secrets/ci.yaml
+          sparse-checkout-cone-mode: false
+
+      - name: Resolve broker App client ID
+        id: broker-app-client-id
+        uses: ./.github/actions/sops-secret
+        with:
+          age-key: ${{ secrets.SOPS_AGE_KEY }}
+          secret-file: secrets/ci.yaml
+          secret-key: broker_app.client_id
+
+      - name: Resolve broker App private key
+        id: broker-app-private-key
+        uses: ./.github/actions/sops-secret
+        with:
+          age-key: ${{ secrets.SOPS_AGE_KEY }}
+          secret-file: secrets/ci.yaml
+          secret-key: broker_app.private_key
+
+      # A merge from main brings main's workflow changes along, which GitHub
+      # accepts from an App only with the separate Workflows grant.
+      - name: Mint current-repository branch updater token
+        id: updater-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ steps.broker-app-client-id.outputs.value }}
+          private-key: ${{ steps.broker-app-private-key.outputs.value }}
+          # Omitting owner and repositories is the action's exact
+          # current-repository scope; never derive either from event payload.
+          permission-contents: write
+          permission-workflows: write
+
+      # Updates only pull requests whose auto-merge the broker App enabled:
+      # Dependabot's, and the sync pull request the same App opened. The merge
+      # commit message carries `[dependabot skip]`, so Dependabot still
+      # force-pushes over it when it rebases or recreates its update. A clean
+      # merge from main is also the one foreign commit the next Standards sync
+      # may drop when it rebuilds its branch. A conflict waits for Dependabot
+      # or the next sync, which both resolve their own conflicts.
+      - name: Merge main into pull requests waiting to auto-merge
+        env:
+          GH_TOKEN: ${{ steps.updater-token.outputs.token }}
+          APP_SLUG: ${{ steps.updater-token.outputs.app-slug }}
+          PULL_REQUESTS: ${{ needs.pending.outputs.pull-requests }}
+          REPOSITORY: ${{ github.repository }}
+          BASE_REF: ${{ github.ref_name }}
+          BASE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          targets=$(jq -r --arg app "$APP_SLUG" '.[]
+            | select(.enabledBy == $app
+              and (.author == "dependabot"
+                or (.author == $app and .headRefName == "standards-sync/update")))
+            | [.number, .headRefName] | @tsv' <<<"$PULL_REQUESTS")
+          failed=
+          while IFS=$'\t' read -r number branch; do
+            [ -n "$number" ] || continue
+            response=$(gh api --include --method POST "repos/$REPOSITORY/merges" \
+              -f base="$branch" -f head="$BASE_SHA" \
+              -f commit_message="Merge $BASE_REF into $branch [dependabot skip]") || true
+            status=$(head -n 1 <<<"$response" | cut -d ' ' -f 2)
+            case "$status" in
+              201) echo "Merged $BASE_REF at $BASE_SHA into #$number." ;;
+              204) echo "#$number already contains $BASE_SHA." ;;
+              404) echo "::notice::The branch of #$number no longer exists." ;;
+              409) echo "::warning::#$number conflicts with $BASE_REF. It waits for Dependabot or the next Standards sync to resolve the conflict." ;;
+              *)
+                echo "::error::Could not merge $BASE_REF into #$number: $(head -n 1 <<<"$response")"
+                failed=true
+                ;;
+            esac
+          done <<<"$targets"
+          [ -z "$failed" ]

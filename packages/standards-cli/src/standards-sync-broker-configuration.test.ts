@@ -28,6 +28,8 @@ const PROVISION_BROKER_COMMAND =
   'bun standards creds add github --dest ci:ci.broker_app';
 const WRITER_PERMISSIONS = 'Contents write and Workflows write';
 const PR_PERMISSIONS = 'Contents read and Pull requests write';
+const MERGE_PERMISSIONS =
+  'Contents write, Pull requests write, and Workflows write';
 const OBSOLETE_ONE_TOKEN_GUIDANCE = [
   'mints a short-lived token with Contents read and Pull requests write',
   'mints its pull request token from ci.broker_app',
@@ -120,12 +122,15 @@ describe('Standards sync broker documentation contract', () => {
       expect(document).toContain(BROKER_DESTINATION);
       expect(document).toContain(WRITER_PERMISSIONS);
       expect(document).toContain(PR_PERMISSIONS);
+      expect(document).toContain(MERGE_PERMISSIONS);
     }
 
     expect(syncSkill).toContain('(references/github.md)');
     expect(syncGithubReference).toContain('ci.broker_app');
     expect(syncGithubReference).toContain('short-lived tokens');
     expect(syncGithubReference).toContain('there is no fallback credential');
+    expect(syncGithubReference).toContain(MERGE_PERMISSIONS);
+    expect(adoptionGuide).toContain('Standards auto-merge');
     expect(rootReadme).toContain('[Adopt the standards](docs/adoption.md)');
     expect(rootReadme).toContain('[Operations](docs/operations.md)');
 

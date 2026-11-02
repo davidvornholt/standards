@@ -152,7 +152,7 @@ jobs:
       # Resolve through the action from the trusted pre-sync checkout. Sync
       # replaces managed files, including this action, so no local action may
       # execute after the mirror changes. The App credentials are step outputs
-      # passed only to the two mint steps, never job environment variables.
+      # passed only to the mint steps, never job environment variables.
       - name: Resolve broker App client ID
         id: broker-app-client-id
         uses: ./.github/actions/sops-secret
@@ -169,11 +169,11 @@ jobs:
           secret-file: secrets/ci.yaml
           secret-key: broker_app.private_key
 
-      # Mint both tokens before sync as a cheap, fail-closed permission check,
-      # but expose them only to the post-sync operation that needs each one.
-      # The writer needs GitHub's separate Workflows grant because canonical
-      # files include .github/workflows/**; Contents write alone cannot push
-      # those files.
+      # Mint every token before sync as a cheap, fail-closed permission check,
+      # but expose each one only to the post-sync operation that needs it.
+      # The writer and the merge token need GitHub's separate Workflows grant
+      # because canonical files include .github/workflows/**; Contents write
+      # alone cannot push or merge those files.
       - name: Mint current-repository branch writer token
         id: branch-writer-token
         uses: actions/create-github-app-token@v3
@@ -195,6 +195,18 @@ jobs:
           # current-repository scope; never derive either from event payload.
           permission-contents: read
           permission-pull-requests: write
+
+      - name: Mint current-repository merge token
+        id: merge-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ steps.broker-app-client-id.outputs.value }}
+          private-key: ${{ steps.broker-app-private-key.outputs.value }}
+          # Omitting owner and repositories is the action's exact
+          # current-repository scope; never derive either from event payload.
+          permission-contents: write
+          permission-pull-requests: write
+          permission-workflows: write
 
       # Rebase the branch of the open sync PR so maintainer seam edits survive.
       # Without an open PR, no review depends on that history: a closed or
@@ -222,30 +234,44 @@ jobs:
             open=$(GH_TOKEN="$SYNC_READ_TOKEN" gh pr list --state open --head "$branch" --limit 1000 --json number,headRefName,isCrossRepository --jq '[.[] | select((.isCrossRepository | not) and .headRefName == "standards-sync/update")][0].number // empty')
           fi
           rebuild=
+          manual=false
           if [ -n "$open" ]; then
             git fetch --no-tags origin "refs/heads/$branch"
+            # Commits the bot both authored and committed hold only content
+            # the next sync rewrites, so a rebuild may drop them, and the PR
+            # may merge them without review. A hand rebase makes the
+            # maintainer the committer. A clean merge from the base branch,
+            # which Standards auto-merge writes to keep the PR up to date, adds
+            # nothing a rebuild from the base lacks.
+            bot="$(git config user.name) <$(git config user.email)>"
+            # Steps run without pipefail, so a failed log must stop the step
+            # here rather than reach the loop as an empty list.
+            commits=$(git log --format='%H%x09%an <%ae>%x09%cn <%ce>%x09%P' "origin/$SYNC_BASE_REF..$previous")
+            foreign=$(while IFS=$'\t' read -r commit author committer parents; do
+              read -r first second extra <<<"$parents"
+              if [ -n "$second" ] && [ -z "$extra" ] \
+                && git merge-base --is-ancestor "$second" "origin/$SYNC_BASE_REF" \
+                && merged=$(git merge-tree --write-tree "$first" "$second") \
+                && [ "$merged" = "$(git rev-parse "$commit^{tree}")" ]; then
+                continue
+              fi
+              if [ "$author" != "$bot" ] || [ "$committer" != "$bot" ] || [ -n "$second" ]; then
+                echo "$commit"
+                echo "Commit $commit on $branch: author $author, committer $committer, parents $parents" >&2
+              fi
+            done <<<"$commits")
             git switch -c "$branch" "$previous"
             if ! git rebase "origin/$SYNC_BASE_REF"; then
               git rebase --abort
-              # Commits the bot both authored and committed hold only content
-              # the next sync rewrites, so a rebuild may drop them. A hand
-              # rebase makes the maintainer the committer.
-              bot="$(git config user.name) <$(git config user.email)>"
-              # Steps run without pipefail, so a failed log must stop the step
-              # here rather than reach the loop as an empty list.
-              commits=$(git log --format='%H%x09%an <%ae>%x09%cn <%ce>%x09%P' "origin/$SYNC_BASE_REF..$previous")
-              foreign=$(while IFS=$'\t' read -r commit author committer parents; do
-                if [ "$author" != "$bot" ] || [ "$committer" != "$bot" ] || [[ "$parents" == *" "* ]]; then
-                  echo "$commit"
-                  echo "Commit $commit on $branch: author $author, committer $committer, parents $parents" >&2
-                fi
-              done <<<"$commits")
               if [ -n "$foreign" ]; then
                 echo "::error::Standards sync PR #$open conflicts with $SYNC_BASE_REF, and $branch has commits the sync bot did not write: $(paste -sd ' ' <<<"$foreign"). Rebase $branch onto $SYNC_BASE_REF and push it, or close PR #$open so the next run rebuilds the branch from $SYNC_BASE_REF."
                 exit 1
               fi
               echo "::notice::Standards sync PR #$open conflicts with $SYNC_BASE_REF, and only the sync bot wrote $branch; rebuilding it from $SYNC_BASE_REF and replacing $previous in PR #$open."
               rebuild=true
+            elif [ -n "$foreign" ]; then
+              echo "::notice::$branch has commits the sync bot did not write: $(paste -sd ' ' <<<"$foreign"). Standards sync PR #$open stays manual."
+              manual=true
             fi
           else
             if [ -n "$previous" ]; then
@@ -256,7 +282,10 @@ jobs:
           if [ -n "$rebuild" ]; then
             git switch -C "$branch" "$start"
           fi
-          echo "previous=$previous" >> "$GITHUB_OUTPUT"
+          {
+            echo "previous=$previous"
+            echo "manual=$manual"
+          } >> "$GITHUB_OUTPUT"
 
       # Forward the validated policy pin explicitly as a second fail-closed
       # boundary. The CLI also reads and validates the same document, so local
@@ -331,7 +360,10 @@ jobs:
             git commit -m "chore: sync standards from upstream"
           fi
           git push --force-with-lease="refs/heads/$branch:$EXPECTED_SYNC_HEAD" --set-upstream origin "$branch"
-          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          {
+            echo "branch=$branch"
+            echo "head=$(git rev-parse HEAD)"
+          } >> "$GITHUB_OUTPUT"
 
       # The description becomes the squash commit body, so every run that
       # changes the mirror regenerates it from the base and branch locks. It
@@ -430,12 +462,14 @@ jobs:
       # `github.event.repository.default_branch` are empty here. Only the
       # non-secret branch name crosses from the writer-token process.
       - name: Reconcile sync pull requests
+        id: reconcile
         env:
           GH_TOKEN: ${{ steps.pr-token.outputs.token }}
           MIRROR_CHANGED: ${{ steps.mirror.outputs.changed }}
         run: |
           open=$(gh pr list --state open --limit 1000 --json number,headRefName,isCrossRepository --jq '[.[] | select((.isCrossRepository | not) and (.headRefName | startswith("standards-sync/")))]')
           current=
+          created=false
           if [ "$MIRROR_CHANGED" = true ]; then
             current=$(jq -r '[.[] | select(.headRefName == "standards-sync/update")][0].number // empty' <<<"$open")
             if [ -n "$current" ]; then
@@ -447,6 +481,7 @@ jobs:
                 --title "chore: sync standards from upstream" \
                 --body-file "$RUNNER_TEMP/standards-sync-pr-body.md")
               current=${url##*/}
+              created=true
             fi
             comment="Superseded by #$current, the current standards sync pull request."
           else
@@ -457,3 +492,69 @@ jobs:
             gh pr close "$number" --comment "$comment"
             echo "Closed superseded standards sync PR #$number"
           done
+          {
+            echo "number=$current"
+            echo "created=$created"
+          } >> "$GITHUB_OUTPUT"
+
+      # The sync PR merges itself once its required checks pass, so `check`
+      # stays its only gate. A failing check, such as one that waits for
+      # `github --apply` after a settings change, holds it open as before. The
+      # broker App enables auto-merge because a merge by the workflow token
+      # would start no push run on the base branch. Standards auto-merge keeps
+      # the branch up to date after later pushes to the base branch.
+      #
+      # Only the run that opens the sync PR turns auto-merge on, at the head it
+      # pushed. A later run can't tell whether auto-merge was ever on or who
+      # turned it off, because a clean rebase makes a maintainer's commit look
+      # like the bot's. So a reused PR keeps its auto-merge as it is. Commits
+      # the sync bot did not write need review: a run that finds them never
+      # turns auto-merge on, and turns off the auto-merge the App turned on in
+      # case Standards auto-merge missed the push. A person merges the PR or
+      # turns auto-merge back on.
+      - name: Enable sync pull request auto-merge
+        if: steps.mirror.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.merge-token.outputs.token }}
+          APP_SLUG: ${{ steps.merge-token.outputs.app-slug }}
+          REPOSITORY: ${{ github.repository }}
+          BASE_REF: ${{ github.ref_name }}
+          PR_NUMBER: ${{ steps.reconcile.outputs.number }}
+          PR_CREATED: ${{ steps.reconcile.outputs.created }}
+          SYNC_HEAD: ${{ steps.sync-branch.outputs.head }}
+          SYNC_MANUAL: ${{ steps.sync-base.outputs.manual }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
+            echo "::error::Reconcile sync pull requests reported no current pull request"
+            exit 1
+          fi
+          if [ "$SYNC_MANUAL" = true ]; then
+            enabled_by=$(gh pr view "$PR_NUMBER" --json autoMergeRequest --jq '.autoMergeRequest.enabledBy.login // ""')
+            if [ "$enabled_by" = "$APP_SLUG" ]; then
+              gh pr merge "$PR_NUMBER" --disable-auto
+              echo "Turned auto-merge off for standards sync PR #$PR_NUMBER"
+            else
+              echo "Standards sync PR #$PR_NUMBER has commits the sync bot did not write, so the App leaves its auto-merge as it is."
+            fi
+          elif [ "$PR_CREATED" = true ]; then
+            # gh merges a pull request that nothing holds at once, so auto-merge
+            # starts only where an active rule on the base branch requires
+            # `check`. A repository whose plan has no rulesets doesn't allow
+            # auto-merge, and GitHub refuses to list its rules.
+            allowed=$(gh repo view "$REPOSITORY" --json autoMergeAllowed --jq .autoMergeAllowed)
+            if [ "$allowed" != true ]; then
+              echo "This repository doesn't allow auto-merge, so standards sync PR #$PR_NUMBER stays manual."
+              exit 0
+            fi
+            required=$(gh api "repos/$REPOSITORY/rules/branches/$BASE_REF" --paginate \
+              --jq '.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context')
+            if grep -qx check <<<"$required"; then
+              gh pr merge "$PR_NUMBER" --auto --squash --match-head-commit "$SYNC_HEAD"
+              echo "Enabled auto-merge for standards sync PR #$PR_NUMBER"
+            else
+              echo "No active rule on $BASE_REF requires check, so standards sync PR #$PR_NUMBER stays manual."
+            fi
+          else
+            echo "An earlier run opened standards sync PR #$PR_NUMBER, so the App leaves its auto-merge as it is."
+          fi

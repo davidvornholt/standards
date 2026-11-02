@@ -22,11 +22,16 @@ const readWorkflow = (name: string) =>
   };
 
 const sync = readWorkflow('standards-sync.yml');
+const autoMerge = readWorkflow('standards-auto-merge.yml');
 
 describe('automation bootstrap secret scope', () => {
   it('binds the secret-consuming job to the repository-selected environment', () => {
     const selectedEnvironment = expression('vars.CI_SECRETS_ENVIRONMENT');
     expect(sync.jobs.sync?.environment).toBe(selectedEnvironment);
     expect(sync.jobs.policy?.environment).toBeUndefined();
+    expect(autoMerge.jobs.dependabot?.environment).toBe(selectedEnvironment);
+    expect(autoMerge.jobs.sync?.environment).toBe(selectedEnvironment);
+    expect(autoMerge.jobs.update?.environment).toBe(selectedEnvironment);
+    expect(autoMerge.jobs.pending?.environment).toBeUndefined();
   });
 });
