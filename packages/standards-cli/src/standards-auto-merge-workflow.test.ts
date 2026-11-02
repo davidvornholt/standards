@@ -124,7 +124,6 @@ describe('Standards auto-merge workflow contract', () => {
         "github.event.pull_request.user.login == 'dependabot[bot]'",
         'github.event.pull_request.head.repo.full_name == github.repository',
         'github.event.pull_request.base.ref == github.event.repository.default_branch',
-        "(github.event.action != 'synchronize' || github.event.sender.login == 'dependabot[bot]' || github.event.sender.type != 'Bot')",
       ].join(' && '),
     );
     expect(dependabot.permissions).toEqual({
@@ -144,7 +143,6 @@ describe('Standards auto-merge workflow contract', () => {
     expect(step('dependabot', 'Read Dependabot update metadata')).toEqual({
       name: 'Read Dependabot update metadata',
       id: 'metadata',
-      if: "github.event.action != 'synchronize' || github.event.sender.login == 'dependabot[bot]'",
       uses: 'dependabot/fetch-metadata@v3',
     });
     expect(dependabot.steps).toHaveLength(6);

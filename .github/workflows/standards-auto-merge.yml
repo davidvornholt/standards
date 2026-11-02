@@ -36,16 +36,16 @@ permissions:
   contents: read
 
 jobs:
-  # Decides auto-merge for each Dependabot update to the default branch. A
-  # push by a person makes the pull request manual. Pushes by other bots,
-  # which include the broker App's own branch updates, keep the decision.
+  # Decides auto-merge for each Dependabot update to the default branch from
+  # the pull request's whole commit list, whoever caused the event. A commit
+  # that is neither Dependabot's nor a broker App merge from main makes the
+  # pull request manual.
   dependabot:
     if: >-
       github.event_name == 'pull_request_target' &&
       github.event.pull_request.user.login == 'dependabot[bot]' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.base.ref == github.event.repository.default_branch &&
-      (github.event.action != 'synchronize' || github.event.sender.login == 'dependabot[bot]' || github.event.sender.type != 'Bot')
+      github.event.pull_request.base.ref == github.event.repository.default_branch
     # Repository/organization variable; empty keeps repository-scoped secrets.
     # See the standards-sync skill reference for environment-scoped bootstrap.
     environment: ${{ vars.CI_SECRETS_ENVIRONMENT }}
@@ -56,7 +56,8 @@ jobs:
       pull-requests: read
     runs-on: ${{ vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-small', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || 'ubuntu-latest' }}
     timeout-minutes: 10
-    # A newer event for the same pull request decides from newer state.
+    # A newer event for the same pull request decides from newer state, and
+    # every run checks every commit, so a cancelled run loses no decision.
     concurrency:
       group: standards-auto-merge-${{ github.event.pull_request.number }}
       cancel-in-progress: true
@@ -106,10 +107,9 @@ jobs:
           permission-workflows: write
 
       # Fails unless Dependabot opened the pull request and wrote and signed
-      # its head commit, so it never runs after a push by a person.
+      # its first commit. The decision below checks the other commits.
       - name: Read Dependabot update metadata
         id: metadata
-        if: github.event.action != 'synchronize' || github.event.sender.login == 'dependabot[bot]'
         uses: dependabot/fetch-metadata@v3
 
       # Runs after a failed metadata check too, and then turns auto-merge off.
@@ -122,10 +122,9 @@ jobs:
           APP_SLUG: ${{ steps.merge-token.outputs.app-slug }}
           METADATA_OUTCOME: ${{ steps.metadata.outcome }}
           UPDATE_TYPE: ${{ steps.metadata.outputs.update-type }}
-          EVENT_ACTION: ${{ github.event.action }}
-          EVENT_SENDER: ${{ github.event.sender.login }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_URL: ${{ github.event.pull_request.html_url }}
-          PR_HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           live=$(gh pr view "$PR_URL" --json state,headRefOid,autoMergeRequest \
@@ -135,8 +134,21 @@ jobs:
             echo "The pull request is no longer open; nothing to decide."
             exit 0
           fi
-          if [ "$EVENT_ACTION" = synchronize ] && [ "$EVENT_SENDER" != "dependabot[bot]" ]; then
-            reason="$EVENT_SENDER pushed to the Dependabot branch"
+          # GitHub signs Dependabot's commits and the broker App's merges from
+          # main. A signature proves the committer, not the author, but anyone
+          # who could forge an author here can already push and merge.
+          pages=$(gh api --paginate "repos/$REPOSITORY/pulls/$PR_NUMBER/commits")
+          last=$(jq -rs 'add // [] | last.sha // ""' <<<"$pages")
+          foreign=$(jq -rs --arg app "$APP_SLUG[bot]" '[add // [] | .[]
+            | select(.commit.verification.verified
+              and (.author.login == "dependabot[bot]"
+                or (.author.login == $app and (.parents | length) == 2))
+              | not)
+            | .sha] | join(" ")' <<<"$pages")
+          if [ "$last" != "$head" ]; then
+            reason="its commit list does not end at its head $head"
+          elif [ -n "$foreign" ]; then
+            reason="it has commits that are neither verified Dependabot commits nor broker App merges: $foreign"
           elif [ "$METADATA_OUTCOME" != success ]; then
             reason="dependabot/fetch-metadata did not verify this Dependabot update"
           else
@@ -144,10 +156,9 @@ jobs:
               version-update:semver-minor | version-update:semver-patch)
                 if [ -n "$enabled_by" ]; then
                   echo "Auto-merge is already enabled by $enabled_by."
-                elif [ "$head" != "$PR_HEAD" ]; then
-                  echo "The head moved from $PR_HEAD to $head; the run for that push decides."
                 else
-                  gh pr merge "$PR_URL" --auto --squash
+                  # Auto-merge starts only at the head whose commits passed.
+                  gh pr merge "$PR_URL" --auto --squash --match-head-commit "$head"
                   echo "Enabled auto-merge for a $UPDATE_TYPE update."
                 fi
                 exit 0

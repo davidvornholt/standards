@@ -25,7 +25,8 @@ const HEAD = 'a'.repeat(40);
 const MODE = 0o755;
 
 // `pr view` applies the caller's `--jq` filter to the fixture pull request,
-// `api graphql` prints the fixture pages, and `api --include` answers a
+// `api graphql` prints the fixture pages, `api --paginate` prints the fixture
+// commit pages one after another as gh does, and `api --include` answers a
 // merge with the fixture status for its base branch. Every call is recorded.
 const FAKE_GH = `#!/usr/bin/env bash
 set -euo pipefail
@@ -39,6 +40,10 @@ case "$1 $2" in
   'api graphql')
     echo 'api graphql' >> "$GH_CALLS"
     cat "$FIXTURE_DIR/pages.json"
+    ;;
+  'api --paginate')
+    echo "$*" >> "$GH_CALLS"
+    jq -c '.[]' "$FIXTURE_DIR/commit-pages.json"
     ;;
   'api --include')
     echo "$*" >> "$GH_CALLS"
@@ -87,23 +92,52 @@ const run = (
   return { ...result, calls: read('calls'), output: read('output') };
 };
 
+type ListedCommit = {
+  readonly sha: string;
+  readonly login: string;
+  readonly parents?: number;
+  readonly verified?: boolean;
+};
+const listedCommit = ({
+  sha,
+  login,
+  parents = 1,
+  verified = true,
+}: ListedCommit) => ({
+  sha,
+  author: { login },
+  commit: { verification: { verified } },
+  parents: Array.from({ length: parents }, (_, index) => ({
+    sha: String(index).repeat(40),
+  })),
+});
+const DEPENDABOT_COMMIT = listedCommit({
+  sha: 'd'.repeat(40),
+  login: 'dependabot[bot]',
+});
+const APP_MERGE = listedCommit({ sha: HEAD, login: `${APP}[bot]`, parents: 2 });
+
 describe('Dependabot auto-merge decision', () => {
   const view = `pr view ${PR_URL} --json state,headRefOid,autoMergeRequest --jq [.state, .headRefOid, (.autoMergeRequest.enabledBy.login // "")] | @tsv\n`;
-  const enable = `pr merge ${PR_URL} --auto --squash\n`;
+  const list = 'api --paginate repos/owner/repo/pulls/12/commits\n';
+  const enable = `pr merge ${PR_URL} --auto --squash --match-head-commit ${HEAD}\n`;
   const disable = `pr merge ${PR_URL} --disable-auto\n`;
   const decisionEnv: Env = [
     ['APP_SLUG', APP],
     ['METADATA_OUTCOME', 'success'],
     ['UPDATE_TYPE', 'version-update:semver-minor'],
-    ['EVENT_ACTION', 'opened'],
-    ['EVENT_SENDER', 'dependabot[bot]'],
+    ['REPOSITORY', 'owner/repo'],
+    ['PR_NUMBER', '12'],
     ['PR_URL', PR_URL],
-    ['PR_HEAD', HEAD],
   ];
   const decide = (
     enabledBy: string | null,
     values: Env,
     pullRequest: Readonly<Record<string, string>> = {},
+    commitPages: ReadonlyArray<ReadonlyArray<unknown>> = [
+      [DEPENDABOT_COMMIT],
+      [APP_MERGE],
+    ],
   ): Run =>
     run(
       AUTO_MERGE,
@@ -116,6 +150,7 @@ describe('Dependabot auto-merge decision', () => {
             enabledBy === null ? null : { enabledBy: { login: enabledBy } },
           ...pullRequest,
         },
+        'commit-pages.json': commitPages,
       },
       [...decisionEnv, ...values],
     );
@@ -147,28 +182,41 @@ describe('Dependabot auto-merge decision', () => {
       ],
       disable,
     ],
-    [
-      'a push by a person',
-      APP,
-      [
-        ['EVENT_ACTION', 'synchronize'],
-        ['EVENT_SENDER', 'maintainer'],
-      ],
-      disable,
-    ],
-    ['a rebase by Dependabot', null, [['EVENT_ACTION', 'synchronize']], enable],
   ];
 
   it.each(cases)('decides %s', (_label, enabledBy, values, change) => {
     const result = decide(enabledBy, values);
     expect(result.status).toBe(0);
-    expect(result.calls).toBe(`${view}${change}`);
+    expect(result.calls).toBe(`${view}${list}${change}`);
   });
 
-  it('leaves a moved head to the run for that push', () => {
-    const result = decide(null, [], { headRefOid: 'b'.repeat(40) });
+  // fetch-metadata verifies only the first commit, and a reopen names nobody
+  // who pushed, so only the full commit list shows the others.
+  it('keeps a reopened pull request with commits from someone else manual', () => {
+    const others = [
+      listedCommit({ sha: 'e'.repeat(40), login: 'maintainer' }),
+      listedCommit({
+        sha: 'f'.repeat(40),
+        login: 'dependabot[bot]',
+        verified: false,
+      }),
+      listedCommit({ sha: '1'.repeat(40), login: `${APP}[bot]` }),
+    ];
+    const result = decide(APP, [], {}, [
+      [DEPENDABOT_COMMIT, ...others],
+      [APP_MERGE],
+    ]);
     expect(result.status).toBe(0);
-    expect(result.calls).toBe(view);
+    expect(result.calls).toBe(`${view}${list}${disable}`);
+    expect(result.stdout).toContain(
+      `::notice::Turned auto-merge off because it has commits that are neither verified Dependabot commits nor broker App merges: ${others.map(({ sha }) => sha).join(' ')}.`,
+    );
+  });
+
+  it('leaves a pull request manual when its commit list does not end at its head', () => {
+    const result = decide(APP, [], { headRefOid: 'b'.repeat(40) });
+    expect(result.status).toBe(0);
+    expect(result.calls).toBe(`${view}${list}${disable}`);
   });
 
   it('does nothing for a closed pull request', () => {
