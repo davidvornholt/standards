@@ -2,12 +2,13 @@ name: Standards auto-merge
 
 # Bot pull requests merge themselves once the ruleset's required `check`
 # passes: Dependabot minor and patch version updates, which this workflow
-# enables, and the Standards sync pull request, which standards-sync.yml
-# enables. Major updates, updates without a semantic version such as Nix flake
-# inputs, bot pull requests with commits from anyone else, and every other pull
-# request stay manual. Once auto-merge on a bot pull request is turned off, by
-# a person or by these workflows, the App never turns it on again; a person
-# merges the pull request or turns auto-merge back on. Synced from
+# enables, and the Standards sync pull request, which the standards-sync.yml
+# run that opens it enables. Major updates, updates without a semantic version
+# such as Nix flake inputs, bot pull requests with commits from anyone else,
+# and every other pull request stay manual. Once auto-merge on a bot pull
+# request is turned off, by a person, by GitHub, or by these workflows,
+# including when the pull request is closed, the App never turns it on again;
+# a person merges the pull request or turns auto-merge back on. Synced from
 # davidvornholt/standards.
 #
 # The broker App in ci.broker_app, not the workflow token, enables auto-merge
