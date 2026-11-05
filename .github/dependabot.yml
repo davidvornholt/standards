@@ -11,6 +11,7 @@ updates:
       interval: "weekly"
     ignore:
       - dependency-name: "@biomejs/biome"
+      - dependency-name: "@types/bun"
       - dependency-name: "typescript"
         versions:
           - ">7.0.2"
