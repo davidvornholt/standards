@@ -5,6 +5,7 @@ import {
   APP,
   AUTO_MERGE,
   autoMergeGate,
+  autoMergeSetting,
   type Env,
   HEAD,
   PR_URL,
@@ -343,7 +344,7 @@ describe('sync pull request auto-merge gate', () => {
   it('fails without turning auto-merge on when the branch rules are unreadable', () => {
     const result = enable('7', null, {
       created: true,
-      gate: { 'repository.json': { autoMergeAllowed: true } },
+      gate: autoMergeSetting(true),
     });
     expect(result.status).not.toBe(0);
     expect(result.calls).toBe(`${readAutoMergeSetting}${readRequiredChecks}`);

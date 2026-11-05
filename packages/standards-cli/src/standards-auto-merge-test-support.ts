@@ -44,6 +44,11 @@ export const disableRecord = (disabled: boolean) => ({
 export const readDisables = (number: number): string =>
   `api graphql -f owner=owner -f name=repo -F number=${number}\n`;
 
+// GraphQL's answer to whether owner/repo allows auto-merge.
+export const autoMergeSetting = (allowed: boolean) => ({
+  'repository.json': { data: { repository: { autoMergeAllowed: allowed } } },
+});
+
 // Whether owner/repo allows auto-merge, and the active rules on its main
 // branch, which may require `check`. A missing fixture fails the call.
 export const autoMergeGate = ({
@@ -53,7 +58,7 @@ export const autoMergeGate = ({
   readonly allowed?: boolean;
   readonly required?: ReadonlyArray<string>;
 } = {}) => ({
-  'repository.json': { autoMergeAllowed: allowed },
+  ...autoMergeSetting(allowed),
   'rules.json': [
     { type: 'deletion' },
     {
@@ -65,17 +70,18 @@ export const autoMergeGate = ({
     },
   ],
 });
-export const readAutoMergeSetting =
-  'repo view owner/repo --json autoMergeAllowed --jq .autoMergeAllowed\n';
+export const readAutoMergeSetting = 'api graphql -f owner=owner -f name=repo\n';
 export const readRequiredChecks =
   'api repos/owner/repo/rules/branches/main --paginate --jq .[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context\n';
 
 // `pr view` applies the caller's `--jq` filter to the fixture pull request,
-// `repo view` and the branch rules read apply it to the fixture repository
-// and rules, `api graphql` applies it to the fixture pages and records the
-// variables without the query, `api --paginate` prints the fixture commit
-// pages one after another as gh does, and `api --include` answers a merge
-// with the fixture status for its base branch. Every call is recorded.
+// the branch rules read applies it to the fixture rules, `api graphql`
+// applies it to the fixture repository when the query reads the auto-merge
+// setting and to the fixture pages otherwise, and records the variables
+// without the query, `api --paginate` prints the fixture commit pages one
+// after another as gh does, and `api --include` answers a merge with the
+// fixture status for its base branch. Every call is recorded. Anything else
+// fails, so a workflow can't lean on a gh call this fake only imagines.
 const FAKE_GH = `#!/usr/bin/env bash
 set -euo pipefail
 case "$1 $2" in
@@ -85,26 +91,31 @@ case "$1 $2" in
     jq -r "$2" "$FIXTURE_DIR/pull-request.json"
     ;;
   'pr merge') echo "$*" >> "$GH_CALLS" ;;
-  'repo view' | 'api repos/'*'/rules/branches/'*)
+  'api repos/'*'/rules/branches/'*)
     echo "$*" >> "$GH_CALLS"
-    fixture=repository.json
-    [ "$1" = repo ] || fixture=rules.json
     while [ "$1" != --jq ]; do shift; done
-    jq -r "$2" "$FIXTURE_DIR/$fixture"
+    jq -r "$2" "$FIXTURE_DIR/rules.json"
     ;;
   'api graphql')
-    call='api graphql' filter=.
+    call='api graphql' filter=. fixture=pages.json
     shift 2
     while [ $# -gt 0 ]; do
       case "$1" in
         --jq) filter=$2; shift ;;
-        -f | -F) [[ "$2" == query=* ]] || call="$call $1 $2"; shift ;;
+        -f | -F)
+          case "$2" in
+            query=*autoMergeAllowed*) fixture=repository.json ;;
+            query=*) ;;
+            *) call="$call $1 $2" ;;
+          esac
+          shift
+          ;;
         *) call="$call $1" ;;
       esac
       shift
     done
     echo "$call" >> "$GH_CALLS"
-    jq -r "$filter" "$FIXTURE_DIR/pages.json"
+    jq -r "$filter" "$FIXTURE_DIR/$fixture"
     ;;
   'api --paginate')
     echo "$*" >> "$GH_CALLS"
