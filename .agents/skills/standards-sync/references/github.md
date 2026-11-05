@@ -31,12 +31,14 @@ Standards auto-merge uses the same App, so a repository with `"autoSync": false`
 
 ## Auto-merge
 
-The `Standards auto-merge` workflow lets bot pull requests merge themselves once the required `check` passes, without review:
+The `Standards auto-merge` workflow lets bot pull requests merge themselves once every required check passes, without review:
 
 - Dependabot minor and patch version updates on this repository's own branches. Major updates stay manual, and so do updates without a semantic version, such as Nix flake inputs, and groups that contain a major update. Dependabot holds each version update until its release is three days old. Security updates skip that hold.
 - The sync pull request. The sync run that opens it turns its auto-merge on.
 
 Auto-merge starts only where the repository allows auto-merge and an active rule on the base branch requires `check`. Without such a rule, gh would merge the pull request at once instead of waiting for `check`. So in a repository that declares `"rulesetEnforcement": "unavailable-on-plan"`, bot pull requests stay manual.
+
+Auto-merge waits only for required checks. So declare any other check that a dependency update can break as required in `.github/settings.local.json`, such as a Nix build with a fixed dependency hash.
 
 Both turn auto-merge on with a merge token from the broker App with Contents write, Pull requests write, and Workflows write. A merge the App enables starts the push workflows on main; one enabled with the workflow token would not. Workflows write lets it merge pull requests that change workflows.
 
