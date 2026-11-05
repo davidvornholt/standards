@@ -7,14 +7,16 @@ import {
   autoMergeGate,
   autoMergeSetting,
   disableRecord,
-  type Env,
   HEAD,
+  NO_RULESETS_ON_PLAN,
   PR_URL,
-  type Run,
   readAutoMergeSetting,
   readDisables,
   readRequiredChecks,
+  rulesRefused,
   stepRunner,
+  type Env,
+  type Run,
 } from './standards-auto-merge-test-support';
 
 afterEach(cleanupTmpDirs);
@@ -234,6 +236,12 @@ describe('Dependabot auto-merge gate', () => {
       readGate,
       'no active rule on main requires check',
     ],
+    [
+      'has no rulesets on its plan',
+      rulesRefused(NO_RULESETS_ON_PLAN),
+      readGate,
+      'no active rule on main requires check',
+    ],
   ])(
     'keeps an eligible update manual where the repository %s',
     (_label, gate, reads, reason) => {
@@ -251,6 +259,15 @@ describe('Dependabot auto-merge gate', () => {
       gate: autoMergeSetting(true),
     });
     expect(result.status).not.toBe(0);
+    expect(result.calls).toBe(`${view}${list}${readGate}`);
+  });
+
+  it('fails without turning auto-merge on when GitHub refuses the branch rules for another reason', () => {
+    const result = decide(null, [], {
+      gate: rulesRefused('Resource not accessible by integration'),
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('Resource not accessible by integration');
     expect(result.calls).toBe(`${view}${list}${readGate}`);
   });
 });
