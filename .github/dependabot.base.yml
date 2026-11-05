@@ -22,6 +22,11 @@ updates:
       # Biome 2.5.15 pin, so consumers never self-bump it. Upgrades happen
       # in the standards template and roll out through sync.
       - dependency-name: "@biomejs/biome"
+      # Not a temporary hold: the read-only canonical packages declare it, so
+      # a Dependabot bump rewrites manifests the drift check rejects, and that
+      # fails every update grouped with it. Upgrades happen in the standards
+      # template and roll out through sync.
+      - dependency-name: "@types/bun"
       # Temporary hold: Next.js does not support TypeScript releases above
       # 7.0.x. Lift here when Next declares support.
       - dependency-name: "typescript"
