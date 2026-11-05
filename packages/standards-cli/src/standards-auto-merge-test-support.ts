@@ -44,7 +44,6 @@ export const disableRecord = (disabled: boolean) => ({
 export const readDisables = (number: number): string =>
   `api graphql -f owner=owner -f name=repo -F number=${number}\n`;
 
-// GraphQL's answer to whether owner/repo allows auto-merge.
 export const autoMergeSetting = (allowed: boolean) => ({
   'repository.json': { data: { repository: { autoMergeAllowed: allowed } } },
 });
