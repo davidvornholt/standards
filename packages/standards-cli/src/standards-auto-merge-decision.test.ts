@@ -7,16 +7,16 @@ import {
   autoMergeGate,
   autoMergeSetting,
   disableRecord,
+  type Env,
   HEAD,
   NO_RULESETS_ON_PLAN,
   PR_URL,
+  type Run,
   readAutoMergeSetting,
   readDisables,
   readRequiredChecks,
   rulesRefused,
   stepRunner,
-  type Env,
-  type Run,
 } from './standards-auto-merge-test-support';
 
 afterEach(cleanupTmpDirs);

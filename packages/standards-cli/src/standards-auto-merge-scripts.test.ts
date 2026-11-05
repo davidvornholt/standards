@@ -6,16 +6,16 @@ import {
   AUTO_MERGE,
   autoMergeGate,
   autoMergeSetting,
+  type Env,
   HEAD,
   NO_RULESETS_ON_PLAN,
   PR_URL,
+  type Run,
   readAutoMergeSetting,
   readRequiredChecks,
   rulesRefused,
-  stepRunner,
   SYNC,
-  type Env,
-  type Run,
+  stepRunner,
 } from './standards-auto-merge-test-support';
 
 afterEach(cleanupTmpDirs);
