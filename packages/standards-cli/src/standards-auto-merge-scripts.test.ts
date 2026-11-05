@@ -339,6 +339,12 @@ describe('sync pull request auto-merge gate', () => {
       `${readAutoMergeSetting}${readRequiredChecks}`,
       'No active rule on main requires check, so standards sync PR #7 stays manual.',
     ],
+    [
+      'lost its rulesets after an earlier page listed check',
+      rulesRefused(NO_RULESETS_ON_PLAN, ['check']),
+      `${readAutoMergeSetting}${readRequiredChecks}`,
+      'No active rule on main requires check, so standards sync PR #7 stays manual.',
+    ],
   ])(
     'keeps a new sync pull request manual where the repository %s',
     (_label, gate, calls, message) => {

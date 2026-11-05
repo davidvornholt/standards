@@ -141,10 +141,12 @@ elif [ "$PR_CREATED" = true ]; then
   fi
   # A plan without rulesets refuses this read with a 403, even where
   # the repository still allows auto-merge. Any other failure stops here.
-  required=$(gh api "repos/$REPOSITORY/rules/branches/$BASE_REF" --paginate \\
-    --jq '.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context' 2>&1) ||
-    grep -qF 'Upgrade to GitHub Pro' <<<"$required" ||
-    { echo "$required" >&2; exit 1; }
+  if ! required=$(gh api "repos/$REPOSITORY/rules/branches/$BASE_REF" --paginate \\
+    --jq '.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context' 2>&1); then
+    grep -qF 'Upgrade to GitHub Pro' <<<"$required" || { echo "$required" >&2; exit 1; }
+    # A refused read proves nothing, whatever an earlier page listed.
+    required=''
+  fi
   if grep -qx check <<<"$required"; then
     gh pr merge "$PR_NUMBER" --auto --squash --match-head-commit "$SYNC_HEAD"
     echo "Enabled auto-merge for standards sync PR #$PR_NUMBER"

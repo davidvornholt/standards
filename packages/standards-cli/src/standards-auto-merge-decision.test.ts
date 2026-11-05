@@ -242,6 +242,12 @@ describe('Dependabot auto-merge gate', () => {
       readGate,
       'no active rule on main requires check',
     ],
+    [
+      'lost its rulesets after an earlier page listed check',
+      rulesRefused(NO_RULESETS_ON_PLAN, ['check']),
+      readGate,
+      'no active rule on main requires check',
+    ],
   ])(
     'keeps an eligible update manual where the repository %s',
     (_label, gate, reads, reason) => {

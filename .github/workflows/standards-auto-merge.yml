@@ -193,10 +193,12 @@ jobs:
                   else
                     # A plan without rulesets refuses this read with a 403, even where
                     # the repository still allows auto-merge. Any other failure stops here.
-                    required=$(gh api "repos/$REPOSITORY/rules/branches/$BASE_REF" --paginate \
-                      --jq '.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context' 2>&1) ||
-                      grep -qF 'Upgrade to GitHub Pro' <<<"$required" ||
-                      { echo "$required" >&2; exit 1; }
+                    if ! required=$(gh api "repos/$REPOSITORY/rules/branches/$BASE_REF" --paginate \
+                      --jq '.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context' 2>&1); then
+                      grep -qF 'Upgrade to GitHub Pro' <<<"$required" || { echo "$required" >&2; exit 1; }
+                      # A refused read proves nothing, whatever an earlier page listed.
+                      required=''
+                    fi
                     if grep -qx check <<<"$required"; then
                       # Auto-merge starts only at the head whose commits passed.
                       gh pr merge "$PR_URL" --auto --squash --match-head-commit "$head"

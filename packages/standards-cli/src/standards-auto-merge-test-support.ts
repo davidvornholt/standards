@@ -73,9 +73,13 @@ export const autoMergeGate = ({
 // rulesets, which can still allow auto-merge.
 export const NO_RULESETS_ON_PLAN =
   'Upgrade to GitHub Pro or make this repository public to enable this feature.';
-export const rulesRefused = (message: string) => ({
+// `listedFirst` is what earlier pages printed before a later page was refused.
+export const rulesRefused = (
+  message: string,
+  listedFirst: ReadonlyArray<string> = [],
+) => ({
   ...autoMergeSetting(true),
-  'rules-refusal.json': { message, status: '403' },
+  'rules-refusal.json': { listedFirst, message, status: '403' },
 });
 export const readAutoMergeSetting = 'api graphql -f owner=owner -f name=repo\n';
 export const readRequiredChecks =
@@ -102,7 +106,8 @@ case "$1 $2" in
   'api repos/'*'/rules/branches/'*)
     echo "$*" >> "$GH_CALLS"
     if [ -f "$FIXTURE_DIR/rules-refusal.json" ]; then
-      cat "$FIXTURE_DIR/rules-refusal.json"
+      jq -r '.listedFirst[]' "$FIXTURE_DIR/rules-refusal.json"
+      jq -c '{message, status}' "$FIXTURE_DIR/rules-refusal.json"
       echo "gh: $(jq -r .message "$FIXTURE_DIR/rules-refusal.json") (HTTP 403)" >&2
       exit 1
     fi
