@@ -130,9 +130,11 @@ if [ "$SYNC_MANUAL" = true ]; then
 elif [ "$PR_CREATED" = true ]; then
   # gh merges a pull request that nothing holds at once, so auto-merge
   # starts only where an active rule on the base branch requires
-  # \`check\`. A repository whose plan has no rulesets doesn't allow
-  # auto-merge, and GitHub refuses to list its rules.
-  allowed=$(gh repo view "$REPOSITORY" --json autoMergeAllowed --jq .autoMergeAllowed)
+  # \`check\`.
+  # shellcheck disable=SC2016 # GraphQL variables in the query are literal on purpose.
+  allowed=$(gh api graphql -f owner="\${REPOSITORY%/*}" -f name="\${REPOSITORY#*/}" \\
+    -f query='query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { autoMergeAllowed } }' \\
+    --jq '.data.repository.autoMergeAllowed')
   if [ "$allowed" != true ]; then
     echo "This repository doesn't allow auto-merge, so standards sync PR #$PR_NUMBER stays manual."
     exit 0

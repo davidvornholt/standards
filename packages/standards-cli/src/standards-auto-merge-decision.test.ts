@@ -5,6 +5,7 @@ import {
   APP,
   AUTO_MERGE,
   autoMergeGate,
+  autoMergeSetting,
   disableRecord,
   type Env,
   HEAD,
@@ -247,7 +248,7 @@ describe('Dependabot auto-merge gate', () => {
 
   it('fails without turning auto-merge on when the branch rules are unreadable', () => {
     const result = decide(null, [], {
-      gate: { 'repository.json': { autoMergeAllowed: true } },
+      gate: autoMergeSetting(true),
     });
     expect(result.status).not.toBe(0);
     expect(result.calls).toBe(`${view}${list}${readGate}`);
