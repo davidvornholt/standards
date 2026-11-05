@@ -547,8 +547,14 @@ jobs:
               echo "This repository doesn't allow auto-merge, so standards sync PR #$PR_NUMBER stays manual."
               exit 0
             fi
-            required=$(gh api "repos/$REPOSITORY/rules/branches/$BASE_REF" --paginate \
-              --jq '.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context')
+            # A plan without rulesets refuses this read with a 403, even where
+            # the repository still allows auto-merge. Any other failure stops here.
+            if ! required=$(gh api "repos/$REPOSITORY/rules/branches/$BASE_REF" --paginate \
+              --jq '.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context' 2>&1); then
+              grep -qF 'Upgrade to GitHub Pro' <<<"$required" || { echo "$required" >&2; exit 1; }
+              # A refused read proves nothing, whatever an earlier page listed.
+              required=''
+            fi
             if grep -qx check <<<"$required"; then
               gh pr merge "$PR_NUMBER" --auto --squash --match-head-commit "$SYNC_HEAD"
               echo "Enabled auto-merge for standards sync PR #$PR_NUMBER"

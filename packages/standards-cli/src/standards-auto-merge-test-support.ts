@@ -69,12 +69,25 @@ export const autoMergeGate = ({
     },
   ],
 });
+// GitHub's refusal to list the rules of a repository whose plan has no
+// rulesets, which can still allow auto-merge.
+export const NO_RULESETS_ON_PLAN =
+  'Upgrade to GitHub Pro or make this repository public to enable this feature.';
+// `listedFirst` is what earlier pages printed before a later page was refused.
+export const rulesRefused = (
+  message: string,
+  listedFirst: ReadonlyArray<string> = [],
+) => ({
+  ...autoMergeSetting(true),
+  'rules-refusal.json': { listedFirst, message, status: '403' },
+});
 export const readAutoMergeSetting = 'api graphql -f owner=owner -f name=repo\n';
 export const readRequiredChecks =
   'api repos/owner/repo/rules/branches/main --paginate --jq .[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context\n';
 
 // `pr view` applies the caller's `--jq` filter to the fixture pull request,
-// the branch rules read applies it to the fixture rules, `api graphql`
+// the branch rules read applies it to the fixture rules or answers as gh does
+// for a refusal, with the body on stdout and the error on stderr, `api graphql`
 // applies it to the fixture repository when the query reads the auto-merge
 // setting and to the fixture pages otherwise, and records the variables
 // without the query, `api --paginate` prints the fixture commit pages one
@@ -92,6 +105,12 @@ case "$1 $2" in
   'pr merge') echo "$*" >> "$GH_CALLS" ;;
   'api repos/'*'/rules/branches/'*)
     echo "$*" >> "$GH_CALLS"
+    if [ -f "$FIXTURE_DIR/rules-refusal.json" ]; then
+      jq -r '.listedFirst[]' "$FIXTURE_DIR/rules-refusal.json"
+      jq -c '{message, status}' "$FIXTURE_DIR/rules-refusal.json"
+      echo "gh: $(jq -r .message "$FIXTURE_DIR/rules-refusal.json") (HTTP 403)" >&2
+      exit 1
+    fi
     while [ "$1" != --jq ]; do shift; done
     jq -r "$2" "$FIXTURE_DIR/rules.json"
     ;;
