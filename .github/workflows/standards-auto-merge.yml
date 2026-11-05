@@ -183,10 +183,11 @@ jobs:
                 else
                   # gh merges a pull request that nothing holds at once, so
                   # auto-merge starts only where an active rule on the base
-                  # branch requires `check`. A repository whose plan has no
-                  # rulesets doesn't allow auto-merge, and GitHub refuses to
-                  # list its rules.
-                  allowed=$(gh repo view "$REPOSITORY" --json autoMergeAllowed --jq .autoMergeAllowed)
+                  # branch requires `check`.
+                  # shellcheck disable=SC2016 # GraphQL variables in the query are literal on purpose.
+                  allowed=$(gh api graphql -f owner="${REPOSITORY%/*}" -f name="${REPOSITORY#*/}" \
+                    -f query='query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { autoMergeAllowed } }' \
+                    --jq '.data.repository.autoMergeAllowed')
                   if [ "$allowed" != true ]; then
                     reason="this repository doesn't allow auto-merge"
                   else
