@@ -295,9 +295,13 @@ jobs:
   # request, which would otherwise wait behind main for the next push.
   pending:
     if: github.event_name == 'push' || github.event.action == 'auto_merge_enabled'
+    # In a private repository, GitHub fails the whole query below for a token
+    # that can read neither checks nor statuses. The rollup combines both.
     permissions:
+      checks: read
       contents: read
       pull-requests: read
+      statuses: read
     runs-on: ${{ vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-small', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || 'ubuntu-latest' }}
     timeout-minutes: 10
     outputs:
