@@ -221,8 +221,10 @@ describe('Standards auto-merge branch update contract', () => {
     expect(pending.environment).toBeUndefined();
     expect(JSON.stringify(pending)).not.toContain('secrets.');
     expect(pending.permissions).toEqual({
+      checks: 'read',
       contents: 'read',
       'pull-requests': 'read',
+      statuses: 'read',
     });
 
     const update = job('update');
