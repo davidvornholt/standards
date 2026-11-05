@@ -1,7 +1,7 @@
 name: Standards auto-merge
 
-# Bot pull requests merge themselves once the ruleset's required `check`
-# passes: Dependabot minor and patch version updates, which this workflow
+# Bot pull requests merge themselves once every required check passes:
+# Dependabot minor and patch version updates, which this workflow
 # enables, and the Standards sync pull request, which the standards-sync.yml
 # run that opens it enables. Major updates, updates without a semantic version
 # such as Nix flake inputs, bot pull requests with commits from anyone else,

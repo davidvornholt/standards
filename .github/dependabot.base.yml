@@ -8,10 +8,11 @@ version: 2
 updates:
   - package-ecosystem: "bun"
     directory: "/"
-    # Standards auto-merge merges minor and patch updates once `check` passes,
-    # without review. Holding each version update until its release is three
-    # days old gives the registry and maintainers time to pull a compromised
-    # release first. Dependabot's own default is the same; this pins it.
+    # Standards auto-merge merges minor and patch updates once every required
+    # check passes, without review. Holding each version update until its
+    # release is three days old gives the registry and maintainers time to pull
+    # a compromised release first. Dependabot's own default is the same; this
+    # pins it.
     # Security updates ignore cooldown and still open immediately.
     cooldown:
       default-days: 3
