@@ -22,8 +22,8 @@ When you're given a lens, report only its failure class and respect its exclusio
 Give each finding exactly one decision:
 
 - `block`: demonstrated, within the intent, material under the threat model, and serious enough to stop this merge.
-- `defer`: real and actionable, but outside this pull request or below the merge bar.
-- `discard`: refuted, speculative, already accepted, or not worth scheduling.
+- `defer`: real and actionable, with impact `breakage` or `weakening`, but outside this pull request or below the merge bar. A finding fixed before the merge isn't deferred.
+- `discard`: refuted, speculative, already accepted, not worth scheduling, or below the merge bar with impact `polish`.
 - `ask`: the repository can't choose between materially different, durable product or architecture outcomes, and choosing wrong would be expensive to reverse.
 
 Reserve `ask` for that case, and decide inferable or reversible choices yourself. Recommend the smallest correction within scope, and defer optional machinery.

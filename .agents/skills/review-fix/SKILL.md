@@ -61,6 +61,10 @@ A verification finding triggers one repair round only if it is an original block
 
 If that review finds a material defect, make one final repair, verify it mechanically only, and stop repairing. Then run the full deterministic gate locally once, after the last change. Fix gate failures the cycle introduced mechanically, without another review pass. Resolve the blocker threads once their verification and the final gate pass.
 
+## Deferred findings
+
+Before reporting, file one issue with the [issues skill](../issues/SKILL.md) for each deferred finding still present at the final head whose impact is `breakage`, or `weakening` that could lose data or access. Whoever picks it up hasn't seen the pull request, so the issue must stand alone. Link it from the report. Other deferred findings stay in the report only. The bar is narrow because minor findings filed as issues pile up until they are cleared in bulk rather than judged one at a time.
+
 ## Report and stop
 
 Post the report on the pull request and mark it ready with `gh pr ready`, unless an `ask` is still open. Open the report with this table, with a row for every phase, including skipped ones:
