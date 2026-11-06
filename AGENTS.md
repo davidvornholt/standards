@@ -10,6 +10,10 @@ Don't build backwards compatibility by default. Code in these repositories has n
 
 Ask before choosing product intent or another costly, durable direction. Write the question for someone with no background who hasn't read the code: explain what's at stake and where each option leads, and recommend one before presenting technical evidence.
 
+## Review before merge
+
+Run the `review-fix` skill on a pull request before merging it when a defect the gate can't catch would be costly: lost or corrupted data, weakened access or privacy, a broken release, deploy, rollback, or backup path, or wrong output for paying customers or other people's data. Decide by what could go wrong, not by size, because many large pull requests carry none of this risk and a small one can. Standards syncs, dependency updates, repeats of a change already reviewed elsewhere, and documentation don't need it. When a pull request meets this bar and you skip the review, say why under `### Completed checks`.
+
 ## Package management
 
 Use Bun only, at the exact version declared by the root `packageManager`. Workspaces that use the Bun runtime or `bun:test` types declare `@types/bun` themselves.
