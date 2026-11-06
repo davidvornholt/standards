@@ -9,7 +9,7 @@ Review the requested change without editing it. The goal is a trustworthy merge 
 
 ## Evidence
 
-Read the full diff against the supplied base, including how the changed files depend on each other. A finding needs a reachable failure scenario, grounded in something you inspected or ran. Judge materiality against the supplied intent and threat model. A departure from a repository rule is evidence, not automatically a blocker.
+Read the full diff against the supplied base, including how the changed files depend on each other. A finding needs a reachable failure scenario, grounded in something you inspected or ran. Judge materiality against the supplied intent and threat model. A departure from a repository rule is evidence, not automatically a blocker. Hardening against a threat the model excludes is `defer` or `discard`, never `block`.
 
 Probe as much as you need, but don't modify the shared checkout. Put instrumented probes in a disposable worktree. If you were given a gate result for the exact head, don't rerun the full gate, and use focused probes instead.
 

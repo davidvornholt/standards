@@ -35,7 +35,7 @@ Each lens is a separate reviewer with its own context, a distinct failure class,
 1. Behavior and invariants: correctness, error paths, state transitions, edge cases, and meaningful tests.
 2. Premise and integration: whether the change solves the stated problem and preserves architecture, compatibility, and operational contracts. This lens also owns documentation that breaks the documentation rule, and any material finding no other lens owns.
 
-Add a third or fourth lens only for a material risk that would otherwise have no owner, such as authorization or concurrency. Name that failure class in the scope comment.
+Add a third or fourth lens only when the diff exposes a named failure family that would otherwise have no owner, such as outbound mail, credentials, untrusted input, or concurrency. The scope comment names the family and the changed path that exposes it, because lenses chosen for a general category, such as authorization, often found nothing.
 
 ## Baseline
 
@@ -65,14 +65,19 @@ If that review finds a material defect, make one final repair, verify it mechani
 
 Post the report on the pull request and mark it ready with `gh pr ready`, unless an `ask` is still open. Open the report with this table, with a row for every phase, including skipped ones:
 
-| Phase | Scope | Model / lenses | Findings | Outcome | Duration |
-| --- | --- | --- | --- | --- | ---: |
-| Baseline gate | exact initial head | deterministic | — | reused or passed | elapsed |
-| Review | base → initial head | model × lenses | decision counts | fixed or clean | elapsed |
-| Fix verification | fix delta | model × 0–2 lenses | decision counts | repaired, clean, or skipped | elapsed |
-| Repair verification | repair delta | model × 0–2 lenses | decision counts | final repair, clean, or skipped | elapsed |
-| Final gate | exact final head | deterministic | — | passed or failed | elapsed |
+| Phase | Scope | Model / lenses | Findings | Outcome | Duration | Tokens |
+| --- | --- | --- | --- | --- | ---: | ---: |
+| Baseline gate | exact initial head | deterministic | — | reused or passed | elapsed | — |
+| Review | base → initial head | model × lenses | decision counts | fixed or clean | elapsed | total |
+| Fix verification | fix delta | model × 0–2 lenses | decision counts | repaired, clean, or skipped | elapsed | total |
+| Repair verification | repair delta | model × 0–2 lenses | decision counts | final repair, clean, or skipped | elapsed | total |
+| Final gate | exact final head | deterministic | — | passed or failed | elapsed | — |
 
-After the table, link each finding with its decision, impact, and reporting lenses. Then report lens yield, assumptions, tests added or extended, any new test machinery, deferred work, residual risk, and any final repair that no fresh reviewer saw. Measure the total wall-clock duration from the scope comment to the report.
+Write `unknown` for tokens the harness doesn't report. Follow it with this table, with one row per finding and each finding linked. Keep both tables exactly in this form so that reports can be compared across repositories.
+
+| Finding | Decision | Impact | Lenses |
+| --- | --- | --- | --- |
+
+Then report lens yield, assumptions, tests added or extended, any new test machinery, deferred work, residual risk, and any final repair that no fresh reviewer saw. For residual risk that only a running production build would show, name the gate or deploy check that covers it, and file an issue for the check when none exists. Measure the total wall-clock duration from the scope comment to the report.
 
 If the user asked you to merge when you're confident and you are, with no `ask` open, wait for CI and merge once it passes. Otherwise report the CI run as pending rather than waiting for it. Then stop.
