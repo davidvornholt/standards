@@ -41,7 +41,7 @@ Don't hard-wrap Markdown prose.
 
 ## Documentation and instructions
 
-Agents are the main readers of documentation, skills, and instructions, and every word costs tokens on each read. Write only what a capable model can't learn from the code or infer on its own, give the reason for a rule that isn't obvious, and state each fact once. Keep history and status in PRs and issues, and cut documentation in the same change that makes it stale.
+Agents are the main readers of documentation, skills, instructions, and prompts. Both reading and reasoning cost tokens, so keep a sentence only when it saves more thinking than it costs to read, such as a decision agents would otherwise get wrong or work out again on every run. Simplify by removing decisions and branches rather than compressing sentences, and before adding a rule, check whether changing an existing one would do. Give the reason for a rule that isn't obvious, and state each fact once. Keep history and status in PRs and issues, and cut documentation in the same change that makes it stale.
 
 ## Project-specific rules
 
