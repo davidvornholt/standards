@@ -30,7 +30,7 @@ Reserve `ask` for that case, and decide inferable or reversible choices yourself
 
 Also record each finding's `impact`: `breakage`, `weakening`, or `polish`. This is the consequence if the change ships as it is, not the size of the fix.
 
-Documentation, comments, or instructions that break the documentation rule, whether the diff adds them or leaves them stale, are `block` findings with impact `polish`. Quote the passages to cut.
+Documentation, comments, or instructions that break the documentation rule, whether the diff adds them or leaves them stale, are cuts rather than findings. List them under `Cuts` and quote the passages to remove. A cut doesn't stop a merge and takes no decision, but whoever acts on the review makes it before merging. Text that would lead a reader into a real failure, such as a wrong command, is an ordinary finding.
 
 ## Test recommendations
 
@@ -38,4 +38,4 @@ Recommend at most one minimal regression test per failure class, preferably by e
 
 ## Output
 
-Group findings by `block`, `ask`, `defer`, and the `discard` decisions worth keeping on record. If nothing qualifies, say so and summarize the surfaces you inspected and the focused checks you ran.
+Group findings by `block`, `ask`, `defer`, and the `discard` decisions worth keeping on record, followed by `Cuts`. If nothing qualifies, say so and summarize the surfaces you inspected and the focused checks you ran.

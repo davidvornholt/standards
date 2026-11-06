@@ -33,7 +33,7 @@ Choose the number of lenses from the diff:
 Each lens is a separate reviewer with its own context, a distinct failure class, and explicit exclusions. The default pair is:
 
 1. Behavior and invariants: correctness, error paths, state transitions, edge cases, and meaningful tests.
-2. Premise and integration: whether the change solves the stated problem and preserves architecture, compatibility, and operational contracts. This lens also owns documentation that breaks the documentation rule, and any material finding no other lens owns.
+2. Premise and integration: whether the change solves the stated problem and preserves architecture, compatibility, and operational contracts. This lens also owns the review skill's cuts, and any material finding no other lens owns.
 
 Add a third or fourth lens only for a material risk that would otherwise have no owner, such as authorization or concurrency. Name that failure class in the scope comment.
 
@@ -49,9 +49,11 @@ Merge duplicate findings, keeping every lens that reported each one, and give ea
 
 ## Fix
 
-Give each blocker its own self-contained review thread on the pull request, and fix it with a worker subagent. The worker reproduces the failure first, makes the smallest correction, and runs focused checks. If it can't reproduce the failure, it leaves the thread unresolved and the finding is reclassified rather than fixed on speculation. A documentation blocker needs no reproduction: cut the quoted passages.
+Give each blocker its own self-contained review thread on the pull request, and fix it with a worker subagent. The worker reproduces the failure first, makes the smallest correction, and runs focused checks. If it can't reproduce the failure, it leaves the thread unresolved and the finding is reclassified rather than fixed on speculation.
 
 Keep each fix the size of its finding, without new machinery, because new machinery attracts findings of its own. Add the regression test the review skill describes, at most one per failure class, ideally one that fails on the pre-fix behavior.
+
+Make every cut in one commit after the blocker fixes, with no thread, reproduction, or verification, even when the review found no blocker. A cut never triggers another review or repair round, because prose cleanup shouldn't take a cycle's attention away from defects. Report the number of cuts apart from the number of blockers.
 
 ## Verify
 
