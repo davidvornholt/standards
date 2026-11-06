@@ -28,3 +28,8 @@ Never cache image layers with `type=gha`, because their churn in the shared Acti
 ## Deployment
 
 Deploy a commit only after the quality gate passed for that exact commit. Serialize deployments with FIFO queueing (`concurrency.queue: max`), because otherwise a late run for an older commit can evict the pending run for the newest one.
+
+A review reads code, so it can't see failures that only the built artifact shows. Cover them with checks:
+
+- The gate loads an app's production build in a browser and fails on an uncaught page error, because a server-only module in the browser bundle can leave every page unresponsive while every test passes.
+- A check starts the container, waits for its health check, sends SIGTERM, and fails unless the app exits as the [app-release contract](../declarative-infra/references/app-release.md) requires, because a shell or runtime running as PID 1 can ignore the signal.
