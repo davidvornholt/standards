@@ -33,7 +33,7 @@ Use Effect extensively wherever it makes sense, because it helps agents write mo
 
 ## Writing style
 
-Write plainly and directly, in literal wording and complete sentences that are easy to follow. Avoid mannered prose, jargon, and stock phrases, and don't compress sentences into fragments to save words.
+Write plainly and directly, in literal wording and complete sentences that are easy to follow. Avoid mannered prose, stock phrases, and jargon where plain words say the same thing, and don't compress sentences into fragments to save words.
 
 Use sentence case for reader-facing text, including Markdown headings.
 
