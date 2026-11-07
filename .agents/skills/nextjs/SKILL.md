@@ -1,6 +1,6 @@
 ---
 name: nextjs
-description: Use when changing pages, layouts, Server Components, Route Handlers, Server Actions, caching, or rendering in a Next.js application. Applies the repository's Cache Components policy.
+description: Use when changing pages, layouts, Server Components, Route Handlers, Server Actions, caching, or rendering in a Next.js application.
 ---
 
 # Next.js

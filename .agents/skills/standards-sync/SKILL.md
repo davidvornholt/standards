@@ -1,6 +1,6 @@
 ---
 name: standards-sync
-description: Use when changing a file the standards sync manages (listed in `sync-standards.json`, such as `AGENTS.md`, `biome.base.jsonc`, `justfile`, canonical skills, or the standards workflows), changing sync behavior, propagating standards, or running `bun standards`. Routes each change to the owner that keeps it.
+description: Use when changing a file the standards sync manages (listed in `sync-standards.json`, such as `AGENTS.md`, `biome.base.jsonc`, `justfile`, canonical skills, or the standards workflows), changing sync behavior, propagating standards, or running `bun standards`.
 ---
 
 # Standards sync

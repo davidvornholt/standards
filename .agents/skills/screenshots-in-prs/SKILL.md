@@ -1,6 +1,6 @@
 ---
 name: screenshots-in-prs
-description: Use when opening or editing a pull request for a change to rendered UI. Produces safe, matched visual evidence for reviewers.
+description: Use when opening or editing a pull request for a change to rendered UI.
 ---
 
 # Screenshots in PRs

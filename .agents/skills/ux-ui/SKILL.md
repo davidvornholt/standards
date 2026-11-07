@@ -1,6 +1,6 @@
 ---
 name: ux-ui
-description: Use when creating or changing a user-facing interface. Applies the project's styling, component placement, theme, icon, and accessibility-test conventions.
+description: Use when creating or changing a user-facing interface.
 ---
 
 # UX/UI
