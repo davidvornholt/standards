@@ -120,19 +120,22 @@ type CliOptions = {
 const sha256 = (buf: Buffer): string =>
   createHash('sha256').update(buf).digest('hex');
 
-// The lock covers only the part of AGENTS.md that sync writes, so the
-// repository's own rules below it never read as drift.
-const lockDigest = async (
+// Sync owns AGENTS.md only down to its local heading, so the repository's own
+// rules below it are neither drift nor canonical content.
+const managedPart = async (
   rel: string,
   entry: ManagedEntry,
-): Promise<string> => {
+): Promise<Buffer> => {
   const input = await managedEntryDigestInput(entry);
   const head =
     rel === AGENTS_FILE && entry.kind === 'file'
       ? splitAgents(input.toString('utf8'))?.head
       : undefined;
-  return sha256(head === undefined ? input : Buffer.from(head));
+  return head === undefined ? input : Buffer.from(head);
 };
+
+const lockDigest = async (rel: string, entry: ManagedEntry): Promise<string> =>
+  sha256(await managedPart(rel, entry));
 
 // `C:/Windows` is absolute on Windows and relative to POSIX `isAbsolute`, so a
 // drive-qualified target written with forward slashes would escape a consumer
@@ -778,8 +781,10 @@ const runCheck = async (consumer: string): Promise<boolean> => {
     ...results.filter((p): p is string => p !== null),
     ...symlinkTargetProblems(lockedFiles, true),
   ];
-  const directiveFiles =
-    await findManagedFilesContainingBiomeDirectiveToken(lockedFiles);
+  const directiveFiles = await findManagedFilesContainingBiomeDirectiveToken(
+    lockedFiles,
+    managedPart,
+  );
   if (problems.length > 0) {
     console.error(
       `standards: ${problems.length} canonical path(s) drifted from the last synced state:`,
@@ -1000,6 +1005,13 @@ const runAgents = async (dir: string, write: boolean): Promise<boolean> => {
   }
   if (write) {
     const path = join(dir, AGENTS_FILE);
+    // Writing through a link would rewrite whatever file it points at.
+    if ((await inspectManagedPath(path))?.kind === 'symlink') {
+      console.error(
+        `standards agents: ${AGENTS_FILE} is a symlink; replace it with a regular file`,
+      );
+      return false;
+    }
     await writeFile(path, await withLocalRules(composed, path));
     console.log(`standards agents: generated ${AGENTS_FILE}`);
     return true;

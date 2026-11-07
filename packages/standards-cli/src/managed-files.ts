@@ -151,13 +151,18 @@ export const writeManagedEntry = async (
   await writeFile(dest, await readFile(entry.absolutePath));
 };
 
+// `managedPart` narrows a file to the part sync owns, as for AGENTS.md.
 export const findManagedFilesContainingBiomeDirectiveToken = async (
   files: ReadonlyMap<string, ManagedEntry>,
+  managedPart: (path: string, entry: ManagedEntry) => Promise<Buffer> = (
+    _path,
+    entry,
+  ) => managedEntryDigestInput(entry),
 ): Promise<ReadonlyArray<string>> => {
   const matches = await Promise.all(
     [...files].map(async ([path, entry]) =>
       entry.kind === 'file' &&
-      (await readFile(entry.absolutePath)).includes(directiveToken)
+      (await managedPart(path, entry)).includes(directiveToken)
         ? path
         : null,
     ),

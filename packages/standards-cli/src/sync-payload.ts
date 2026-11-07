@@ -167,17 +167,22 @@ const selectedParts = (
 // including it, and the repository owns its own rules below it.
 export const AGENTS_LOCAL_HEADING = '## Project-specific rules';
 
+// The heading as a whole line, ending in LF, CRLF, or the end of the file.
+const AGENTS_LOCAL_HEADING_LINE = new RegExp(
+  `(?<![^\\n])${AGENTS_LOCAL_HEADING}(?:\\r?\\n|$)`,
+  'u',
+);
+
+// Splits at the end of the heading line, keeping the file's exact bytes.
 export const splitAgents = (
   text: string,
 ): { readonly head: string; readonly tail: string } | null => {
-  const lines = text.split('\n');
-  const index = lines.indexOf(AGENTS_LOCAL_HEADING);
-  return index < 0
-    ? null
-    : {
-        head: `${lines.slice(0, index + 1).join('\n')}\n`,
-        tail: lines.slice(index + 1).join('\n'),
-      };
+  const match = AGENTS_LOCAL_HEADING_LINE.exec(text);
+  if (match === null) {
+    return null;
+  }
+  const end = match.index + match[0].length;
+  return { head: text.slice(0, end), tail: text.slice(end) };
 };
 
 // One self-contained file rather than `@` imports: Codex doesn't expand them,
@@ -192,7 +197,7 @@ export const composeAgents = async (
       (await readFile(join(srcDir, part.agents), 'utf8')).trim(),
     ),
   );
-  if (parts.some((part) => part.split('\n').includes(AGENTS_LOCAL_HEADING))) {
+  if (parts.some((part) => AGENTS_LOCAL_HEADING_LINE.test(part))) {
     throw new Error(
       `An AGENTS.md part must not contain the line "${AGENTS_LOCAL_HEADING}"`,
     );

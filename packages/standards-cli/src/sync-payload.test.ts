@@ -133,6 +133,19 @@ describe('AGENTS.md composition', () => {
     });
     expect(splitAgents('# AGENTS.md\n')).toBeNull();
   });
+
+  it('keeps the exact line endings and recognizes only the whole heading line', () => {
+    expect(splitAgents('# A\r\n## Project-specific rules\r\nown\r\n')).toEqual({
+      head: '# A\r\n## Project-specific rules\r\n',
+      tail: 'own\r\n',
+    });
+    expect(splitAgents('# A\n## Project-specific rules')).toEqual({
+      head: '# A\n## Project-specific rules',
+      tail: '',
+    });
+    expect(splitAgents('# A\n## Project-specific rules too\n')).toBeNull();
+    expect(splitAgents('# A\nSee ## Project-specific rules\n')).toBeNull();
+  });
 });
 
 describe('canonical core payload', () => {

@@ -3,7 +3,7 @@
 
 import { afterEach, describe, expect, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
 import {
@@ -119,6 +119,27 @@ describe('core payload', () => {
     );
   });
 
+  it('removes Bun paths when a consumer switches to core', () => {
+    const up = buildUpstream();
+    const consumer = newConsumer();
+    expect(init(up, consumer).status).toBe(0);
+    expect(read(consumer, 'AGENTS.md')).toContain(AGENTS_PARTS.bun);
+
+    write(consumer, 'sync-standards.local.json', CORE_POLICY);
+    const result = run(consumer, ['sync', '--from', up, '--dir', consumer]);
+
+    expect(result.status).toBe(0);
+    expect(existsSync(join(consumer, 'bun-managed/b.txt'))).toBe(false);
+    expect(read(consumer, 'AGENTS.md')).not.toContain(AGENTS_PARTS.bun);
+    expect(lockedPaths(consumer)).toEqual([
+      'AGENTS.md',
+      'core-managed/a.txt',
+      'sync-standards.json',
+    ]);
+  });
+});
+
+describe("a repository's own rules in AGENTS.md", () => {
   it("keeps the repository's own rules below the heading through sync and check", () => {
     const up = buildUpstream();
     const consumer = newConsumer(CORE_POLICY);
@@ -138,6 +159,32 @@ describe('core payload', () => {
     expect(run(consumer, ['check', '--dir', consumer]).status).toBe(0);
   });
 
+  it('checks only the managed part of AGENTS.md for the Biome directive token', () => {
+    const consumer = newConsumer(CORE_POLICY);
+    expect(init(buildUpstream(), consumer).status).toBe(0);
+    const generated = read(consumer, 'AGENTS.md');
+    const token = ['biome', 'ignore'].join('-');
+
+    write(consumer, 'AGENTS.md', `${generated}\nMention ${token} here.\n`);
+    expect(run(consumer, ['check', '--dir', consumer]).status).toBe(0);
+
+    write(consumer, 'AGENTS.md', `Mention ${token} here.\n${generated}`);
+    const result = run(consumer, ['check', '--dir', consumer]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('forbidden inline Biome directive token');
+  });
+
+  it('reports an AGENTS.md that lost the newline after the heading', () => {
+    const consumer = newConsumer(CORE_POLICY);
+    expect(init(buildUpstream(), consumer).status).toBe(0);
+    write(consumer, 'AGENTS.md', read(consumer, 'AGENTS.md').trimEnd());
+
+    const result = run(consumer, ['check', '--dir', consumer]);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('modified: AGENTS.md');
+  });
+
   it('refuses to sync over an AGENTS.md without the local heading', () => {
     const up = buildUpstream();
     const consumer = newConsumer(CORE_POLICY);
@@ -151,25 +198,6 @@ describe('core payload', () => {
     );
     expect(read(consumer, 'AGENTS.md')).toBe('# Hand-written rules\n');
     expect(existsSync(join(consumer, 'sync-standards.lock'))).toBe(false);
-  });
-
-  it('removes Bun paths when a consumer switches to core', () => {
-    const up = buildUpstream();
-    const consumer = newConsumer();
-    expect(init(up, consumer).status).toBe(0);
-    expect(read(consumer, 'AGENTS.md')).toContain(AGENTS_PARTS.bun);
-
-    write(consumer, 'sync-standards.local.json', CORE_POLICY);
-    const result = run(consumer, ['sync', '--from', up, '--dir', consumer]);
-
-    expect(result.status).toBe(0);
-    expect(existsSync(join(consumer, 'bun-managed/b.txt'))).toBe(false);
-    expect(read(consumer, 'AGENTS.md')).not.toContain(AGENTS_PARTS.bun);
-    expect(lockedPaths(consumer)).toEqual([
-      'AGENTS.md',
-      'core-managed/a.txt',
-      'sync-standards.json',
-    ]);
   });
 });
 
@@ -208,6 +236,19 @@ describe('agents', () => {
     expect(agents).toContain(`${AGENTS_PARTS.core}\n${AGENTS_PARTS.bun}`);
     expect(agents.endsWith(`## Project-specific rules\n${own}`)).toBe(true);
     expect(run(up, ['agents', '--check', '--dir', up]).status).toBe(0);
+  });
+
+  it('refuses to write through a symlinked AGENTS.md', () => {
+    const up = buildUpstream();
+    write(up, 'target.md', '# Stale\n');
+    rmSync(join(up, 'AGENTS.md'), { force: true });
+    symlinkSync('target.md', join(up, 'AGENTS.md'));
+
+    const result = run(up, ['agents', '--write', '--dir', up]);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('AGENTS.md is a symlink');
+    expect(read(up, 'target.md')).toBe('# Stale\n');
   });
 
   it('accepts only one of --check or --write', () => {
