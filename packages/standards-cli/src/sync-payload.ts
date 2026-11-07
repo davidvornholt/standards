@@ -165,13 +165,15 @@ const selectedParts = (
 
 const AGENTS_FOOTER = `## Project-specific rules
 
-This is a canonical file from the standards repository. Project-specific rules belong in \`AGENTS.local.md\`.
+This is a canonical file from the standards repository. Project-specific rules are in \`AGENTS.local.md\`. Read that file before starting any task.
 
 @AGENTS.local.md
 `;
 
 // One self-contained file rather than imports, so every contributor's tool
-// reads the same rules and nothing dangles where a part does not apply.
+// reads the same rules and nothing dangles where a part does not apply. Codex
+// doesn't expand `@` imports, hence the sentence telling agents to read the
+// local rules.
 export const composeAgents = async (
   srcDir: string,
   manifest: Manifest,

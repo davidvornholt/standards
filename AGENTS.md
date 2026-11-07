@@ -51,6 +51,6 @@ Use Effect extensively wherever it makes sense, because it helps agents write mo
 
 ## Project-specific rules
 
-This is a canonical file from the standards repository. Project-specific rules belong in `AGENTS.local.md`.
+This is a canonical file from the standards repository. Project-specific rules are in `AGENTS.local.md`. Read that file before starting any task.
 
 @AGENTS.local.md
