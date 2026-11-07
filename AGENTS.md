@@ -12,7 +12,7 @@ Ask before choosing product intent or another costly, durable direction. Write t
 
 ## Review before merge
 
-Run the `review-fix` skill on a pull request before merging it when a defect the gate can't catch would be costly: lost or corrupted data, weakened access or privacy, a broken release, deploy, rollback, or backup path, or wrong output for paying customers or other people's data. Decide by what could go wrong, not by size, because many large pull requests carry none of this risk and a small one can. Standards syncs, dependency updates, repeats of a change already reviewed elsewhere, and documentation don't need it. When a pull request meets this bar and you skip the review, say why under `### Completed checks`.
+Run `review-fix` before merging a pull request when a defect the gate can't catch could lose data, weaken access, break a release, deploy, or backup path, or give customers wrong output. Decide by what could go wrong, not by size. Syncs, dependency updates, and documentation are exempt. If you skip it on a pull request that meets this bar, say why under `### Completed checks`.
 
 ## Package management
 
