@@ -10,6 +10,8 @@ Don't build backwards compatibility by default. Code in these repositories has n
 
 Ask before choosing product intent or another costly, durable direction. Write the question for someone with no background who hasn't read the code: explain what's at stake and where each option leads, and recommend one before presenting technical evidence.
 
+Before merging a pull request of any size, run `review-fix` if you judge that a reviewer could find a bug in it that someone would otherwise run into. Standards syncs are exempt, because a consumer can't change synced files.
+
 ## Package management
 
 Use Bun only, at the exact version declared by the root `packageManager`. Workspaces that use the Bun runtime or `bun:test` types declare `@types/bun` themselves.
