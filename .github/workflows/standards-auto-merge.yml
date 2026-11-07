@@ -1,7 +1,7 @@
 name: Standards auto-merge
 
-# Bot pull requests merge themselves once the ruleset's required `check`
-# passes: Dependabot minor and patch version updates, which this workflow
+# Bot pull requests merge themselves once every required check passes:
+# Dependabot minor and patch version updates, which this workflow
 # enables, and the Standards sync pull request, which the standards-sync.yml
 # run that opens it enables. Major updates, updates without a semantic version
 # such as Nix flake inputs, bot pull requests with commits from anyone else,
@@ -183,15 +183,22 @@ jobs:
                 else
                   # gh merges a pull request that nothing holds at once, so
                   # auto-merge starts only where an active rule on the base
-                  # branch requires `check`. A repository whose plan has no
-                  # rulesets doesn't allow auto-merge, and GitHub refuses to
-                  # list its rules.
-                  allowed=$(gh repo view "$REPOSITORY" --json autoMergeAllowed --jq .autoMergeAllowed)
+                  # branch requires `check`.
+                  # shellcheck disable=SC2016 # GraphQL variables in the query are literal on purpose.
+                  allowed=$(gh api graphql -f owner="${REPOSITORY%/*}" -f name="${REPOSITORY#*/}" \
+                    -f query='query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { autoMergeAllowed } }' \
+                    --jq '.data.repository.autoMergeAllowed')
                   if [ "$allowed" != true ]; then
                     reason="this repository doesn't allow auto-merge"
                   else
-                    required=$(gh api "repos/$REPOSITORY/rules/branches/$BASE_REF" --paginate \
-                      --jq '.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context')
+                    # A plan without rulesets refuses this read with a 403, even where
+                    # the repository still allows auto-merge. Any other failure stops here.
+                    if ! required=$(gh api "repos/$REPOSITORY/rules/branches/$BASE_REF" --paginate \
+                      --jq '.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context' 2>&1); then
+                      grep -qF 'Upgrade to GitHub Pro' <<<"$required" || { echo "$required" >&2; exit 1; }
+                      # A refused read proves nothing, whatever an earlier page listed.
+                      required=''
+                    fi
                     if grep -qx check <<<"$required"; then
                       # Auto-merge starts only at the head whose commits passed.
                       gh pr merge "$PR_URL" --auto --squash --match-head-commit "$head"
@@ -294,9 +301,13 @@ jobs:
   # request, which would otherwise wait behind main for the next push.
   pending:
     if: github.event_name == 'push' || github.event.action == 'auto_merge_enabled'
+    # In a private repository, GitHub fails the whole query below for a token
+    # that can read neither checks nor statuses. The rollup combines both.
     permissions:
+      checks: read
       contents: read
       pull-requests: read
+      statuses: read
     runs-on: ${{ vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-small', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || 'ubuntu-latest' }}
     timeout-minutes: 10
     outputs:

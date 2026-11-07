@@ -5,12 +5,15 @@ import {
   APP,
   AUTO_MERGE,
   autoMergeGate,
+  autoMergeSetting,
   type Env,
   HEAD,
+  NO_RULESETS_ON_PLAN,
   PR_URL,
   type Run,
   readAutoMergeSetting,
   readRequiredChecks,
+  rulesRefused,
   SYNC,
   stepRunner,
 } from './standards-auto-merge-test-support';
@@ -330,6 +333,18 @@ describe('sync pull request auto-merge gate', () => {
       `${readAutoMergeSetting}${readRequiredChecks}`,
       'No active rule on main requires check, so standards sync PR #7 stays manual.',
     ],
+    [
+      'has no rulesets on its plan',
+      rulesRefused(NO_RULESETS_ON_PLAN),
+      `${readAutoMergeSetting}${readRequiredChecks}`,
+      'No active rule on main requires check, so standards sync PR #7 stays manual.',
+    ],
+    [
+      'lost its rulesets after an earlier page listed check',
+      rulesRefused(NO_RULESETS_ON_PLAN, ['check']),
+      `${readAutoMergeSetting}${readRequiredChecks}`,
+      'No active rule on main requires check, so standards sync PR #7 stays manual.',
+    ],
   ])(
     'keeps a new sync pull request manual where the repository %s',
     (_label, gate, calls, message) => {
@@ -343,9 +358,19 @@ describe('sync pull request auto-merge gate', () => {
   it('fails without turning auto-merge on when the branch rules are unreadable', () => {
     const result = enable('7', null, {
       created: true,
-      gate: { 'repository.json': { autoMergeAllowed: true } },
+      gate: autoMergeSetting(true),
     });
     expect(result.status).not.toBe(0);
+    expect(result.calls).toBe(`${readAutoMergeSetting}${readRequiredChecks}`);
+  });
+
+  it('fails without turning auto-merge on when GitHub refuses the branch rules for another reason', () => {
+    const result = enable('7', null, {
+      created: true,
+      gate: rulesRefused('Resource not accessible by integration'),
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('Resource not accessible by integration');
     expect(result.calls).toBe(`${readAutoMergeSetting}${readRequiredChecks}`);
   });
 });

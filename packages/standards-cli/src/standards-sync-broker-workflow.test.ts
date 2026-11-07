@@ -130,15 +130,23 @@ if [ "$SYNC_MANUAL" = true ]; then
 elif [ "$PR_CREATED" = true ]; then
   # gh merges a pull request that nothing holds at once, so auto-merge
   # starts only where an active rule on the base branch requires
-  # \`check\`. A repository whose plan has no rulesets doesn't allow
-  # auto-merge, and GitHub refuses to list its rules.
-  allowed=$(gh repo view "$REPOSITORY" --json autoMergeAllowed --jq .autoMergeAllowed)
+  # \`check\`.
+  # shellcheck disable=SC2016 # GraphQL variables in the query are literal on purpose.
+  allowed=$(gh api graphql -f owner="\${REPOSITORY%/*}" -f name="\${REPOSITORY#*/}" \\
+    -f query='query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { autoMergeAllowed } }' \\
+    --jq '.data.repository.autoMergeAllowed')
   if [ "$allowed" != true ]; then
     echo "This repository doesn't allow auto-merge, so standards sync PR #$PR_NUMBER stays manual."
     exit 0
   fi
-  required=$(gh api "repos/$REPOSITORY/rules/branches/$BASE_REF" --paginate \\
-    --jq '.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context')
+  # A plan without rulesets refuses this read with a 403, even where
+  # the repository still allows auto-merge. Any other failure stops here.
+  if ! required=$(gh api "repos/$REPOSITORY/rules/branches/$BASE_REF" --paginate \\
+    --jq '.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context' 2>&1); then
+    grep -qF 'Upgrade to GitHub Pro' <<<"$required" || { echo "$required" >&2; exit 1; }
+    # A refused read proves nothing, whatever an earlier page listed.
+    required=''
+  fi
   if grep -qx check <<<"$required"; then
     gh pr merge "$PR_NUMBER" --auto --squash --match-head-commit "$SYNC_HEAD"
     echo "Enabled auto-merge for standards sync PR #$PR_NUMBER"
