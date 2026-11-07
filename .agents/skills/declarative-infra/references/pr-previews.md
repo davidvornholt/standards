@@ -41,7 +41,7 @@ A deploy runs these steps in order:
 2. Verify that production's active slot tag names the exact digest in its [app-release](app-release.md) state, and that the running image is that image or content-equivalent under [app-release's comparison](https://github.com/davidvornholt/standards/blob/main/nix/app-release/src/app_release/podman.py).
 3. Upsert the preview.
 4. Run `switch`.
-5. Run migrations.
+5. Run migrations, then the [sample-data seed](#sign-in-and-sample-data).
 6. Restart the preview container.
 
 Release state, not the flake, picks the production digest, so the rebuild never moves production.
@@ -62,6 +62,14 @@ Also:
 
 - The preview UID overrides the image's user, so every non-secret runtime file and its directories must be readable and traversable by any unprivileged UID. In the build workflow, smoke-test the image with `--user=<base-uid>:<base-gid>` and the host's read-only root, tmpfs mounts, capabilities, and security options.
 - With Caddy's admin API `off`, set `services.caddy.enableReload = false`, or the reload fails an otherwise healthy activation. Changes then restart Caddy, which is the interruption [Deploy downtime](bootstrap.md#deploy-downtime) accepts.
+
+## Sign-in and sample data
+
+A preview of an app with sign-in gets working sign-in and starts with sample data, so a reviewer can see the signed-in app. Don't add a preview-only auth bypass to the app instead.
+
+- Sign-in goes through a preview-only OAuth app that the host's previews share. Register `https://pr.<domain>/<callback path>` for each app; GitHub also accepts subdomains of a callback host, so one URL covers every PR number. Keep the client ID in Nix and the secret in the host's SOPS file, rendered root-only into an env file that Podman reads before it drops to the preview UID. Never give a preview production's OAuth credentials, and assert that the preview client ID matches no production container's. Keep the app's allowed-account restriction.
+- The app ships a `db:seed:preview` package script in its image. It inserts synthetic sample data into a database without app data and changes nothing otherwise, so a redeploy keeps what a reviewer changed. Bun resolves it from the image's working directory, so it belongs in the `package.json` there.
+- After migrations succeed, run `bun run --if-present db:seed:preview` with the migration container's identity and constraints. `--if-present` lets a branch that predates the script deploy with an empty database, because the app and infra changes land in either order and a missing preview blocks review more than an empty one. A script that exists and fails still fails the deploy. Never run the seed outside previews.
 
 ## Lifecycle
 
