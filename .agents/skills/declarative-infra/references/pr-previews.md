@@ -54,9 +54,9 @@ Each preview gets, from the modules:
 
 - A system user and group in a reserved UID/GID range, such as 200000 plus index. The container runs as that identity with all capabilities dropped, `no-new-privileges`, CPU, memory, and pids caps, and a tmpfs `/tmp`.
 - Its own database `<app>_pr_<number>`, peer-mapped only to that user through the PostgreSQL module's `databaseSystemUsers`.
-- An internal Podman network with a non-overlapping, host-reachable subnet and a fixed container address, so previews reach neither each other nor the internet.
+- An internal Podman network with a non-overlapping, host-reachable subnet and a fixed container address, so previews reach neither each other nor the internet. The [sign-in proxy](#sign-in-and-sample-data) is their only way out.
 - A Caddy virtual host `<pr>.pr.<domain>` that proxies the container address directly and sends `X-Robots-Tag: noindex, nofollow, noarchive`. Never publish a host port: rootful Podman's internal bridge disables the forwarding it needs. Never restore forwarding or outbound access to make one work.
-- A firewall rule, before any host-service allow rule, that rejects connections initiated from the whole reserved preview range, including their later packets. Without it, a preview can reach host listeners on its gateway and use host Caddy to reach another preview. Allow reply packets so host-originated Caddy and readiness traffic returns.
+- A firewall rule, before any host-service allow rule, that rejects connections initiated from the whole reserved preview range, including their later packets, except those to the sign-in proxy. Without it, a preview can reach host listeners on its gateway and use host Caddy to reach another preview. Allow reply packets so host-originated Caddy and readiness traffic returns.
 
 Also:
 
@@ -67,7 +67,8 @@ Also:
 
 A preview of an app with sign-in gets working sign-in and starts with sample data, so a reviewer can see the signed-in app. Don't add a preview-only auth bypass to the app instead.
 
-- Sign-in goes through a preview-only OAuth app that the host's previews share. Register `https://pr.<domain>/<callback path>` for each app; GitHub also accepts subdomains of a callback host, so one URL covers every PR number. Keep the client ID in Nix and the secret in the host's SOPS file, rendered root-only into an env file that Podman reads before it drops to the preview UID. Never give a preview production's OAuth credentials, and assert that the preview client ID matches no production container's. Keep the app's allowed-account restriction.
+- Sign-in goes through a preview-only OAuth app that the host's previews share. Register `https://pr.<domain>/<callback path>` for each app and turn on wildcard matching for each of these callback URLs in the OAuth app's settings. Without it, GitHub rejects the callback from `<pr>.pr.<domain>`. Keep the client ID in Nix and the secret in the host's SOPS file, rendered root-only into an env file that Podman reads before it drops to the preview UID. Never give a preview production's OAuth credentials, and assert that the preview client ID matches no production container's. Keep the app's allowed-account restriction.
+- The preview's server finishes sign-in by calling the provider, for GitHub at `github.com` and `api.github.com`. Run a forward proxy on the host that accepts connections only from preview networks and allows only HTTPS `CONNECT` to those hosts, and point each preview's `HTTPS_PROXY` at it on the preview's gateway. Check that the server honors `HTTPS_PROXY`: Bun's `fetch` does, and Node's needs `NODE_USE_ENV_PROXY=1`.
 - The app ships a `db:seed:preview` package script in its image. It inserts synthetic sample data into a database without app data and changes nothing otherwise, so a redeploy keeps what a reviewer changed. Bun resolves it from the image's working directory, so it belongs in the `package.json` there.
 - After migrations succeed, run `bun run --if-present db:seed:preview` with the migration container's identity and constraints. `--if-present` lets a branch that predates the script deploy with an empty database, because the app and infra changes land in either order and a missing preview blocks review more than an empty one. A script that exists and fails still fails the deploy. Never run the seed outside previews.
 
