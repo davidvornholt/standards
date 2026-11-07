@@ -173,7 +173,11 @@ jobs:
               echo "::error::The sync policy ref $SYNC_POLICY_REF can't be used as a Nix flake ref"
               exit 1
             fi
-            nix build --out-link "$runtime/standards-cli" "$flake#standards-cli"
+            # Resolve a branch or tag once: if it moved between the build and
+            # the sync, an older CLI would mirror newer content.
+            rev="$(nix flake metadata --json "$flake" | jq -er '.locked.rev')"
+            nix build --out-link "$runtime/standards-cli" "${flake%%\?*}?rev=$rev#standards-cli"
+            echo "STANDARDS_SYNC_REV=$rev" >> "$GITHUB_ENV"
           else
             # Bun isolated packages resolve dependencies through their real
             # store paths. Keep that internal symlink graph in the independent
@@ -351,11 +355,13 @@ jobs:
           cd "$STANDARDS_SYNC_RUNTIME"
           if [ "$SYNC_PAYLOAD" = core ]; then
             cli=(standards-cli/bin/standards)
+            ref="$STANDARDS_SYNC_REV"
           else
             cli=(bun --no-env-file node_modules/@davidvornholt/standards/src/cli.ts)
+            ref="$SYNC_POLICY_REF"
           fi
-          if [ -n "$SYNC_POLICY_REF" ]; then
-            "${cli[@]}" sync --from "$trusted_source" --dir "$GITHUB_WORKSPACE" --ref "$SYNC_POLICY_REF"
+          if [ -n "$ref" ]; then
+            "${cli[@]}" sync --from "$trusted_source" --dir "$GITHUB_WORKSPACE" --ref "$ref"
           else
             "${cli[@]}" sync --from "$trusted_source" --dir "$GITHUB_WORKSPACE"
           fi
