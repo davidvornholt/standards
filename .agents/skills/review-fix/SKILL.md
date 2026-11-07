@@ -18,7 +18,7 @@ Each reviewer is a separate read-only agent that follows the [review skill](../r
 - Behavior: correctness, error paths, edge cases, and whether the tests can fail.
 - Premise: whether the change solves the problem its description states and fits the architecture and operational contracts. This reviewer also owns documentation cuts and anything no other reviewer covers.
 
-A prose-only change gets only the premise reviewer, and any other change gets both. Add up to two more only for a specific risk that the diff exposes, such as outbound mail or concurrency, because reviewers added for a general category often found nothing.
+A prose-only change gets only the premise reviewer, and any other change gets both. Add a reviewer for each specific risk the diff exposes, such as outbound mail or concurrency.
 
 ## Review
 
@@ -26,7 +26,7 @@ Reuse a gate that passed on this exact commit, or run it once, and fix only mech
 
 Give each reviewer the range from base to head, the pull request's description, the gate result, its kind of failure, and the other reviewers' kinds. Retry one that doesn't report. If it still doesn't report, stop, because a partial review isn't a safe basis for fixes.
 
-The label on each finding is your decision. Overrule a reviewer when the evidence supports it, and say so in the report. Put each `ask` to the user yourself, as AGENTS.md describes, rather than in the report.
+Reviewers propose a label for each finding, and you decide the final one. Put each `ask` to the user yourself, as AGENTS.md describes, rather than in the report.
 
 ## Fix
 
@@ -38,13 +38,14 @@ Run the full gate after the last change.
 
 ## Report
 
-File an issue with the [issues skill](../issues/SKILL.md) for each deferred finding that could still cause harm. Other deferred findings stay in the report, because minor ones filed as issues pile up until they get cleared in bulk.
+File an issue with the [issues skill](../issues/SKILL.md) for each deferred finding that someone would otherwise run into.
 
 Post one comment on the pull request, leaving out any part with nothing in it:
 
-- One line with the reviewers, the final gate result, and the total time.
+- A table with one row per review round, including skipped ones: what it reviewed, its reviewers, its findings by label, and the outcome.
+- One line with the final gate result and the total time.
 - One table row per finding: its file and line, what goes wrong, its label, and the commit that fixed it or why it wasn't fixed.
-- Each reviewer you overruled, and why.
+- Each label you changed, and why.
 - Any risk that remains. If it would show only after deployment, name the check that covers it or file an issue for one.
 
-Run `gh pr ready` unless an `ask` is open. If the user asked you to merge when you're confident and you are, wait for CI and merge. Otherwise report CI as pending, and stop.
+Run `gh pr ready` unless an `ask` is open. If the user asked you to land the pull request when you're confident, and you are, wait for CI and land it. Otherwise report CI as pending, and stop.

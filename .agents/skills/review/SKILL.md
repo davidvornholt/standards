@@ -14,12 +14,12 @@ If you're assigned one kind of failure, check everything that could fail that wa
 Give each finding its file and line, what goes wrong, and one label:
 
 - `block`: you showed it can happen, and it's bad enough to stop this merge.
-- `defer`: it's real, but it shouldn't stop this merge. Say whether it could still cause harm, such as breaking something, losing data, or weakening access.
+- `defer`: it's real, but it shouldn't stop this merge. Say whether someone would run into it.
 - `ask`: only a person can choose, because the options are durable product or architecture directions that are expensive to reverse.
 
 Leave out anything you refuted or that isn't worth doing.
 
-Recommend the smallest fix, and at most one regression test per cause, extending an existing test where you can. Never propose a new test mechanism for one finding.
+Recommend the smallest fix and a regression test that fails without it, built on the tests that already exist.
 
 Quote any documentation or comment that breaks the documentation rule under `Cuts`. A cut doesn't block, but it gets made before the merge. Text that would lead a reader into a real failure, such as a wrong command, is a finding instead.
 
