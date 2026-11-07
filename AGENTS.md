@@ -10,7 +10,7 @@ Don't build backwards compatibility by default. Code in these repositories has n
 
 Ask before choosing product intent or another costly, durable direction. Write the question for someone with no background who hasn't read the code: explain what's at stake and where each option leads, and recommend one before presenting technical evidence.
 
-Run `review-fix` before merging a pull request of any size that changes how data is stored or deleted, who can access what, a release, deploy, or backup path, or results customers rely on. Standards syncs, dependency updates without code changes, and documentation are exempt.
+Run `review-fix` before merging a pull request whose defects would be costly or hard to undo, whatever its size. Standards syncs are exempt, because a consumer can't change their content.
 
 ## Package management
 
