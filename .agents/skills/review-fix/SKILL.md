@@ -30,7 +30,7 @@ The label on each finding is your decision. Overrule a reviewer when the evidenc
 
 ## Fix
 
-A worker fixes each blocker: it reproduces the failure, makes the smallest correction, adds the recommended test, and runs focused checks. If it can't reproduce the failure, don't fix it on speculation, and relabel the finding. Then make all cuts in one commit.
+A worker on your own model fixes each blocker: it reproduces the failure, makes the smallest correction, adds the recommended test, and runs focused checks. If it can't reproduce the failure, don't fix it on speculation, and relabel the finding. Then make all cuts in one commit.
 
 When a fix could lose data, weaken access, break a release, deploy, or backup path, or give customers wrong output, one reviewer reads only the fix commits. If it finds a blocker the fixes left or a defect they introduced, repair it once and confirm the repair with tests alone. Defer or drop anything that was already there.
 
