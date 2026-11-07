@@ -1,6 +1,6 @@
 # standards
 
-Canonical agent instructions, skills, quality configuration, repository policy, and tooling for TypeScript and Bun monorepos. Consumer repositories receive these files through the [`@davidvornholt/standards`](packages/standards-cli) CLI, which also detects drift.
+Canonical agent instructions and skills for every repository, plus quality configuration, repository policy, and tooling for TypeScript and Bun monorepos. Consumer repositories receive these files through the [`@davidvornholt/standards`](packages/standards-cli) CLI, which also detects drift.
 
 - To adopt the standards in a repository, follow [Adopt the standards](docs/adoption.md).
 - For sync recovery, testing unpublished canonical changes, CodeBuild runners, and the Nix package, see [Operations](docs/operations.md).

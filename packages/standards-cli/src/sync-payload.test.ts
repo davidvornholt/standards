@@ -1,0 +1,128 @@
+import { afterEach, describe, expect, it } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import {
+  ACTUAL_UPSTREAM,
+  AGENTS_PARTS,
+  cleanupTmpDirs,
+  mkTmp,
+  writeSyncManifest,
+} from './cli-test-support';
+import { composeAgents, loadManifest, parseManifest } from './sync-payload';
+
+afterEach(cleanupTmpDirs);
+
+const payload = (
+  paths: ReadonlyArray<string>,
+  seeds: ReadonlyArray<string>,
+) => ({
+  agents: 'agents-md/part.md',
+  seeds,
+  paths,
+});
+const manifestWith = (payloads: Record<string, unknown>): unknown => ({
+  upstream: 'github:davidvornholt/standards',
+  seedDir: 'template',
+  payloads,
+});
+
+describe('sync manifest', () => {
+  it('accepts the whole seed directory as a seed', () => {
+    const manifest = parseManifest(
+      manifestWith({ core: payload([], []), bun: payload([], ['.']) }),
+    );
+    expect(manifest.payloads.bun.seeds).toEqual(['.']);
+  });
+
+  it.each([
+    [
+      'a missing payload',
+      manifestWith({ core: payload([], []) }),
+      'requires "payloads" with exactly the keys core and bun',
+    ],
+    [
+      'an unknown payload',
+      manifestWith({
+        core: payload([], []),
+        bun: payload([], []),
+        rust: payload([], []),
+      }),
+      'requires "payloads" with exactly the keys core and bun',
+    ],
+    [
+      'a managed AGENTS.md',
+      manifestWith({ core: payload(['AGENTS.md'], []), bun: payload([], []) }),
+      'must not manage AGENTS.md',
+    ],
+    [
+      'a path in both payloads',
+      manifestWith({
+        core: payload(['justfile'], []),
+        bun: payload(['justfile'], []),
+      }),
+      'managed paths must be unique across payloads',
+    ],
+    [
+      'the repository root as a managed path',
+      manifestWith({ core: payload(['.'], []), bun: payload([], []) }),
+      'must be a normalized repository-relative path: .',
+    ],
+    [
+      'a top-level paths list',
+      {
+        upstream: 'github:davidvornholt/standards',
+        seedDir: 'template',
+        paths: [],
+      },
+      'requires "payloads"',
+    ],
+  ])('rejects %s', (_label, raw, message) => {
+    expect(() => parseManifest(raw)).toThrow(message);
+  });
+});
+
+describe('AGENTS.md composition', () => {
+  it('gives core consumers the core part and Bun consumers both', async () => {
+    const up = mkTmp('agents-up-');
+    writeSyncManifest(up, up, []);
+    const manifest = await loadManifest(join(up, 'sync-standards.json'));
+
+    const core = await composeAgents(up, manifest, 'core');
+    const bun = await composeAgents(up, manifest, 'bun');
+
+    expect(core.startsWith(`# AGENTS.md\n\n${AGENTS_PARTS.core}\n`)).toBe(true);
+    expect(core).not.toContain(AGENTS_PARTS.bun);
+    expect(bun).toContain(`${AGENTS_PARTS.core}\n${AGENTS_PARTS.bun}`);
+    for (const composed of [core, bun]) {
+      expect(composed.endsWith('\n\n@AGENTS.local.md\n')).toBe(true);
+    }
+  });
+
+  it("keeps this repository's AGENTS.md generated from its parts", async () => {
+    const manifest = await loadManifest(
+      join(ACTUAL_UPSTREAM, 'sync-standards.json'),
+    );
+    expect(readFileSync(join(ACTUAL_UPSTREAM, 'AGENTS.md'), 'utf8')).toBe(
+      await composeAgents(ACTUAL_UPSTREAM, manifest, 'bun'),
+    );
+  });
+});
+
+describe('canonical core payload', () => {
+  // A repository on the core payload has no Bun workspace, so everything the
+  // weekly sync runs must arrive with core.
+  it('carries what the weekly sync needs', async () => {
+    const { payloads } = await loadManifest(
+      join(ACTUAL_UPSTREAM, 'sync-standards.json'),
+    );
+    expect(payloads.core.paths).toEqual(
+      expect.arrayContaining([
+        'sync-standards.json',
+        '.github/workflows/standards-sync.yml',
+        '.github/actions/sops-secret',
+        '.agents/skills/standards-sync',
+      ]),
+    );
+    expect(payloads.core.seeds).toEqual(['AGENTS.local.md']);
+  });
+});

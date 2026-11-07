@@ -84,6 +84,7 @@ export const syncName = 'Sync canonical files from upstream';
 const writerConsumerName = 'Commit and push mirror changes';
 const prConsumerName = 'Reconcile sync pull requests';
 const mergeConsumerName = 'Enable sync pull request auto-merge';
+export const syncPayloadName = ['SYNC', 'PAYLOAD'].join('_');
 export const syncPolicyRefName = ['SYNC', 'POLICY', 'REF'].join('_');
 
 // Any new field can change execution or failure semantics. Even safe metadata

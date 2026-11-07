@@ -2,6 +2,10 @@
 
 This repository is the source of `AGENTS.md` and the canonical payload. Edit canonical files here; consumers receive them through `bun standards sync`.
 
+## Payloads and the generated AGENTS.md
+
+`sync-standards.json` splits the payload into `core`, for repositories of any language, and `bun`, which Bun consumers get on top of core. Put a path in `bun` when it assumes a Bun workspace. `AGENTS.md` is generated from the payloads' parts in `agents-md/`: edit those and run `bun run check:fix`, which regenerates it.
+
 ## Source-repository structure profile
 
 This repository is not a `standards structure` consumer. Its root gate runs the local CLI instead of `standards check`, and `packages/standards-cli` is a published bin-only package with a SemVer version. The `source` profile in `packages/standards-cli/src/structure-profile.ts` pins these exceptions. When the repository's shape changes, update that profile and the root `check` and `check:fix` scripts together.
