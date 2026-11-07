@@ -1,6 +1,6 @@
 ---
 name: secrets-and-config
-description: Use when changing application configuration, environment variables, SOPS secret files, or generated development environments. Keeps each value in one documented owner.
+description: Use when changing application configuration, environment variables, SOPS secret files, or generated development environments.
 ---
 
 # Secrets and configuration
