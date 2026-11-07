@@ -1,6 +1,6 @@
 ---
 name: prs
-description: Use when opening a pull request or changing its title or description. Produces a decision-ready, reproducible change record.
+description: Use when opening a pull request or changing its title or description.
 ---
 
 # Pull requests

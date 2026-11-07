@@ -1,6 +1,6 @@
 ---
 name: issues
-description: Use when opening an issue or changing its title or description. Produces an actionable problem record for a decider with no project context.
+description: Use when opening an issue or changing its title or description.
 ---
 
 # Issues
