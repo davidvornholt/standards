@@ -51,7 +51,7 @@ export const AGENTS_PARTS = {
 } as const;
 
 // A fixture source's manifest shaped like the real one: `corePaths` and the
-// `AGENTS.local.md` seed in core, `paths` and the whole template in Bun. Writes
+// no seeds in core, `paths` and the whole template in Bun. Writes
 // the AGENTS.md parts it names, so init and sync can compose AGENTS.md.
 export const writeSyncManifest = (
   root: string,
@@ -70,7 +70,7 @@ export const writeSyncManifest = (
       payloads: {
         core: {
           agents: 'agents-md/core.md',
-          seeds: ['AGENTS.local.md'],
+          seeds: [],
           paths: corePaths,
         },
         bun: { agents: 'agents-md/bun.md', seeds: ['.'], paths },

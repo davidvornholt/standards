@@ -22,7 +22,7 @@ A change every consumer should get belongs upstream. A change for one consumer b
 | Canonical path | Consumer extension |
 | --- | --- |
 | `biome.base.jsonc` | `biome.jsonc` |
-| `AGENTS.md` | `AGENTS.local.md` |
+| `AGENTS.md` | Below its `## Project-specific rules` heading |
 | `justfile` and `secrets.just` | `local.just` |
 | `.github/settings.json` | `.github/settings.local.json` |
 | `.github/dependabot.base.yml` | `.github/dependabot.local.yml` |

@@ -6,9 +6,15 @@ import {
   AGENTS_PARTS,
   cleanupTmpDirs,
   mkTmp,
+  write,
   writeSyncManifest,
 } from './cli-test-support';
-import { composeAgents, loadManifest, parseManifest } from './sync-payload';
+import {
+  composeAgents,
+  loadManifest,
+  parseManifest,
+  splitAgents,
+} from './sync-payload';
 
 afterEach(cleanupTmpDirs);
 
@@ -94,7 +100,7 @@ describe('AGENTS.md composition', () => {
     expect(core).not.toContain(AGENTS_PARTS.bun);
     expect(bun).toContain(`${AGENTS_PARTS.core}\n${AGENTS_PARTS.bun}`);
     for (const composed of [core, bun]) {
-      expect(composed.endsWith('\n\n@AGENTS.local.md\n')).toBe(true);
+      expect(composed.endsWith('\n\n## Project-specific rules\n')).toBe(true);
     }
   });
 
@@ -102,9 +108,30 @@ describe('AGENTS.md composition', () => {
     const manifest = await loadManifest(
       join(ACTUAL_UPSTREAM, 'sync-standards.json'),
     );
-    expect(readFileSync(join(ACTUAL_UPSTREAM, 'AGENTS.md'), 'utf8')).toBe(
+    const actual = readFileSync(join(ACTUAL_UPSTREAM, 'AGENTS.md'), 'utf8');
+    expect(splitAgents(actual)?.head).toBe(
       await composeAgents(ACTUAL_UPSTREAM, manifest, 'bun'),
     );
+  });
+
+  it('refuses a part that contains the local heading', async () => {
+    const up = mkTmp('agents-up-');
+    writeSyncManifest(up, up, []);
+    write(up, 'agents-md/core.md', '## Project-specific rules\n');
+    const manifest = await loadManifest(join(up, 'sync-standards.json'));
+
+    await expect(composeAgents(up, manifest, 'core')).rejects.toThrow(
+      'must not contain the line "## Project-specific rules"',
+    );
+  });
+
+  it('splits after the first local heading and puts the halves back together', () => {
+    const text = '# AGENTS.md\n\n## Project-specific rules\n\n### Own\n';
+    expect(splitAgents(text)).toEqual({
+      head: '# AGENTS.md\n\n## Project-specific rules\n',
+      tail: '\n### Own\n',
+    });
+    expect(splitAgents('# AGENTS.md\n')).toBeNull();
   });
 });
 
@@ -123,6 +150,6 @@ describe('canonical core payload', () => {
         '.agents/skills/standards-sync',
       ]),
     );
-    expect(payloads.core.seeds).toEqual(['AGENTS.local.md']);
+    expect(payloads.core.seeds).toEqual([]);
   });
 });

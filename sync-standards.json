@@ -4,7 +4,7 @@
   "payloads": {
     "core": {
       "agents": "agents-md/core.md",
-      "seeds": ["AGENTS.local.md"],
+      "seeds": [],
       "paths": [
         "sync-standards.json",
         ".agents/skills/issues",

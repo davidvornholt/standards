@@ -163,17 +163,25 @@ const selectedParts = (
     ? [manifest.payloads.core]
     : [manifest.payloads.core, manifest.payloads.bun];
 
-const AGENTS_FOOTER = `## Project-specific rules
+// The last line sync writes to AGENTS.md. Sync owns everything up to and
+// including it, and the repository owns its own rules below it.
+export const AGENTS_LOCAL_HEADING = '## Project-specific rules';
 
-This is a canonical file from the standards repository. Project-specific rules are in \`AGENTS.local.md\`. Read that file before starting any task.
+export const splitAgents = (
+  text: string,
+): { readonly head: string; readonly tail: string } | null => {
+  const lines = text.split('\n');
+  const index = lines.indexOf(AGENTS_LOCAL_HEADING);
+  return index < 0
+    ? null
+    : {
+        head: `${lines.slice(0, index + 1).join('\n')}\n`,
+        tail: lines.slice(index + 1).join('\n'),
+      };
+};
 
-@AGENTS.local.md
-`;
-
-// One self-contained file rather than imports, so every contributor's tool
-// reads the same rules and nothing dangles where a part does not apply. Codex
-// doesn't expand `@` imports, hence the sentence telling agents to read the
-// local rules.
+// One self-contained file rather than `@` imports: Codex doesn't expand them,
+// and an import of a part that doesn't apply would dangle.
 export const composeAgents = async (
   srcDir: string,
   manifest: Manifest,
@@ -184,7 +192,29 @@ export const composeAgents = async (
       (await readFile(join(srcDir, part.agents), 'utf8')).trim(),
     ),
   );
-  return ['# AGENTS.md', ...parts, AGENTS_FOOTER].join('\n\n');
+  if (parts.some((part) => part.split('\n').includes(AGENTS_LOCAL_HEADING))) {
+    throw new Error(
+      `An AGENTS.md part must not contain the line "${AGENTS_LOCAL_HEADING}"`,
+    );
+  }
+  return `${['# AGENTS.md', ...parts, AGENTS_LOCAL_HEADING].join('\n\n')}\n`;
+};
+
+// Puts the repository's own rules from the AGENTS.md at `path` under `head`.
+export const withLocalRules = async (
+  head: string,
+  path: string,
+): Promise<string> => {
+  if (!existsSync(path)) {
+    return head;
+  }
+  const split = splitAgents(await readFile(path, 'utf8'));
+  if (split === null) {
+    throw new Error(
+      `${AGENTS_FILE} has no "${AGENTS_LOCAL_HEADING}" line; put this repository's own rules under that heading at the end of the file, then re-run`,
+    );
+  }
+  return head + split.tail;
 };
 
 export type PayloadPlan = {
@@ -192,13 +222,21 @@ export type PayloadPlan = {
   readonly upstream: ReadonlyMap<string, ManagedEntry>;
 };
 
-// Lists what init and sync mirror for one payload. The generated AGENTS.md is a
-// managed file like any other, staged in a temporary directory that lives only
-// as long as `use`.
+// Lists what init and sync mirror for one payload. The generated AGENTS.md
+// keeps the consumer's own rules and is staged in a temporary directory that
+// lives only as long as `use`.
 export const withPayloadPlan = async <T>(
-  manifest: Manifest,
-  srcDir: string,
-  payload: SyncPayload,
+  {
+    manifest,
+    srcDir,
+    payload,
+    consumer,
+  }: {
+    readonly manifest: Manifest;
+    readonly srcDir: string;
+    readonly payload: SyncPayload;
+    readonly consumer: string;
+  },
   use: (plan: PayloadPlan) => Promise<T>,
 ): Promise<T> => {
   const parts = selectedParts(manifest, payload);
@@ -212,7 +250,13 @@ export const withPayloadPlan = async <T>(
   const staging = await mkdtemp(join(tmpdir(), 'standards-agents-'));
   try {
     const agents = join(staging, AGENTS_FILE);
-    await writeFile(agents, await composeAgents(srcDir, manifest, payload));
+    await writeFile(
+      agents,
+      await withLocalRules(
+        await composeAgents(srcDir, manifest, payload),
+        join(consumer, AGENTS_FILE),
+      ),
+    );
     const upstream = new Map(listed);
     upstream.set(AGENTS_FILE, { kind: 'file', absolutePath: agents });
     return await use({ seeds, upstream });

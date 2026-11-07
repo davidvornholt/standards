@@ -61,7 +61,6 @@ const buildUpstream = (): string => {
       '',
     ].join('\n'),
   );
-  write(up, 'template/AGENTS.local.md', '# Local\n');
   write(up, 'template/biome.jsonc', '{"extends":["./biome.base.jsonc"]}\n');
   write(up, 'template/.github/dependabot.local.yml', '# no additions yet\n');
   return up;
@@ -94,8 +93,7 @@ describe('core payload', () => {
     const agents = read(consumer, 'AGENTS.md');
     expect(agents).toContain(AGENTS_PARTS.core);
     expect(agents).not.toContain(AGENTS_PARTS.bun);
-    expect(agents.endsWith('@AGENTS.local.md\n')).toBe(true);
-    expect(read(consumer, 'AGENTS.local.md')).toBe('# Local\n');
+    expect(agents.endsWith('\n## Project-specific rules\n')).toBe(true);
     for (const bunOnly of [
       'bun-managed/b.txt',
       'biome.jsonc',
@@ -116,6 +114,43 @@ describe('core payload', () => {
     const drifted = run(consumer, ['check', '--dir', consumer]);
     expect(drifted.status).toBe(1);
     expect(drifted.stderr).toContain('modified: AGENTS.md');
+    expect(drifted.stderr).toContain(
+      'own rules go below "## Project-specific rules"',
+    );
+  });
+
+  it("keeps the repository's own rules below the heading through sync and check", () => {
+    const up = buildUpstream();
+    const consumer = newConsumer(CORE_POLICY);
+    expect(init(up, consumer).status).toBe(0);
+    const own = '\n### Own rule\n\nUse tabs.\n';
+    write(consumer, 'AGENTS.md', read(consumer, 'AGENTS.md') + own);
+    expect(run(consumer, ['check', '--dir', consumer]).status).toBe(0);
+
+    write(up, 'agents-md/core.md', '## Core rules, revised\n');
+    const synced = run(consumer, ['sync', '--from', up, '--dir', consumer]);
+
+    expect(synced.status).toBe(0);
+    expect(synced.stdout).not.toContain('locally-modified');
+    const agents = read(consumer, 'AGENTS.md');
+    expect(agents).toContain('## Core rules, revised');
+    expect(agents.endsWith(`## Project-specific rules\n${own}`)).toBe(true);
+    expect(run(consumer, ['check', '--dir', consumer]).status).toBe(0);
+  });
+
+  it('refuses to sync over an AGENTS.md without the local heading', () => {
+    const up = buildUpstream();
+    const consumer = newConsumer(CORE_POLICY);
+    write(consumer, 'AGENTS.md', '# Hand-written rules\n');
+
+    const result = init(up, consumer);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      'AGENTS.md has no "## Project-specific rules" line',
+    );
+    expect(read(consumer, 'AGENTS.md')).toBe('# Hand-written rules\n');
+    expect(existsSync(join(consumer, 'sync-standards.lock'))).toBe(false);
   });
 
   it('removes Bun paths when a consumer switches to core', () => {
@@ -159,18 +194,19 @@ describe('Bun payload', () => {
 });
 
 describe('agents', () => {
-  it('fails on a stale AGENTS.md until --write regenerates it', () => {
+  it('fails on a stale AGENTS.md until --write regenerates it, keeping own rules', () => {
     const up = buildUpstream();
-    write(up, 'AGENTS.md', '# Stale\n');
+    const own = '\n### Own rule\n';
+    write(up, 'AGENTS.md', `# Stale\n\n## Project-specific rules\n${own}`);
 
     const stale = run(up, ['agents', '--dir', up]);
     expect(stale.status).toBe(1);
     expect(stale.stderr).toContain('does not match its parts');
 
     expect(run(up, ['agents', '--write', '--dir', up]).status).toBe(0);
-    expect(read(up, 'AGENTS.md')).toContain(
-      `${AGENTS_PARTS.core}\n${AGENTS_PARTS.bun}`,
-    );
+    const agents = read(up, 'AGENTS.md');
+    expect(agents).toContain(`${AGENTS_PARTS.core}\n${AGENTS_PARTS.bun}`);
+    expect(agents.endsWith(`## Project-specific rules\n${own}`)).toBe(true);
     expect(run(up, ['agents', '--check', '--dir', up]).status).toBe(0);
   });
 

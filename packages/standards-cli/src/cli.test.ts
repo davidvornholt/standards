@@ -1125,7 +1125,6 @@ const buildUpstream = (paths: ReadonlyArray<string> = STD_PATHS): string => {
   write(up, 'template/.envrc', 'use flake\n');
   write(up, 'template/flake.nix', '{}\n');
   write(up, 'template/flake.lock', '{}\n');
-  write(up, 'template/AGENTS.local.md', '# Local\n');
   write(up, 'template/biome.jsonc', '{"extends":["./biome.base.jsonc"]}\n');
   write(
     up,
@@ -1513,7 +1512,6 @@ describe('doctor', () => {
     const doctor = run(consumer, ['doctor', '--dir', consumer]);
     expect(doctor.status).toBe(1);
     expect(doctor.stderr).toContain('biome.jsonc must extend');
-    expect(doctor.stderr).toContain('AGENTS.local.md must exist');
     expect(doctor.stderr).toContain('.github/dependabot.base.yml must exist');
     expect(doctor.stderr).toContain('@davidvornholt/standards');
     expect(doctor.stderr).toContain('script "check"');

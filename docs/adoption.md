@@ -13,7 +13,7 @@ Then [connect CI and GitHub](#connect-ci-and-github).
 
 ## Repository outside Bun
 
-A repository that isn't a Bun workspace, such as a Rust, Nix, or Python project, takes the core payload: `AGENTS.md`, the language-neutral skills, and the weekly sync. Move project-specific content from `AGENTS.md` and `CLAUDE.md` to `AGENTS.local.md` first, then run the CLI through Nix:
+A repository that isn't a Bun workspace, such as a Rust, Nix, or Python project, takes the core payload: `AGENTS.md`, the language-neutral skills, and the weekly sync. First move the project-specific content of `AGENTS.md` and `CLAUDE.md` below a `## Project-specific rules` heading at the end of `AGENTS.md`, and delete `CLAUDE.md`. Then run the CLI through Nix:
 
 ```sh
 echo '{ "payload": "core" }' > sync-standards.local.json
@@ -28,7 +28,7 @@ Commit `sync-standards.lock` and `sync-standards.local.json`, and check for drif
 
 | Existing path | Move its project-specific content to |
 | --- | --- |
-| `AGENTS.md`, `CLAUDE.md` | `AGENTS.local.md`, then delete `CLAUDE.md` |
+| `AGENTS.md`, `CLAUDE.md` | Below a `## Project-specific rules` heading at the end of `AGENTS.md`, then delete `CLAUDE.md` |
 | `justfile`, `secrets.just` | `local.just` |
 | `.github/dependabot.yml` | `.github/dependabot.local.yml` |
 | `.claude/skills/<name>` | `.agents/skills/<name>` |

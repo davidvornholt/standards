@@ -55,7 +55,6 @@
         "$TURBO_ROOT$/secrets/ci.yaml",
         "$TURBO_ROOT$/template/**",
         "$TURBO_ROOT$/package.json",
-        "$TURBO_ROOT$/AGENTS.local.md",
         "$TURBO_ROOT$/README.md",
         "$TURBO_ROOT$/docs/**",
         "$TURBO_ROOT$/turbo.json"
