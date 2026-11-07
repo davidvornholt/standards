@@ -19,7 +19,7 @@ Give each finding its file and line, what goes wrong, and one label:
 
 Leave out anything you refuted or that isn't worth doing.
 
-Recommend the smallest fix and a regression test that fails without it, built on the tests that already exist.
+Recommend the smallest fix and a regression test that fails without it.
 
 Quote any documentation or comment that breaks the documentation rule under `Cuts`. A cut doesn't block, but it gets made before the merge. Text that would lead a reader into a real failure, such as a wrong command, is a finding instead.
 
