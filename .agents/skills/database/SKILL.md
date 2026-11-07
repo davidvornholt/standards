@@ -1,6 +1,6 @@
 ---
 name: database
-description: Use when changing database schemas, migrations, database access, or database package structure. Keeps the Drizzle schema authoritative and migrations generated.
+description: Use when changing database schemas, migrations, database access, or database package structure.
 ---
 
 # Database and migrations

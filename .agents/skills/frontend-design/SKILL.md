@@ -1,6 +1,6 @@
 ---
 name: frontend-design
-description: Use when creating or visually styling a web interface. Establishes a deliberate visual direction before implementation.
+description: Use when creating or visually styling a web interface.
 license: Complete terms in LICENSE.txt
 ---
 
