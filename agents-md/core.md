@@ -22,6 +22,8 @@ Don't build backwards compatibility by default. Code in these repositories has n
 
 ## Formatting
 
+The user may read only your last message. While working, write only to answer a question, when your goal changes, when something is ready for review, or when you need something from the user, such as an approval, and leave out the details of the step you're on. If you're prompted for an update anyway, say in one sentence what you're working toward. Start each final message by answering every question the user asked after the last final message they replied to, even if you answered it before, then say what you need from them and what's ready for their review.
+
 Use sentence case for reader-facing text, including Markdown headings.
 
 Don't hard-wrap Markdown prose.
