@@ -1,0 +1,230 @@
+import { afterEach, describe, expect, it } from 'bun:test';
+import { execFileSync } from 'node:child_process';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import process from 'node:process';
+import { cleanupTmpDirs, mkTmp, write } from './cli-test-support';
+import { runSyncStep } from './standards-sync-workflow-test-support';
+
+// The core payload has no Bun workspace, so the sync workflow fetches the
+// standards source at the commit it syncs from and runs the CLI from there.
+// These tests point the GitHub URL at a local repository through Git's own
+// `insteadOf` rewrite, so the workflow script runs unchanged.
+const UPSTREAM = 'github:owner/trusted';
+const UPSTREAM_URL = 'https://github.com/owner/trusted.git';
+const FETCH_STEP = 'Fetch trusted standards CLI source';
+const PRESERVE_STEP = 'Preserve trusted sync runtime';
+const SYNC_STEP = 'Sync canonical files from upstream';
+const BUN_VERSION = '1.4.3';
+
+afterEach(cleanupTmpDirs);
+
+const git = (cwd: string, ...args: Array<string>): string =>
+  execFileSync('git', args, {
+    cwd,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim();
+
+const commitAll = (cwd: string, message: string): string => {
+  git(cwd, 'add', '-A');
+  git(
+    cwd,
+    '-c',
+    'user.name=fixture',
+    '-c',
+    'user.email=fixture@example.invalid',
+    '-c',
+    'commit.gpgsign=false',
+    'commit',
+    '-m',
+    message,
+  );
+  return git(cwd, 'rev-parse', 'HEAD');
+};
+
+// The fixture CLI records where it ran from and the arguments it received.
+const cliSource = (label: string): string =>
+  `import { writeFileSync } from 'node:fs';
+const args = process.argv.slice(2);
+writeFileSync(args[args.indexOf('--dir') + 1] + '/canonical.txt', ${JSON.stringify(label)} + ' ' + args.join(' ') + '\\n');
+`;
+
+const seedUpstream = (
+  root: string,
+  packageManager = `bun@${BUN_VERSION}`,
+): string => {
+  const upstream = join(root, 'upstream');
+  git(root, 'init', '--initial-branch=main', upstream);
+  // GitHub serves any reachable commit by its SHA.
+  git(upstream, 'config', 'uploadpack.allowReachableSHA1InWant', 'true');
+  write(
+    upstream,
+    'package.json',
+    JSON.stringify({
+      name: 'fixture-standards',
+      private: true,
+      packageManager,
+      workspaces: ['packages/*'],
+    }),
+  );
+  write(
+    upstream,
+    'packages/standards-cli/package.json',
+    JSON.stringify({
+      name: '@davidvornholt/standards',
+      version: '0.0.0',
+      type: 'module',
+    }),
+  );
+  write(upstream, 'packages/standards-cli/src/cli.ts', cliSource('first'));
+  execFileSync('bun', ['install'], { cwd: upstream, stdio: 'ignore' });
+  write(upstream, '.gitignore', 'node_modules/\n');
+  return upstream;
+};
+
+const seedConsumer = (
+  root: string,
+  upstream: string,
+  name = 'consumer',
+): string => {
+  const consumer = join(root, name);
+  git(root, 'init', '--initial-branch=main', consumer);
+  write(consumer, 'sync-standards.json', JSON.stringify({ upstream }));
+  write(consumer, 'sync-standards.local.json', '{"payload":"core"}\n');
+  return consumer;
+};
+
+const stepEnvironment = (
+  root: string,
+  upstreamPath: string,
+  policyRef = '',
+): Record<string, string | undefined> => ({
+  ...process.env,
+  ...Object.fromEntries([
+    ['GIT_CONFIG_COUNT', '1'],
+    ['GIT_CONFIG_KEY_0', `url.file://${upstreamPath}.insteadOf`],
+    ['GIT_CONFIG_VALUE_0', UPSTREAM_URL],
+    ['GITHUB_ENV', join(root, 'github-env')],
+    ['GITHUB_OUTPUT', join(root, 'github-output')],
+    ['RUNNER_TEMP', join(root, 'runner')],
+    ['SYNC_PAYLOAD', 'core'],
+    ['SYNC_POLICY_REF', policyRef],
+  ]),
+});
+
+const readAssignments = (path: string): Record<string, string> =>
+  Object.fromEntries(
+    (existsSync(path) ? readFileSync(path, 'utf8') : '')
+      .split('\n')
+      .filter((line) => line.includes('='))
+      .map((line) => [
+        line.slice(0, line.indexOf('=')),
+        line.slice(line.indexOf('=') + 1),
+      ]),
+  );
+
+const fixture = (
+  packageManager?: string,
+): { root: string; upstream: string; consumer: string; base: string } => {
+  const root = mkTmp('sync-core-runtime-');
+  write(root, 'runner/.keep', '');
+  const upstream = seedUpstream(root, packageManager);
+  const base = commitAll(upstream, 'base');
+  const consumer = seedConsumer(root, UPSTREAM);
+  return { root, upstream, consumer, base };
+};
+
+describe('standards sync workflow core runtime', () => {
+  it.each(['', 'main', 'v1', 'pinned'])(
+    'runs the CLI from the one upstream commit that ref %p names',
+    (refKind) => {
+      const { root, upstream, consumer, base } = fixture();
+      git(upstream, 'tag', '--annotate', 'v1', '--message', 'v1');
+      write(upstream, 'packages/standards-cli/src/cli.ts', cliSource('second'));
+      const head = commitAll(upstream, 'second');
+      const policyRef = refKind === 'pinned' ? base : refKind;
+      const expected = refKind === 'v1' || refKind === 'pinned' ? base : head;
+      const label = expected === base ? 'first' : 'second';
+      const environment = stepEnvironment(root, upstream, policyRef);
+
+      expect(runSyncStep(consumer, FETCH_STEP, environment).status).toBe(0);
+      const fetched = readAssignments(join(root, 'github-env'));
+      expect(fetched.STANDARDS_SYNC_REV).toBe(expected);
+      expect(readAssignments(join(root, 'github-output'))).toEqual(
+        Object.fromEntries([['bun-version', BUN_VERSION]]),
+      );
+
+      // The ref moves after the fetch. The sync still mirrors the fetched
+      // commit with the CLI from that same commit.
+      write(upstream, 'packages/standards-cli/src/cli.ts', cliSource('third'));
+      commitAll(upstream, 'third');
+      git(upstream, 'tag', '--force', '--annotate', 'v1', '--message', 'v1');
+
+      const runtimeEnvironment = { ...environment, ...fetched };
+      expect(
+        runSyncStep(consumer, PRESERVE_STEP, runtimeEnvironment).status,
+      ).toBe(0);
+      const preserved = readAssignments(join(root, 'github-env'));
+
+      // The consumer branch can't load its Bun configuration or env file into
+      // the CLI.
+      write(consumer, 'bunfig.toml', 'preload = ["./evil.ts"]\n');
+      write(
+        consumer,
+        'evil.ts',
+        "import { writeFileSync } from 'node:fs'; writeFileSync('preload-ran', 'unsafe');\n",
+      );
+      const sync = runSyncStep(consumer, SYNC_STEP, {
+        ...runtimeEnvironment,
+        ...preserved,
+        ...Object.fromEntries([['GITHUB_WORKSPACE', consumer]]),
+      });
+      expect(sync.status).toBe(0);
+      expect(readFileSync(join(consumer, 'canonical.txt'), 'utf8')).toBe(
+        `${label} sync --from ${UPSTREAM} --dir ${consumer} --ref ${expected}\n`,
+      );
+      expect(existsSync(join(consumer, 'preload-ran'))).toBe(false);
+    },
+  );
+
+  it.each([
+    ['a non-GitHub upstream', 'file:///srv/standards', ''],
+    ['an upstream with a ref', 'github:owner/trusted/v1', ''],
+    ['an upstream that leaves the owner', 'github:owner/..', ''],
+    ['a ref that reads as an option', UPSTREAM, '--upload-pack=touch'],
+    ['a ref a URL query would carry', UPSTREAM, 'v1?dir=x'],
+    ['a refspec', UPSTREAM, 'main:refs/heads/other'],
+  ])('fails before fetching for %s', (_label, upstreamName, ref) => {
+    const { root, upstream } = fixture();
+    const consumer = seedConsumer(root, upstreamName, 'other');
+    const result = runSyncStep(
+      consumer,
+      FETCH_STEP,
+      stepEnvironment(root, upstream, ref),
+    );
+
+    expect(result.status).toBe(1);
+    expect(`${result.stdout}${result.stderr}`).toContain('::error::');
+    expect(readdirSync(join(root, 'runner'))).toEqual(['.keep']);
+    expect(existsSync(join(root, 'github-env'))).toBe(false);
+  });
+
+  it.each(['bun@1.4', 'bun@^1.4.3', 'npm@11.0.0'])(
+    'rejects an upstream packageManager of %p',
+    (packageManager) => {
+      const { root, upstream, consumer } = fixture(packageManager);
+      const result = runSyncStep(
+        consumer,
+        FETCH_STEP,
+        stepEnvironment(root, upstream),
+      );
+
+      expect(result.status).toBe(1);
+      expect(`${result.stdout}${result.stderr}`).toContain(
+        'must pin an exact bun@x.y.z packageManager',
+      );
+      expect(existsSync(join(root, 'github-output'))).toBe(false);
+    },
+  );
+});

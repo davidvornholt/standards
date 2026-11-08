@@ -16,8 +16,9 @@ name: Standards sync
 #                          local `bun standards sync` obeys the same pin.
 #   { "payload": "core" }  receive only the language-neutral standards, for a
 #                          repository that isn't a Bun workspace. This
-#                          workflow then runs the CLI through Nix. The
-#                          default, "bun", adds the Bun workspace standards.
+#                          workflow then runs the CLI from the upstream
+#                          source it syncs. The default, "bun", adds the Bun
+#                          workspace standards.
 
 on:
   schedule:
@@ -114,20 +115,56 @@ jobs:
           persist-credentials: false
 
       # A Bun consumer runs the standards CLI its lockfile pins. Any other
-      # consumer has no installed CLI and builds it with Nix below.
+      # consumer has no installed CLI, so it runs the CLI from the standards
+      # commit this run syncs from, and the CLI always matches the content it
+      # mirrors. Resolve a branch or tag once: if it moved between this fetch
+      # and the sync, an older CLI would mirror newer content.
+      - name: Fetch trusted standards CLI source
+        id: standards-source
+        if: needs.policy.outputs.payload == 'core'
+        env:
+          SYNC_POLICY_REF: ${{ needs.policy.outputs.ref }}
+        run: |
+          upstream="$(jq -er '.upstream | strings' sync-standards.json)" || upstream=
+          repository="${upstream#github:}"
+          if [[ ! "$upstream" =~ ^github:[A-Za-z0-9-]+/[A-Za-z0-9_.-]+$ ]] || [[ "$repository" == */. || "$repository" == */.. ]]; then
+            echo "::error::sync-standards.json must name a github:owner/repo upstream to fetch the standards CLI from"
+            exit 1
+          fi
+          url="https://github.com/$repository.git"
+          if [ -z "$SYNC_POLICY_REF" ]; then
+            ref=HEAD
+          elif [[ "$SYNC_POLICY_REF" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]]; then
+            ref="$SYNC_POLICY_REF"
+          else
+            echo "::error::The sync policy ref $SYNC_POLICY_REF can't be fetched as a branch, tag, or commit"
+            exit 1
+          fi
+          git() { command git -c core.hooksPath=/dev/null -c core.fsmonitor=false "$@"; }
+          source=$(mktemp -d "$RUNNER_TEMP/standards-source.XXXXXX")
+          git init --quiet "$source"
+          git -C "$source" fetch --quiet --depth=1 --no-tags -- "$url" "$ref"
+          rev=$(git -C "$source" rev-parse --verify 'FETCH_HEAD^{commit}')
+          git -C "$source" checkout --quiet --detach "$rev"
+          if ! package_manager="$(jq -er '.packageManager | select(type == "string" and test("^bun@(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"))' "$source/package.json")"; then
+            echo "::error::The standards package.json at $rev must pin an exact bun@x.y.z packageManager"
+            exit 1
+          fi
+          echo "bun-version=${package_manager#bun@}" >> "$GITHUB_OUTPUT"
+          {
+            echo "STANDARDS_SYNC_REV=$rev"
+            echo "STANDARDS_SYNC_SOURCE=$source"
+          } >> "$GITHUB_ENV"
+
+      # The core payload runs the CLI under the Bun its own source declares.
       - name: Setup Bun
-        if: needs.policy.outputs.payload == 'bun'
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.3
+          bun-version: ${{ steps.standards-source.outputs.bun-version || '1.4.3' }}
 
       - name: Install dependencies
         if: needs.policy.outputs.payload == 'bun'
         run: bun install --frozen-lockfile
-
-      - name: Install Nix
-        if: needs.policy.outputs.payload == 'core'
-        uses: cachix/install-nix-action@v31
 
       # A consumer can receive this canonical workflow before upgrading its
       # repo-owned package manifest. Fail before sync with an upgrade message
@@ -153,32 +190,18 @@ jobs:
 
       # Preserve the CLI before checking out a reusable branch. That branch can
       # change package scripts, Bun configuration, and dependencies. Without a
-      # Bun workspace, build the CLI from the standards revision this run syncs
-      # from, so the CLI and the content it mirrors always match.
+      # Bun workspace, install the CLI's production dependencies into the
+      # fetched standards source, outside the workspace, from its own lockfile.
       - name: Preserve trusted sync runtime
         env:
           SYNC_PAYLOAD: ${{ needs.policy.outputs.payload }}
-          SYNC_POLICY_REF: ${{ needs.policy.outputs.ref }}
         run: |
           runtime=$(mktemp -d "$RUNNER_TEMP/standards-sync.XXXXXX")
           if [ "$SYNC_PAYLOAD" = core ]; then
-            flake="$(jq -er '.upstream | strings | select(startswith("github:"))' sync-standards.json)" || {
-              echo "::error::sync-standards.json must name a github: upstream for Nix to build the standards CLI from"
-              exit 1
-            }
-            if [[ "$SYNC_POLICY_REF" =~ ^[0-9a-f]{40}$ ]]; then
-              flake="$flake?rev=$SYNC_POLICY_REF"
-            elif [[ "$SYNC_POLICY_REF" =~ ^[A-Za-z0-9._/-]+$ ]]; then
-              flake="$flake?ref=$SYNC_POLICY_REF"
-            elif [ -n "$SYNC_POLICY_REF" ]; then
-              echo "::error::The sync policy ref $SYNC_POLICY_REF can't be used as a Nix flake ref"
-              exit 1
-            fi
-            # Resolve a branch or tag once: if it moved between the build and
-            # the sync, an older CLI would mirror newer content.
-            rev="$(nix flake metadata --json "$flake" | jq -er '.locked.rev')"
-            nix build --out-link "$runtime/standards-cli" "${flake%%\?*}?rev=$rev#standards-cli"
-            echo "STANDARDS_SYNC_REV=$rev" >> "$GITHUB_ENV"
+            (
+              cd "$STANDARDS_SYNC_SOURCE"
+              bun install --frozen-lockfile --filter @davidvornholt/standards --production --ignore-scripts
+            )
           else
             # Bun isolated packages resolve dependencies through their real
             # store paths. Keep that internal symlink graph in the independent
@@ -355,7 +378,7 @@ jobs:
           fi
           cd "$STANDARDS_SYNC_RUNTIME"
           if [ "$SYNC_PAYLOAD" = core ]; then
-            cli=(standards-cli/bin/standards)
+            cli=(bun --no-env-file "$STANDARDS_SYNC_SOURCE/packages/standards-cli/src/cli.ts")
             ref="$STANDARDS_SYNC_REV"
           else
             cli=(bun --no-env-file node_modules/@davidvornholt/standards/src/cli.ts)
