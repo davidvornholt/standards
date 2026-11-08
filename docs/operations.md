@@ -34,4 +34,4 @@ The PostgreSQL image applies the user, password, and database name only when it 
 
 ## Nix package
 
-Each release tag's flake exposes `packages.<system>.standards-cli`, which is also `packages.<system>.default`, for `x86_64-linux` and `aarch64-linux`. It bundles `standards`, `bun`, and `bunx`. Install that package directly instead of building another Bun or CLI derivation.
+For NixOS hosts, each release tag's flake exposes `packages.<system>.standards-cli`, which is also `packages.<system>.default`, for `x86_64-linux` and `aarch64-linux`. It bundles `standards`, `bun`, and `bunx`. Install that package directly instead of building another Bun or CLI derivation.

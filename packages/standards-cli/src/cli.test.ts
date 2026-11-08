@@ -124,9 +124,6 @@ echo "$RUNNER_TEMP/zstd/usr/bin" >> "$GITHUB_PATH"
 `,
 };
 const EXECUTABLE_MODE = 0o755;
-const RESOLVED_SHA = 'fedcba9876543210fedcba9876543210fedcba98';
-const NIX_RESOLVED_BUILD =
-  /^build --out-link \S+\/standards-cli github:davidvornholt\/standards\?rev=fedcba9876543210fedcba9876543210fedcba98#standards-cli$/u;
 const STD_PATHS: ReadonlyArray<string> = [
   'sync-standards.json',
   '.github/dependabot.yml',
@@ -3732,85 +3729,6 @@ describe('standards sync workflow policy', () => {
       expect(runWorkflowVersionGuard(version).status).toBe(0);
     },
   );
-});
-
-describe('standards sync workflow core runtime', () => {
-  const PINNED_SHA = '0123456789abcdef0123456789abcdef01234567';
-  const preserveCoreRuntime = (
-    upstream: string,
-    ref: string,
-  ): { result: RunResult; nixArgs: ReadonlyArray<string>; env: string } => {
-    const fixture = mkTmp('sync-core-runtime-');
-    write(fixture, 'sync-standards.json', JSON.stringify({ upstream }));
-    write(
-      fixture,
-      'bin/nix',
-      `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> "$NIX_ARGS"\n[ "$1" != flake ] || printf '{"locked":{"rev":"${RESOLVED_SHA}"}}'\n`,
-    );
-    chmodSync(join(fixture, 'bin/nix'), EXECUTABLE_MODE);
-    const argsPath = join(fixture, 'nix-args');
-    const result = runExecutable(
-      'bash',
-      fixture,
-      [
-        '-euo',
-        'pipefail',
-        '-c',
-        workflowRunScript('Preserve trusted sync runtime'),
-      ],
-      {
-        GITHUB_ENV: join(fixture, 'github-env'),
-        NIX_ARGS: argsPath,
-        PATH: `${join(fixture, 'bin')}:${process.env.PATH ?? ''}`,
-        RUNNER_TEMP: fixture,
-        SYNC_PAYLOAD: 'core',
-        SYNC_POLICY_REF: ref,
-      },
-    );
-    const envPath = join(fixture, 'github-env');
-    return {
-      result,
-      nixArgs: existsSync(argsPath)
-        ? readFileSync(argsPath, 'utf8').trim().split('\n')
-        : [],
-      env: existsSync(envPath) ? readFileSync(envPath, 'utf8') : '',
-    };
-  };
-
-  // The CLI comes from the same standards commit as the content it mirrors,
-  // even when the branch or tag moves during the run.
-  it.each([
-    ['', 'github:davidvornholt/standards'],
-    ['v0.34.0', 'github:davidvornholt/standards?ref=v0.34.0'],
-    [PINNED_SHA, `github:davidvornholt/standards?rev=${PINNED_SHA}`],
-  ])('builds the CLI with Nix for ref %p', (ref, flake) => {
-    const { result, nixArgs, env } = preserveCoreRuntime(
-      'github:davidvornholt/standards',
-      ref,
-    );
-
-    expect(result.status).toBe(0);
-    expect(nixArgs).toEqual([
-      `flake metadata --json ${flake}`,
-      expect.stringMatching(NIX_RESOLVED_BUILD),
-    ]);
-    expect(env).toContain(`STANDARDS_SYNC_REV=${RESOLVED_SHA}\n`);
-  });
-
-  it.each([
-    ['a non-GitHub upstream', 'file:///srv/standards', ''],
-    [
-      'a ref a flake URL cannot carry',
-      'github:davidvornholt/standards',
-      'v1?dir=x',
-    ],
-  ])('fails before building for %s', (_label, upstream, ref) => {
-    const { result, nixArgs } = preserveCoreRuntime(upstream, ref);
-
-    expect(result.status).toBe(1);
-    expect(`${result.stdout}${result.stderr}`).toContain('::error::');
-    expect(nixArgs).toEqual([]);
-  });
 });
 
 describe('standards sync workflow trigger policy', () => {
