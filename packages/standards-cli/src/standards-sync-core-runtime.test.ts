@@ -6,8 +6,6 @@ import process from 'node:process';
 import { cleanupTmpDirs, mkTmp, write } from './cli-test-support';
 import { runSyncStep } from './standards-sync-workflow-test-support';
 
-// The core payload has no Bun workspace, so the sync workflow fetches the
-// standards source at the commit it syncs from and runs the CLI from there.
 // These tests point the GitHub URL at a local repository through Git's own
 // `insteadOf` rewrite, so the workflow script runs unchanged.
 const UPSTREAM = 'github:owner/trusted';
