@@ -13,14 +13,14 @@ Then [connect CI and GitHub](#connect-ci-and-github).
 
 ## Repository outside Bun
 
-A repository that isn't a Bun workspace, such as a Rust, Nix, or Python project, takes the core payload: `AGENTS.md`, the language-neutral skills, and the weekly sync. First move the project-specific content of `AGENTS.md` and `CLAUDE.md` below a `## Project-specific rules` heading at the end of `AGENTS.md`, and delete `CLAUDE.md`. Then run the CLI through Nix:
+A repository that isn't a Bun workspace, such as a Rust, Nix, or Python project, takes the core payload: `AGENTS.md`, the language-neutral skills, and the weekly sync. First move the project-specific content of `AGENTS.md` and `CLAUDE.md` below a `## Project-specific rules` heading at the end of `AGENTS.md`, and delete `CLAUDE.md`. Then run the CLI with `bunx`, which needs Bun installed but not a Bun workspace:
 
 ```sh
 echo '{ "payload": "core" }' > sync-standards.local.json
-nix run github:davidvornholt/standards -- init
+bunx @davidvornholt/standards init
 ```
 
-Commit `sync-standards.lock` and `sync-standards.local.json`, and check for drift with `nix run github:davidvornholt/standards -- check`. For the weekly sync pull request, do steps 1 and 2 of [Connect CI and GitHub](#connect-ci-and-github), running `nix run github:davidvornholt/standards --` in place of `bun standards`.
+Commit `sync-standards.lock` and `sync-standards.local.json`, and check for drift with `bunx @davidvornholt/standards check`. For the weekly sync pull request, do steps 1 and 2 of [Connect CI and GitHub](#connect-ci-and-github), running `bunx @davidvornholt/standards` in place of `bun standards`.
 
 ## Existing repository
 

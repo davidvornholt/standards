@@ -45,4 +45,4 @@ Add `### Check it yourself` only when a reviewer can confirm the behavior intera
 
 Before landing a pull request of any size, run the `review-fix` skill if you judge that a reviewer could find a bug in it that someone would otherwise run into. Standards syncs are exempt, because a consumer can't change synced files.
 
-Land with `bun standards land <pr>`, or `nix run github:davidvornholt/standards -- land <pr>` in a repository without Bun, never with `gh pr merge`. GitHub can't require checks in private repositories on its free plan, so `land`'s wait for them may be the only gate.
+Land with `bun standards land <pr>`, or `bunx @davidvornholt/standards land <pr>` in a repository without a Bun workspace, never with `gh pr merge`. GitHub can't require checks in private repositories on its free plan, so `land`'s wait for them may be the only gate.
