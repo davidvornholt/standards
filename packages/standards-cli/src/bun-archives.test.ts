@@ -1,6 +1,5 @@
 // The trusted settings checker must not read pins from the pull request
 // checkout, so its install step carries a copy of the Bun archive pins inline.
-// This suite keeps that copy equal to nix/bun-archives.json.
 
 import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
