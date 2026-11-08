@@ -158,12 +158,15 @@ extract_path="[\"${ssh_key_path//./\"][\"}\"]"
 install_sops() {
   version=v3.13.3
   case "$(uname -m)" in
-    x86_64) arch=amd64 sha=e5bec3346a873ae91d871550f3e698c1aad962aff462a080e40f25fde17fef6b ;;
-    aarch64) arch=arm64 sha=53b0abacd38ef1b12a66d6c100956691b9cefce018d91f81e73ddf7438b94d77 ;;
+    x86_64) arch=amd64 asset=486808201 sha=e5bec3346a873ae91d871550f3e698c1aad962aff462a080e40f25fde17fef6b ;;
+    aarch64) arch=arm64 asset=486808229 sha=53b0abacd38ef1b12a66d6c100956691b9cefce018d91f81e73ddf7438b94d77 ;;
     *) fail "No pinned SOPS binary for runner architecture $(uname -m)" ;;
   esac
   sops="$work/sops"
-  if ! curl -sSfLo "$sops" --retry 3 --retry-all-errors --connect-timeout 10 --max-time 60 "https://github.com/getsops/sops/releases/download/${version}/sops-${version}.linux.${arch}"; then
+  if ! {
+    curl -sSfLo "$sops" --retry 3 --retry-all-errors --connect-timeout 10 --max-time 60 "https://github.com/getsops/sops/releases/download/${version}/sops-${version}.linux.${arch}" || \
+      curl -sSfLo "$sops" --retry 3 --retry-all-errors --connect-timeout 10 --max-time 60 -H "Accept: application/octet-stream" "https://api.github.com/repos/getsops/sops/releases/assets/${asset}"
+  }; then
     rm -f "$sops"
     fail "Downloading SOPS ${version} for linux/${arch} failed"
   fi
