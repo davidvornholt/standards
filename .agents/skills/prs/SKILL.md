@@ -1,6 +1,6 @@
 ---
 name: prs
-description: Use when opening a pull request or changing its title or description.
+description: Use when opening or landing a pull request, or changing its title or description.
 ---
 
 # Pull requests
@@ -9,7 +9,7 @@ A pull request delivers one coherent outcome, together with the migrations, test
 
 ## Draft and ready
 
-CI runs the full gate only on pull requests marked ready. Keep a pull request in draft while work continues, and mark it ready with `gh pr ready` once the repository gate passes locally on the final commit. Each move to ready starts a full run, so convert it back with `gh pr ready --undo` before pushing more changes. Unless you are about to merge, report that run as pending instead of waiting for it.
+CI runs the full gate only on pull requests marked ready. Keep a pull request in draft while work continues, and mark it ready with `gh pr ready` once the repository gate passes locally on the final commit. Each move to ready starts a full run, so convert it back with `gh pr ready --undo` before pushing more changes. Unless you are about to land the pull request, report that run as pending instead of waiting for it.
 
 ## Title and description
 
@@ -40,3 +40,19 @@ End the description with one line naming what opened the pull request: the model
 Always include `## Verification` with `### Completed checks`: one line per check, naming what ran and how much of it passed, including partial runs and failures.
 
 Add `### Check it yourself` only when a reviewer can confirm the behavior interactively or visually. Give the exact `gh pr checkout <number-or-branch>` command, the shortest steps, and the expected result.
+
+## Landing
+
+Before landing a pull request of any size, run the `review-fix` skill if you judge that a reviewer could find a bug in it that someone would otherwise run into. Standards syncs are exempt, because a consumer can't change synced files.
+
+Land with the standards CLI's `land` command, never with `gh pr merge`: `bun standards land <pr>` in a Bun workspace, and `nix run github:davidvornholt/standards -- land <pr>` anywhere else. Run it from any checkout of the repository or from inside the pull request's worktree; without `<pr>`, it lands the current branch's pull request. It needs `git` and a signed-in `gh`. It waits until the checks on the pull request's current head have passed, squash-merges exactly that head, deletes the local branch, and waits for the runs the merge starts, such as a deploy. GitHub can't require checks in private repositories on its free plan, and there `land`'s wait is the only gate.
+
+When no workflow in the repository runs on pull requests, `land` merges at once, so run the repository's gate on the final commit first. Add `--no-wait` only when the change can't affect the checks, as for a change to documentation only. It still refuses a failed check, still waits for a check skipped before the pull request was marked ready, and never overrides the repository's rules. `land` refuses merge options such as `--auto` or `--admin`, because where nothing requires checks, `--auto` merges before CI has run.
+
+`land` marks a draft ready, updates the branch when GitHub requires it to be up to date, and waits up to 45 minutes for the checks. A pull request that changed less than a minute ago counts as not yet checked, because CI starts with a delay. After the merge, it waits up to 60 minutes for the push runs on the merge commit and for every run started through `workflow_run` after the merge. Stopping it then leaves the merge in place. Its exit code says what happened:
+
+- **0:** merged, and the runs after the merge passed or there were none. Cleanup problems are only warnings.
+- **1:** nothing merged, and the message says why. When a check failed because of a problem already fixed on the base branch, run `gh pr update-branch <pr>` and then `land` again.
+- **2:** merged, but a run after the merge isn't green or couldn't be read. Check the linked run now. GitHub files a run started through `workflow_run` under the default branch's newest commit, so a red one may come from another pull request.
+
+`land` deletes the pull request's local branch only when every commit on it is part of the merged pull request, and leaves remote branches to GitHub's "Automatically delete head branches" setting. When it lands the current branch, it needs a clean working tree, then switches to the base branch and fast-forwards it. Inside a worktree whose base branch is checked out elsewhere, it leaves the worktree detached; remove it with `git worktree remove <path>`. Running `land` on a merged pull request only cleans up, so it's safe to repeat.
