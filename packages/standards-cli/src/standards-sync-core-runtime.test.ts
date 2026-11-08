@@ -260,8 +260,10 @@ describe('standards sync workflow core runtime', () => {
       expect(existsSync(join(root, 'github-output'))).toBe(false);
     },
   );
+});
 
-  it('refuses to install dependencies that the upstream lockfile lacks', () => {
+describe('standards sync workflow core dependency install', () => {
+  it('refuses dependencies that the upstream lockfile lacks', () => {
     const { root, upstream, consumer } = fixture();
     const unlocked = '@standards-fixture/unlocked';
     write(
