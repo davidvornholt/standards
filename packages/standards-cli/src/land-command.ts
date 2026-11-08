@@ -1,26 +1,20 @@
 // The command edge of `standards land`: it parses the arguments, builds the
-// context the land modules run in, and turns a land error into exit code 1.
+// context the land modules run in, and turns a land error into a failure.
 // cli.ts hands it the process environment and output.
 
 import { land } from './land';
-import {
-  EXIT_DONE,
-  EXIT_NOT_MERGED,
-  errorMessage,
-  POLL_SECONDS,
-  secondsToMs,
-} from './land-context';
+import { errorMessage, POLL_SECONDS, secondsToMs } from './land-context';
 
 const LAND_USAGE = `Usage: standards land [PR_OR_BRANCH] [--no-wait]
 
-Wait until the checks on a pull request's current head pass, squash-merge exactly that head, delete its local branch, and wait for the runs the merge starts. A pull request that no workflow checks merges at once.
+Wait until the checks on a pull request's current head pass, squash-merge exactly that head, and delete its local branch. A pull request that no workflow checks merges at once.
 
 PR_OR_BRANCH is a pull request number, URL, or branch (default: the current branch's pull request).
 
 Options:
   --no-wait  Merge without waiting for pending checks, where GitHub allows that. Use it only when the change can't affect the checks, or when no workflow reports on the pull request.
 
-Exit codes: 0 done, 1 nothing merged, 2 merged but a run after the merge isn't green.`;
+Exit code 1 means the pull request isn't merged, or that cleaning up after an earlier merge stopped. Once land merges, a cleanup problem is only a warning.`;
 
 // Tests set LAND_POLL_SECONDS=0 to poll without delay.
 const POLL_SECONDS_ENV = 'LAND_POLL_SECONDS';
@@ -44,10 +38,10 @@ export type LandProcess = {
 export const runLandCommand = async (
   argv: ReadonlyArray<string>,
   edge: LandProcess,
-): Promise<number> => {
+): Promise<boolean> => {
   if (argv[0] === '-h' || argv[0] === '--help') {
     edge.out(LAND_USAGE);
-    return EXIT_DONE;
+    return true;
   }
   const noWait = argv.includes('--no-wait');
   const operands = argv.filter((arg) => arg !== '--no-wait');
@@ -57,7 +51,7 @@ export const runLandCommand = async (
     edge.err(
       `standards land: unexpected arguments: ${operands.join(' ')}. See \`standards land --help\`.`,
     );
-    return EXIT_NOT_MERGED;
+    return false;
   }
   try {
     const context = {
@@ -69,9 +63,10 @@ export const runLandCommand = async (
       print: edge.out,
       warn: (line: string) => edge.err(`standards land: ${line}`),
     };
-    return await land(context, operands[0] ?? null, noWait);
+    await land(context, operands[0] ?? null, noWait);
+    return true;
   } catch (error) {
     edge.err(`standards land: ${errorMessage(error)}`);
-    return EXIT_NOT_MERGED;
+    return false;
   }
 };

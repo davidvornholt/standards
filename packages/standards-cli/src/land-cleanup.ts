@@ -4,6 +4,7 @@
 
 import {
   currentBranch,
+  errorMessage,
   git,
   type LandContext,
   LandError,
@@ -13,6 +14,8 @@ import {
   resolvedPath,
   run,
   runVisibly,
+  shortSha,
+  viewPr,
 } from './land-context';
 
 export type Checkout = {
@@ -197,6 +200,48 @@ export const updateBase = (context: LandContext, base: string): void => {
   if (!runVisibly(context, 'git', ['pull', '--ff-only', '--prune'])) {
     throw new LandError(
       `Could not fast-forward ${quoted(base)}; update it manually.`,
+    );
+  }
+};
+
+// Finishes a merge land just made. The pull request is merged by now, so a
+// problem from here on is only a warning. land doesn't wait for the runs the
+// merge starts: an agent that has to act on a deploy watches that run itself.
+export const finishMerge = (
+  context: LandContext,
+  prNumber: number,
+  repo: Repository,
+  checkout: Checkout,
+): void => {
+  let pr: PullRequest;
+  try {
+    pr = viewPr(context, String(prNumber), repo);
+  } catch (error) {
+    context.warn(
+      `PR #${prNumber} is merged, but reading it back failed: ${errorMessage(error)}`,
+    );
+    return;
+  }
+  if (pr.state !== 'MERGED') {
+    throw new LandError(
+      `GitHub accepted PR #${prNumber} but hasn't merged it yet. Run \`standards land ${prNumber}\` again once it has.`,
+    );
+  }
+  const sha = pr.mergeCommit?.oid;
+  if (sha) {
+    context.print(`PR #${prNumber} is merged as ${shortSha(sha)}.`);
+  }
+  if (!repo.deleteBranchOnMerge) {
+    context.warn(
+      'GitHub keeps merged branches in this repository. Enable "Automatically delete head branches" in its settings.',
+    );
+  }
+  try {
+    deleteBranch(context, pr, repo, checkout);
+    updateBase(context, pr.baseRefName);
+  } catch (error) {
+    context.warn(
+      `PR #${prNumber} is merged, but local cleanup stopped: ${errorMessage(error)}`,
     );
   }
 };

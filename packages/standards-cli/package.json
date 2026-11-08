@@ -108,7 +108,6 @@
     "src/github-settings.ts",
     "src/json-file.ts",
     "src/land.ts",
-    "src/land-after-merge.ts",
     "src/land-checks.ts",
     "src/land-cleanup.ts",
     "src/land-command.ts",

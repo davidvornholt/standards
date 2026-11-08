@@ -223,3 +223,26 @@ describe('standards land updating the base', () => {
     expect(branchExists(fixture)).toBe(false);
   });
 });
+
+describe('standards land cleaning up after its own merge', () => {
+  it('only warns when local cleanup fails', () => {
+    fixture.pr.state = 'OPEN';
+    git(fixture, ['switch', 'feature/topic']);
+    git(fixture, ['commit', '--allow-empty', '-m', 'unpublished']);
+    const result = land(fixture);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).toContain(
+      'PR #123 is merged, but local cleanup stopped',
+    );
+    expect(result.stderr).toContain("tip isn't part of merged PR #123");
+    expect(branchExists(fixture)).toBe(true);
+  });
+
+  it('warns when GitHub keeps merged branches', () => {
+    fixture.pr.state = 'OPEN';
+    fixture.env.GH_KEEPS_BRANCHES = '1';
+    const result = land(fixture, ['123']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).toContain('Automatically delete head branches');
+  });
+});

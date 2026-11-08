@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import process from 'node:process';
 import { cleanupTmpDirs } from './cli-test-support';
-import { MERGE_COMMIT } from './land-fake-gh-test-support';
 import {
   branchExists,
   calls,
@@ -17,7 +16,6 @@ import {
   NEW_HEAD,
   now,
   OLD_UPDATE,
-  workflowReads,
 } from './land-test-support';
 
 // The 45-minute wait takes 180 polls, each a fake gh process.
@@ -38,7 +36,7 @@ const openPr = (fields: Record<string, unknown> = {}): void => {
 };
 
 describe('standards land on an open pull request', () => {
-  it('merges, then cleans up and waits for push runs', () => {
+  it('merges, then cleans up', () => {
     openPr();
     git(fixture, ['switch', 'feature/topic']);
     const result = land(fixture);
@@ -47,11 +45,10 @@ describe('standards land on an open pull request', () => {
     expect(branchExists(fixture)).toBe(false);
     expect(currentBranchOf(fixture)).toBe('trunk');
     expect(result.stderr).not.toContain('Automatically delete head branches');
-    expect(result.stdout).toContain('Push runs passed.');
-    // Passed checks need no GraphQL; only the merge commit's workflows are
-    // read, to find whether it starts push runs.
-    expect(calls(fixture, 'api', 'graphql')).toHaveLength(1);
-    expect(workflowReads(fixture)).toEqual([MERGE_COMMIT]);
+    expect(result.stdout).toContain('PR #123 is merged as fffffff.');
+    // Passed checks need no GraphQL, and land doesn't look for the runs the
+    // merge starts.
+    expect(calls(fixture, 'api', 'graphql')).toEqual([]);
   });
 
   it('waits for checks on the final head, then merges it', () => {
@@ -326,7 +323,6 @@ describe("standards land and GitHub's merge state", () => {
     const merged = land(fixture, ['123']);
     expect(merged.status, merged.stderr).toBe(0);
     expect(mergeCalls(fixture)).toEqual([mergeCall(fixture)]);
-    expect(calls(fixture, 'run', 'list')).toEqual([]);
   });
 });
 

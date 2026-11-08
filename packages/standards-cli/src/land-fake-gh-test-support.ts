@@ -14,9 +14,8 @@ import {
 import { join } from 'node:path';
 import process from 'node:process';
 
-export const MERGED_AT = '2026-06-01T00:00:00Z';
 const SHA_LENGTH = 40;
-export const MERGE_COMMIT = 'f'.repeat(SHA_LENGTH);
+const MERGE_COMMIT = 'f'.repeat(SHA_LENGTH);
 const EXECUTABLE = 0o755;
 const UNKNOWN_CALL = 99;
 const WORKFLOWS_DIR = '.github/workflows/';
@@ -27,8 +26,6 @@ export type FakePr = Record<string, unknown> & {
   polls: Array<Record<string, unknown>>;
 };
 
-export type FakeRun = Readonly<Record<string, string>>;
-
 export type FakeGithub = {
   // False when the commit has no workflows folder.
   workflows: boolean;
@@ -37,9 +34,6 @@ export type FakeGithub = {
   compare: string | null;
   // The time of the last ready-for-review event, which `gh pr ready` sets.
   ready: string | null;
-  // Each `gh run list` applies the next entry to `runs`; the last one stays.
-  runPolls: Array<Array<FakeRun>>;
-  runs: Array<FakeRun>;
   // Maps a check's run to its workflow file.
   runFiles: Record<string, string>;
   // Workflow file texts by path, at every commit.
@@ -81,15 +75,6 @@ const notFound = (): FakeGhResult => failure('gh: Not Found (HTTP 404)\n');
 const nextOf = <T>(queue: Array<T>): T | undefined =>
   queue.length > 1 ? queue.shift() : queue[0];
 
-const option = (
-  args: ReadonlyArray<string>,
-  name: string,
-  fallback: string,
-): string => {
-  const index = args.indexOf(name);
-  return index === -1 ? fallback : (args[index + 1] ?? fallback);
-};
-
 const viewPr = ({ args, pr, savePr }: Call): FakeGhResult => {
   if ((args.at(-1) ?? '').includes('statusCheckRollup')) {
     const poll = nextOf(pr.polls);
@@ -113,11 +98,7 @@ const merge = ({ env, pr, savePr }: Call): FakeGhResult => {
   if (env.GH_MERGE_FAIL) {
     return failure('');
   }
-  Object.assign(pr, {
-    state: 'MERGED',
-    mergeCommit: { oid: MERGE_COMMIT },
-    mergedAt: MERGED_AT,
-  });
+  Object.assign(pr, { state: 'MERGED', mergeCommit: { oid: MERGE_COMMIT } });
   savePr();
   return ok();
 };
@@ -196,27 +177,6 @@ const graphql = (call: Call): FakeGhResult => {
 const compare = ({ github }: Call): FakeGhResult =>
   github.compare === null ? notFound() : ok(`${github.compare}\n`);
 
-// A run is filed under the merge commit and created at the merge unless it
-// says otherwise.
-const listRuns = ({ args, github, saveGithub }: Call): FakeGhResult => {
-  const runs = nextOf(github.runPolls);
-  if (runs !== undefined) {
-    github.runs = runs;
-    saveGithub();
-  }
-  const created = option(args, '--created', '>=').replace('>=', '');
-  return json(
-    github.runs.filter((run) => {
-      const headSha = run.headSha ?? MERGE_COMMIT;
-      return (
-        option(args, '--event', run.event ?? '') === run.event &&
-        option(args, '--commit', headSha) === headSha &&
-        (run.createdAt ?? MERGED_AT) >= created
-      );
-    }),
-  );
-};
-
 const repoView = ({ env }: Call): FakeGhResult =>
   json({
     url: 'https://github.com/test/repo',
@@ -232,7 +192,6 @@ const ROUTES: ReadonlyMap<string, (call: Call) => FakeGhResult> = new Map([
   ['pr update-branch', () => ok()],
   ['pr merge', merge],
   ['api graphql', graphql],
-  ['run list', listRuns],
 ]);
 
 const route = (call: Call): FakeGhResult => {

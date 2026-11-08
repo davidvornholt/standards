@@ -12,9 +12,6 @@ export const POLL_SECONDS = 15;
 // that changed less than a minute ago may not show them yet.
 export const QUIET_SECONDS = 60;
 export const GREEN = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
-export const EXIT_DONE = 0;
-export const EXIT_NOT_MERGED = 1;
-export const EXIT_MERGED_NOT_GREEN = 2;
 const MS_PER_SECOND = 1000;
 const SECONDS_PER_MINUTE = 60;
 const SHORT_SHA_LENGTH = 7;
@@ -45,7 +42,6 @@ export type PullRequest = {
   readonly baseRefName: string;
   readonly isCrossRepository: boolean;
   readonly mergeCommit: { readonly oid?: string } | null;
-  readonly mergedAt: string | null;
 };
 
 export class LandError extends Error {}
@@ -165,7 +161,7 @@ export const runIdOf = (detailsUrl: string | null | undefined): number => {
 };
 
 export const PR_FIELDS =
-  'number,url,state,headRefOid,headRefName,baseRefName,isCrossRepository,mergeCommit,mergedAt';
+  'number,url,state,headRefOid,headRefName,baseRefName,isCrossRepository,mergeCommit';
 
 export const viewPr = <T = PullRequest>(
   context: LandContext,

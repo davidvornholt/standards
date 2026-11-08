@@ -94,7 +94,6 @@ const initialPr = (head: string): FakePr => ({
   statusCheckRollup: [check()],
   updatedAt: OLD_UPDATE,
   mergeCommit: null,
-  mergedAt: null,
   polls: [],
 });
 
@@ -103,16 +102,6 @@ const initialGithub = (): FakeGithub => ({
   workflowsFail: false,
   compare: null,
   ready: null,
-  runPolls: [],
-  runs: [
-    {
-      workflowName: 'Deploy',
-      event: 'push',
-      status: 'completed',
-      conclusion: 'success',
-      url: 'https://runs/1',
-    },
-  ],
   runFiles: { '1': CI, '2': CI },
   workflowFiles: {
     [CI]: 'on:\n  pull_request:\n    types: [opened, ready_for_review]\n',

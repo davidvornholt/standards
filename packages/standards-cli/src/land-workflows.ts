@@ -1,5 +1,5 @@
-// Whether a commit or pull request has CI that reports on it: any workflow
-// file that runs on pull requests or pushes. A workflow that only runs on a
+// Whether a pull request has CI that reports on it: any workflow file that
+// runs on pull requests or pushes. A workflow that only runs on a
 // schedule, such as the synced standards-sync workflow, never reports checks,
 // so waiting for it would wait out the whole timeout.
 
@@ -138,17 +138,12 @@ const branchTip = (
   return response.data.repository.ref?.target.oid ?? null;
 };
 
-type CiDetector = {
-  readonly commit: (sha: string) => boolean;
-  readonly pullRequest: (head: string, base: string) => boolean;
-};
-
-// Returns lookups that read each commit's workflows once, because the files
+// Returns a lookup that reads each commit's workflows once, because the files
 // at a commit never change.
 export const ciDetector = (
   context: LandContext,
   repo: Repository,
-): CiDetector => {
+): ((head: string, base: string) => boolean) => {
   const known = new Map<string, boolean>();
   const commit = (sha: string): boolean => {
     const cached = known.get(sha);
@@ -164,12 +159,11 @@ export const ciDetector = (
   // a head cut before its base gained CI still gets checks. The base branch
   // can move while land waits, so each call looks up its tip again. A base
   // branch that can't be found counts as CI.
-  const pullRequest = (head: string, base: string): boolean => {
+  return (head: string, base: string): boolean => {
     if (commit(head)) {
       return true;
     }
     const tip = branchTip(context, repo, base);
     return tip === null || commit(tip);
   };
-  return { commit, pullRequest };
 };

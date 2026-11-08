@@ -1,12 +1,15 @@
 // `standards land`: merge a pull request once the checks on its current head
-// pass, squash-merging exactly that head, then delete its local branch and
-// wait for the runs the merge starts. The prs skill describes the behavior.
+// pass, squash-merging exactly that head, then delete its local branch. The
+// prs skill describes the behavior.
 
-import { afterMerge } from './land-after-merge';
-import { type Checkout, deleteBranch, updateBase } from './land-cleanup';
+import {
+  type Checkout,
+  deleteBranch,
+  finishMerge,
+  updateBase,
+} from './land-cleanup';
 import {
   currentBranch,
-  EXIT_DONE,
   ghJson,
   git,
   type LandContext,
@@ -27,13 +30,13 @@ const openCheckout = (context: LandContext): Checkout => ({
   current: currentBranch(context),
 });
 
-// Returns the exit code: 0 when done, 1 when nothing was merged, and 2 when
-// the pull request merged but a run after the merge isn't green.
+// Throws a LandError when the pull request isn't merged, or when cleaning up
+// after an earlier merge stops.
 export const land = async (
   context: LandContext,
   selector: string | null,
   noWait: boolean,
-): Promise<number> => {
+): Promise<void> => {
   const checkout = openCheckout(context);
   if (selector === null && checkout.current === null) {
     throw new LandError('Detached HEAD: specify a PR number or branch.');
@@ -57,13 +60,17 @@ export const land = async (
     // Running land on a merged pull request only cleans up.
     deleteBranch(context, pr, repo, checkout);
     updateBase(context, pr.baseRefName);
-    return EXIT_DONE;
+    return;
   }
   if (pr.state !== 'OPEN') {
     throw new LandError(`PR #${pr.number} is ${pr.state}, not merged.`);
   }
-  const ci = ciDetector(context, repo);
-  const request = { prNumber: pr.number, repo, noWait, hasCi: ci.pullRequest };
+  const request = {
+    prNumber: pr.number,
+    repo,
+    noWait,
+    hasCi: ciDetector(context, repo),
+  };
   const head = await waitForChecks(context, request);
   // gh reports progress itself, so its output stays on the terminal.
   const merged = runVisibly(context, 'gh', [
@@ -79,10 +86,5 @@ export const land = async (
   if (!merged) {
     throw new LandError(`PR #${pr.number} was not merged.`);
   }
-  return afterMerge(context, {
-    prNumber: pr.number,
-    repo,
-    checkout,
-    hasCi: ci.commit,
-  });
+  finishMerge(context, pr.number, repo, checkout);
 };
