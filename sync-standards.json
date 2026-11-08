@@ -34,6 +34,7 @@
         "justfile",
         "secrets.just",
         "nix/standards-bun.nix",
+        "nix/bun-archives.json",
         ".github/settings.json",
         ".github/dependabot.yml",
         ".github/actions/app-release",

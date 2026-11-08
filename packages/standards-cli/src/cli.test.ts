@@ -51,10 +51,8 @@ const STANDARDS_WORKFLOW = join(
   ACTUAL_UPSTREAM,
   '.github/workflows/standards.yml',
 );
-const NIX_SYSTEM_METADATA = join(
-  ACTUAL_UPSTREAM,
-  'nix/bun-system-metadata.json',
-);
+const BUN_ARCHIVES = join(ACTUAL_UPSTREAM, 'nix/bun-archives.json');
+const ROOT_MANIFEST = join(ACTUAL_UPSTREAM, 'package.json');
 const NIX_SYSTEM_MATRIX_FILTER = join(
   ACTUAL_UPSTREAM,
   'nix/bun-system-matrix.jq',
@@ -321,20 +319,30 @@ if (( \${#caches[@]} > 0 )); then
 fi
 echo "present=$present" >> "$GITHUB_OUTPUT"
 `;
+// The fixture manifest pins a Bun version no real table has, so these cases
+// keep testing discovery after the next Bun upgrade.
+const FIXTURE_MANIFEST = '{"packageManager":"bun@9.9.9"}';
+const FIXTURE_ARCHIVE =
+  '{"asset":"bun-linux-x64-baseline.zip","assetId":1,"sha256":"1fc2edac843102909e3a1be1d8d9802cc6071cf074e67e88231f4ffe0f8b397b"}';
 const runNixDiscovery = ({
+  archives,
   filter,
-  metadata,
+  manifest,
 }: {
+  readonly archives: string | undefined;
   readonly filter: string | undefined;
-  readonly metadata: string | undefined;
+  readonly manifest: string | undefined;
 }): { readonly output: string; readonly result: RunResult } => {
   const fixture = mkTmp('nix-discovery-');
   const outputPath = join(fixture, 'github-output');
   if (filter !== undefined) {
     write(fixture, 'nix/bun-system-matrix.jq', filter);
   }
-  if (metadata !== undefined) {
-    write(fixture, 'nix/bun-system-metadata.json', metadata);
+  if (archives !== undefined) {
+    write(fixture, 'nix/bun-archives.json', archives);
+  }
+  if (manifest !== undefined) {
+    write(fixture, 'package.json', manifest);
   }
   const result = runExecutable(
     'bash',
@@ -2541,8 +2549,6 @@ describe('canonical standards workflow settings security', () => {
     expect(settingsRun).toContain(
       '[ -z "$SETTINGS_TOKEN" ] || [[ "$SETTINGS_TOKEN" == *$\'\\n\'* ]] || [[ "$SETTINGS_TOKEN" == *$\'\\r\'* ]]',
     );
-    expect(installRun).toContain('bun_version=1.4.3');
-    expect(installRun.match(/bun_sha=[a-f0-9]{64}/gu)).toHaveLength(2);
     expect(installRun).toContain('standards_version=0.35.0');
     expect(installRun).toContain(
       'standards_sha=b91c9de3b14c501b5902179f0c7ebcf845f07108be95eb03875ce5b7f72aad5668610548bc4e468600cd4c6d37caa33882603cf83292546593387c472297b255',
@@ -3176,10 +3182,11 @@ describe('canonical standards workflow Nix gate', () => {
     }
   });
 
-  it('emits the current native runner matrix from its sole JSON owner', () => {
+  it('emits a native runner for each system the Bun archive table pins', () => {
     const { output, result } = runNixDiscovery({
+      archives: readFileSync(BUN_ARCHIVES, 'utf8'),
       filter: readFileSync(NIX_SYSTEM_MATRIX_FILTER, 'utf8'),
-      metadata: readFileSync(NIX_SYSTEM_METADATA, 'utf8'),
+      manifest: readFileSync(ROOT_MANIFEST, 'utf8'),
     });
 
     expect(result.status).toBe(0);
@@ -3190,8 +3197,9 @@ describe('canonical standards workflow Nix gate', () => {
 
   it('fails discovery when the Punktlandung matrix filter is missing', () => {
     const { output, result } = runNixDiscovery({
+      archives: readFileSync(BUN_ARCHIVES, 'utf8'),
       filter: undefined,
-      metadata: readFileSync(NIX_SYSTEM_METADATA, 'utf8'),
+      manifest: readFileSync(ROOT_MANIFEST, 'utf8'),
     });
 
     expect(result.status).not.toBe(0);
@@ -3200,21 +3208,30 @@ describe('canonical standards workflow Nix gate', () => {
   });
 
   it.each([
-    ['missing metadata', undefined],
-    ['invalid JSON', 'not json'],
-    ['an empty system set', '{}'],
+    ['a missing archive table', undefined, FIXTURE_MANIFEST],
+    ['an invalid archive table', 'not json', FIXTURE_MANIFEST],
+    ['no archives for the pinned Bun', '{}', FIXTURE_MANIFEST],
+    ['an empty system set', '{"9.9.9":{}}', FIXTURE_MANIFEST],
     [
-      'a missing runner mapping',
-      '{"x86_64-linux":{"archiveHash":"sha256-lR7iruhV8IWVruxiJSJqKY0/6oOj3NZGXAnLzN9+hI8=","archivePlatform":"x64"}}',
+      'a system without a native runner',
+      `{"9.9.9":{"riscv64-linux":${FIXTURE_ARCHIVE}}}`,
+      FIXTURE_MANIFEST,
     ],
     [
-      'a non-GitHub runner mapping',
-      '{"x86_64-linux":{"archiveHash":"sha256-lR7iruhV8IWVruxiJSJqKY0/6oOj3NZGXAnLzN9+hI8=","archivePlatform":"x64","runner":"self-hosted"}}',
+      'a missing manifest',
+      `{"9.9.9":{"x86_64-linux":${FIXTURE_ARCHIVE}}}`,
+      undefined,
     ],
-  ])('fails discovery for %s', (_label, metadata) => {
+    [
+      'an inexact packageManager',
+      `{"9.9.9":{"x86_64-linux":${FIXTURE_ARCHIVE}}}`,
+      '{"packageManager":"bun@^9.9.9"}',
+    ],
+  ])('fails discovery for %s', (_label, archives, manifest) => {
     const { output, result } = runNixDiscovery({
+      archives,
       filter: readFileSync(NIX_SYSTEM_MATRIX_FILTER, 'utf8'),
-      metadata,
+      manifest,
     });
 
     expect(result.status).not.toBe(0);
@@ -3241,8 +3258,8 @@ describe('canonical standards workflow Nix steps', () => {
           },
         }),
         expect.objectContaining({
-          name: 'Test Nix system metadata',
-          run: 'bash nix/bun-system-metadata.test.sh',
+          name: 'Test Nix systems',
+          run: 'bash nix/bun-systems.test.sh',
         }),
         expect.objectContaining({
           name: 'Build Nix check',

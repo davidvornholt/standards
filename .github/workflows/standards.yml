@@ -722,7 +722,7 @@ jobs:
         id: matrix
         run: |
           set -euo pipefail
-          matrix=$(jq -cer -f nix/bun-system-matrix.jq nix/bun-system-metadata.json)
+          matrix=$(jq -cer --slurpfile manifest package.json -f nix/bun-system-matrix.jq nix/bun-archives.json)
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
   # A job's implicit `success()` fails when any ancestor was skipped, and
@@ -753,8 +753,8 @@ jobs:
         with:
           extra_nix_config: ${{ matrix.system == 'x86_64-linux' && 'system-features = nixos-test benchmark big-parallel kvm' || '' }}
 
-      - name: Test Nix system metadata
-        run: bash nix/bun-system-metadata.test.sh
+      - name: Test Nix systems
+        run: bash nix/bun-systems.test.sh
 
       - name: Build Nix check
         run: nix build ".#checks.${{ matrix.system }}.standards-cli" -L
@@ -855,8 +855,8 @@ jobs:
           esac
           bun_version=1.4.3
           case "$(uname -m)" in
-            x86_64) bun_arch=x64; bun_asset=626788717; bun_sha=3e730528d89775f03f87f05c06787c4df4099d0a37f3f252e7b829cb23816e18 ;;
-            aarch64) bun_arch=aarch64; bun_asset=626788529; bun_sha=efa9813da5ed72423bf847f916e8d2c47c0d776add972354026a75e10da9aa21 ;;
+            x86_64) bun_platform=x64-baseline; bun_asset=626789490; bun_sha=1fc2edac843102909e3a1be1d8d9802cc6071cf074e67e88231f4ffe0f8b397b ;;
+            aarch64) bun_platform=aarch64; bun_asset=626788529; bun_sha=efa9813da5ed72423bf847f916e8d2c47c0d776add972354026a75e10da9aa21 ;;
             *)
               echo "::error::No pinned Bun binary for runner architecture $(uname -m)"
               exit 1
@@ -864,12 +864,12 @@ jobs:
           esac
           bun_archive="$RUNNER_TEMP/bun.zip"
           bun_root="$RUNNER_TEMP/standards-bin"
-          curl --disable --proto '=https' --proto-redir '=https' -sSfLo "$bun_archive" --retry 3 --retry-all-errors --connect-timeout 10 --max-time 60 "https://github.com/oven-sh/bun/releases/download/bun-v${bun_version}/bun-linux-${bun_arch}.zip" || \
+          curl --disable --proto '=https' --proto-redir '=https' -sSfLo "$bun_archive" --retry 3 --retry-all-errors --connect-timeout 10 --max-time 60 "https://github.com/oven-sh/bun/releases/download/bun-v${bun_version}/bun-linux-${bun_platform}.zip" || \
             printf 'Authorization: Bearer %s\n' "$release_api_token" | curl --disable --proto '=https' --proto-redir '=https' -sSfLo "$bun_archive" --retry 3 --retry-all-errors --connect-timeout 10 --max-time 60 -H @- -H "Accept: application/octet-stream" "https://api.github.com/repos/oven-sh/bun/releases/assets/${bun_asset}"
           echo "$bun_sha  $bun_archive" | sha256sum --check --quiet
           mkdir "$bun_root"
           unzip -q "$bun_archive" -d "$bun_root"
-          install -m 0755 "$bun_root/bun-linux-${bun_arch}/bun" "$bun_root/bun"
+          install -m 0755 "$bun_root/bun-linux-${bun_platform}/bun" "$bun_root/bun"
 
           standards_version=0.35.0
           standards_sha=b91c9de3b14c501b5902179f0c7ebcf845f07108be95eb03875ce5b7f72aad5668610548bc4e468600cd4c6d37caa33882603cf83292546593387c472297b255
