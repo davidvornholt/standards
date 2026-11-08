@@ -18,6 +18,8 @@ Write plainly and directly, in literal wording that is easy to follow. Avoid man
 
 When you ask the reader to decide, say what's at stake and where each option leads, and recommend one before giving technical evidence.
 
+The user may read only your last message, so make each final message the current state, briefly: first what needs them, such as decisions, pull requests to approve, steps only they can do, and a short answer to anything they asked since they last wrote; then what you're working on and what changed. While working, write only when your goal changes or you need something: one sentence about the goal, not the step you're on.
+
 Use sentence case for reader-facing text, including Markdown headings.
 
 Don't hard-wrap Markdown prose.
