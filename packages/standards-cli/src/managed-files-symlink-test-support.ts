@@ -5,7 +5,13 @@
 
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { mkTmp, type RunResult, runProcess, write } from './cli-test-support';
+import {
+  mkTmp,
+  type RunResult,
+  runProcess,
+  write,
+  writeSyncManifest,
+} from './cli-test-support';
 
 export const ENGINE = join(import.meta.dir, 'cli.ts');
 export const LINK = '.claude/skills';
@@ -72,21 +78,13 @@ export const buildUpstream = ({
   extra = [],
 }: Partial<UpstreamOptions> = {}): string => {
   const up = mkTmp('symlink-up-');
-  write(
-    up,
+  writeSyncManifest(up, up, [
     'sync-standards.json',
-    JSON.stringify({
-      upstream: up,
-      seedDir: 'template',
-      paths: [
-        'sync-standards.json',
-        '.github/dependabot.base.yml',
-        '.agents/skills',
-        ...(claudeSkills === 'absent' ? [] : [LINK]),
-        ...extra,
-      ],
-    }),
-  );
+    '.github/dependabot.base.yml',
+    '.agents/skills',
+    ...(claudeSkills === 'absent' ? [] : [LINK]),
+    ...extra,
+  ]);
   write(up, 'template/seed.txt', 'seed original\n');
   write(up, '.github/dependabot.base.yml', DEPENDABOT_BASE);
   write(up, SKILL, '---\nname: probe\n---\n');

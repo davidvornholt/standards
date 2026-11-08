@@ -15,7 +15,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { lstat, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, isAbsolute, join, posix, resolve } from 'node:path';
+import { dirname, join, posix, resolve } from 'node:path';
 import process from 'node:process';
 import { isContainedPath } from './contained-path';
 import { runCredsCommand } from './creds-commands';
@@ -50,8 +50,22 @@ import { collectStructureProblems } from './structure-check';
 import type { StructureProfile } from './structure-profile';
 import { hasSafeCommand } from './structure-script';
 import {
+  AGENTS_FILE,
+  AGENTS_LOCAL_HEADING,
+  assertSafeRelativePath,
+  loadManifest,
+  type Manifest,
+  readManifestUpstream,
+  readSourceAgents,
+  splitAgents,
+  withLocalRules,
+  withPayloadPlan,
+} from './sync-payload';
+import {
   inspectSyncPolicy,
   readSyncPolicy,
+  type SyncPayload,
+  selectedPayload,
   selectedSyncRef,
 } from './sync-policy';
 
@@ -67,12 +81,6 @@ const COLLISION_SAMPLE = 3;
 const GITHUB_PREFIX = 'github:';
 const SKIP_GITHUB_CHECK_ENV = 'STANDARDS_SKIP_GITHUB_CHECK';
 
-type Manifest = {
-  readonly upstream: string;
-  readonly seedDir: string;
-  readonly paths: ReadonlyArray<string>;
-};
-
 type Lock = {
   readonly upstream: string;
   readonly sha: string;
@@ -86,6 +94,7 @@ type Source = {
 };
 
 type Command =
+  | 'agents'
   | 'check'
   | 'dependabot'
   | 'dev-env'
@@ -111,23 +120,22 @@ type CliOptions = {
 const sha256 = (buf: Buffer): string =>
   createHash('sha256').update(buf).digest('hex');
 
-const assertSafeRelativePath = (path: string, label: string): void => {
-  // POSIX semantics on every platform: managed paths are repository-relative
-  // POSIX paths, and win32 normalize would rewrite `/` to `\` and reject them.
-  const normalized = posix.normalize(path);
-  if (
-    path.length === 0 ||
-    path === '.' ||
-    isAbsolute(path) ||
-    path.includes('\\') ||
-    normalized !== path ||
-    path.split('/').includes('..')
-  ) {
-    throw new Error(
-      `${label} must be a normalized repository-relative path: ${path}`,
-    );
-  }
+// Sync owns AGENTS.md only down to its local heading, so the repository's own
+// rules below it are neither drift nor canonical content.
+const managedPart = async (
+  rel: string,
+  entry: ManagedEntry,
+): Promise<Buffer> => {
+  const input = await managedEntryDigestInput(entry);
+  const head =
+    rel === AGENTS_FILE && entry.kind === 'file'
+      ? splitAgents(input.toString('utf8'))?.head
+      : undefined;
+  return head === undefined ? input : Buffer.from(head);
 };
+
+const lockDigest = async (rel: string, entry: ManagedEntry): Promise<string> =>
+  sha256(await managedPart(rel, entry));
 
 // `C:/Windows` is absolute on Windows and relative to POSIX `isAbsolute`, so a
 // drive-qualified target written with forward slashes would escape a consumer
@@ -238,42 +246,6 @@ const symlinkTargetProblems = (
     })
     .filter((problem): problem is string => problem !== null);
 
-const parseManifest = (raw: unknown): Manifest => {
-  if (typeof raw !== 'object' || raw === null) {
-    throw new Error('sync-standards.json must be a JSON object');
-  }
-  const o = raw as Record<string, unknown>;
-  if (typeof o.upstream !== 'string' || typeof o.seedDir !== 'string') {
-    throw new Error(
-      'sync-standards.json requires string "upstream" and "seedDir"',
-    );
-  }
-  if (
-    !(Array.isArray(o.paths) && o.paths.every((p) => typeof p === 'string'))
-  ) {
-    throw new Error('sync-standards.json requires a string array "paths"');
-  }
-  assertSafeRelativePath(o.seedDir, 'sync-standards.json "seedDir"');
-  for (const path of o.paths as ReadonlyArray<string>) {
-    assertSafeRelativePath(path, 'sync-standards.json managed path');
-  }
-  if (new Set(o.paths).size !== o.paths.length) {
-    throw new Error('sync-standards.json managed paths must be unique');
-  }
-  return {
-    upstream: o.upstream,
-    seedDir: o.seedDir,
-    paths: o.paths as ReadonlyArray<string>,
-  };
-};
-
-const loadManifest = async (path: string): Promise<Manifest> => {
-  if (!existsSync(path)) {
-    throw new Error(`Manifest not found: ${path}`);
-  }
-  return parseManifest(JSON.parse(await readFile(path, 'utf8')) as unknown);
-};
-
 const readLock = async (dir: string): Promise<Lock | null> => {
   const path = join(dir, 'sync-standards.lock');
   if (!existsSync(path)) {
@@ -347,26 +319,6 @@ const resolveSource = (src: string, ref: string | undefined): Source => {
     encoding: 'utf8',
   }).trim();
   return { dir, sha, cleanup };
-};
-
-const isUnder = (a: string, b: string): boolean =>
-  a === b || a.startsWith(`${b}/`);
-
-// Managed (bucket 1) paths and seed (bucket 2) targets must never overlap, or a
-// file would have two owners and `sync` could clobber a repo-owned seed.
-const assertDisjoint = (
-  managed: ReadonlyArray<string>,
-  seeds: ReadonlyArray<string>,
-): void => {
-  for (const m of managed) {
-    for (const s of seeds) {
-      if (isUnder(m, s) || isUnder(s, m)) {
-        throw new Error(
-          `Managed path "${m}" overlaps seed path "${s}"; ownership is ambiguous`,
-        );
-      }
-    }
-  }
 };
 
 type MirrorResult = {
@@ -578,12 +530,10 @@ const mirror = async ({
   await Promise.all(
     [...upstream].map(async ([rel, entry]) => {
       const dest = join(consumer, rel);
-      const hash = sha256(await managedEntryDigestInput(entry));
+      const hash = await lockDigest(rel, entry);
       const current = await inspectManagedPath(dest);
       const currentHash =
-        current === null
-          ? null
-          : sha256(await managedEntryDigestInput(current));
+        current === null ? null : await lockDigest(rel, current);
       const prev = previous[rel];
       if (prev !== undefined && currentHash !== null && currentHash !== prev) {
         tampered.push(rel);
@@ -679,112 +629,120 @@ const reportDryRunSummary = (
   );
 };
 
-const seedTargets = (
-  srcDir: string,
-  seedDir: string,
-): Promise<ReadonlyMap<string, ManagedEntry>> => {
-  const root = join(srcDir, seedDir);
-  return listManagedFiles(root, ['.']);
-};
-
 const runInit = async (
   manifest: Manifest,
   src: Source,
   consumer: string,
-): Promise<void> => {
-  const seeds = await seedTargets(src.dir, manifest.seedDir);
-  assertDisjoint(manifest.paths, [...seeds.keys()]);
-  const upstream = await listManagedFiles(src.dir, manifest.paths);
-  // Seeds are written before the mirror, so both halves of the payload must
-  // clear their preconditions here for `init` to refuse before writing anything.
-  assertNoProblems(
-    [
-      ...symlinkTargetProblems(seeds),
-      ...(await mirrorPreconditionProblems(consumer, upstream, {}, 'init')),
-    ],
-    'cannot initialize from this source',
-  );
-  const prospectiveDependabot = await prepareProspectiveDependabot(
-    upstream,
-    consumer,
-    seeds.get(DEPENDABOT_LOCAL_FILE) ?? null,
-  );
-  await Promise.all(
-    [...seeds].map(async ([rel, entry]) => {
-      const dest = join(consumer, rel);
-      // A seed destination is kept whenever anything at all occupies it.
-      // `existsSync` reports a broken link as absent, so it would call this
-      // destination free and let the seed replace a link the consumer put
-      // there; `lstat` sees the link and keeps it.
-      if ((await inspectManagedPath(dest)) !== null) {
-        console.log(`  kept ${rel} (already present)`);
-        return;
+  payload: SyncPayload,
+): Promise<void> =>
+  withPayloadPlan(
+    { manifest, srcDir: src.dir, payload, consumer },
+    async ({ seeds, upstream }) => {
+      // Seeds are written before the mirror, so both halves of the payload must
+      // clear their preconditions here for `init` to refuse before writing anything.
+      assertNoProblems(
+        [
+          ...symlinkTargetProblems(seeds),
+          ...(await mirrorPreconditionProblems(consumer, upstream, {}, 'init')),
+        ],
+        'cannot initialize from this source',
+      );
+      const prospectiveDependabot =
+        payload === 'bun'
+          ? await prepareProspectiveDependabot(
+              upstream,
+              consumer,
+              seeds.get(DEPENDABOT_LOCAL_FILE) ?? null,
+            )
+          : null;
+      await Promise.all(
+        [...seeds].map(async ([rel, entry]) => {
+          const dest = join(consumer, rel);
+          // A seed destination is kept whenever anything at all occupies it.
+          // `existsSync` reports a broken link as absent, so it would call this
+          // destination free and let the seed replace a link the consumer put
+          // there; `lstat` sees the link and keeps it.
+          if ((await inspectManagedPath(dest)) !== null) {
+            console.log(`  kept ${rel} (already present)`);
+            return;
+          }
+          await mkdir(dirname(dest), { recursive: true });
+          await writeManagedEntry(dest, entry);
+          console.log(`  seeded ${rel}`);
+        }),
+      );
+      const result = await mirror({
+        upstream,
+        consumer,
+        previous: {},
+        dryRun: false,
+        command: 'init',
+      });
+      reportMirror(result, false);
+      if (prospectiveDependabot !== null) {
+        await applyProspectiveDependabot(
+          consumer,
+          prospectiveDependabot,
+          false,
+        );
       }
-      await mkdir(dirname(dest), { recursive: true });
-      await writeManagedEntry(dest, entry);
-      console.log(`  seeded ${rel}`);
-    }),
+      await writeLock(consumer, {
+        upstream: manifest.upstream,
+        sha: src.sha,
+        files: result.files,
+      });
+      console.log(
+        `init complete: ${Object.keys(result.files).length} managed path(s) at ${src.sha}`,
+      );
+    },
   );
-  const result = await mirror({
-    upstream,
-    consumer,
-    previous: {},
-    dryRun: false,
-    command: 'init',
-  });
-  reportMirror(result, false);
-  await applyProspectiveDependabot(consumer, prospectiveDependabot, false);
-  await writeLock(consumer, {
-    upstream: manifest.upstream,
-    sha: src.sha,
-    files: result.files,
-  });
-  console.log(
-    `init complete: ${Object.keys(result.files).length} managed path(s) at ${src.sha}`,
-  );
-};
 
 const runSync = async (
   manifest: Manifest,
   src: Source,
   consumer: string,
-  dryRun: boolean,
-): Promise<void> => {
-  const seeds = await seedTargets(src.dir, manifest.seedDir);
-  assertDisjoint(manifest.paths, [...seeds.keys()]);
-  const upstream = await listManagedFiles(src.dir, manifest.paths);
-  const prospectiveDependabot = await prepareProspectiveDependabot(
-    upstream,
-    consumer,
-    null,
-  );
-  const lock = await readLock(consumer);
-  const result = await mirror({
-    upstream,
-    consumer,
-    previous: lock?.files ?? {},
+  {
     dryRun,
-    command: 'sync',
-  });
-  reportMirror(result, dryRun);
-  const generated = await applyProspectiveDependabot(
-    consumer,
-    prospectiveDependabot,
-    dryRun,
+    payload,
+  }: { readonly dryRun: boolean; readonly payload: SyncPayload },
+): Promise<void> =>
+  withPayloadPlan(
+    { manifest, srcDir: src.dir, payload, consumer },
+    async ({ upstream }) => {
+      const prospectiveDependabot =
+        payload === 'bun'
+          ? await prepareProspectiveDependabot(upstream, consumer, null)
+          : null;
+      const lock = await readLock(consumer);
+      const result = await mirror({
+        upstream,
+        consumer,
+        previous: lock?.files ?? {},
+        dryRun,
+        command: 'sync',
+      });
+      reportMirror(result, dryRun);
+      const generated =
+        prospectiveDependabot !== null &&
+        (await applyProspectiveDependabot(
+          consumer,
+          prospectiveDependabot,
+          dryRun,
+        ));
+      if (dryRun) {
+        reportDryRunSummary(result, generated);
+        return;
+      }
+      await writeLock(consumer, {
+        upstream: manifest.upstream,
+        sha: src.sha,
+        files: result.files,
+      });
+      console.log(
+        `sync complete: ${Object.keys(result.files).length} managed path(s) at ${src.sha}`,
+      );
+    },
   );
-  if (dryRun) {
-    reportDryRunSummary(result, generated);
-    return;
-  }
-  await writeLock(consumer, {
-    upstream: manifest.upstream,
-    sha: src.sha,
-    files: result.files,
-  });
-  console.log(
-    `sync complete: ${Object.keys(result.files).length} managed path(s) at ${src.sha}`,
-  );
-};
 
 // Offline drift detection: every locked file must still match its hash. Catches
 // local edits or deletions of canonical files. Does NOT detect upstream moving
@@ -808,9 +766,13 @@ const runCheck = async (consumer: string): Promise<boolean> => {
       if (entry === null) {
         return `  missing:  ${rel}`;
       }
-      const current = sha256(await managedEntryDigestInput(entry));
+      const current = await lockDigest(rel, entry);
       if (current !== hash) {
-        return `  modified: ${rel} (expected ${hash.slice(0, HASH_PREVIEW_LENGTH)}, found ${current.slice(0, HASH_PREVIEW_LENGTH)})`;
+        const hint =
+          rel === AGENTS_FILE
+            ? `; a repository's own rules go below "${AGENTS_LOCAL_HEADING}"`
+            : '';
+        return `  modified: ${rel} (expected ${hash.slice(0, HASH_PREVIEW_LENGTH)}, found ${current.slice(0, HASH_PREVIEW_LENGTH)})${hint}`;
       }
       return null;
     }),
@@ -819,8 +781,10 @@ const runCheck = async (consumer: string): Promise<boolean> => {
     ...results.filter((p): p is string => p !== null),
     ...symlinkTargetProblems(lockedFiles, true),
   ];
-  const directiveFiles =
-    await findManagedFilesContainingBiomeDirectiveToken(lockedFiles);
+  const directiveFiles = await findManagedFilesContainingBiomeDirectiveToken(
+    lockedFiles,
+    managedPart,
+  );
   if (problems.length > 0) {
     console.error(
       `standards: ${problems.length} canonical path(s) drifted from the last synced state:`,
@@ -1033,6 +997,31 @@ const runDependabotCheck = async (consumer: string): Promise<boolean> => {
   return true;
 };
 
+const runAgents = async (dir: string, write: boolean): Promise<boolean> => {
+  const { composed, current } = await readSourceAgents(dir);
+  if (current !== null && splitAgents(current)?.head === composed) {
+    console.log(`standards agents: ${AGENTS_FILE} matches its parts`);
+    return true;
+  }
+  if (write) {
+    const path = join(dir, AGENTS_FILE);
+    // Writing through a link would rewrite whatever file it points at.
+    if ((await inspectManagedPath(path))?.kind === 'symlink') {
+      console.error(
+        `standards agents: ${AGENTS_FILE} is a symlink; replace it with a regular file`,
+      );
+      return false;
+    }
+    await writeFile(path, await withLocalRules(composed, path));
+    console.log(`standards agents: generated ${AGENTS_FILE}`);
+    return true;
+  }
+  console.error(
+    `standards agents: ${AGENTS_FILE} does not match its parts; regenerate it with \`standards agents --write\``,
+  );
+  return false;
+};
+
 const runDependabotWrite = async (consumer: string): Promise<void> => {
   const sources = await readDependabotSources(consumer);
   const { composed, problems } = composedDependabot(sources);
@@ -1094,25 +1083,35 @@ const extendsBiomeBase = (raw: string): boolean => {
   }
 };
 
-const runDoctor = async (consumer: string): Promise<boolean> => {
+// The seams only a Bun workspace has: Biome, the composed Dependabot config,
+// and the package manifest that runs the gate.
+const bunSeamProblems = async (
+  consumer: string,
+): Promise<ReadonlyArray<string>> => {
   const problems: Array<string> = [];
   const biome = await readTextIfPresent(join(consumer, 'biome.jsonc'));
   if (biome === null || !extendsBiomeBase(biome)) {
     problems.push('biome.jsonc must extend "./biome.base.jsonc"');
   }
-
-  if (!existsSync(join(consumer, 'AGENTS.local.md'))) {
-    problems.push('AGENTS.local.md must exist for project-specific guidance');
-  }
-
   problems.push(...(await dependabotProblems(consumer)));
-
-  const packagePath = join(consumer, 'package.json');
-  const packageRaw = await readTextIfPresent(packagePath);
+  const packageRaw = await readTextIfPresent(join(consumer, 'package.json'));
   if (packageRaw === null) {
     problems.push('package.json must exist');
   } else {
     problems.push(...inspectPackageJson(packageRaw));
+  }
+  return problems;
+};
+
+// An unreadable policy falls back to the Bun payload, the stricter check, and
+// doctor reports the policy problem itself.
+const consumerPayload = async (consumer: string): Promise<SyncPayload> =>
+  selectedPayload(await readSyncPolicy(consumer).catch(() => ({})));
+
+const runDoctor = async (consumer: string): Promise<boolean> => {
+  const problems: Array<string> = [];
+  if ((await consumerPayload(consumer)) === 'bun') {
+    problems.push(...(await bunSeamProblems(consumer)));
   }
 
   // The GitHub settings seam only exists once the canonical declaration has
@@ -1147,11 +1146,12 @@ const USAGE = `Usage: standards <command> [options]
 Commands:
   init        Bootstrap a consumer repo: seed repo-owned files, mirror canonical files, write the lock
   sync        Mirror canonical files from upstream, regenerate the composed Dependabot config, and rewrite the lock
-  check       Verify canonical files, extension seams, monorepo structure, and GitHub settings
+  check       Verify canonical files, extension seams, monorepo structure (Bun payload), and GitHub settings
   doctor      Validate extension seams only
   source-text Reject raw control characters in tracked source text
   structure   Validate monorepo structure rules only
   dependabot  Verify (--check) or regenerate (--write) the composed .github/dependabot.yml
+  agents      In the standards source repository, verify (--check) or regenerate (--write) AGENTS.md from its parts
   dev-env     Compose each workspace's generated .env.local from its three dev layers and authorized broker-owned S3 pair references
   github      Compare (--check) or converge (--apply) live GitHub settings
   creds       Mint, rotate, and revoke brokered credentials (see \`standards creds help\`)
@@ -1164,12 +1164,13 @@ Options:
   --from <src>     Upstream override for init/sync (GitHub repo or local path)
   --ref <ref>      Upstream tag, branch, or full commit sha for init/sync (remote Git/GitHub sources only; default: main)
   --dry-run        Preview a sync without writing anything
-  --check          With github/dependabot: compare against the declared sources (default)
+  --check          With github/dependabot/agents: compare against the declared sources (default)
   --apply          With github: converge the live repository (needs admin auth)
-  --write          With dependabot: regenerate the composed .github/dependabot.yml`;
+  --write          With dependabot/agents: regenerate the composed file`;
 
 const commandFromArg = (arg: string): Command => {
   if (
+    arg === 'agents' ||
     arg === 'check' ||
     arg === 'dependabot' ||
     arg === 'dev-env' ||
@@ -1226,9 +1227,14 @@ type ParsedFlags = {
 // typo fails loudly instead of silently doing the default thing.
 const assertOptionUsage = (flags: ParsedFlags): void => {
   const { command, checkFlag, apply, write, ref, profile } = flags;
-  if (checkFlag && command !== 'github' && command !== 'dependabot') {
+  if (
+    checkFlag &&
+    command !== 'github' &&
+    command !== 'dependabot' &&
+    command !== 'agents'
+  ) {
     throw new Error(
-      '--check is only valid with the github and dependabot commands',
+      '--check is only valid with the github, dependabot, and agents commands',
     );
   }
   if (apply && command !== 'github') {
@@ -1237,11 +1243,13 @@ const assertOptionUsage = (flags: ParsedFlags): void => {
   if (apply && checkFlag) {
     throw new Error('github accepts exactly one of --check or --apply');
   }
-  if (write && command !== 'dependabot') {
-    throw new Error('--write is only valid with the dependabot command');
+  if (write && command !== 'dependabot' && command !== 'agents') {
+    throw new Error(
+      '--write is only valid with the dependabot and agents commands',
+    );
   }
   if (write && checkFlag) {
-    throw new Error('dependabot accepts exactly one of --check or --write');
+    throw new Error(`${command} accepts exactly one of --check or --write`);
   }
   if (ref !== undefined && command !== 'init' && command !== 'sync') {
     throw new Error('--ref is only valid with the init and sync commands');
@@ -1361,7 +1369,11 @@ const runSourceTextCheck = (consumer: string): boolean => {
 const runCheckCommand = async (consumer: string): Promise<boolean> => {
   const driftIsClean = await runCheck(consumer);
   const integrationIsValid = await runDoctor(consumer);
-  const structureIsValid = await runStructure(consumer, 'consumer');
+  // The structure rules describe a Bun monorepo.
+  const structureIsValid =
+    (await consumerPayload(consumer)) === 'bun'
+      ? await runStructure(consumer, 'consumer')
+      : true;
   const sourceTextIsValid = runSourceTextCheck(consumer);
   // The GitHub gate activates with the synced declaration and then fails
   // closed: once .github/settings.json exists, an unreachable API or an
@@ -1414,7 +1426,7 @@ const runInitCommand = async (
     const manifest = await loadManifest(
       join(source.dir, 'sync-standards.json'),
     );
-    await runInit(manifest, source, consumer);
+    await runInit(manifest, source, consumer, selectedPayload(policy));
   } finally {
     source.cleanup();
   }
@@ -1426,17 +1438,18 @@ const runSyncCommand = async (
   ref: string | undefined,
   dryRun: boolean,
 ): Promise<void> => {
-  const consumerManifest = await loadManifest(
-    join(consumer, 'sync-standards.json'),
-  );
-  const src = from ?? consumerManifest.upstream;
+  const src =
+    from ?? (await readManifestUpstream(join(consumer, 'sync-standards.json')));
   const policy = await readSyncPolicy(consumer);
   const source = resolveSource(src, selectedSyncRef(src, ref, policy));
   try {
     const manifest = await loadManifest(
       join(source.dir, 'sync-standards.json'),
     );
-    await runSync(manifest, source, consumer, dryRun);
+    await runSync(manifest, source, consumer, {
+      dryRun,
+      payload: selectedPayload(policy),
+    });
   } finally {
     source.cleanup();
   }
@@ -1526,6 +1539,13 @@ const main = async (): Promise<void> => {
 
   if (command === 'dependabot' && write) {
     await runDependabotWrite(consumer);
+    return;
+  }
+
+  if (command === 'agents') {
+    if (!(await runAgents(consumer, write))) {
+      process.exitCode = 1;
+    }
     return;
   }
 

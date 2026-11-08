@@ -8,9 +8,27 @@ Don't weaken a quality gate to make a change pass. Explain every inline suppress
 
 Don't build backwards compatibility by default. Code in these repositories has no consumers outside them, so migrate every call site and delete the old shape in the same change.
 
-Ask before choosing product intent or another costly, durable direction. Write the question for someone with no background who hasn't read the code: explain what's at stake and where each option leads, and recommend one before presenting technical evidence.
+Ask before choosing product intent or another costly, durable direction.
+
+Disagree openly when an instruction, plan, or rule seems wrong, and say what you would do instead. Recommend the better option even when it's a bigger change than was asked for.
 
 Before merging a pull request of any size, run `review-fix` if you judge that a reviewer could find a bug in it that someone would otherwise run into. Standards syncs are exempt, because a consumer can't change synced files.
+
+## Writing style
+
+Write for a reader who has no background on the task and hasn't read the code. That includes the user, because agents write most of the code.
+
+Write plainly and directly, in literal wording that is easy to follow. Avoid mannered prose, stock phrases, and jargon where plain words say the same thing, and don't compress sentences into fragments to save words.
+
+When you ask the reader to decide, say what's at stake and where each option leads, and recommend one before giving technical evidence.
+
+Use sentence case for reader-facing text, including Markdown headings.
+
+Don't hard-wrap Markdown prose.
+
+## Documentation and instructions
+
+Agents are the main readers of documentation, skills, instructions, and prompts. Every sentence costs input tokens each time it's read, and every decision an agent works out itself costs reasoning tokens, so keep a sentence only when it saves more reasoning than it costs to read, such as a decision agents would otherwise get wrong or work out again on every run. Simplify by removing decisions and branches rather than compressing sentences, and before adding a rule, check whether changing an existing one would do. Give the reason for a rule that isn't obvious, and state each fact once. Keep history and status in PRs and issues, and cut documentation in the same change that makes it stale.
 
 ## Package management
 
@@ -33,20 +51,32 @@ Operational scripts belong in the owning workspace's `package.json`. Root script
 
 Use Effect extensively wherever it makes sense, because it helps agents write more robust code. In an Effect v4 workspace, follow the agent guide shipped at `node_modules/effect/AGENTS.md`, because v4's API differs from the v3 most models learned.
 
-## Writing style
-
-Write plainly and directly, in literal wording and complete sentences that are easy to follow. Avoid mannered prose, stock phrases, and jargon where plain words say the same thing, and don't compress sentences into fragments to save words.
-
-Use sentence case for reader-facing text, including Markdown headings.
-
-Don't hard-wrap Markdown prose.
-
-## Documentation and instructions
-
-Agents are the main readers of documentation, skills, instructions, and prompts. Both reading and reasoning cost tokens, so keep a sentence only when it saves more thinking than it costs to read, such as a decision agents would otherwise get wrong or work out again on every run. Simplify by removing decisions and branches rather than compressing sentences, and before adding a rule, check whether changing an existing one would do. Give the reason for a rule that isn't obvious, and state each fact once. Keep history and status in PRs and issues, and cut documentation in the same change that makes it stale.
-
 ## Project-specific rules
 
-This is a canonical file from the standards repository. Project-specific rules belong in `AGENTS.local.md`.
+### Payloads and the generated AGENTS.md
 
-@AGENTS.local.md
+`sync-standards.json` lists what `standards sync` copies into consumers, in two payloads: `core`, for repositories in any language, and `bun`, which Bun consumers get on top of core. Put a path in `bun` when it assumes a Bun workspace. `AGENTS.md` is generated from the payloads' parts in `agents-md/` down to its `## Project-specific rules` heading: edit the parts and run `bun run check:fix`, which regenerates that part.
+
+### Source-repository structure profile
+
+This repository is not a `standards structure` consumer. Its root gate runs the local CLI instead of `standards check`, and `packages/standards-cli` is a published bin-only package with a SemVer version. The `source` profile in `packages/standards-cli/src/structure-profile.ts` pins these exceptions. When the repository's shape changes, update that profile and the root `check` and `check:fix` scripts together.
+
+### Standards CLI bootstrap architecture
+
+`packages/standards-cli` is exempt from the Effect standards. It must run through `bunx` before a consumer installs dependencies, so it uses plain async TypeScript and minimal runtime dependencies.
+
+### Standards CLI subcommand vs. justfile recipe
+
+Operator tooling with real logic, such as validation, credential resolution, provider calls, or structured output, becomes a tested `bun standards` subcommand. Justfile recipes stay one-line compositions of existing commands. Do not wrap a subcommand that is already a single obvious invocation.
+
+### Dependency version holds
+
+Declare template-wide holds as `ignore` entries in `.github/dependabot.base.yml`, each with a comment giving the reason and the lift condition. Never hold a version by closing Dependabot PRs or with `@dependabot ignore` comments. When a hold or held pin changes, update the hold entry and every affected pin in the root `package.json`, `template/package.json`, and the `biome.base.jsonc` schema URL together.
+
+### Authoring the canonical Biome base
+
+`biome.base.jsonc` enables every applicable rule domain, the recommended set, and applicable opt-in nursery and security rules at `error`. On Biome upgrades, adopt new rules at `error` and opt out deliberately.
+
+### Skill descriptions
+
+A skill's `description` is loaded into every session, so it says only when to use the skill, such as `Use when opening an issue or changing its title or description.` What the skill does belongs in its body.

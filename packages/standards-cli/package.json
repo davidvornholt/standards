@@ -131,6 +131,7 @@
     "src/structure-sops-envelope.ts",
     "src/structure-turbo.ts",
     "src/structure-workspace.ts",
+    "src/sync-payload.ts",
     "src/sync-policy.ts",
     "src/yaml-emit.ts",
     "src/yaml-parse.ts",

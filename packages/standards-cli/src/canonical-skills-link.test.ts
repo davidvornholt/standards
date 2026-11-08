@@ -3,9 +3,9 @@
 // actually carrying the link, which is what every consumer receives.
 
 import { describe, expect, it } from 'bun:test';
-import { existsSync, lstatSync, readFileSync, readlinkSync } from 'node:fs';
+import { existsSync, lstatSync, readlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { ACTUAL_UPSTREAM } from './cli-test-support';
+import { ACTUAL_UPSTREAM, manifestPaths } from './cli-test-support';
 
 const LINK = '.claude/skills';
 const TARGET = '../.agents/skills';
@@ -27,10 +27,8 @@ describe('canonical .claude/skills link', () => {
   });
 
   it('is declared as a managed path so consumers receive it', () => {
-    const manifest = JSON.parse(
-      readFileSync(join(ACTUAL_UPSTREAM, 'sync-standards.json'), 'utf8'),
-    ) as { paths: ReadonlyArray<string> };
-
-    expect(manifest.paths).toContain(LINK);
+    expect(
+      manifestPaths(join(ACTUAL_UPSTREAM, 'sync-standards.json')),
+    ).toContain(LINK);
   });
 });

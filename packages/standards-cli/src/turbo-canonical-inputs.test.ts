@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ACTUAL_UPSTREAM } from './cli-test-support';
+import { ACTUAL_UPSTREAM, manifestPaths } from './cli-test-support';
 
 const TEST_TASK = '@davidvornholt/standards#test';
 const ROOT_TOKEN = '$TURBO_ROOT$/';
@@ -14,12 +14,8 @@ const ROOT_TOKEN = '$TURBO_ROOT$/';
 const readJson = (relativePath: string): unknown =>
   JSON.parse(readFileSync(join(ACTUAL_UPSTREAM, relativePath), 'utf8'));
 
-const manifestPaths = (): ReadonlyArray<string> => {
-  const manifest = readJson('sync-standards.json') as {
-    paths: ReadonlyArray<string>;
-  };
-  return manifest.paths;
-};
+const canonicalPaths = (): ReadonlyArray<string> =>
+  manifestPaths(join(ACTUAL_UPSTREAM, 'sync-standards.json'));
 
 // Three manifest directories are deliberately declared as a set of narrower
 // inputs, so installed dependencies and build output under them stay out of the
@@ -67,7 +63,7 @@ const covers = (root: string, path: string): boolean =>
 describe('canonical payload as a test input', () => {
   it('declares every managed path in the standards test task inputs', () => {
     const roots = rootedInputs().map(inputRoot);
-    const uncovered = manifestPaths().filter(
+    const uncovered = canonicalPaths().filter(
       (path) => !(path in NARROWED || roots.some((root) => covers(root, path))),
     );
 

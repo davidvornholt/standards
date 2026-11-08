@@ -203,6 +203,7 @@ it.each([false, true])(
       ['GITHUB_WORKSPACE', cwd],
       ['SYNC_BASE_REF', 'main'],
       ['SYNC_READ_TOKEN', 'read-fixture'],
+      ['SYNC_PAYLOAD', 'bun'],
       ['SYNC_POLICY_REF', ''],
     ]);
     expect(shell(cwd, 'Preserve trusted sync runtime', values).status).toBe(0);

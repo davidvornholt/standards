@@ -111,7 +111,10 @@ export const buildConsumer = (
     JSON.stringify({
       upstream: 'github:davidvornholt/standards',
       seedDir: 'template',
-      paths: ['sync-standards.json', 'AGENTS.md'],
+      payloads: {
+        core: { agents: 'agents-md/core.md', seeds: [], paths: [] },
+        bun: { agents: 'agents-md/bun.md', seeds: [], paths: [] },
+      },
     }),
   );
   writeInto(

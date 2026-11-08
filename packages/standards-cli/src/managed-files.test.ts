@@ -6,7 +6,6 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -14,23 +13,15 @@ import {
   listManagedFiles,
   writeManagedEntry,
 } from './managed-files';
+import { loadManifest } from './sync-payload';
 
 const repositoryRoot = join(import.meta.dir, '../../..');
 const manifestPath = join(repositoryRoot, 'sync-standards.json');
 const directiveToken = ['biome', 'ignore'].join('-');
 
 const readCanonicalPaths = async (): Promise<ReadonlyArray<string>> => {
-  const manifest: unknown = JSON.parse(await readFile(manifestPath, 'utf8'));
-  if (
-    typeof manifest !== 'object' ||
-    manifest === null ||
-    !('paths' in manifest) ||
-    !Array.isArray(manifest.paths) ||
-    !manifest.paths.every((path) => typeof path === 'string')
-  ) {
-    throw new Error('sync-standards.json must contain a string paths array');
-  }
-  return manifest.paths;
+  const { payloads } = await loadManifest(manifestPath);
+  return [...payloads.core.paths, ...payloads.bun.paths];
 };
 
 describe('managed file contract', () => {
