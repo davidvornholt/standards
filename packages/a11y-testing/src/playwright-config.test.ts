@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { availableParallelism } from 'node:os';
 import process from 'node:process';
 import { createA11yPlaywrightConfig } from './playwright-config';
 
@@ -55,6 +56,15 @@ describe('createA11yPlaywrightConfig', () => {
       'desktop-chromium',
       'mobile-chromium',
     ]);
+  });
+
+  it('runs one worker per available core, at most eight', () => {
+    const config = createA11yPlaywrightConfig({
+      baseUrl: 'http://127.0.0.1:3000',
+      webServerCommand: 'bun run start',
+    });
+
+    expect(config.workers).toBe(Math.min(availableParallelism(), 8));
   });
 
   it('uses stricter retry and reporting defaults in CI', () => {
