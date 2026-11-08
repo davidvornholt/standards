@@ -1,11 +1,13 @@
 ---
 name: secrets-and-config
-description: Use when changing application configuration, environment variables, SOPS secret files, or generated development environments.
+description: Use when changing application configuration, environment variables, or generated development environments, or when decrypting or changing SOPS secret files.
 ---
 
 # Secrets and configuration
 
 A value is secret when disclosing it enables impersonation, data access, or cost. Secrets live only in SOPS-encrypted YAML. Every other value lives in plain configuration beside the code that reads it.
+
+Never let a decrypted secret reach a command's output, not even through a filter, because the session transcript keeps it and filters miss multi-line values such as private keys. Pipe it into the command that needs it, or compare values by hash.
 
 Document each value once, where it is declared. A plain value is explained in its configuration file. A secret is explained in the matching `*.example.yaml`, which mirrors the key shape of the encrypted file, because the encrypted file cannot carry readable comments. Use a workspace README only for setup that these declarations cannot express.
 
