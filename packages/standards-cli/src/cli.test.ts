@@ -1132,7 +1132,7 @@ const runWorkflowVersionGuard = (version: string): RunResult => {
       '-c',
       workflowRunScript('Require compatible standards CLI'),
     ],
-    { MINIMUM_STANDARDS_VERSION: '0.34.0' },
+    { MINIMUM_STANDARDS_VERSION: '0.35.0' },
   );
 };
 
@@ -3689,9 +3689,10 @@ describe('standards sync workflow policy', () => {
   });
 
   // A lower minor that sorts after the minimum as text, a prerelease of the
-  // minimum, the adjacent minor, and 0.21.0, which can't read the payload
+  // minimum, the adjacent minor 0.34.0, which reads the payload manifest but
+  // not the split Dependabot config, and 0.21.0, which can't read the payload
   // manifest, cover the SemVer gate and the version comparison.
-  it.each(['0.4.0', '0.34.0-beta.1', '0.33.0', '0.21.0'])(
+  it.each(['0.4.0', '0.35.0-beta.1', '0.34.0', '0.21.0'])(
     'rejects installed CLI version %s without a policy file',
     (version) => {
       const result = runWorkflowVersionGuard(version);
@@ -3700,15 +3701,15 @@ describe('standards sync workflow policy', () => {
     },
   );
 
-  it('makes the 0.34.0 guard unconditional', () => {
+  it('makes the 0.35.0 guard unconditional', () => {
     const workflow = readFileSync(SYNC_WORKFLOW, 'utf8');
-    expect(workflow).toContain('MINIMUM_STANDARDS_VERSION: "0.34.0"');
+    expect(workflow).toContain('MINIMUM_STANDARDS_VERSION: "0.35.0"');
     expect(workflow).not.toContain(
       "if: needs.policy.outputs.present == 'true'",
     );
   });
 
-  it.each(['0.34.0', '0.34.1', '1.0.0'])(
+  it.each(['0.35.0', '0.35.1', '1.0.0'])(
     'accepts installed CLI version %s without a policy file',
     (version) => {
       expect(runWorkflowVersionGuard(version).status).toBe(0);
