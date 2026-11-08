@@ -24,6 +24,7 @@ import { CANONICAL_SETTINGS_FILE, LOCAL_SETTINGS_FILE } from './github-api';
 import { runGithubApply, runGithubCheck } from './github-commands';
 import { loadGithubSettings } from './github-settings';
 import { isRecord } from './github-settings-parse';
+import { runLandCommand } from './land-command';
 import {
   findManagedFilesContainingBiomeDirectiveToken,
   inspectManagedPath,
@@ -926,6 +927,7 @@ Commands:
   dev-env     Compose each workspace's generated .env.local from its three dev layers and authorized broker-owned S3 pair references
   github      Compare (--check) or converge (--apply) live GitHub settings
   creds       Mint, rotate, and revoke brokered credentials (see \`standards creds help\`)
+  land        Merge a pull request once its checks pass and delete its local branch (see \`standards land --help\`)
   screenshots Publish UI screenshots to the configured public bucket and print PR-ready markdown (see \`standards screenshots help\`)
   help        Show this help
 
@@ -1249,13 +1251,20 @@ const runGateCommand = (
   return apply ? runGithubApply(consumer) : runGithubCheckGate(consumer);
 };
 
-// The creds family owns its flag vocabulary and the screenshots family takes
-// variadic file operands; both route before the strict global parser rejects
+// The creds family owns its flag vocabulary, the screenshots family takes
+// variadic file operands, and land takes a pull request operand and refuses
+// merge options itself; all route before the strict global parser rejects
 // their arguments.
 const commandFamilies: Readonly<
   Record<string, (argv: ReadonlyArray<string>) => Promise<boolean>>
 > = {
   creds: runCredsCommand,
+  land: (argv) =>
+    runLandCommand(argv, {
+      env: process.env,
+      out: (line) => console.log(line),
+      err: (line) => console.error(line),
+    }),
   screenshots: runScreenshotsCommand,
 };
 

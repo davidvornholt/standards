@@ -48,4 +48,4 @@ Post one comment on the pull request, leaving out any part with nothing in it:
 - Each label you changed, and why.
 - Any risk that remains. If it would show only after deployment, name the check that covers it or file an issue for one.
 
-Run `gh pr ready` unless an `ask` is open. If the user asked you to land the pull request when you're confident, and you are, wait for CI and land it. Otherwise report CI as pending, and stop.
+Run `gh pr ready` unless an `ask` is open. If the user asked you to land the pull request when you're confident, and you are, land it as the [prs skill](../prs/SKILL.md) describes. Otherwise report CI as pending, and stop.

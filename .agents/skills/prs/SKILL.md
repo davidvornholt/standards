@@ -1,6 +1,6 @@
 ---
 name: prs
-description: Use when opening a pull request or changing its title or description.
+description: Use when opening or landing a pull request, or changing its title or description.
 ---
 
 # Pull requests
@@ -9,7 +9,7 @@ A pull request delivers one coherent outcome, together with the migrations, test
 
 ## Draft and ready
 
-CI runs the full gate only on pull requests marked ready. Keep a pull request in draft while work continues, and mark it ready with `gh pr ready` once the repository gate passes locally on the final commit. Each move to ready starts a full run, so convert it back with `gh pr ready --undo` before pushing more changes. Unless you are about to merge, report that run as pending instead of waiting for it.
+CI runs the full gate only on pull requests marked ready. Keep a pull request in draft while work continues, and mark it ready with `gh pr ready` once the repository gate passes locally on the final commit. Each move to ready starts a full run, so convert it back with `gh pr ready --undo` before pushing more changes. Unless you are about to land the pull request, report that run as pending instead of waiting for it.
 
 ## Title and description
 
@@ -40,3 +40,9 @@ End the description with one line naming what opened the pull request: the model
 Always include `## Verification` with `### Completed checks`: one line per check, naming what ran and how much of it passed, including partial runs and failures.
 
 Add `### Check it yourself` only when a reviewer can confirm the behavior interactively or visually. Give the exact `gh pr checkout <number-or-branch>` command, the shortest steps, and the expected result.
+
+## Landing
+
+Before landing a pull request of any size, run the `review-fix` skill if you judge that a reviewer could find a bug in it that someone would otherwise run into. Standards syncs are exempt, because a consumer can't change synced files.
+
+Land with `bun standards land <pr>`, or `nix run github:davidvornholt/standards -- land <pr>` in a repository without Bun, never with `gh pr merge`. GitHub can't require checks in private repositories on its free plan, so `land`'s wait for them may be the only gate.

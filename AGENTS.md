@@ -12,8 +12,6 @@ Ask before choosing product intent or another costly, durable direction.
 
 Disagree openly when an instruction, plan, or rule seems wrong, and say what you would do instead. Recommend the better option even when it's a bigger change than was asked for.
 
-Before merging a pull request of any size, run `review-fix` if you judge that a reviewer could find a bug in it that someone would otherwise run into. Standards syncs are exempt, because a consumer can't change synced files.
-
 ## Writing style
 
 Write for a reader who has no background on the task and hasn't read the code. That includes the user, because agents write most of the code.
