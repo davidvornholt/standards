@@ -31,9 +31,12 @@ source.overrideAttrs {
 '
 
 export BUN_DOWNLOAD_SYSTEM BUN_DOWNLOAD_VERSION BUN_DOWNLOAD_CORRUPT=no
+# A plain assignment, unlike a process substitution, stops the script when the
+# table can't be read.
+archives=$(jq -er 'to_entries[] | .key as $version | .value | keys[] | [$version, .] | @tsv' "$BUN_DOWNLOAD_REPO/nix/bun-archives.json")
 while IFS=$'\t' read -r BUN_DOWNLOAD_VERSION BUN_DOWNLOAD_SYSTEM; do
   nix build --no-link --impure --expr "$expression" -L
-done < <(jq -er 'to_entries[] | .key as $version | .value | keys[] | [$version, .] | @tsv' "$BUN_DOWNLOAD_REPO/nix/bun-archives.json")
+done <<<"$archives"
 
 BUN_DOWNLOAD_VERSION=$(jq -er '.packageManager | ltrimstr("bun@")' "$BUN_DOWNLOAD_REPO/package.json")
 BUN_DOWNLOAD_SYSTEM=x86_64-linux
