@@ -44,7 +44,7 @@ Post one comment on the pull request, leaving out any part with nothing in it:
 
 - A table with one row per review, including skipped ones: what it reviewed, its reviewers, its findings by label, and the outcome.
 - One line with the final gate result and the total time.
-- One table row per finding: its file and line, what goes wrong, its label, and the commit that fixed it or why it wasn't fixed.
+- One table row per finding: its file and line, what goes wrong, every reviewer that reported it, its label, and the commit that fixed it or why it wasn't fixed. Naming the reviewers shows which ones find what the others miss.
 - Each label you changed, and why.
 - Any risk that remains. If it would show only after deployment, name the check that covers it or file an issue for one.
 
