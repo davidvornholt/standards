@@ -5,7 +5,7 @@ description: Use when asked to review a pull request and fix its findings in the
 
 # Review and fix
 
-Run one round of review and fixes on a pull request, report, and stop. Reviewing a fix always turns up something, so never start another round for problems this one created.
+Run one review-and-fix cycle on a pull request, with at most three reviews, then report and stop. Reviewing a fix always turns up something, so never add a review or repair beyond the ones below.
 
 Work in a dedicated worktree on a draft pull request. Add commits rather than amending or force-pushing. Note the time you start, because the report gives the total time.
 
@@ -42,9 +42,9 @@ File an issue with the [issues skill](../issues/SKILL.md) for each deferred find
 
 Post one comment on the pull request, leaving out any part with nothing in it:
 
-- A table with one row per review round, including skipped ones: what it reviewed, its reviewers, its findings by label, and the outcome.
+- A table with one row per review, including skipped ones: what it reviewed, its reviewers, its findings by label, and the outcome.
 - One line with the final gate result and the total time.
-- One table row per finding: its file and line, what goes wrong, its label, and the commit that fixed it or why it wasn't fixed.
+- One table row per finding: its file and line, what goes wrong, every reviewer that reported it, its label, and the commit that fixed it or why it wasn't fixed. Naming the reviewers shows which ones find what the others miss.
 - Each label you changed, and why.
 - Any risk that remains. If it would show only after deployment, name the check that covers it or file an issue for one.
 
