@@ -123,9 +123,11 @@ const STUBS: Readonly<Record<string, ReadonlyArray<string>>> = {
   curl: [
     ...recordCall('curl'),
     PRINT_FILE,
+    'output=""; previous=""',
+    'for argument; do if [ "$previous" = -sSfLo ]; then output=$argument; fi; previous=$argument; done',
     'for url; do :; done',
     'case "$url" in',
-    '  https://github.com/getsops/sops/releases/download/*) print_file "$FAKE_SOPS" >"$2" ;;',
+    '  https://github.com/getsops/sops/releases/download/*) print_file "$FAKE_SOPS" >"$output" ;;',
     '  "$ACTIONS_ID_TOKEN_REQUEST_URL"*)',
     ...RECORD_STDIN.map((line) => `    ${line}`),
     '    print_file "$FAKE_DATA/oidc-response"',
@@ -178,7 +180,13 @@ const shim = (path: string, body: ReadonlyArray<string>, root: string) => {
   write(
     root,
     path,
-    ['#!/usr/bin/env bash', 'set -euo pipefail', ...body, ''].join('\n'),
+    [
+      '#!/usr/bin/env bash',
+      'set -euo pipefail',
+      `[ -z "\${APP_RELEASE_GITHUB_TOKEN+x}\${release_api_token+x}" ] || exit 97`,
+      ...body,
+      '',
+    ].join('\n'),
   );
   chmodSync(join(root, path), EXECUTABLE_MODE);
 };
@@ -297,6 +305,7 @@ const childEnvironment = (
     ACTIONS_ID_TOKEN_REQUEST_URL:
       'https://oidc.example.test/token?api-version=2.0',
     ACTIONS_ID_TOKEN_REQUEST_TOKEN: REQUEST_TOKEN,
+    APP_RELEASE_GITHUB_TOKEN: 'fixture-api-token',
     APP_RELEASE_COMMAND: inputs.command,
     APP_RELEASE_IMAGES: inputs.images,
     APP_RELEASE_UNIT: inputs.unit,

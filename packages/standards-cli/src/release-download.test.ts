@@ -1,56 +1,19 @@
 import { afterEach, expect, it } from 'bun:test';
-import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
-import {
-  ACTUAL_UPSTREAM,
-  cleanupTmpDirs,
-  mkTmp,
-  runProcess,
-  SOPS_ACTION,
-  write,
-  yamlRunScript,
-} from './cli-test-support';
+import { cleanupTmpDirs, mkTmp, runProcess, write } from './cli-test-support';
 
-const workflow = join(ACTUAL_UPSTREAM, '.github/workflows/standards.yml');
-const artifact =
-  '#!/usr/bin/env bash\nprintf executed > "$EXECUTED"\nprintf \'{"ci":{"token":"fixture"}}\'\n';
-const checksum = createHash('sha256').update(artifact).digest('hex');
-const releaseScript = readFileSync(
-  join(ACTUAL_UPSTREAM, '.github/actions/app-release/release.sh'),
-  'utf8',
-);
-const installer = releaseScript.slice(
-  releaseScript.indexOf('install_sops() {'),
-  releaseScript.indexOf('\nkey_file='),
-);
-// Exercise each embedded download/verification boundary directly. Workflow
-// prefixes stop where archive extraction would begin, then execute a harmless
-// fixture with a real SHA-256 check, so corrupt bytes cannot cross it.
-const scripts = [
-  ['SOPS secret', yamlRunScript(SOPS_ACTION, 'Resolve and validate secret')],
-  [
-    'SOPS release',
-    `set -euo pipefail\nfail() { exit 1; }\nwork="$RUNNER_TEMP"\n${installer}\ninstall_sops\n"$sops"`,
-  ],
-  [
-    'actionlint',
-    `${yamlRunScript(workflow, 'Lint workflows').split('tar -xzf')[0]}bash "$archive"`,
-  ],
-  [
-    'just',
-    `${yamlRunScript(workflow, 'Install just').split('tar -xzf')[0]}bash "$archive"`,
-  ],
-  [
-    'settings Bun',
-    `${yamlRunScript(workflow, 'Install pinned settings checker').split('mkdir "$bun_root"')[0]}bash "$bun_archive"`,
-  ],
-] as const;
+import { artifact, checksum, scripts } from './release-download-test-support';
 
 afterEach(cleanupTmpDirs);
 
-const runInstaller = (script: string, mode: string, architecture: string) => {
+const runInstaller = (
+  script: string,
+  mode: string,
+  architecture: string,
+  token = 'fixture-api-token',
+) => {
   const root = mkTmp('release-download-');
   const bin = join(root, 'bin');
   const executed = join(root, 'executed');
@@ -68,17 +31,28 @@ const runInstaller = (script: string, mode: string, architecture: string) => {
     `#!/usr/bin/env bash
 set -euo pipefail
 url="\${@: -1}"
+[ "$1" = --disable ] || exit 93
+[ -z "\${RELEASE_API_TOKEN+x}\${APP_RELEASE_GITHUB_TOKEN+x}\${release_api_token+x}" ] || exit 94
+[[ "$*" != *fixture-api-token* ]] || exit 95
+output=""
+previous=""
+for argument; do
+  if [ "$previous" = -sSfLo ]; then output=$argument; fi
+  previous=$argument
+done
 printf '%s\\n' "$url" >> "$CALLS"
 case "$url" in
   https://github.com/*/releases/download/*)
-    if [ "$MODE" = direct ]; then cp "$ARTIFACT" "$2"; exit 0; fi
-    if [ "$MODE" = direct-corrupt ]; then printf corrupt > "$2"; exit 0; fi
-    printf partial > "$2"; exit 22 ;;
+    if [ "$MODE" = direct ]; then cp "$ARTIFACT" "$output"; exit 0; fi
+    if [ "$MODE" = direct-corrupt ]; then printf corrupt > "$output"; exit 0; fi
+    printf partial > "$output"; exit 22 ;;
   https://api.github.com/repos/*/releases/assets/*)
-    [[ "$*" == *"Accept: application/octet-stream"* ]] || exit 90
-    if [ "$MODE" = failed ]; then printf partial > "$2"; exit 22; fi
-    if [ "$MODE" = corrupt ]; then printf corrupt > "$2"; exit 0; fi
-    cp "$ARTIFACT" "$2" ;;
+    [[ "$*" == *"Accept: application/octet-stream"* && "$*" == *"-H @-"* ]] || exit 90
+    IFS= read -r authorization
+    [ "$authorization" = 'Authorization: Bearer fixture-api-token' ] || exit 96
+    if [ "$MODE" = failed ]; then printf partial > "$output"; exit 22; fi
+    if [ "$MODE" = corrupt ]; then printf corrupt > "$output"; exit 0; fi
+    cp "$ARTIFACT" "$output" ;;
   *) exit 91 ;;
 esac
 `,
@@ -94,6 +68,13 @@ esac
       ...Object.fromEntries([
         ['PATH', `${bin}:${process.env.PATH}`],
         ['RUNNER_TEMP', root],
+        ['APP_RELEASE_WORK_DIR', root],
+        [
+          script.includes('install_sops()')
+            ? 'APP_RELEASE_GITHUB_TOKEN'
+            : 'RELEASE_API_TOKEN',
+          token,
+        ],
         ['ARCHITECTURE', architecture],
         ['ARTIFACT', join(root, 'artifact')],
         ['CALLS', calls],
@@ -120,6 +101,9 @@ for (const architecture of ['x86_64', 'aarch64']) {
     (_name, script) => {
       const run = runInstaller(script, 'fallback', architecture);
       expect(run.result.status).toBe(0);
+      expect(run.result.stdout + run.result.stderr + run.calls).not.toContain(
+        'fixture-api-token',
+      );
       expect(run.executed).toBe(true);
       expect(run.calls).toContain('https://github.com/');
       expect(run.calls).toContain('/releases/assets/');
@@ -144,6 +128,26 @@ for (const mode of ['corrupt', 'failed', 'direct-corrupt']) {
 it.each(scripts)('%s keeps the successful direct path', (_name, script) => {
   const run = runInstaller(script, 'direct', 'x86_64');
   expect(run.result.status).toBe(0);
+  expect(run.result.stdout + run.result.stderr + run.calls).not.toContain(
+    'fixture-api-token',
+  );
   expect(run.executed).toBe(true);
   expect(run.calls).not.toContain('/releases/assets/');
 });
+
+for (const token of [
+  '',
+  'fixture\rInjected: header',
+  'fixture\nInjected: header',
+]) {
+  it.each(scripts)(
+    '%s rejects absent or multiline API credentials before downloading',
+    (_name, script) => {
+      const run = runInstaller(script, 'fallback', 'x86_64', token);
+      expect(run.result.status).not.toBe(0);
+      expect(run.executed).toBe(false);
+      expect(run.calls).toBe('');
+      expect(run.result.stdout + run.result.stderr).not.toContain('Injected');
+    },
+  );
+}

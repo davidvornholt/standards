@@ -9,6 +9,7 @@
 # 4 (lock wait timed out).
 # shellcheck disable=SC2016 # Markdown backticks in printf formats and $unit in the jq program are literal on purpose.
 set -euo pipefail
+set +x
 # Every file this script creates holds or sits next to a credential.
 umask 077
 
@@ -23,10 +24,13 @@ tag_production=${APP_RELEASE_TAG_PRODUCTION-}
 work=${APP_RELEASE_WORK_DIR-}
 age_key=${APP_RELEASE_AGE_KEY-}
 registry_token=${APP_RELEASE_REGISTRY_TOKEN-}
+release_api_token=${APP_RELEASE_GITHUB_TOKEN-}
+export -n release_api_token
 # Credentials reach only the one process that needs each of them: the age key
 # reaches sops through its environment, and the registry token reaches docker
-# login on stdin. No other child process inherits either.
-unset APP_RELEASE_AGE_KEY APP_RELEASE_REGISTRY_TOKEN
+# login on stdin. The workflow token reaches only the GitHub release API on
+# curl stdin. No unrelated child process inherits these credentials.
+unset APP_RELEASE_AGE_KEY APP_RELEASE_REGISTRY_TOKEN APP_RELEASE_GITHUB_TOKEN
 
 readonly name_pattern='^[a-z0-9][a-z0-9-]*$'
 readonly image_pattern='^([a-z0-9][a-z0-9-]*)@(sha256:[0-9a-f]{64})$'
@@ -156,6 +160,9 @@ extract_path="[\"${ssh_key_path//./\"][\"}\"]"
 # the download stall and end in an HTTP error, so each attempt is capped and
 # retried.
 install_sops() {
+  case "$release_api_token" in
+    ''|*$'\r'*|*$'\n'*) fail "A single-line GitHub workflow token is required" ;;
+  esac
   version=v3.13.3
   case "$(uname -m)" in
     x86_64) arch=amd64 asset=486808201 sha=e5bec3346a873ae91d871550f3e698c1aad962aff462a080e40f25fde17fef6b ;;
@@ -164,8 +171,8 @@ install_sops() {
   esac
   sops="$work/sops"
   if ! {
-    curl -sSfLo "$sops" --retry 3 --retry-all-errors --connect-timeout 10 --max-time 60 "https://github.com/getsops/sops/releases/download/${version}/sops-${version}.linux.${arch}" || \
-      curl -sSfLo "$sops" --retry 3 --retry-all-errors --connect-timeout 10 --max-time 60 -H "Accept: application/octet-stream" "https://api.github.com/repos/getsops/sops/releases/assets/${asset}"
+    curl --disable --proto '=https' --proto-redir '=https' -sSfLo "$sops" --retry 3 --retry-all-errors --connect-timeout 10 --max-time 60 "https://github.com/getsops/sops/releases/download/${version}/sops-${version}.linux.${arch}" || \
+      printf 'Authorization: Bearer %s\n' "$release_api_token" | curl --disable --proto '=https' --proto-redir '=https' -sSfLo "$sops" --retry 3 --retry-all-errors --connect-timeout 10 --max-time 60 -H @- -H "Accept: application/octet-stream" "https://api.github.com/repos/getsops/sops/releases/assets/${asset}"
   }; then
     rm -f "$sops"
     fail "Downloading SOPS ${version} for linux/${arch} failed"

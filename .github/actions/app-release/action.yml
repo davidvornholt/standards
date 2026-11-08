@@ -75,6 +75,7 @@ runs:
       id: release
       shell: bash
       env:
+        APP_RELEASE_GITHUB_TOKEN: ${{ github.token }}
         APP_RELEASE_COMMAND: ${{ inputs.command }}
         APP_RELEASE_IMAGES: ${{ inputs.images }}
         APP_RELEASE_UNIT: ${{ inputs.unit }}

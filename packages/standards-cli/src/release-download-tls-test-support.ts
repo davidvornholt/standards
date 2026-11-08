@@ -1,0 +1,19 @@
+// Public test-only identity for loopback HTTPS redirect checks; never used outside tests.
+export const testTlsKey = `-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgqMi+md4GDs6mSySQ
+81EdLmakFsrY9yg5DWAy1ZdZSeuhRANCAARr+fpYgvBlOWwxII6OQjQcQYmPl6xz
+A1hfM248+teSoHwVwwWjApDlcX9uYLoXHe3CD/diyZ5gUx37u+jH5VBx
+-----END PRIVATE KEY-----
+`;
+export const testTlsCertificate = `-----BEGIN CERTIFICATE-----
+MIIBnDCCAUGgAwIBAgIUBowp8lkLDtcX5SHCg4bgwXUOvbAwCgYIKoZIzj0EAwIw
+FDESMBAGA1UEAwwJbG9jYWxob3N0MCAXDTI2MTEwODExMDUyN1oYDzIxMjYxMDE1
+MTEwNTI3WjAUMRIwEAYDVQQDDAlsb2NhbGhvc3QwWTATBgcqhkjOPQIBBggqhkjO
+PQMBBwNCAARr+fpYgvBlOWwxII6OQjQcQYmPl6xzA1hfM248+teSoHwVwwWjApDl
+cX9uYLoXHe3CD/diyZ5gUx37u+jH5VBxo28wbTAdBgNVHQ4EFgQUiQP3RfadzrFr
+p+R1L2ck2jmv+ngwHwYDVR0jBBgwFoAUiQP3RfadzrFrp+R1L2ck2jmv+ngwDwYD
+VR0TAQH/BAUwAwEB/zAaBgNVHREEEzARgglsb2NhbGhvc3SHBH8AAAEwCgYIKoZI
+zj0EAwIDSQAwRgIhAI8hNwoRQlTjyZKeslffZjQ/KDhAA9jEwPGH8T7LovFJAiEA
+1WApDHmRV1nsIax3lTmdCpsTaSWnxvBYSpbwI3oVAUI=
+-----END CERTIFICATE-----
+`;
