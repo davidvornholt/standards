@@ -7,7 +7,7 @@ description: Use when changing a file the standards sync manages (listed in `syn
 
 The canonical files live in davidvornholt/standards and are mirrored into every consumer repository. A consumer's copy of a synced file is read-only: the next sync overwrites any local edit, and `standards check` reports it as drift against `sync-standards.lock`. So before editing, find which class the path belongs to.
 
-A consumer receives one of two payloads, chosen by `"payload"` in `sync-standards.local.json`. `core` holds `AGENTS.md`, the language-neutral skills, and the weekly sync, for a repository of any language. `bun`, the default, adds the Bun workspace tooling. A Bun consumer runs the CLI as `bun standards <command>`, any other as `nix run github:davidvornholt/standards -- <command>`.
+A consumer receives one of two payloads, chosen by `"payload"` in `sync-standards.local.json`. `core` holds `AGENTS.md`, the language-neutral skills, and the weekly sync, for a repository of any language. `bun`, the default, adds the Bun workspace tooling. A Bun consumer runs the CLI as `bun standards <command>`, any other as `nix run github:davidvornholt/standards -- <command>`. Every repository lands as the prs skill says.
 
 | Class | How to recognize it | Where a change goes |
 | --- | --- | --- |
