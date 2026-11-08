@@ -1,6 +1,6 @@
 # @davidvornholt/standards
 
-Initializes, synchronizes, and validates repositories that consume [davidvornholt/standards](https://github.com/davidvornholt/standards). To adopt it, follow the [adoption guide](https://github.com/davidvornholt/standards/blob/main/docs/adoption.md). For commands and options, run `bun standards help`, `bun standards creds help`, or `bun standards screenshots help`.
+Initializes, synchronizes, and validates repositories that consume [davidvornholt/standards](https://github.com/davidvornholt/standards). To adopt it, follow the [adoption guide](https://github.com/davidvornholt/standards/blob/main/docs/adoption.md). For commands and options, run `bun standards help`, `bun standards creds help`, `bun standards screenshots help`, or `bun standards land --help`.
 
 ## Brokered S3 pairs from another repository
 
