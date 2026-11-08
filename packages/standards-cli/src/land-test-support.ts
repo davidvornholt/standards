@@ -17,6 +17,7 @@ import {
 
 const SHA_LENGTH = 40;
 export const NEW_HEAD = 'a'.repeat(SHA_LENGTH);
+export const BASE_TIP = 'b'.repeat(SHA_LENGTH);
 export const CI = '.github/workflows/ci.yml';
 export const OLD_UPDATE = '2026-01-01T00:00:00Z';
 const CLI = join(import.meta.dir, 'cli.ts');
@@ -116,6 +117,8 @@ const initialGithub = (): FakeGithub => ({
   workflowFiles: {
     [CI]: 'on:\n  pull_request:\n    types: [opened, ready_for_review]\n',
   },
+  commitWorkflows: {},
+  baseTips: [BASE_TIP],
 });
 
 // Git configuration outside the fixture, such as signing, and a GIT_DIR from
@@ -211,6 +214,10 @@ export const workflowReads = (fixture: Land): Array<string> =>
         ?.slice('tree='.length)
         .replace(':.github/workflows', '') ?? '',
   );
+
+// Lookups of the base branch's current tip.
+export const tipLookups = (fixture: Land): Array<Array<string>> =>
+  graphqlCalls(fixture, 'qualifiedName');
 
 export const mergeCalls = (fixture: Land): Array<Array<string>> =>
   calls(fixture, 'pr', 'merge');

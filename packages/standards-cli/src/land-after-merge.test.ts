@@ -3,9 +3,11 @@ import process from 'node:process';
 import { cleanupTmpDirs } from './cli-test-support';
 import { MERGE_COMMIT } from './land-fake-gh-test-support';
 import {
+  BASE_TIP,
   branchExists,
   CI,
   calls,
+  check,
   createLand,
   git,
   type Land,
@@ -13,6 +15,7 @@ import {
   mergeCall,
   mergeCalls,
   now,
+  tipLookups,
   workflowReads,
 } from './land-test-support';
 
@@ -142,6 +145,7 @@ describe('standards land without CI', () => {
     expect(calls(fixture, 'run', 'list')).toEqual([]);
     expect(workflowReads(fixture)).toEqual([
       String(fixture.pr.headRefOid),
+      BASE_TIP,
       MERGE_COMMIT,
     ]);
   });
@@ -162,6 +166,55 @@ describe('standards land without CI', () => {
     expect(mergeCalls(fixture)).toEqual([]);
     // Each head's workflows are read once.
     expect(workflowReads(fixture)).toEqual([String(fixture.pr.headRefOid)]);
+  });
+
+  it('waits for checks when only the base branch has CI', () => {
+    // GitHub runs `pull_request` workflows from the merge into the base branch
+    // and `pull_request_target` ones from the base branch, so a branch cut
+    // before its base gained CI still gets checks. A base branch that can't
+    // be found counts as CI, whatever it holds.
+    const cases: ReadonlyArray<readonly [string, Array<string>]> = [
+      ['pull_request', [BASE_TIP]],
+      ['pull_request_target', [BASE_TIP]],
+      ['schedule', []],
+    ];
+    fixture.github.workflowFiles = { [SCHEDULED]: SCHEDULE_ONLY };
+    for (const [trigger, baseTips] of cases) {
+      fixture.github.commitWorkflows = {
+        [BASE_TIP]: { [CI]: `on: ${trigger}\n` },
+      };
+      fixture.github.baseTips = baseTips;
+      Object.assign(fixture.pr, {
+        statusCheckRollup: [],
+        polls: [{}, { statusCheckRollup: [check({ conclusion: 'FAILURE' })] }],
+      });
+      const result = land(fixture, ['123']);
+      expect(result.status, trigger).toBe(1);
+      expect(result.stderr).toContain('check failed on');
+      expect(mergeCalls(fixture)).toEqual([]);
+    }
+  });
+
+  it("looks up the base branch's tip on every poll", () => {
+    // The base branch drops its CI while land waits. Each commit's workflows
+    // are still read once.
+    const nextTip = 'c'.repeat(BASE_TIP.length);
+    fixture.github.workflowFiles = { [SCHEDULED]: SCHEDULE_ONLY };
+    fixture.github.commitWorkflows = {
+      [BASE_TIP]: { [CI]: 'on: pull_request\n' },
+    };
+    fixture.github.baseTips = [BASE_TIP, BASE_TIP, nextTip];
+    fixture.pr.statusCheckRollup = [];
+    const result = land(fixture, ['123']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(mergeCalls(fixture)).toEqual([mergeCall(fixture)]);
+    expect(tipLookups(fixture)).toHaveLength(3);
+    expect(workflowReads(fixture)).toEqual([
+      String(fixture.pr.headRefOid),
+      BASE_TIP,
+      nextTip,
+      MERGE_COMMIT,
+    ]);
   });
 
   it('waits for checks when a workflow file cannot be parsed', () => {

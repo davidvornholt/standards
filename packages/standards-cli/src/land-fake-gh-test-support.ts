@@ -44,6 +44,12 @@ export type FakeGithub = {
   runFiles: Record<string, string>;
   // Workflow file texts by path, at every commit.
   workflowFiles: Record<string, string>;
+  // Workflow file texts by path at the commits listed here, in place of
+  // workflowFiles.
+  commitWorkflows: Record<string, Record<string, string>>;
+  // Each lookup of the base branch's tip applies the next entry; the last one
+  // stays. Empty when the branch doesn't exist.
+  baseTips: Array<string>;
 };
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -140,11 +146,15 @@ const runsLookup = ({ github }: Call): FakeGhResult =>
     },
   });
 
-const workflowTree = ({ github }: Call): FakeGhResult => {
+const workflowTree = ({ args, github }: Call): FakeGhResult => {
   if (github.workflowsFail) {
     return failure('GitHub unavailable\n');
   }
-  const entries = Object.entries(github.workflowFiles)
+  const files =
+    Object.entries(github.commitWorkflows).find(([sha]) =>
+      args.includes(`tree=${sha}:.github/workflows`),
+    )?.[1] ?? github.workflowFiles;
+  const entries = Object.entries(files)
     .filter(([path]) => path.startsWith(WORKFLOWS_DIR))
     .map(([path, text]) => ({
       name: path.slice(WORKFLOWS_DIR.length),
@@ -158,7 +168,22 @@ const workflowTree = ({ github }: Call): FakeGhResult => {
   });
 };
 
+// Only the pull request's base branch exists.
+const branchTip = ({ args, pr, github, saveGithub }: Call): FakeGhResult => {
+  const base = `ref=refs/heads/${String(pr.baseRefName)}`;
+  const tip = args.includes(base) ? nextOf(github.baseTips) : undefined;
+  saveGithub();
+  return json({
+    data: {
+      repository: { ref: tip === undefined ? null : { target: { oid: tip } } },
+    },
+  });
+};
+
 const graphql = (call: Call): FakeGhResult => {
+  if (call.args.some((arg) => arg.includes('qualifiedName'))) {
+    return branchTip(call);
+  }
   if (call.args.some((arg) => arg.includes('timelineItems'))) {
     return ok(`${call.github.ready ?? ''}\n`);
   }

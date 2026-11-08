@@ -62,8 +62,8 @@ export const land = async (
   if (pr.state !== 'OPEN') {
     throw new LandError(`PR #${pr.number} is ${pr.state}, not merged.`);
   }
-  const hasCi = ciDetector(context, repo);
-  const request = { prNumber: pr.number, repo, noWait, hasCi };
+  const ci = ciDetector(context, repo);
+  const request = { prNumber: pr.number, repo, noWait, hasCi: ci.pullRequest };
   const head = await waitForChecks(context, request);
   // gh reports progress itself, so its output stays on the terminal.
   const merged = runVisibly(context, 'gh', [
@@ -79,5 +79,10 @@ export const land = async (
   if (!merged) {
     throw new LandError(`PR #${pr.number} was not merged.`);
   }
-  return afterMerge(context, { prNumber: pr.number, repo, checkout, hasCi });
+  return afterMerge(context, {
+    prNumber: pr.number,
+    repo,
+    checkout,
+    hasCi: ci.commit,
+  });
 };

@@ -1,5 +1,5 @@
-// Whether a commit has CI that reports on it: any workflow file at the commit
-// that runs on pull requests or pushes. A workflow that only runs on a
+// Whether a commit or pull request has CI that reports on it: any workflow
+// file that runs on pull requests or pushes. A workflow that only runs on a
 // schedule, such as the synced standards-sync workflow, never reports checks,
 // so waiting for it would wait out the whole timeout.
 
@@ -20,6 +20,9 @@ const WORKFLOWS_QUERY =
   'query($owner: String!, $name: String!, $tree: String!) { repository(owner: $owner, name: $name) ' +
   '{ workflows: object(expression: $tree) { ... on Tree { entries { name type ' +
   'object { ... on Blob { text isTruncated } } } } } } }';
+const TIP_QUERY =
+  'query($owner: String!, $name: String!, $ref: String!) { repository(owner: $owner, name: $name) ' +
+  '{ ref(qualifiedName: $ref) { target { oid } } } }';
 
 type WorkflowsResponse = {
   readonly data: {
@@ -34,6 +37,14 @@ type WorkflowsResponse = {
           } | null;
         }>;
       } | null;
+    };
+  };
+};
+
+type TipResponse = {
+  readonly data: {
+    readonly repository: {
+      readonly ref: { readonly target: { readonly oid: string } } | null;
     };
   };
 };
@@ -101,14 +112,45 @@ const workflowTexts = (
     );
 };
 
-// Returns a lookup that reads each commit's workflows once, because the files
+// The commit a branch points to now, or null when the branch doesn't exist.
+// The pull request's own baseRefOid can't stand in for it, because GitHub
+// doesn't update it when the branch moves.
+const branchTip = (
+  context: LandContext,
+  repo: Repository,
+  branch: string,
+): string | null => {
+  const { owner, name } = ownerAndName(repo);
+  const response = JSON.parse(
+    run(context, 'gh', [
+      'api',
+      'graphql',
+      '-f',
+      `owner=${owner}`,
+      '-f',
+      `name=${name}`,
+      '-f',
+      `ref=refs/heads/${branch}`,
+      '-f',
+      `query=${TIP_QUERY}`,
+    ]).stdout,
+  ) as TipResponse;
+  return response.data.repository.ref?.target.oid ?? null;
+};
+
+type CiDetector = {
+  readonly commit: (sha: string) => boolean;
+  readonly pullRequest: (head: string, base: string) => boolean;
+};
+
+// Returns lookups that read each commit's workflows once, because the files
 // at a commit never change.
 export const ciDetector = (
   context: LandContext,
   repo: Repository,
-): ((sha: string) => boolean) => {
+): CiDetector => {
   const known = new Map<string, boolean>();
-  return (sha) => {
+  const commit = (sha: string): boolean => {
     const cached = known.get(sha);
     if (cached !== undefined) {
       return cached;
@@ -117,4 +159,17 @@ export const ciDetector = (
     known.set(sha, hasCi);
     return hasCi;
   };
+  // GitHub runs `pull_request` workflows from the merge of the head into the
+  // base branch and `pull_request_target` workflows from the base branch, so
+  // a head cut before its base gained CI still gets checks. The base branch
+  // can move while land waits, so each call looks up its tip again. A base
+  // branch that can't be found counts as CI.
+  const pullRequest = (head: string, base: string): boolean => {
+    if (commit(head)) {
+      return true;
+    }
+    const tip = branchTip(context, repo, base);
+    return tip === null || commit(tip);
+  };
+  return { commit, pullRequest };
 };

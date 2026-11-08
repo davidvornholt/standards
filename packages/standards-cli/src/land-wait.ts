@@ -23,12 +23,13 @@ import {
 
 const WAIT_MINUTES = 45;
 const POLL_FIELDS =
-  'state,isDraft,headRefOid,mergeStateStatus,statusCheckRollup,updatedAt';
+  'state,isDraft,headRefOid,baseRefName,mergeStateStatus,statusCheckRollup,updatedAt';
 
 type PolledPr = {
   readonly state: string;
   readonly isDraft: boolean;
   readonly headRefOid: string;
+  readonly baseRefName: string;
   readonly mergeStateStatus: string;
   readonly statusCheckRollup: ReadonlyArray<Check> | null;
   readonly updatedAt: string;
@@ -38,7 +39,7 @@ export type WaitRequest = {
   readonly prNumber: number;
   readonly repo: Repository;
   readonly noWait: boolean;
-  readonly hasCi: (sha: string) => boolean;
+  readonly hasCi: (head: string, base: string) => boolean;
 };
 
 type WaitState = {
@@ -49,6 +50,7 @@ type WaitState = {
 
 type Poll = {
   readonly head: string;
+  readonly base: string;
   readonly status: string;
   readonly isDraft: boolean;
   readonly quiet: boolean;
@@ -79,6 +81,7 @@ const readPoll = (
   );
   return {
     head,
+    base: pr.baseRefName,
     status: pr.mergeStateStatus,
     isDraft: pr.isDraft,
     quiet,
@@ -95,8 +98,8 @@ const mayMerge = (request: WaitRequest, poll: Poll): boolean => {
   return (
     (request.noWait && stale.length === 0) ||
     (settled && passed.length > 0) ||
-    // A head without CI has no checks to wait for.
-    (pending.length === 0 && !request.hasCi(poll.head))
+    // A pull request without CI has no checks to wait for.
+    (pending.length === 0 && !request.hasCi(poll.head, poll.base))
   );
 };
 
