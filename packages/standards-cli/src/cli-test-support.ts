@@ -45,6 +45,53 @@ export const write = (root: string, rel: string, content: string): void => {
   writeFileSync(abs, content);
 };
 
+export const AGENTS_PARTS = {
+  core: '## Core rules\n',
+  bun: '## Bun rules\n',
+} as const;
+
+// A fixture source's manifest shaped like the real one: `corePaths` and the
+// no seeds in core, `paths` and the whole template in Bun. Writes
+// the AGENTS.md parts it names, so init and sync can compose AGENTS.md.
+export const writeSyncManifest = (
+  root: string,
+  upstream: string,
+  paths: ReadonlyArray<string>,
+  corePaths: ReadonlyArray<string> = [],
+): void => {
+  write(root, 'agents-md/core.md', AGENTS_PARTS.core);
+  write(root, 'agents-md/bun.md', AGENTS_PARTS.bun);
+  write(
+    root,
+    'sync-standards.json',
+    JSON.stringify({
+      upstream,
+      seedDir: 'template',
+      payloads: {
+        core: {
+          agents: 'agents-md/core.md',
+          seeds: [],
+          paths: corePaths,
+        },
+        bun: { agents: 'agents-md/bun.md', seeds: ['.'], paths },
+      },
+    }),
+  );
+};
+
+type ManifestPayloads = Record<
+  string,
+  { readonly paths: ReadonlyArray<string> }
+>;
+
+// Every managed path of a manifest, core first.
+export const manifestPaths = (manifestPath: string): ReadonlyArray<string> => {
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+    readonly payloads: ManifestPayloads;
+  };
+  return Object.values(manifest.payloads).flatMap((payload) => payload.paths);
+};
+
 export const runProcess = (
   executable: string,
   cwd: string,

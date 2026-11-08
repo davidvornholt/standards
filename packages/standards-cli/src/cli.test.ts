@@ -21,11 +21,13 @@ import { parse as parseYaml } from 'yaml';
 import {
   ACTUAL_UPSTREAM,
   cleanupTmpDirs,
+  manifestPaths,
   mkTmp,
   type RunResult,
   runProcess,
   SOPS_ACTION,
   write,
+  writeSyncManifest,
   yamlRunScript,
   yamlStep,
 } from './cli-test-support';
@@ -124,6 +126,9 @@ echo "$RUNNER_TEMP/zstd/usr/bin" >> "$GITHUB_PATH"
 `,
 };
 const EXECUTABLE_MODE = 0o755;
+const RESOLVED_SHA = 'fedcba9876543210fedcba9876543210fedcba98';
+const NIX_RESOLVED_BUILD =
+  /^build --out-link \S+\/standards-cli github:davidvornholt\/standards\?rev=fedcba9876543210fedcba9876543210fedcba98#standards-cli$/u;
 const STD_PATHS: ReadonlyArray<string> = [
   'sync-standards.json',
   '.github/dependabot.base.yml',
@@ -168,6 +173,11 @@ const INVALID_POLICY_CASES = [
     'a carriage return in ref',
     '{ "ref": "main\\rpresent=false" }',
     '"ref" must be a non-empty single-line string',
+  ],
+  [
+    'an unknown payload',
+    '{ "payload": "rust" }',
+    '"payload" must be "core" or "bun"',
   ],
   [
     'an unsupported field',
@@ -813,25 +823,11 @@ const hasWorkflowExtension = (candidate: string): boolean =>
 
 const canonicalWorkflowPaths = (
   syncManifestPath: string,
-): ReadonlyArray<string> => {
-  const syncManifest: unknown = JSON.parse(
-    readFileSync(syncManifestPath, 'utf8'),
+): ReadonlyArray<string> =>
+  manifestPaths(syncManifestPath).filter(
+    (path) =>
+      path.startsWith('.github/workflows/') && hasWorkflowExtension(path),
   );
-  if (
-    typeof syncManifest !== 'object' ||
-    syncManifest === null ||
-    !('paths' in syncManifest) ||
-    !Array.isArray(syncManifest.paths)
-  ) {
-    throw new Error('Sync manifest must contain a paths array');
-  }
-  return syncManifest.paths.filter(
-    (path): path is string =>
-      typeof path === 'string' &&
-      path.startsWith('.github/workflows/') &&
-      hasWorkflowExtension(path),
-  );
-};
 
 // This merge-time ratchet keeps configurable routing on the exact compatible
 // canonical jobs. It catches accidental workflow drift after review; it does
@@ -1124,16 +1120,11 @@ const runWorkflowVersionGuard = (version: string): RunResult => {
 // A fake upstream: its own manifest, a `template/` seed dir, two managed files.
 const buildUpstream = (paths: ReadonlyArray<string> = STD_PATHS): string => {
   const up = mkTmp('sync-up-');
-  write(
-    up,
-    'sync-standards.json',
-    JSON.stringify({ upstream: up, seedDir: 'template', paths }),
-  );
+  writeSyncManifest(up, up, paths);
   write(up, 'template/seed.txt', 'seed original\n');
   write(up, 'template/.envrc', 'use flake\n');
   write(up, 'template/flake.nix', '{}\n');
   write(up, 'template/flake.lock', '{}\n');
-  write(up, 'template/AGENTS.local.md', '# Local\n');
   write(up, 'template/biome.jsonc', '{"extends":["./biome.base.jsonc"]}\n');
   write(
     up,
@@ -1521,7 +1512,6 @@ describe('doctor', () => {
     const doctor = run(consumer, ['doctor', '--dir', consumer]);
     expect(doctor.status).toBe(1);
     expect(doctor.stderr).toContain('biome.jsonc must extend');
-    expect(doctor.stderr).toContain('AGENTS.local.md must exist');
     expect(doctor.stderr).toContain('.github/dependabot.base.yml must exist');
     expect(doctor.stderr).toContain('@davidvornholt/standards');
     expect(doctor.stderr).toContain('script "check"');
@@ -1892,15 +1882,7 @@ describe('sync', () => {
     const up = buildUpstream();
     const { consumer } = initConsumer(up);
     write(up, 'newly-managed.txt', 'new\n');
-    write(
-      up,
-      'sync-standards.json',
-      JSON.stringify({
-        upstream: up,
-        seedDir: 'template',
-        paths: [...STD_PATHS, 'newly-managed.txt'],
-      }),
-    );
+    writeSyncManifest(up, up, [...STD_PATHS, 'newly-managed.txt']);
 
     const result = sync(up, consumer);
 
@@ -3572,15 +3554,9 @@ describe('canonical configurable runner merge-time ratchet', () => {
 
   it('rejects configurable runners in manifest-owned .yaml workflows', () => {
     const fixture = mkTmp('canonical-yaml-runner-boundary-');
-    write(
-      fixture,
-      'sync-standards.json',
-      JSON.stringify({
-        paths: ['.github/workflows/additional-check.yaml'],
-        seedDir: 'template',
-        upstream: 'github:davidvornholt/standards',
-      }),
-    );
+    writeSyncManifest(fixture, 'github:davidvornholt/standards', [
+      '.github/workflows/additional-check.yaml',
+    ]);
     // Two violating jobs, so one run must name both: a first-match report would
     // cost a maintainer one fix-and-rerun cycle per offending job.
     write(
@@ -3656,10 +3632,9 @@ describe('canonical SOPS secret action wiring', () => {
     for (const workflow of localActionWorkflows) {
       expect(workflow).toContain('uses: ./.github/actions/sops-secret');
     }
-    const syncManifest = JSON.parse(
-      readFileSync(join(ACTUAL_UPSTREAM, 'sync-standards.json'), 'utf8'),
-    ) as { readonly paths: ReadonlyArray<string> };
-    expect(syncManifest.paths).toContain('.github/actions/sops-secret');
+    expect(
+      manifestPaths(join(ACTUAL_UPSTREAM, 'sync-standards.json')),
+    ).toContain('.github/actions/sops-secret');
   });
 });
 
@@ -3778,6 +3753,7 @@ describe('standards sync workflow policy', () => {
 
     expect(result.status).toBe(0);
     expect(output).toContain('auto-sync=true');
+    expect(output).toContain('payload=bun');
     expect(output).toContain('present=false');
     expect(output).toContain('ref=\n');
     expect(readFileSync(SYNC_WORKFLOW, 'utf8')).not.toContain(
@@ -3795,8 +3771,16 @@ describe('standards sync workflow policy', () => {
 
     expect(result.status).toBe(0);
     expect(output).toContain('auto-sync=false');
+    expect(output).toContain('payload=bun');
     expect(output).toContain('present=true');
     expect(output).toContain('ref=v0.7.0');
+  });
+
+  it('emits the core payload', () => {
+    const { result, output } = runPolicyPreflight('{ "payload": "core" }\n');
+
+    expect(result.status).toBe(0);
+    expect(output).toContain('payload=core');
   });
 
   it.each([
@@ -3809,6 +3793,8 @@ describe('standards sync workflow policy', () => {
     ['an empty ref', '{ "ref": "" }'],
     ['a newline in ref', '{ "ref": "main\\npresent=false" }'],
     ['a carriage return in ref', '{ "ref": "main\\rpresent=false" }'],
+    ['an unknown payload', '{ "payload": "rust" }'],
+    ['a non-string payload', '{ "payload": 1 }'],
     ['an unsupported field', '{ "branch": "stable" }'],
   ])('fails closed for %s', (_label, policy) => {
     const { result, output } = runPolicyPreflight(policy);
@@ -3844,6 +3830,85 @@ describe('standards sync workflow policy', () => {
       expect(runWorkflowVersionGuard(version).status).toBe(0);
     },
   );
+});
+
+describe('standards sync workflow core runtime', () => {
+  const PINNED_SHA = '0123456789abcdef0123456789abcdef01234567';
+  const preserveCoreRuntime = (
+    upstream: string,
+    ref: string,
+  ): { result: RunResult; nixArgs: ReadonlyArray<string>; env: string } => {
+    const fixture = mkTmp('sync-core-runtime-');
+    write(fixture, 'sync-standards.json', JSON.stringify({ upstream }));
+    write(
+      fixture,
+      'bin/nix',
+      `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> "$NIX_ARGS"\n[ "$1" != flake ] || printf '{"locked":{"rev":"${RESOLVED_SHA}"}}'\n`,
+    );
+    chmodSync(join(fixture, 'bin/nix'), EXECUTABLE_MODE);
+    const argsPath = join(fixture, 'nix-args');
+    const result = runExecutable(
+      'bash',
+      fixture,
+      [
+        '-euo',
+        'pipefail',
+        '-c',
+        workflowRunScript('Preserve trusted sync runtime'),
+      ],
+      {
+        GITHUB_ENV: join(fixture, 'github-env'),
+        NIX_ARGS: argsPath,
+        PATH: `${join(fixture, 'bin')}:${process.env.PATH ?? ''}`,
+        RUNNER_TEMP: fixture,
+        SYNC_PAYLOAD: 'core',
+        SYNC_POLICY_REF: ref,
+      },
+    );
+    const envPath = join(fixture, 'github-env');
+    return {
+      result,
+      nixArgs: existsSync(argsPath)
+        ? readFileSync(argsPath, 'utf8').trim().split('\n')
+        : [],
+      env: existsSync(envPath) ? readFileSync(envPath, 'utf8') : '',
+    };
+  };
+
+  // The CLI comes from the same standards commit as the content it mirrors,
+  // even when the branch or tag moves during the run.
+  it.each([
+    ['', 'github:davidvornholt/standards'],
+    ['v0.34.0', 'github:davidvornholt/standards?ref=v0.34.0'],
+    [PINNED_SHA, `github:davidvornholt/standards?rev=${PINNED_SHA}`],
+  ])('builds the CLI with Nix for ref %p', (ref, flake) => {
+    const { result, nixArgs, env } = preserveCoreRuntime(
+      'github:davidvornholt/standards',
+      ref,
+    );
+
+    expect(result.status).toBe(0);
+    expect(nixArgs).toEqual([
+      `flake metadata --json ${flake}`,
+      expect.stringMatching(NIX_RESOLVED_BUILD),
+    ]);
+    expect(env).toContain(`STANDARDS_SYNC_REV=${RESOLVED_SHA}\n`);
+  });
+
+  it.each([
+    ['a non-GitHub upstream', 'file:///srv/standards', ''],
+    [
+      'a ref a flake URL cannot carry',
+      'github:davidvornholt/standards',
+      'v1?dir=x',
+    ],
+  ])('fails before building for %s', (_label, upstream, ref) => {
+    const { result, nixArgs } = preserveCoreRuntime(upstream, ref);
+
+    expect(result.status).toBe(1);
+    expect(`${result.stdout}${result.stderr}`).toContain('::error::');
+    expect(nixArgs).toEqual([]);
+  });
 });
 
 describe('standards sync workflow trigger policy', () => {
@@ -3999,12 +4064,14 @@ describe('invalid invocations', () => {
     {
       args: ['sync', '--check', '--dir', DIR],
       messages: [
-        '--check is only valid with the github and dependabot commands',
+        '--check is only valid with the github, dependabot, and agents commands',
       ],
     },
     {
       args: ['sync', '--write', '--dir', DIR],
-      messages: ['--write is only valid with the dependabot command'],
+      messages: [
+        '--write is only valid with the dependabot and agents commands',
+      ],
     },
     {
       args: ['--dir', DIR],
@@ -4054,7 +4121,7 @@ describe('path safety', () => {
     const result = run(consumer, ['init', '--from', up, '--dir', consumer]);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(
-      'managed path must be a normalized repository-relative path',
+      '"payloads.bun.paths" entry must be a normalized repository-relative path',
     );
   });
 

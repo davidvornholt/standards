@@ -15,7 +15,7 @@ CI runs the full gate only on pull requests marked ready. Keep a pull request in
 
 Pull requests squash into main with the title as the commit subject and the description as the commit body, so keep both accurate until the merge. The title is a Conventional Commit subject, `type(scope): description`, with an optional scope and an imperative description.
 
-Write the description for whoever decides on the merge, who has no background on the problem and hasn't read the code. Open with these two short paragraphs and nothing above them, because they should be enough to decide on:
+Write the description for whoever decides on the merge. Open with these two short paragraphs and nothing above them, because they should be enough to decide on:
 
 ```md
 **Before.** The current state, who or what it affects, and its concrete cost or risk.

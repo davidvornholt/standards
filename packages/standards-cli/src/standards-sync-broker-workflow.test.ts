@@ -13,6 +13,7 @@ import {
   prToken,
   resolveClientIdName,
   syncName,
+  syncPayloadName,
   syncPolicyRefName,
   type TokenConsumerContracts,
   workflowSource,
@@ -279,6 +280,7 @@ const credentialMutations = (): ReadonlyArray<
     ),
     (workflow) => {
       mutableStep(workflow, syncName).env = {
+        [syncPayloadName]: expression('needs.policy.outputs.payload'),
         [syncPolicyRefName]: expression('needs.policy.outputs.ref'),
         leakedKey: privateKeyOutput,
       };
@@ -328,6 +330,7 @@ describe('Standards sync broker credential contract', () => {
       namedStep(parsedWorkflow, 'Checkout').with?.['persist-credentials'],
     ).toBe(false);
     expect(namedStep(parsedWorkflow, syncName).env).toEqual({
+      [syncPayloadName]: expression('needs.policy.outputs.payload'),
       [syncPolicyRefName]: expression('needs.policy.outputs.ref'),
     });
     expect(

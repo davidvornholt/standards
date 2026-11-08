@@ -1,36 +1,47 @@
 {
   "upstream": "github:davidvornholt/standards",
   "seedDir": "template",
-  "paths": [
-    "sync-standards.json",
-    "AGENTS.md",
-    ".agents/skills/ci-pipelines",
-    ".agents/skills/database",
-    ".agents/skills/declarative-infra",
-    ".agents/skills/frontend-design",
-    ".agents/skills/issues",
-    ".agents/skills/nextjs",
-    ".agents/skills/prs",
-    ".agents/skills/review",
-    ".agents/skills/review-fix",
-    ".agents/skills/secrets-and-config",
-    ".agents/skills/screenshots-in-prs",
-    ".agents/skills/standards-sync",
-    ".agents/skills/ux-ui",
-    ".claude/skills",
-    ".mise/config.toml",
-    "biome.base.jsonc",
-    "justfile",
-    "secrets.just",
-    "nix/standards-bun.nix",
-    ".github/settings.json",
-    ".github/dependabot.base.yml",
-    ".github/actions/sops-secret",
-    ".github/actions/app-release",
-    "packages/typescript-config",
-    "packages/a11y-testing",
-    ".github/workflows/standards.yml",
-    ".github/workflows/standards-sync.yml",
-    ".github/workflows/standards-auto-merge.yml"
-  ]
+  "payloads": {
+    "core": {
+      "agents": "agents-md/core.md",
+      "seeds": [],
+      "paths": [
+        "sync-standards.json",
+        ".agents/skills/issues",
+        ".agents/skills/prs",
+        ".agents/skills/review",
+        ".agents/skills/review-fix",
+        ".agents/skills/standards-sync",
+        ".claude/skills",
+        ".github/actions/sops-secret",
+        ".github/workflows/standards-sync.yml"
+      ]
+    },
+    "bun": {
+      "agents": "agents-md/bun.md",
+      "seeds": ["."],
+      "paths": [
+        ".agents/skills/ci-pipelines",
+        ".agents/skills/database",
+        ".agents/skills/declarative-infra",
+        ".agents/skills/frontend-design",
+        ".agents/skills/nextjs",
+        ".agents/skills/secrets-and-config",
+        ".agents/skills/screenshots-in-prs",
+        ".agents/skills/ux-ui",
+        ".mise/config.toml",
+        "biome.base.jsonc",
+        "justfile",
+        "secrets.just",
+        "nix/standards-bun.nix",
+        ".github/settings.json",
+        ".github/dependabot.base.yml",
+        ".github/actions/app-release",
+        "packages/typescript-config",
+        "packages/a11y-testing",
+        ".github/workflows/standards.yml",
+        ".github/workflows/standards-auto-merge.yml"
+      ]
+    }
+  }
 }

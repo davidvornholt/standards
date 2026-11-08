@@ -7,17 +7,24 @@ import { isNonEmptyString, isRecord } from './github-settings-parse';
 export const SYNC_POLICY_FILE = 'sync-standards.local.json';
 const LINE_BREAK = /[\r\n]/u;
 
+// Which standards a consumer receives: `core` for every repository, `bun` for
+// Bun workspaces, which also get core. Existing consumers are all Bun.
+export type SyncPayload = 'core' | 'bun';
+
 export type SyncPolicy = {
   readonly autoSync?: boolean;
+  readonly payload?: SyncPayload;
   readonly ref?: string;
 };
+
+const SUPPORTED_FIELDS = new Set(['autoSync', 'payload', 'ref']);
 
 const parseSyncPolicy = (parsed: unknown): SyncPolicy => {
   if (!isRecord(parsed)) {
     throw new Error(`${SYNC_POLICY_FILE} must be a JSON object`);
   }
   const unsupportedFields = Object.keys(parsed).filter(
-    (field) => field !== 'autoSync' && field !== 'ref',
+    (field) => !SUPPORTED_FIELDS.has(field),
   );
   if (unsupportedFields.length > 0) {
     throw new Error(
@@ -28,6 +35,13 @@ const parseSyncPolicy = (parsed: unknown): SyncPolicy => {
     throw new Error(`${SYNC_POLICY_FILE} "autoSync" must be a boolean`);
   }
   if (
+    parsed.payload !== undefined &&
+    parsed.payload !== 'core' &&
+    parsed.payload !== 'bun'
+  ) {
+    throw new Error(`${SYNC_POLICY_FILE} "payload" must be "core" or "bun"`);
+  }
+  if (
     parsed.ref !== undefined &&
     (!isNonEmptyString(parsed.ref) || LINE_BREAK.test(parsed.ref))
   ) {
@@ -35,7 +49,11 @@ const parseSyncPolicy = (parsed: unknown): SyncPolicy => {
       `${SYNC_POLICY_FILE} "ref" must be a non-empty single-line string`,
     );
   }
-  return { autoSync: parsed.autoSync, ref: parsed.ref };
+  return {
+    autoSync: parsed.autoSync,
+    payload: parsed.payload,
+    ref: parsed.ref,
+  };
 };
 
 export const readSyncPolicy = async (consumer: string): Promise<SyncPolicy> => {
@@ -86,3 +104,6 @@ export const selectedSyncRef = (
   policy: SyncPolicy,
 ): string | undefined =>
   existsSync(src) ? explicitRef : (explicitRef ?? policy.ref);
+
+export const selectedPayload = (policy: SyncPolicy): SyncPayload =>
+  policy.payload ?? 'bun';
