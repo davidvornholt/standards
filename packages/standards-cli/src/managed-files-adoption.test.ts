@@ -24,8 +24,7 @@ const untouched = (consumer: string): boolean =>
   !(
     existsSync(join(consumer, 'sync-standards.lock')) ||
     existsSync(join(consumer, 'sync-standards.json')) ||
-    existsSync(join(consumer, 'seed.txt')) ||
-    existsSync(join(consumer, '.github/dependabot.base.yml'))
+    existsSync(join(consumer, 'seed.txt'))
   );
 
 afterEach(cleanupTmpDirs);

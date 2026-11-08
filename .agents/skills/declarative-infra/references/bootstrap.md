@@ -4,7 +4,7 @@ Bootstrap only when a host or zone has no infrastructure home yet. Connecting an
 
 Reuse means copying. Copy the patterns below into the host repo and adapt them, and improve the patterns here, upstream, instead of creating infrastructure flakes or modules that several repos depend on. The one shared module is app-release.
 
-A dedicated infra repo is a full standards consumer, so run `standards init` before laying out the infrastructure. There is no partial consumer profile, so the synced TypeScript payload stays in the repo, inert. Put the Nix and OpenTofu Dependabot update blocks in `.github/dependabot.local.yml`.
+A dedicated infra repo is a full standards consumer, so run `standards init` before laying out the infrastructure. There is no partial consumer profile, so the synced TypeScript payload stays in the repo, inert. Put the Nix and OpenTofu Dependabot update blocks below the `# Project-specific updates` line at the end of `.github/dependabot.yml`.
 
 ## Layout
 

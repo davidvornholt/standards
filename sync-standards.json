@@ -35,7 +35,7 @@
         "secrets.just",
         "nix/standards-bun.nix",
         ".github/settings.json",
-        ".github/dependabot.base.yml",
+        ".github/dependabot.yml",
         ".github/actions/app-release",
         "packages/typescript-config",
         "packages/a11y-testing",

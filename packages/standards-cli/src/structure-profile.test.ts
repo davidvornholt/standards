@@ -18,7 +18,6 @@ const SOURCE_GATE_COMMANDS = {
   check: [
     `${CLI} structure --profile source`,
     `${CLI} source-text`,
-    `${CLI} dependabot --check`,
     `${CLI} agents --check`,
     `${CLI} github --check`,
     'turbo run lint check-types test --output-logs=errors-only',
@@ -26,7 +25,6 @@ const SOURCE_GATE_COMMANDS = {
   'check:fix': [
     `${CLI} structure --profile source`,
     `${CLI} source-text`,
-    `${CLI} dependabot --write`,
     `${CLI} agents --write`,
     `${CLI} github --check`,
     'turbo run lint:fix check-types test --output-logs=errors-only',
@@ -34,22 +32,22 @@ const SOURCE_GATE_COMMANDS = {
 } as const;
 const INVALID_SOURCE_GATES = (['check', 'check:fix'] as const).flatMap(
   (name) => {
-    const [structure, dependabot, github, turbo] = SOURCE_GATE_COMMANDS[name];
+    const [structure, sourceText, agents, github] = SOURCE_GATE_COMMANDS[name];
     return [
       [
         `${name} reversed`,
         name,
-        [github, structure, dependabot, turbo].join(' && '),
+        [github, structure, sourceText, agents].join(' && '),
       ],
       [
         `${name} interleaved`,
         name,
-        [structure, 'true', dependabot, github, turbo].join(' && '),
+        [structure, 'true', sourceText, agents, github].join(' && '),
       ],
       [
         `${name} extra`,
         name,
-        ['true', structure, dependabot, github, turbo].join(' && '),
+        ['true', structure, sourceText, agents, github].join(' && '),
       ],
     ] as const;
   },

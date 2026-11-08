@@ -13,19 +13,12 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
-import { lstat, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, posix, resolve } from 'node:path';
 import process from 'node:process';
-import { isContainedPath } from './contained-path';
 import { runCredsCommand } from './creds-commands';
-import {
-  composeDependabot,
-  DEPENDABOT_BASE_FILE,
-  DEPENDABOT_FILE,
-  DEPENDABOT_LOCAL_FILE,
-} from './dependabot-compose';
-import { inspectDependabot } from './dependabot-inspect';
+import { dependabotProblems } from './dependabot';
 import { runDevEnv } from './dev-env';
 import { CANONICAL_SETTINGS_FILE, LOCAL_SETTINGS_FILE } from './github-api';
 import { runGithubApply, runGithubCheck } from './github-commands';
@@ -51,14 +44,16 @@ import type { StructureProfile } from './structure-profile';
 import { hasSafeCommand } from './structure-script';
 import {
   AGENTS_FILE,
-  AGENTS_LOCAL_HEADING,
   assertSafeRelativePath,
+  isSplitFile,
   loadManifest,
   type Manifest,
+  ownPartHint,
   readManifestUpstream,
   readSourceAgents,
   splitAgents,
-  withLocalRules,
+  splitManaged,
+  withOwnPart,
   withPayloadPlan,
 } from './sync-payload';
 import {
@@ -96,7 +91,6 @@ type Source = {
 type Command =
   | 'agents'
   | 'check'
-  | 'dependabot'
   | 'dev-env'
   | 'doctor'
   | 'github'
@@ -120,16 +114,16 @@ type CliOptions = {
 const sha256 = (buf: Buffer): string =>
   createHash('sha256').update(buf).digest('hex');
 
-// Sync owns AGENTS.md only down to its local heading, so the repository's own
-// rules below it are neither drift nor canonical content.
+// Sync owns a split file such as AGENTS.md only down to its marker line, so the
+// repository's own part below it is neither drift nor canonical content.
 const managedPart = async (
   rel: string,
   entry: ManagedEntry,
 ): Promise<Buffer> => {
   const input = await managedEntryDigestInput(entry);
   const head =
-    rel === AGENTS_FILE && entry.kind === 'file'
-      ? splitAgents(input.toString('utf8'))?.head
+    isSplitFile(rel) && entry.kind === 'file'
+      ? splitManaged(rel, input.toString('utf8'))?.head
       : undefined;
   return head === undefined ? input : Buffer.from(head);
 };
@@ -611,21 +605,17 @@ const reportMirror = (result: MirrorResult, dryRun: boolean): void => {
 
 // A retained or stale key leaves the lock, so the run rewrites `sync-standards.lock`
 // even when it touches nothing on disk; neither may be summed into "no changes".
-const reportDryRunSummary = (
-  result: MirrorResult,
-  generated: boolean,
-): void => {
+const reportDryRunSummary = (result: MirrorResult): void => {
   const unlocked = result.retained.length + result.stale.length;
   const changes =
     result.created.length +
     result.updated.length +
     result.deleted.length +
-    unlocked +
-    Number(generated);
+    unlocked;
   console.log(
     changes === 0
       ? 'dry run: already in sync; no changes'
-      : `dry run: ${result.created.length} to create, ${result.updated.length} to update, ${result.deleted.length} to delete, ${Number(generated)} to generate, ${unlocked} to drop from the lock without deleting`,
+      : `dry run: ${result.created.length} to create, ${result.updated.length} to update, ${result.deleted.length} to delete, ${unlocked} to drop from the lock without deleting`,
   );
 };
 
@@ -647,14 +637,6 @@ const runInit = async (
         ],
         'cannot initialize from this source',
       );
-      const prospectiveDependabot =
-        payload === 'bun'
-          ? await prepareProspectiveDependabot(
-              upstream,
-              consumer,
-              seeds.get(DEPENDABOT_LOCAL_FILE) ?? null,
-            )
-          : null;
       await Promise.all(
         [...seeds].map(async ([rel, entry]) => {
           const dest = join(consumer, rel);
@@ -679,13 +661,6 @@ const runInit = async (
         command: 'init',
       });
       reportMirror(result, false);
-      if (prospectiveDependabot !== null) {
-        await applyProspectiveDependabot(
-          consumer,
-          prospectiveDependabot,
-          false,
-        );
-      }
       await writeLock(consumer, {
         upstream: manifest.upstream,
         sha: src.sha,
@@ -709,10 +684,6 @@ const runSync = async (
   withPayloadPlan(
     { manifest, srcDir: src.dir, payload, consumer },
     async ({ upstream }) => {
-      const prospectiveDependabot =
-        payload === 'bun'
-          ? await prepareProspectiveDependabot(upstream, consumer, null)
-          : null;
       const lock = await readLock(consumer);
       const result = await mirror({
         upstream,
@@ -722,15 +693,8 @@ const runSync = async (
         command: 'sync',
       });
       reportMirror(result, dryRun);
-      const generated =
-        prospectiveDependabot !== null &&
-        (await applyProspectiveDependabot(
-          consumer,
-          prospectiveDependabot,
-          dryRun,
-        ));
       if (dryRun) {
-        reportDryRunSummary(result, generated);
+        reportDryRunSummary(result);
         return;
       }
       await writeLock(consumer, {
@@ -768,10 +732,8 @@ const runCheck = async (consumer: string): Promise<boolean> => {
       }
       const current = await lockDigest(rel, entry);
       if (current !== hash) {
-        const hint =
-          rel === AGENTS_FILE
-            ? `; a repository's own rules go below "${AGENTS_LOCAL_HEADING}"`
-            : '';
+        const own = ownPartHint(rel);
+        const hint = own === undefined ? '' : `; ${own}`;
         return `  modified: ${rel} (expected ${hash.slice(0, HASH_PREVIEW_LENGTH)}, found ${current.slice(0, HASH_PREVIEW_LENGTH)})${hint}`;
       }
       return null;
@@ -814,189 +776,6 @@ const runCheck = async (consumer: string): Promise<boolean> => {
 const readTextIfPresent = async (path: string): Promise<string | null> =>
   existsSync(path) ? readFile(path, 'utf8') : null;
 
-type DependabotSources = {
-  readonly base: string | null;
-  readonly local: string | null;
-  readonly current: string | null;
-};
-
-const readDependabotSources = async (
-  consumer: string,
-): Promise<DependabotSources> => ({
-  base: await readTextIfPresent(join(consumer, DEPENDABOT_BASE_FILE)),
-  local: await readTextIfPresent(join(consumer, DEPENDABOT_LOCAL_FILE)),
-  current: await readTextIfPresent(join(consumer, DEPENDABOT_FILE)),
-});
-
-// Compose the generated Dependabot config from its on-disk sources, folding
-// Dependabot semantic validation into the same problem list.
-const composedDependabot = (
-  sources: DependabotSources,
-): {
-  readonly composed: string | null;
-  readonly problems: ReadonlyArray<string>;
-} => {
-  if (sources.base === null) {
-    return {
-      composed: null,
-      problems: [
-        `${DEPENDABOT_BASE_FILE} must exist; run \`bun standards sync\` to mirror it in`,
-      ],
-    };
-  }
-  const result = composeDependabot(sources.base, sources.local);
-  if (result.composed === null) {
-    return result;
-  }
-  const problems = inspectDependabot(result.composed);
-  return problems.length > 0 ? { composed: null, problems } : result;
-};
-
-const dependabotProblems = async (
-  consumer: string,
-): Promise<ReadonlyArray<string>> => {
-  const sources = await readDependabotSources(consumer);
-  const { composed, problems } = composedDependabot(sources);
-  if (composed === null) {
-    return problems;
-  }
-  if (sources.current !== composed) {
-    return [
-      `${DEPENDABOT_FILE} does not match its composed sources; regenerate it with \`bun standards dependabot --write\``,
-    ];
-  }
-  return [];
-};
-
-const lstatIfPresent = (path: string) =>
-  lstat(path).catch((error: unknown) => {
-    if (isRecord(error) && error.code === 'ENOENT') {
-      return null;
-    }
-    throw error;
-  });
-
-// The generated file is written in place, so a symlinked `.github` or
-// dependabot.yml would redirect the write outside the consumer.
-const assertDependabotDestination = async (consumer: string): Promise<void> => {
-  const dir = dirname(DEPENDABOT_FILE);
-  if (
-    (await lstatIfPresent(join(consumer, dir))) !== null &&
-    !isContainedPath(consumer, dir, 'directory')
-  ) {
-    throw new Error(
-      `${dir} must be a contained directory; symlinked paths are not allowed`,
-    );
-  }
-  if (
-    (await lstatIfPresent(join(consumer, DEPENDABOT_FILE))) !== null &&
-    !isContainedPath(consumer, DEPENDABOT_FILE, 'file')
-  ) {
-    throw new Error(
-      `${DEPENDABOT_FILE} must be a contained regular file; symlinked paths are not allowed`,
-    );
-  }
-};
-
-const writeComposedDependabot = async (
-  consumer: string,
-  composed: string,
-): Promise<void> => {
-  await assertDependabotDestination(consumer);
-  const dest = join(consumer, DEPENDABOT_FILE);
-  await mkdir(dirname(dest), { recursive: true });
-  await writeFile(dest, composed);
-};
-
-const composeProblemsError = (problems: ReadonlyArray<string>): Error =>
-  new Error(
-    [
-      `cannot compose ${DEPENDABOT_FILE}:`,
-      ...problems.map((problem) => `  - ${problem}`),
-    ].join('\n'),
-  );
-
-type ProspectiveDependabot = {
-  readonly composed: string;
-  readonly current: string | null;
-};
-
-// Validate the incoming canonical base against the effective local overlay
-// before init/sync mutates any consumer-owned, canonical, generated, or lock
-// file. For init, an existing overlay wins; otherwise the overlay seed is what
-// the command is about to install.
-const prepareProspectiveDependabot = async (
-  incoming: ReadonlyMap<string, ManagedEntry>,
-  consumer: string,
-  localSeed: ManagedEntry | null,
-): Promise<ProspectiveDependabot> => {
-  await assertDependabotDestination(consumer);
-  const base = incoming.get(DEPENDABOT_BASE_FILE);
-  if (base === undefined || base.kind !== 'file') {
-    throw new Error(
-      `source content must manage ${DEPENDABOT_BASE_FILE}; @davidvornholt/standards 0.10.1 requires a 0.10.1-compatible content ref`,
-    );
-  }
-  const existingLocal = await readTextIfPresent(
-    join(consumer, DEPENDABOT_LOCAL_FILE),
-  );
-  if (
-    existingLocal === null &&
-    localSeed !== null &&
-    localSeed.kind !== 'file'
-  ) {
-    throw new Error(
-      `source seed ${DEPENDABOT_LOCAL_FILE} must be a regular file; replace its symlink with the overlay content`,
-    );
-  }
-  const local =
-    existingLocal ??
-    (localSeed === null || localSeed.kind !== 'file'
-      ? null
-      : await readFile(localSeed.absolutePath, 'utf8'));
-  const current = await readTextIfPresent(join(consumer, DEPENDABOT_FILE));
-  const sources = {
-    base: await readFile(base.absolutePath, 'utf8'),
-    local,
-    current,
-  };
-  const { composed, problems } = composedDependabot(sources);
-  if (composed === null) {
-    throw composeProblemsError(problems);
-  }
-  return { composed, current };
-};
-
-const applyProspectiveDependabot = async (
-  consumer: string,
-  prospective: ProspectiveDependabot,
-  dryRun: boolean,
-): Promise<boolean> => {
-  if (prospective.current === prospective.composed) {
-    return false;
-  }
-  if (dryRun) {
-    console.log(`  would generate ${DEPENDABOT_FILE}`);
-    return true;
-  }
-  await writeComposedDependabot(consumer, prospective.composed);
-  console.log(`  generated ${DEPENDABOT_FILE}`);
-  return true;
-};
-
-const runDependabotCheck = async (consumer: string): Promise<boolean> => {
-  const problems = await dependabotProblems(consumer);
-  if (problems.length > 0) {
-    console.error(`standards dependabot: ${problems.length} problem(s):`);
-    console.error(problems.map((problem) => `  - ${problem}`).join('\n'));
-    return false;
-  }
-  console.log(
-    `standards dependabot: ${DEPENDABOT_FILE} matches its composed sources`,
-  );
-  return true;
-};
-
 const runAgents = async (dir: string, write: boolean): Promise<boolean> => {
   const { composed, current } = await readSourceAgents(dir);
   if (current !== null && splitAgents(current)?.head === composed) {
@@ -1012,7 +791,7 @@ const runAgents = async (dir: string, write: boolean): Promise<boolean> => {
       );
       return false;
     }
-    await writeFile(path, await withLocalRules(composed, path));
+    await writeFile(path, await withOwnPart(AGENTS_FILE, composed, dir));
     console.log(`standards agents: generated ${AGENTS_FILE}`);
     return true;
   }
@@ -1020,20 +799,6 @@ const runAgents = async (dir: string, write: boolean): Promise<boolean> => {
     `standards agents: ${AGENTS_FILE} does not match its parts; regenerate it with \`standards agents --write\``,
   );
   return false;
-};
-
-const runDependabotWrite = async (consumer: string): Promise<void> => {
-  const sources = await readDependabotSources(consumer);
-  const { composed, problems } = composedDependabot(sources);
-  if (composed === null) {
-    throw composeProblemsError(problems);
-  }
-  if (sources.current === composed) {
-    console.log(`standards dependabot: ${DEPENDABOT_FILE} is up to date`);
-    return;
-  }
-  await writeComposedDependabot(consumer, composed);
-  console.log(`standards dependabot: generated ${DEPENDABOT_FILE}`);
 };
 
 const inspectPackageJson = (packageRaw: string): ReadonlyArray<string> => {
@@ -1083,8 +848,8 @@ const extendsBiomeBase = (raw: string): boolean => {
   }
 };
 
-// The seams only a Bun workspace has: Biome, the composed Dependabot config,
-// and the package manifest that runs the gate.
+// The seams only a Bun workspace has: Biome, the Dependabot config, and the
+// package manifest that runs the gate.
 const bunSeamProblems = async (
   consumer: string,
 ): Promise<ReadonlyArray<string>> => {
@@ -1145,12 +910,11 @@ const USAGE = `Usage: standards <command> [options]
 
 Commands:
   init        Bootstrap a consumer repo: seed repo-owned files, mirror canonical files, write the lock
-  sync        Mirror canonical files from upstream, regenerate the composed Dependabot config, and rewrite the lock
+  sync        Mirror canonical files from upstream and rewrite the lock
   check       Verify canonical files, extension seams, monorepo structure (Bun payload), and GitHub settings
   doctor      Validate extension seams only
   source-text Reject raw control characters in tracked source text
   structure   Validate monorepo structure rules only
-  dependabot  Verify (--check) or regenerate (--write) the composed .github/dependabot.yml
   agents      In the standards source repository, verify (--check) or regenerate (--write) AGENTS.md from its parts
   dev-env     Compose each workspace's generated .env.local from its three dev layers and authorized broker-owned S3 pair references
   github      Compare (--check) or converge (--apply) live GitHub settings
@@ -1164,15 +928,14 @@ Options:
   --from <src>     Upstream override for init/sync (GitHub repo or local path)
   --ref <ref>      Upstream tag, branch, or full commit sha for init/sync (remote Git/GitHub sources only; default: main)
   --dry-run        Preview a sync without writing anything
-  --check          With github/dependabot/agents: compare against the declared sources (default)
+  --check          With github/agents: compare against the declared sources (default)
   --apply          With github: converge the live repository (needs admin auth)
-  --write          With dependabot/agents: regenerate the composed file`;
+  --write          With agents: regenerate AGENTS.md from its parts`;
 
 const commandFromArg = (arg: string): Command => {
   if (
     arg === 'agents' ||
     arg === 'check' ||
-    arg === 'dependabot' ||
     arg === 'dev-env' ||
     arg === 'doctor' ||
     arg === 'github' ||
@@ -1227,14 +990,9 @@ type ParsedFlags = {
 // typo fails loudly instead of silently doing the default thing.
 const assertOptionUsage = (flags: ParsedFlags): void => {
   const { command, checkFlag, apply, write, ref, profile } = flags;
-  if (
-    checkFlag &&
-    command !== 'github' &&
-    command !== 'dependabot' &&
-    command !== 'agents'
-  ) {
+  if (checkFlag && command !== 'github' && command !== 'agents') {
     throw new Error(
-      '--check is only valid with the github, dependabot, and agents commands',
+      '--check is only valid with the github and agents commands',
     );
   }
   if (apply && command !== 'github') {
@@ -1243,10 +1001,8 @@ const assertOptionUsage = (flags: ParsedFlags): void => {
   if (apply && checkFlag) {
     throw new Error('github accepts exactly one of --check or --apply');
   }
-  if (write && command !== 'dependabot' && command !== 'agents') {
-    throw new Error(
-      '--write is only valid with the dependabot and agents commands',
-    );
+  if (write && command !== 'agents') {
+    throw new Error('--write is only valid with the agents command');
   }
   if (write && checkFlag) {
     throw new Error(`${command} accepts exactly one of --check or --write`);
@@ -1459,7 +1215,6 @@ const runSyncCommand = async (
 const runGateCommand = (
   command:
     | 'check'
-    | 'dependabot'
     | 'dev-env'
     | 'doctor'
     | 'github'
@@ -1471,9 +1226,6 @@ const runGateCommand = (
 ): Promise<boolean> => {
   if (command === 'check') {
     return runCheckCommand(consumer);
-  }
-  if (command === 'dependabot') {
-    return runDependabotCheck(consumer);
   }
   if (command === 'dev-env') {
     return runDevEnv(consumer);
@@ -1534,11 +1286,6 @@ const main = async (): Promise<void> => {
 
   if (command === 'sync') {
     await runSyncCommand(consumer, from, ref, dryRun);
-    return;
-  }
-
-  if (command === 'dependabot' && write) {
-    await runDependabotWrite(consumer);
     return;
   }
 

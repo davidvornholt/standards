@@ -39,14 +39,14 @@ const buildUpstream = (): string => {
   writeSyncManifest(
     up,
     up,
-    ['.github/dependabot.base.yml', 'bun-managed'],
+    ['.github/dependabot.yml', 'bun-managed'],
     ['sync-standards.json', 'core-managed'],
   );
   write(up, 'core-managed/a.txt', 'core\n');
   write(up, 'bun-managed/b.txt', 'bun\n');
   write(
     up,
-    '.github/dependabot.base.yml',
+    '.github/dependabot.yml',
     [
       'version: 2',
       'updates:',
@@ -58,11 +58,11 @@ const buildUpstream = (): string => {
       '    directory: /',
       '    schedule:',
       '      interval: weekly',
+      '  # Project-specific updates',
       '',
     ].join('\n'),
   );
   write(up, 'template/biome.jsonc', '{"extends":["./biome.base.jsonc"]}\n');
-  write(up, 'template/.github/dependabot.local.yml', '# no additions yet\n');
   return up;
 };
 
@@ -98,7 +98,6 @@ describe('core payload', () => {
       'bun-managed/b.txt',
       'biome.jsonc',
       '.github/dependabot.yml',
-      '.github/dependabot.local.yml',
     ]) {
       expect(existsSync(join(consumer, bunOnly))).toBe(false);
     }
@@ -199,6 +198,24 @@ describe("a repository's own rules in AGENTS.md", () => {
     expect(read(consumer, 'AGENTS.md')).toBe('# Hand-written rules\n');
     expect(existsSync(join(consumer, 'sync-standards.lock'))).toBe(false);
   });
+
+  it('refuses to take the own rules from a symlinked AGENTS.md', () => {
+    const up = buildUpstream();
+    const consumer = newConsumer(CORE_POLICY);
+    expect(init(up, consumer).status).toBe(0);
+    const own = `${read(consumer, 'AGENTS.md')}\n### Own rule\n`;
+    write(consumer, 'CLAUDE.md', own);
+    rmSync(join(consumer, 'AGENTS.md'));
+    symlinkSync('CLAUDE.md', join(consumer, 'AGENTS.md'));
+
+    const result = run(consumer, ['sync', '--from', up, '--dir', consumer]);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      'AGENTS.md is a symlink; replace it with a regular file',
+    );
+    expect(read(consumer, 'CLAUDE.md')).toBe(own);
+  });
 });
 
 describe('Bun payload', () => {
@@ -207,7 +224,7 @@ describe('Bun payload', () => {
     expect(init(buildUpstream(), consumer).status).toBe(0);
 
     expect(lockedPaths(consumer)).toEqual([
-      '.github/dependabot.base.yml',
+      '.github/dependabot.yml',
       'AGENTS.md',
       'bun-managed/b.txt',
       'core-managed/a.txt',
