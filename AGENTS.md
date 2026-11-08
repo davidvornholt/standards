@@ -1,18 +1,10 @@
 # AGENTS.md
 
-## Quality gates
-
-Don't weaken a quality gate to make a change pass. Explain every inline suppression where it appears. Use a configuration exception only where a rule can't apply, scoped to the affected path and rule.
-
-## Change policy
-
-Don't build backwards compatibility by default. Code in these repositories has no consumers outside them, so migrate every call site and delete the old shape in the same change.
+## Working with the user
 
 Ask before choosing product intent or another costly, durable direction.
 
 Disagree openly when an instruction, plan, or rule seems wrong, and say what you would do instead. Recommend the better option even when it's a bigger change than was asked for.
-
-## Writing style
 
 Write for a reader who has no background on the task and hasn't read the code. That includes the user, because agents write most of the code.
 
@@ -21,6 +13,16 @@ Write plainly and directly, in literal wording that is easy to follow. Avoid man
 When you ask the reader to decide, say what's at stake and where each option leads, and recommend one before giving technical evidence.
 
 The user may read only your last message. While working, write only to answer a question, when your goal changes, when something is ready for review, or when you need something from the user, such as an approval, and leave out the details of the step you're on. If you're prompted for an update anyway, say in one sentence what you're working toward. Start each final message by answering everything the user asked since they last wrote, even if you answered it before, then say what you need from them and what's ready for their review.
+
+## Quality gates
+
+Don't weaken a quality gate to make a change pass. Explain every inline suppression where it appears. Use a configuration exception only where a rule can't apply, scoped to the affected path and rule.
+
+## Change policy
+
+Don't build backwards compatibility by default. Code in these repositories has no consumers outside them, so migrate every call site and delete the old shape in the same change.
+
+## Formatting
 
 Use sentence case for reader-facing text, including Markdown headings.
 
@@ -55,7 +57,7 @@ Use Effect extensively wherever it makes sense, because it helps agents write mo
 
 ### Payloads and the generated AGENTS.md
 
-`sync-standards.json` lists what `standards sync` copies into consumers, in two payloads: `core`, for repositories in any language, and `bun`, which Bun consumers get on top of core. Put a path in `bun` when it assumes a Bun workspace. `AGENTS.md` is generated from the payloads' parts in `agents-md/` down to its `## Project-specific rules` heading: edit the parts and run `bun run check:fix`, which regenerates that part. Sync ships this repository's `.github/dependabot.yml` only down to its `# Project-specific updates` line, so update blocks for this repository alone go below that line.
+`sync-standards.json` lists what `standards sync` copies into consumers, in two payloads: `core`, for repositories in any language, and `bun`, which Bun consumers get on top of core. Put a path in `bun` when it assumes a Bun workspace. `AGENTS.md` is generated from the payloads' parts in `agents-md/` down to its `## Project-specific rules` heading: edit the parts and run `bun run check:fix`, which regenerates that part. nix-config also copies the `## Working with the user` section of `agents-md/core.md`, found by that heading, into a user-level file for sessions outside repositories that take the core payload, so keep the heading and put only rules there that hold in any folder. Sync ships this repository's `.github/dependabot.yml` only down to its `# Project-specific updates` line, so update blocks for this repository alone go below that line.
 
 ### Source-repository structure profile
 
