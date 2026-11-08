@@ -1,13 +1,21 @@
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { isAbsolute, join, posix } from 'node:path';
+import { dirname, isAbsolute, join, posix } from 'node:path';
+import { DEPENDABOT_FILE, retiredDependabotLayout } from './dependabot';
 import { isRecord } from './github-settings-parse';
 import { listManagedFiles, type ManagedEntry } from './managed-files';
+import {
+  AGENTS_FILE,
+  AGENTS_LOCAL_HEADING,
+  isSplitFile,
+  sourceHead,
+  splitAgents,
+  withOwnPart,
+} from './own-part';
 import type { SyncPayload } from './sync-policy';
 
 const MANIFEST = 'sync-standards.json';
-export const AGENTS_FILE = 'AGENTS.md';
 const PAYLOADS: ReadonlyArray<SyncPayload> = ['core', 'bun'];
 
 // What one payload adds: the AGENTS.md part, the seeds below `seedDir`, and the
@@ -163,28 +171,6 @@ const selectedParts = (
     ? [manifest.payloads.core]
     : [manifest.payloads.core, manifest.payloads.bun];
 
-// The last line sync writes to AGENTS.md. Sync owns everything up to and
-// including it, and the repository owns its own rules below it.
-export const AGENTS_LOCAL_HEADING = '## Project-specific rules';
-
-// The heading as a whole line, ending in LF, CRLF, or the end of the file.
-const AGENTS_LOCAL_HEADING_LINE = new RegExp(
-  `(?<![^\\n])${AGENTS_LOCAL_HEADING}(?:\\r?\\n|$)`,
-  'u',
-);
-
-// Splits at the end of the heading line, keeping the file's exact bytes.
-export const splitAgents = (
-  text: string,
-): { readonly head: string; readonly tail: string } | null => {
-  const match = AGENTS_LOCAL_HEADING_LINE.exec(text);
-  if (match === null) {
-    return null;
-  }
-  const end = match.index + match[0].length;
-  return { head: text.slice(0, end), tail: text.slice(end) };
-};
-
 // One self-contained file rather than `@` imports: Codex doesn't expand them,
 // and an import of a part that doesn't apply would dangle.
 export const composeAgents = async (
@@ -197,7 +183,7 @@ export const composeAgents = async (
       (await readFile(join(srcDir, part.agents), 'utf8')).trim(),
     ),
   );
-  if (parts.some((part) => AGENTS_LOCAL_HEADING_LINE.test(part))) {
+  if (parts.some((part) => splitAgents(part) !== null)) {
     throw new Error(
       `An AGENTS.md part must not contain the line "${AGENTS_LOCAL_HEADING}"`,
     );
@@ -205,31 +191,14 @@ export const composeAgents = async (
   return `${['# AGENTS.md', ...parts, AGENTS_LOCAL_HEADING].join('\n\n')}\n`;
 };
 
-// Puts the repository's own rules from the AGENTS.md at `path` under `head`.
-export const withLocalRules = async (
-  head: string,
-  path: string,
-): Promise<string> => {
-  if (!existsSync(path)) {
-    return head;
-  }
-  const split = splitAgents(await readFile(path, 'utf8'));
-  if (split === null) {
-    throw new Error(
-      `${AGENTS_FILE} has no "${AGENTS_LOCAL_HEADING}" line; put this repository's own rules under that heading at the end of the file, then re-run`,
-    );
-  }
-  return head + split.tail;
-};
-
 export type PayloadPlan = {
   readonly seeds: ReadonlyMap<string, ManagedEntry>;
   readonly upstream: ReadonlyMap<string, ManagedEntry>;
 };
 
-// Lists what init and sync mirror for one payload. The generated AGENTS.md
-// keeps the consumer's own rules and is staged in a temporary directory that
-// lives only as long as `use`.
+// Lists what init and sync mirror for one payload. Each split file keeps the
+// consumer's own part and is staged in a temporary directory that lives only as
+// long as `use`.
 export const withPayloadPlan = async <T>(
   {
     manifest,
@@ -251,19 +220,34 @@ export const withPayloadPlan = async <T>(
     parts.flatMap((part) => part.seeds),
   );
   assertDisjoint([...paths, AGENTS_FILE], [...seeds.keys()]);
+  const retired = paths.includes(DEPENDABOT_FILE)
+    ? await retiredDependabotLayout(consumer)
+    : null;
+  if (retired !== null) {
+    throw new Error(retired);
+  }
   const listed = await listManagedFiles(srcDir, paths);
-  const staging = await mkdtemp(join(tmpdir(), 'standards-agents-'));
+  const heads: ReadonlyArray<readonly [string, string]> = [
+    [AGENTS_FILE, await composeAgents(srcDir, manifest, payload)],
+    ...(await Promise.all(
+      paths
+        .filter(isSplitFile)
+        .map(
+          async (rel) => [rel, await sourceHead(rel, listed.get(rel))] as const,
+        ),
+    )),
+  ];
+  const staging = await mkdtemp(join(tmpdir(), 'standards-split-'));
   try {
-    const agents = join(staging, AGENTS_FILE);
-    await writeFile(
-      agents,
-      await withLocalRules(
-        await composeAgents(srcDir, manifest, payload),
-        join(consumer, AGENTS_FILE),
-      ),
-    );
     const upstream = new Map(listed);
-    upstream.set(AGENTS_FILE, { kind: 'file', absolutePath: agents });
+    await Promise.all(
+      heads.map(async ([rel, head]) => {
+        const staged = join(staging, rel);
+        await mkdir(dirname(staged), { recursive: true });
+        await writeFile(staged, await withOwnPart(rel, head, consumer));
+        upstream.set(rel, { kind: 'file', absolutePath: staged });
+      }),
+    );
     return await use({ seeds, upstream });
   } finally {
     await rm(staging, { recursive: true, force: true });

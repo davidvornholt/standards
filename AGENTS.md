@@ -55,7 +55,7 @@ Use Effect extensively wherever it makes sense, because it helps agents write mo
 
 ### Payloads and the generated AGENTS.md
 
-`sync-standards.json` lists what `standards sync` copies into consumers, in two payloads: `core`, for repositories in any language, and `bun`, which Bun consumers get on top of core. Put a path in `bun` when it assumes a Bun workspace. `AGENTS.md` is generated from the payloads' parts in `agents-md/` down to its `## Project-specific rules` heading: edit the parts and run `bun run check:fix`, which regenerates that part.
+`sync-standards.json` lists what `standards sync` copies into consumers, in two payloads: `core`, for repositories in any language, and `bun`, which Bun consumers get on top of core. Put a path in `bun` when it assumes a Bun workspace. `AGENTS.md` is generated from the payloads' parts in `agents-md/` down to its `## Project-specific rules` heading: edit the parts and run `bun run check:fix`, which regenerates that part. Sync ships this repository's `.github/dependabot.yml` only down to its `# Project-specific updates` line, so update blocks for this repository alone go below that line.
 
 ### Source-repository structure profile
 
@@ -71,7 +71,7 @@ Operator tooling with real logic, such as validation, credential resolution, pro
 
 ### Dependency version holds
 
-Declare template-wide holds as `ignore` entries in `.github/dependabot.base.yml`, each with a comment giving the reason and the lift condition. Never hold a version by closing Dependabot PRs or with `@dependabot ignore` comments. When a hold or held pin changes, update the hold entry and every affected pin in the root `package.json`, `template/package.json`, and the `biome.base.jsonc` schema URL together.
+Declare template-wide holds as `ignore` entries in the shared blocks of `.github/dependabot.yml`, above its `# Project-specific updates` line, each with a comment giving the reason and the lift condition. Never hold a version by closing Dependabot PRs or with `@dependabot ignore` comments. When a hold or held pin changes, update the hold entry and every affected pin in the root `package.json`, `template/package.json`, and the `biome.base.jsonc` schema URL together.
 
 ### Authoring the canonical Biome base
 

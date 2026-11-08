@@ -30,7 +30,7 @@ Commit `sync-standards.lock` and `sync-standards.local.json`, and check for drif
 | --- | --- |
 | `AGENTS.md`, `CLAUDE.md` | Below a `## Project-specific rules` heading at the end of `AGENTS.md`, then delete `CLAUDE.md` |
 | `justfile`, `secrets.just` | `local.just` |
-| `.github/dependabot.yml` | `.github/dependabot.local.yml` |
+| `.github/dependabot.yml` | Below a `# Project-specific updates` line, indented two spaces, at the end of `.github/dependabot.yml`, without the root `bun` and `github-actions` blocks |
 | `.claude/skills/<name>` | `.agents/skills/<name>` |
 
 ```sh

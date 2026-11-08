@@ -9,12 +9,8 @@ import {
   write,
   writeSyncManifest,
 } from './cli-test-support';
-import {
-  composeAgents,
-  loadManifest,
-  parseManifest,
-  splitAgents,
-} from './sync-payload';
+import { splitAgents } from './own-part';
+import { composeAgents, loadManifest, parseManifest } from './sync-payload';
 
 afterEach(cleanupTmpDirs);
 

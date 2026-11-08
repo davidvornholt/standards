@@ -3,7 +3,14 @@
 
 import { afterEach, describe, expect, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
 import {
@@ -20,6 +27,15 @@ afterEach(cleanupTmpDirs);
 
 const ENGINE = join(import.meta.dir, 'cli.ts');
 const CORE_POLICY = '{ "payload": "core" }\n';
+const DEPENDABOT = '.github/dependabot.yml';
+const MARKER = '  # Project-specific updates';
+const OWN_BLOCK = [
+  '  - package-ecosystem: nix',
+  '    directory: /infra',
+  '    schedule:',
+  '      interval: weekly',
+  '',
+].join('\n');
 
 const run = (cwd: string, args: ReadonlyArray<string>): RunResult =>
   runProcess('bun', cwd, [ENGINE, ...args], process.env);
@@ -39,14 +55,14 @@ const buildUpstream = (): string => {
   writeSyncManifest(
     up,
     up,
-    ['.github/dependabot.base.yml', 'bun-managed'],
+    ['.github/dependabot.yml', 'bun-managed'],
     ['sync-standards.json', 'core-managed'],
   );
   write(up, 'core-managed/a.txt', 'core\n');
   write(up, 'bun-managed/b.txt', 'bun\n');
   write(
     up,
-    '.github/dependabot.base.yml',
+    '.github/dependabot.yml',
     [
       'version: 2',
       'updates:',
@@ -58,11 +74,11 @@ const buildUpstream = (): string => {
       '    directory: /',
       '    schedule:',
       '      interval: weekly',
+      MARKER,
       '',
     ].join('\n'),
   );
   write(up, 'template/biome.jsonc', '{"extends":["./biome.base.jsonc"]}\n');
-  write(up, 'template/.github/dependabot.local.yml', '# no additions yet\n');
   return up;
 };
 
@@ -98,7 +114,6 @@ describe('core payload', () => {
       'bun-managed/b.txt',
       'biome.jsonc',
       '.github/dependabot.yml',
-      '.github/dependabot.local.yml',
     ]) {
       expect(existsSync(join(consumer, bunOnly))).toBe(false);
     }
@@ -130,12 +145,108 @@ describe('core payload', () => {
 
     expect(result.status).toBe(0);
     expect(existsSync(join(consumer, 'bun-managed/b.txt'))).toBe(false);
+    expect(existsSync(join(consumer, DEPENDABOT))).toBe(false);
     expect(read(consumer, 'AGENTS.md')).not.toContain(AGENTS_PARTS.bun);
     expect(lockedPaths(consumer)).toEqual([
       'AGENTS.md',
       'core-managed/a.txt',
       'sync-standards.json',
     ]);
+  });
+});
+
+describe("a split file leaving the payload with the repository's own part", () => {
+  it.each([
+    [
+      'below the marker',
+      (synced: string): string => `${synced}${OWN_BLOCK}`,
+      "sync would delete it and this repository's own update blocks below",
+    ],
+    [
+      'with the marker removed',
+      (synced: string): string =>
+        `${synced}${OWN_BLOCK}`.replace(`${MARKER}\n`, ''),
+      `sync would delete it, and it has no "# Project-specific updates" line to show where this repository's own update blocks start`,
+    ],
+  ])(
+    "refuses to switch to core while the Dependabot config holds the repository's own blocks %s",
+    (_label, edit, why) => {
+      const up = buildUpstream();
+      const consumer = newConsumer();
+      expect(init(up, consumer).status).toBe(0);
+      const own = edit(read(consumer, DEPENDABOT));
+      write(consumer, DEPENDABOT, own);
+      write(consumer, 'sync-standards.local.json', CORE_POLICY);
+      const lock = read(consumer, 'sync-standards.lock');
+      const agents = read(consumer, 'AGENTS.md');
+
+      for (const dryRun of [['--dry-run'], []]) {
+        const result = run(consumer, [
+          'sync',
+          ...dryRun,
+          '--from',
+          up,
+          '--dir',
+          consumer,
+        ]);
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain(
+          `${DEPENDABOT} is no longer synced, so ${why}`,
+        );
+        expect(result.stderr).toContain(
+          `to keep them, move ${DEPENDABOT} aside, re-run, then move it back`,
+        );
+      }
+      expect(read(consumer, DEPENDABOT)).toBe(own);
+      expect(read(consumer, 'sync-standards.lock')).toBe(lock);
+      expect(read(consumer, 'AGENTS.md')).toBe(agents);
+      expect(existsSync(join(consumer, 'bun-managed/b.txt'))).toBe(true);
+
+      const aside = join(mkTmp('payload-aside-'), 'dependabot.yml');
+      renameSync(join(consumer, DEPENDABOT), aside);
+      expect(
+        run(consumer, ['sync', '--from', up, '--dir', consumer]).status,
+      ).toBe(0);
+      renameSync(aside, join(consumer, DEPENDABOT));
+      expect(lockedPaths(consumer)).not.toContain(DEPENDABOT);
+      expect(read(consumer, DEPENDABOT)).toBe(own);
+    },
+  );
+
+  it("refuses to replace the directory holding the Dependabot config's own blocks with a symlink", () => {
+    const up = buildUpstream();
+    const consumer = newConsumer();
+    expect(init(up, consumer).status).toBe(0);
+    const own = `${read(consumer, DEPENDABOT)}${OWN_BLOCK}`;
+    write(consumer, DEPENDABOT, own);
+    const lock = read(consumer, 'sync-standards.lock');
+    // Upstream now ships .github as a link to a directory of its own.
+    renameSync(join(up, '.github'), join(up, 'github-shared'));
+    symlinkSync('github-shared', join(up, '.github'));
+    writeSyncManifest(
+      up,
+      up,
+      ['.github', 'github-shared', 'bun-managed'],
+      ['sync-standards.json', 'core-managed'],
+    );
+
+    for (const dryRun of [['--dry-run'], []]) {
+      const result = run(consumer, [
+        'sync',
+        ...dryRun,
+        '--from',
+        up,
+        '--dir',
+        consumer,
+      ]);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        `${DEPENDABOT} is no longer synced, so sync would delete it and this repository's own update blocks below`,
+      );
+    }
+    expect(lstatSync(join(consumer, '.github')).isDirectory()).toBe(true);
+    expect(read(consumer, DEPENDABOT)).toBe(own);
+    expect(read(consumer, 'sync-standards.lock')).toBe(lock);
   });
 });
 
@@ -199,6 +310,24 @@ describe("a repository's own rules in AGENTS.md", () => {
     expect(read(consumer, 'AGENTS.md')).toBe('# Hand-written rules\n');
     expect(existsSync(join(consumer, 'sync-standards.lock'))).toBe(false);
   });
+
+  it('refuses to take the own rules from a symlinked AGENTS.md', () => {
+    const up = buildUpstream();
+    const consumer = newConsumer(CORE_POLICY);
+    expect(init(up, consumer).status).toBe(0);
+    const own = `${read(consumer, 'AGENTS.md')}\n### Own rule\n`;
+    write(consumer, 'CLAUDE.md', own);
+    rmSync(join(consumer, 'AGENTS.md'));
+    symlinkSync('CLAUDE.md', join(consumer, 'AGENTS.md'));
+
+    const result = run(consumer, ['sync', '--from', up, '--dir', consumer]);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      'AGENTS.md is a symlink; replace it with a regular file',
+    );
+    expect(read(consumer, 'CLAUDE.md')).toBe(own);
+  });
 });
 
 describe('Bun payload', () => {
@@ -207,7 +336,7 @@ describe('Bun payload', () => {
     expect(init(buildUpstream(), consumer).status).toBe(0);
 
     expect(lockedPaths(consumer)).toEqual([
-      '.github/dependabot.base.yml',
+      '.github/dependabot.yml',
       'AGENTS.md',
       'bun-managed/b.txt',
       'core-managed/a.txt',

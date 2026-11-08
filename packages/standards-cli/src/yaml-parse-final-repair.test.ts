@@ -1,12 +1,11 @@
 import { describe, expect, it } from 'bun:test';
-import { composeDependabot } from './dependabot-compose';
 import { parseYaml } from './yaml-parse';
 
-const EMPTY_BASE = 'version: 2\nupdates: []\n';
+const PROBLEM = 'config must contain valid YAML with unique mapping keys';
 
 describe('strict YAML merge-key final repair', () => {
-  it('rejects repeated merge keys in the canonical base', () => {
-    const result = composeDependabot(
+  it('rejects repeated merge keys in a list item', () => {
+    const result = parseYaml(
       [
         'version: 2',
         'updates:',
@@ -17,35 +16,13 @@ describe('strict YAML merge-key final repair', () => {
         '    schedule: { interval: weekly }',
         '',
       ].join('\n'),
-      null,
+      'config',
     );
-    expect(result.composed).toBeNull();
-    expect(result.problems).toContain(
-      '.github/dependabot.base.yml must contain valid YAML with unique mapping keys',
-    );
-  });
-
-  it('rejects repeated merge keys in the local overlay', () => {
-    const result = composeDependabot(
-      EMPTY_BASE,
-      [
-        'updates:',
-        '  - <<: &target',
-        '      package-ecosystem: nix',
-        '      directory: /',
-        '    <<: *target',
-        '    schedule: { interval: weekly }',
-        '',
-      ].join('\n'),
-    );
-    expect(result.composed).toBeNull();
-    expect(result.problems).toContain(
-      '.github/dependabot.local.yml must contain valid YAML with unique mapping keys',
-    );
+    expect(result).toEqual({ value: null, problem: PROBLEM });
   });
 
   it('rejects repeated merge keys in nested mappings', () => {
-    const result = composeDependabot(
+    const result = parseYaml(
       [
         'version: 2',
         'updates:',
@@ -56,12 +33,9 @@ describe('strict YAML merge-key final repair', () => {
         '      <<: *weekly',
         '',
       ].join('\n'),
-      null,
+      'config',
     );
-    expect(result.composed).toBeNull();
-    expect(result.problems).toContain(
-      '.github/dependabot.base.yml must contain valid YAML with unique mapping keys',
-    );
+    expect(result).toEqual({ value: null, problem: PROBLEM });
   });
 
   it('preserves alias sequences and explicit overrides in one merge key', () => {

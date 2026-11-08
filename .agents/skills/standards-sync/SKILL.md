@@ -13,7 +13,7 @@ A consumer receives one of two payloads, chosen by `"payload"` in `sync-standard
 | --- | --- | --- |
 | Synced | `AGENTS.md`, or listed in a payload of `sync-standards.json`, or inside a listed directory | The standards repository, which edits canonical files directly |
 | Project-owned | Seeded once by `init` from `template/`, or an extension point below | The consumer, freely |
-| Generated | Rebuilt by the CLI, such as `.github/dependabot.yml` and `sync-standards.lock` | Its inputs, then regenerate |
+| Generated | Rebuilt by the CLI, such as `sync-standards.lock` | Its inputs, then regenerate |
 
 A change every consumer should get belongs upstream. A change for one consumer belongs in that consumer's extension point. Don't copy canonical logic into a project-owned file to change it locally.
 
@@ -25,13 +25,13 @@ A change every consumer should get belongs upstream. A change for one consumer b
 | `AGENTS.md` | Below its `## Project-specific rules` heading |
 | `justfile` and `secrets.just` | `local.just` |
 | `.github/settings.json` | `.github/settings.local.json` |
-| `.github/dependabot.base.yml` | `.github/dependabot.local.yml` |
+| `.github/dependabot.yml` | Below its `# Project-specific updates` line |
 | `.agents/skills/*` | Unmanaged sibling skill directories |
 | `.github/workflows/standards-sync.yml` | `sync-standards.local.json` |
 | `.mise/config.toml` | `mise.toml` |
 | `nix/standards-bun.nix` | `flake.nix` and `dev-shell.local.nix` |
 
-A core consumer has only the `AGENTS.md`, skills, and sync workflow rows. An extension adds to its canonical file and doesn't replace it. GitHub settings can only add stricter settings, rulesets, and labels.
+A core consumer has only the `AGENTS.md`, skills, and sync workflow rows. An extension adds to its canonical file and doesn't replace it. GitHub settings can only add stricter settings, rulesets, and labels. A repository's own Dependabot blocks can't repeat a shared block's ecosystem, directory, and target branch, so a hold on a shared block goes upstream. Blocks that share an ecosystem and target branch list their directories without globs, because `check` can't tell whether two globs overlap.
 
 `standards help` lists the commands and options.
 

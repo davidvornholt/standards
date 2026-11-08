@@ -18,20 +18,6 @@ export const LINK = '.claude/skills';
 export const TARGET = '../.agents/skills';
 export const SKILL = '.agents/skills/probe/SKILL.md';
 
-const DEPENDABOT_BASE = [
-  'version: 2',
-  'updates:',
-  '  - package-ecosystem: bun',
-  '    directory: /',
-  '    schedule:',
-  '      interval: weekly',
-  '  - package-ecosystem: github-actions',
-  '    directory: /',
-  '    schedule:',
-  '      interval: weekly',
-  '',
-].join('\n');
-
 type Engine = {
   readonly run: (cwd: string, args: ReadonlyArray<string>) => RunResult;
   readonly initConsumer: (up: string) => {
@@ -80,13 +66,11 @@ export const buildUpstream = ({
   const up = mkTmp('symlink-up-');
   writeSyncManifest(up, up, [
     'sync-standards.json',
-    '.github/dependabot.base.yml',
     '.agents/skills',
     ...(claudeSkills === 'absent' ? [] : [LINK]),
     ...extra,
   ]);
   write(up, 'template/seed.txt', 'seed original\n');
-  write(up, '.github/dependabot.base.yml', DEPENDABOT_BASE);
   write(up, SKILL, '---\nname: probe\n---\n');
   for (const rel of extra) {
     write(up, rel, `canonical ${rel}\n`);

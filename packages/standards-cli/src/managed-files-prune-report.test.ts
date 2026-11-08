@@ -142,7 +142,7 @@ describe('summing a run that only rewrites the lock', () => {
 
     expect(dryRun.stdout).not.toContain('already in sync');
     expect(dryRun.stdout).toContain(
-      'dry run: 0 to create, 0 to update, 0 to delete, 0 to generate, 1 to drop from the lock without deleting',
+      'dry run: 0 to create, 0 to update, 0 to delete, 1 to drop from the lock without deleting',
     );
     expect(pruneOutcomes(dryRun.stdout)).toEqual(pruneOutcomes(result.stdout));
     expect(lockedPaths(consumer)).not.toContain(LEGACY);

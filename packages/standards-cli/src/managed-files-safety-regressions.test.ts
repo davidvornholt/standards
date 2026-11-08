@@ -33,18 +33,6 @@ it('refuses a link-to-directory downgrade before changing canonical content', ()
   }
 });
 
-it('rejects a non-file Dependabot overlay seed before initialization writes', () => {
-  const up = buildUpstream();
-  rmSync(join(up, 'template/.github/dependabot.local.yml'), { force: true });
-  write(up, 'template/.github/overlay.yml', '# overlay\n');
-  symlinkSync('overlay.yml', join(up, 'template/.github/dependabot.local.yml'));
-  const { result } = initConsumer(up);
-  expect(result.status).not.toBe(0);
-  expect(result.stderr).toContain(
-    'dependabot.local.yml must be a regular file',
-  );
-});
-
 it('counts already absent lock entries as a real lock change', () => {
   const legacy = 'docs/legacy.md';
   const { consumer } = initConsumer(buildUpstream({ extra: [legacy] }));

@@ -34,7 +34,6 @@ const SOURCE_ROOT_EXPECTATIONS: ReadonlyArray<RootScriptExpectation> = [
     commands: [
       `${SOURCE_CLI} structure --profile source`,
       `${SOURCE_CLI} source-text`,
-      `${SOURCE_CLI} dependabot --check`,
       `${SOURCE_CLI} agents --check`,
       `${SOURCE_CLI} github --check`,
       'turbo run lint check-types test --output-logs=errors-only',
@@ -46,7 +45,6 @@ const SOURCE_ROOT_EXPECTATIONS: ReadonlyArray<RootScriptExpectation> = [
     commands: [
       `${SOURCE_CLI} structure --profile source`,
       `${SOURCE_CLI} source-text`,
-      `${SOURCE_CLI} dependabot --write`,
       `${SOURCE_CLI} agents --write`,
       `${SOURCE_CLI} github --check`,
       'turbo run lint:fix check-types test --output-logs=errors-only',
