@@ -56,15 +56,16 @@ const splitFile = (rel: string): SplitFile => {
   return file;
 };
 
-// The consumer's copy of `rel` when it is reached without passing a link or a
-// file on the way. Below one there is no copy to read; the mirror refuses or
-// prunes those destinations itself.
+// The consumer's copy of `rel` as it is on disk now, when it is reached without
+// passing a link or a file on the way. Below a link the content is somewhere
+// else, which sync never deletes; below a file there is no copy. The planned
+// payload plays no part: a directory it replaces with a link still holds the
+// copy until the mirror deletes it.
 const consumerCopy = async (
   root: string,
   rel: string,
-  planned: ReadonlyMap<string, ManagedEntry>,
 ): Promise<ManagedEntry | null> =>
-  (await interposedAncestor(root, rel, planned)) === null
+  (await interposedAncestor(root, rel, new Map())) === null
     ? await inspectManagedPath(join(root, rel))
     : null;
 
@@ -77,7 +78,7 @@ export const withOwnPart = async (
   root: string,
 ): Promise<string> => {
   const file = splitFile(rel);
-  const entry = await consumerCopy(root, rel, new Map());
+  const entry = await consumerCopy(root, rel);
   if (entry?.kind === 'symlink') {
     throw new Error(
       `${rel} is a symlink; replace it with a regular file, then re-run`,
@@ -115,35 +116,44 @@ export const sourceHead = async (
   return split.head;
 };
 
+// Without the marker, nothing tells the repository's own part from the synced
+// one, so the whole file counts as the repository's.
 const leavingProblem = async (
   consumer: string,
   file: SplitFile,
-  planned: ReadonlyMap<string, ManagedEntry>,
 ): Promise<string | null> => {
-  const entry = await consumerCopy(consumer, file.rel, planned);
+  const entry = await consumerCopy(consumer, file.rel);
   if (entry?.kind !== 'file') {
     return null;
   }
-  const own = splitAt(file, await readFile(entry.absolutePath, 'utf8'))?.tail;
-  return own === undefined || own.trim() === ''
-    ? null
-    : `${file.rel} is no longer synced, so sync would delete it and ${file.own} below "${file.marker.trimStart()}"; to keep them, move ${file.rel} aside, re-run, then move it back as a file this repository owns, or delete them, then re-run`;
+  const split = splitAt(file, await readFile(entry.absolutePath, 'utf8'));
+  if (split !== null && split.tail.trim() === '') {
+    return null;
+  }
+  const marker = file.marker.trimStart();
+  const [why, drop] =
+    split === null
+      ? [
+          `, and it has no "${marker}" line to show where ${file.own} start`,
+          'it',
+        ]
+      : [` and ${file.own} below "${marker}"`, 'them'];
+  return `${file.rel} is no longer synced, so sync would delete it${why}; to keep them, move ${file.rel} aside, re-run, then move it back as a file this repository owns, or delete ${drop}, then re-run`;
 };
 
 // A split file that leaves the payload is pruned like any other managed file,
-// which would delete the repository's own part, which sync never owned.
+// which would delete the repository's own part, which sync never owned. That
+// includes a file below a directory the payload now replaces with a link or a
+// file, which the mirror deletes once nothing unlocked is left in it.
 export const leavingOwnPartProblems = async (
   consumer: string,
   leaving: ReadonlyArray<string>,
-  planned: ReadonlyMap<string, ManagedEntry>,
 ): Promise<ReadonlyArray<string>> =>
   (
     await Promise.all(
       leaving.flatMap((rel) => {
         const file = SPLIT_FILES.get(rel);
-        return file === undefined
-          ? []
-          : [leavingProblem(consumer, file, planned)];
+        return file === undefined ? [] : [leavingProblem(consumer, file)];
       }),
     )
   ).filter((problem): problem is string => problem !== null);

@@ -399,7 +399,6 @@ const mirrorPreconditionProblems = async (
     ...(await leavingOwnPartProblems(
       consumer,
       [...locked].filter((rel) => !upstream.has(rel)),
-      upstream,
     )),
   ];
 };
