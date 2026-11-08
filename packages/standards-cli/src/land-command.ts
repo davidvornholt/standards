@@ -13,14 +13,14 @@ import {
 
 const LAND_USAGE = `Usage: standards land [PR_OR_BRANCH] [--no-wait]
 
-Merge a pull request once the checks on its current head pass, squash-merging exactly that head, then delete its local branch and wait for the runs the merge starts.
+Wait until the checks on a pull request's current head pass, squash-merge exactly that head, delete its local branch, and wait for the runs the merge starts. A pull request that no workflow checks merges at once.
 
 PR_OR_BRANCH is a pull request number, URL, or branch (default: the current branch's pull request).
 
 Options:
-  --no-wait  Merge without waiting for pending checks, where GitHub allows that
+  --no-wait  Merge without waiting for pending checks, where GitHub allows that. Use it only when the change can't affect the checks, or when no workflow reports on the pull request.
 
-Exit codes: 0 done, 1 nothing merged, 2 merged but a run after the merge isn't green. The prs skill describes the details.`;
+Exit codes: 0 done, 1 nothing merged, 2 merged but a run after the merge isn't green.`;
 
 // Tests set LAND_POLL_SECONDS=0 to poll without delay.
 const POLL_SECONDS_ENV = 'LAND_POLL_SECONDS';
