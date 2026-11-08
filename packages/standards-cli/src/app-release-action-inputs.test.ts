@@ -114,6 +114,7 @@ describe('action.yml', () => {
     expect(releaseStep?.env).toEqual(
       Object.fromEntries([
         ...inputVariables,
+        ['APP_RELEASE_GITHUB_TOKEN', expression('github.token')],
         ['APP_RELEASE_WORK_DIR', expression('steps.work.outputs.path')],
       ]),
     );

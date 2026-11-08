@@ -31,12 +31,20 @@ runs:
       id: resolve
       shell: bash
       env:
+        RELEASE_API_TOKEN: ${{ github.token }}
         SOPS_AGE_KEY: ${{ inputs.age-key }}
         SOPS_SECRET_FILE: ${{ inputs.secret-file }}
         SOPS_SECRET_ROOT: ${{ inputs.secret-root }}
         SOPS_SECRET_KEY: ${{ inputs.secret-key }}
       run: |
         set -euo pipefail
+        set +x
+        release_api_token=${RELEASE_API_TOKEN-}
+        unset RELEASE_API_TOKEN
+        export -n release_api_token
+        case "$release_api_token" in
+          ''|*$'\r'*|*$'\n'*) echo "::error::A single-line GitHub workflow token is required" >&2; exit 1 ;;
+        esac
 
         case "$SOPS_SECRET_ROOT" in
           ci) secret_path="ci.$SOPS_SECRET_KEY" ;;
@@ -67,8 +75,8 @@ runs:
           # Runners occasionally see the download stall and end in an HTTP
           # error, so each attempt is capped and retried.
           if [ -z "$reason" ] && ! {
-            curl -sSfLo "$sops" --retry 3 --retry-all-errors --connect-timeout 10 --max-time 60 "https://github.com/getsops/sops/releases/download/${version}/sops-${version}.linux.${arch}" || \
-              curl -sSfLo "$sops" --retry 3 --retry-all-errors --connect-timeout 10 --max-time 60 -H "Accept: application/octet-stream" "https://api.github.com/repos/getsops/sops/releases/assets/${asset}"
+            curl --disable --proto '=https' --proto-redir '=https' -sSfLo "$sops" --retry 3 --retry-all-errors --connect-timeout 10 --max-time 60 "https://github.com/getsops/sops/releases/download/${version}/sops-${version}.linux.${arch}" || \
+              printf 'Authorization: Bearer %s\n' "$release_api_token" | curl --disable --proto '=https' --proto-redir '=https' -sSfLo "$sops" --retry 3 --retry-all-errors --connect-timeout 10 --max-time 60 -H @- -H "Accept: application/octet-stream" "https://api.github.com/repos/getsops/sops/releases/assets/${asset}"
           }; then
             rm -f "$sops"
             reason="Downloading SOPS ${version} for linux/${arch} failed"

@@ -83,12 +83,14 @@ export const createSopsActionRunner =
     shim(fixture, 'bin/curl', [
       '#!/usr/bin/env bash',
       'set -euo pipefail',
+      'output=""; previous=""',
+      'for argument; do if [ "$previous" = -sSfLo ]; then output=$argument; fi; previous=$argument; done',
       'printf called > "$CURL_MARKER"',
       'if [ "$FAKE_CURL_STATUS" -ne 0 ]; then',
-      '  printf partial > "$2"',
+      '  printf partial > "$output"',
       '  exit "$FAKE_CURL_STATUS"',
       'fi',
-      'cp "$FAKE_SOPS" "$2"',
+      'cp "$FAKE_SOPS" "$output"',
     ]);
     shim(fixture, 'bin/sha256sum', [
       '#!/usr/bin/env bash',
@@ -128,6 +130,7 @@ export const createSopsActionRunner =
         GITHUB_OUTPUT: outputPath,
         PATH: `${bin}:${basePath}`,
         RUNNER_TEMP: runnerTemp,
+        RELEASE_API_TOKEN: 'fixture-api-token',
         SOPS_AGE_KEY: resolved.ageKey,
         SOPS_MARKER: sopsMarker,
         SOPS_SECRET_FILE: 'secrets/ci.yaml',
