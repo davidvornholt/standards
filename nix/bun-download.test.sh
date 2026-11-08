@@ -44,7 +44,7 @@ for BUN_DOWNLOAD_KIND in cli shell; do
   if [[ "$BUN_DOWNLOAD_KIND" = shell ]]; then versions=(1.4.0 1.4.2 1.4.3); fi
   for BUN_DOWNLOAD_VERSION in "${versions[@]}"; do
     for BUN_DOWNLOAD_SYSTEM in x86_64-linux aarch64-linux; do
-      nix build --no-link --no-substitute --impure --expr "$expression" -L
+      nix build --no-link --impure --expr "$expression" -L
     done
   done
 done
@@ -54,7 +54,7 @@ BUN_DOWNLOAD_SYSTEM=x86_64-linux
 BUN_DOWNLOAD_CORRUPT=yes
 log=$(mktemp)
 trap 'rm -f "$log"' EXIT
-if nix build --no-link --no-substitute --impure --expr "$expression" -L >"$log" 2>&1; then
+if nix build --no-link --impure --expr "$expression" -L >"$log" 2>&1; then
   echo 'Incorrect Bun checksum unexpectedly succeeded' >&2
   exit 1
 fi
