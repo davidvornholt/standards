@@ -48,12 +48,45 @@ const commitAll = (cwd: string, message: string): string => {
   return git(cwd, 'rev-parse', 'HEAD');
 };
 
-// The fixture CLI records where it ran from and the arguments it received.
+// The fixture CLI records where it ran from and the arguments it received. It
+// imports a workspace package, so it runs only after the workflow installs the
+// CLI's dependencies into the fetched source.
+const RUNTIME_DEPENDENCY = '@standards-fixture/runtime-dependency';
+
 const cliSource = (label: string): string =>
   `import { writeFileSync } from 'node:fs';
+import '${RUNTIME_DEPENDENCY}';
 const args = process.argv.slice(2);
 writeFileSync(args[args.indexOf('--dir') + 1] + '/canonical.txt', ${JSON.stringify(label)} + ' ' + args.join(' ') + '\\n');
 `;
+
+const cliManifest = (...dependencies: Array<string>): string =>
+  JSON.stringify({
+    name: '@davidvornholt/standards',
+    version: '0.0.0',
+    type: 'module',
+    dependencies: Object.fromEntries(
+      dependencies.map((name) => [name, 'workspace:*']),
+    ),
+  });
+
+const writeWorkspacePackage = (
+  upstream: string,
+  directory: string,
+  name: string,
+): void => {
+  write(
+    upstream,
+    `packages/${directory}/package.json`,
+    JSON.stringify({
+      name,
+      version: '0.0.0',
+      type: 'module',
+      exports: './index.js',
+    }),
+  );
+  write(upstream, `packages/${directory}/index.js`, 'export {};\n');
+};
 
 const seedUpstream = (
   root: string,
@@ -76,12 +109,9 @@ const seedUpstream = (
   write(
     upstream,
     'packages/standards-cli/package.json',
-    JSON.stringify({
-      name: '@davidvornholt/standards',
-      version: '0.0.0',
-      type: 'module',
-    }),
+    cliManifest(RUNTIME_DEPENDENCY),
   );
+  writeWorkspacePackage(upstream, 'runtime-dependency', RUNTIME_DEPENDENCY);
   write(upstream, 'packages/standards-cli/src/cli.ts', cliSource('first'));
   execFileSync('bun', ['install'], { cwd: upstream, stdio: 'ignore' });
   write(upstream, '.gitignore', 'node_modules/\n');
@@ -232,4 +262,30 @@ describe('standards sync workflow core runtime', () => {
       expect(existsSync(join(root, 'github-output'))).toBe(false);
     },
   );
+
+  it('refuses to install dependencies that the upstream lockfile lacks', () => {
+    const { root, upstream, consumer } = fixture();
+    const unlocked = '@standards-fixture/unlocked';
+    write(
+      upstream,
+      'packages/standards-cli/package.json',
+      cliManifest(RUNTIME_DEPENDENCY, unlocked),
+    );
+    writeWorkspacePackage(upstream, 'unlocked', unlocked);
+    commitAll(upstream, 'unlocked dependency');
+    const environment = stepEnvironment(root, upstream);
+    expect(runSyncStep(consumer, FETCH_STEP, environment).status).toBe(0);
+
+    const preserve = runSyncStep(consumer, PRESERVE_STEP, {
+      ...environment,
+      ...readAssignments(join(root, 'github-env')),
+    });
+    expect(preserve.status).not.toBe(0);
+    expect(`${preserve.stdout}${preserve.stderr}`).toContain(
+      'lockfile is frozen',
+    );
+    expect(
+      readAssignments(join(root, 'github-env')).STANDARDS_SYNC_RUNTIME,
+    ).toBeUndefined();
+  });
 });
