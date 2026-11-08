@@ -19,27 +19,32 @@ const BUN_VERSION = '1.4.3';
 
 afterEach(cleanupTmpDirs);
 
+// Fixture repositories ignore the machine's Git configuration, so commits and
+// annotated tags work the same on a CI runner without a Git identity and on a
+// workstation that signs commits.
+const FIXTURE_GIT_ENVIRONMENT = {
+  ...process.env,
+  ...Object.fromEntries([
+    ['GIT_AUTHOR_EMAIL', 'fixture@example.invalid'],
+    ['GIT_AUTHOR_NAME', 'fixture'],
+    ['GIT_COMMITTER_EMAIL', 'fixture@example.invalid'],
+    ['GIT_COMMITTER_NAME', 'fixture'],
+    ['GIT_CONFIG_GLOBAL', '/dev/null'],
+    ['GIT_CONFIG_NOSYSTEM', '1'],
+  ]),
+};
+
 const git = (cwd: string, ...args: Array<string>): string =>
   execFileSync('git', args, {
     cwd,
     encoding: 'utf8',
+    env: FIXTURE_GIT_ENVIRONMENT,
     stdio: ['ignore', 'pipe', 'pipe'],
   }).trim();
 
 const commitAll = (cwd: string, message: string): string => {
   git(cwd, 'add', '-A');
-  git(
-    cwd,
-    '-c',
-    'user.name=fixture',
-    '-c',
-    'user.email=fixture@example.invalid',
-    '-c',
-    'commit.gpgsign=false',
-    'commit',
-    '-m',
-    message,
-  );
+  git(cwd, 'commit', '-m', message);
   return git(cwd, 'rev-parse', 'HEAD');
 };
 
