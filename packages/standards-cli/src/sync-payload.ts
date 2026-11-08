@@ -2,17 +2,20 @@ import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, posix } from 'node:path';
+import { DEPENDABOT_FILE, retiredDependabotLayout } from './dependabot';
 import { isRecord } from './github-settings-parse';
+import { listManagedFiles, type ManagedEntry } from './managed-files';
 import {
-  inspectManagedPath,
-  listManagedFiles,
-  type ManagedEntry,
-} from './managed-files';
-import { interposedAncestor } from './managed-path-ownership';
+  AGENTS_FILE,
+  AGENTS_LOCAL_HEADING,
+  isSplitFile,
+  sourceHead,
+  splitAgents,
+  withOwnPart,
+} from './own-part';
 import type { SyncPayload } from './sync-policy';
 
 const MANIFEST = 'sync-standards.json';
-export const AGENTS_FILE = 'AGENTS.md';
 const PAYLOADS: ReadonlyArray<SyncPayload> = ['core', 'bun'];
 
 // What one payload adds: the AGENTS.md part, the seeds below `seedDir`, and the
@@ -168,66 +171,6 @@ const selectedParts = (
     ? [manifest.payloads.core]
     : [manifest.payloads.core, manifest.payloads.bun];
 
-// The last line sync writes to AGENTS.md. Sync owns everything up to and
-// including it, and the repository owns its own rules below it.
-export const AGENTS_LOCAL_HEADING = '## Project-specific rules';
-
-// The same split inside the `updates` list of the Dependabot config: the shared
-// update blocks above the comment, the repository's own blocks below it. YAML
-// stays valid because `updates` is the file's last key.
-export const DEPENDABOT_FILE = '.github/dependabot.yml';
-export const DEPENDABOT_LOCAL_MARKER = '  # Project-specific updates';
-
-type SplitFile = {
-  readonly marker: string;
-  // What the repository keeps below the marker, for messages.
-  readonly own: string;
-  readonly line: RegExp;
-};
-
-// The marker as a whole line, ending in LF, CRLF, or the end of the file. The
-// markers contain no regex syntax, so they go into the pattern as they are.
-const splitFile = (marker: string, own: string): SplitFile => ({
-  marker,
-  own,
-  line: new RegExp(`(?<![^\\n])${marker}(?:\\r?\\n|$)`, 'u'),
-});
-
-// The files sync owns only down to a marker line.
-const SPLIT_FILES: ReadonlyMap<string, SplitFile> = new Map([
-  [AGENTS_FILE, splitFile(AGENTS_LOCAL_HEADING, "this repository's own rules")],
-  [
-    DEPENDABOT_FILE,
-    splitFile(DEPENDABOT_LOCAL_MARKER, "this repository's own update blocks"),
-  ],
-]);
-
-export const isSplitFile = (rel: string): boolean => SPLIT_FILES.has(rel);
-
-// Where the repository's own part of a split file goes, for messages.
-export const ownPartHint = (rel: string): string | undefined => {
-  const file = SPLIT_FILES.get(rel);
-  return file === undefined
-    ? undefined
-    : `${file.own} go below "${file.marker}"`;
-};
-
-type Split = { readonly head: string; readonly tail: string };
-
-// Splits at the end of the marker line, keeping the file's exact bytes. Null
-// when `rel` is not a split file or has no marker line.
-export const splitManaged = (rel: string, text: string): Split | null => {
-  const match = SPLIT_FILES.get(rel)?.line.exec(text);
-  if (match === undefined || match === null) {
-    return null;
-  }
-  const end = match.index + match[0].length;
-  return { head: text.slice(0, end), tail: text.slice(end) };
-};
-
-export const splitAgents = (text: string): Split | null =>
-  splitManaged(AGENTS_FILE, text);
-
 // One self-contained file rather than `@` imports: Codex doesn't expand them,
 // and an import of a part that doesn't apply would dangle.
 export const composeAgents = async (
@@ -246,75 +189,6 @@ export const composeAgents = async (
     );
   }
   return `${['# AGENTS.md', ...parts, AGENTS_LOCAL_HEADING].join('\n\n')}\n`;
-};
-
-// Puts the repository's own part of the split file `rel` under `root` below
-// `head`. Through a link the own part would come from whatever the link points
-// at, so a link is refused. Below a link or a file, and at a directory, there
-// is no own part to read; the mirror refuses those destinations itself.
-export const withOwnPart = async (
-  rel: string,
-  head: string,
-  root: string,
-): Promise<string> => {
-  const entry =
-    (await interposedAncestor(root, rel, new Map())) === null
-      ? await inspectManagedPath(join(root, rel))
-      : null;
-  if (entry?.kind === 'symlink') {
-    throw new Error(
-      `${rel} is a symlink; replace it with a regular file, then re-run`,
-    );
-  }
-  if (entry?.kind !== 'file') {
-    return head;
-  }
-  const split = splitManaged(rel, await readFile(entry.absolutePath, 'utf8'));
-  if (split === null) {
-    const file = SPLIT_FILES.get(rel);
-    throw new Error(
-      `${rel} has no "${file?.marker}" line; add it at the end of the file with ${file?.own} below it, then re-run`,
-    );
-  }
-  return head + split.tail;
-};
-
-// The Dependabot layout before the config became one file: a synced base, a
-// repository-owned overlay, and a merge of the two that sync generated.
-const RETIRED_DEPENDABOT_BASE = '.github/dependabot.base.yml';
-const RETIRED_DEPENDABOT_LOCAL = '.github/dependabot.local.yml';
-
-// No automatic migration: the overlay's blocks are the repository's to move.
-export const retiredDependabotLayout = async (
-  consumer: string,
-): Promise<string | null> => {
-  const found = await Promise.all(
-    [RETIRED_DEPENDABOT_BASE, RETIRED_DEPENDABOT_LOCAL].map(
-      async (rel) => (await inspectManagedPath(join(consumer, rel))) !== null,
-    ),
-  );
-  if (!found.includes(true)) {
-    return null;
-  }
-  return `${RETIRED_DEPENDABOT_BASE} and ${RETIRED_DEPENDABOT_LOCAL} are retired: ${DEPENDABOT_FILE} is now one file that sync owns down to the line "${DEPENDABOT_LOCAL_MARKER}", with this repository's own update blocks below it. To migrate once, add that line, indented two spaces, at the end of ${DEPENDABOT_FILE}; move the update blocks from ${RETIRED_DEPENDABOT_LOCAL} below it; delete ${RETIRED_DEPENDABOT_BASE} and ${RETIRED_DEPENDABOT_LOCAL}; then run \`bun standards sync\``;
-};
-
-// A split file other than AGENTS.md ships the head of the source's own copy;
-// the source repository keeps its own part below the marker too.
-const sourceHead = async (
-  rel: string,
-  entry: ManagedEntry | undefined,
-): Promise<string> => {
-  if (entry?.kind !== 'file') {
-    throw new Error(`source ${rel} must be a regular file`);
-  }
-  const split = splitManaged(rel, await readFile(entry.absolutePath, 'utf8'));
-  if (split === null) {
-    throw new Error(
-      `source ${rel} has no "${SPLIT_FILES.get(rel)?.marker}" line`,
-    );
-  }
-  return split.head;
 };
 
 export type PayloadPlan = {

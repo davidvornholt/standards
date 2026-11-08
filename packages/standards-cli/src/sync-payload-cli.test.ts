@@ -3,7 +3,13 @@
 
 import { afterEach, describe, expect, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import {
+  existsSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
 import {
@@ -20,6 +26,14 @@ afterEach(cleanupTmpDirs);
 
 const ENGINE = join(import.meta.dir, 'cli.ts');
 const CORE_POLICY = '{ "payload": "core" }\n';
+const DEPENDABOT = '.github/dependabot.yml';
+const OWN_BLOCK = [
+  '  - package-ecosystem: nix',
+  '    directory: /infra',
+  '    schedule:',
+  '      interval: weekly',
+  '',
+].join('\n');
 
 const run = (cwd: string, args: ReadonlyArray<string>): RunResult =>
   runProcess('bun', cwd, [ENGINE, ...args], process.env);
@@ -129,12 +143,52 @@ describe('core payload', () => {
 
     expect(result.status).toBe(0);
     expect(existsSync(join(consumer, 'bun-managed/b.txt'))).toBe(false);
+    expect(existsSync(join(consumer, DEPENDABOT))).toBe(false);
     expect(read(consumer, 'AGENTS.md')).not.toContain(AGENTS_PARTS.bun);
     expect(lockedPaths(consumer)).toEqual([
       'AGENTS.md',
       'core-managed/a.txt',
       'sync-standards.json',
     ]);
+  });
+
+  it("refuses to switch to core while the Dependabot config holds the repository's own blocks", () => {
+    const up = buildUpstream();
+    const consumer = newConsumer();
+    expect(init(up, consumer).status).toBe(0);
+    const own = `${read(consumer, DEPENDABOT)}${OWN_BLOCK}`;
+    write(consumer, DEPENDABOT, own);
+    write(consumer, 'sync-standards.local.json', CORE_POLICY);
+    const lock = read(consumer, 'sync-standards.lock');
+    const agents = read(consumer, 'AGENTS.md');
+
+    for (const dryRun of [['--dry-run'], []]) {
+      const result = run(consumer, [
+        'sync',
+        ...dryRun,
+        '--from',
+        up,
+        '--dir',
+        consumer,
+      ]);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        `${DEPENDABOT} is no longer synced, so sync would delete it and this repository's own update blocks below "# Project-specific updates"; to keep them, move ${DEPENDABOT} aside, re-run, then move it back`,
+      );
+    }
+    expect(read(consumer, DEPENDABOT)).toBe(own);
+    expect(read(consumer, 'sync-standards.lock')).toBe(lock);
+    expect(read(consumer, 'AGENTS.md')).toBe(agents);
+    expect(existsSync(join(consumer, 'bun-managed/b.txt'))).toBe(true);
+
+    const aside = join(mkTmp('payload-aside-'), 'dependabot.yml');
+    renameSync(join(consumer, DEPENDABOT), aside);
+    expect(
+      run(consumer, ['sync', '--from', up, '--dir', consumer]).status,
+    ).toBe(0);
+    renameSync(aside, join(consumer, DEPENDABOT));
+    expect(lockedPaths(consumer)).not.toContain(DEPENDABOT);
+    expect(read(consumer, DEPENDABOT)).toBe(own);
   });
 });
 

@@ -130,13 +130,13 @@ jobs:
         uses: cachix/install-nix-action@v31
 
       # A consumer can receive this canonical workflow before upgrading its
-      # repo-owned package manifest. Fail before sync instead of letting an
-      # older CLI mirror canonical files without enforcing their lock-backed
-      # managed-file contract.
+      # repo-owned package manifest. Fail before sync with an upgrade message
+      # instead of letting an older CLI fail on the payload manifest or mirror
+      # canonical files without the split Dependabot config and its checks.
       - name: Require compatible standards CLI
         if: needs.policy.outputs.payload == 'bun'
         env:
-          MINIMUM_STANDARDS_VERSION: "0.21.0"
+          MINIMUM_STANDARDS_VERSION: "0.34.0"
         run: |
           package_path=node_modules/@davidvornholt/standards/package.json
           installed_version=$(jq -er '.version | select(type == "string")' "$package_path")

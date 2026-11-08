@@ -1132,7 +1132,7 @@ const runWorkflowVersionGuard = (version: string): RunResult => {
       '-c',
       workflowRunScript('Require compatible standards CLI'),
     ],
-    { MINIMUM_STANDARDS_VERSION: '0.21.0' },
+    { MINIMUM_STANDARDS_VERSION: '0.34.0' },
   );
 };
 
@@ -1295,7 +1295,7 @@ describe('init', () => {
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(
-      `source ${DEPENDABOT} has no "${DEPENDABOT_MARKER}" line`,
+      `source ${DEPENDABOT} has no "${DEPENDABOT_MARKER.trimStart()}" line`,
     );
     expect(snapshotTree(consumer)).toEqual(before);
   });
@@ -1315,7 +1315,7 @@ describe('init', () => {
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(
-      `${DEPENDABOT} has no "${DEPENDABOT_MARKER}" line`,
+      `${DEPENDABOT} has no "${DEPENDABOT_MARKER.trimStart()}" line`,
     );
     expect(snapshotTree(consumer)).toEqual(before);
   });
@@ -1567,7 +1567,7 @@ describe('Dependabot config split', () => {
     expect(check.status).toBe(1);
     expect(check.stderr).toContain(`modified: ${DEPENDABOT}`);
     expect(check.stderr).toContain(
-      `this repository's own update blocks go below "${DEPENDABOT_MARKER}"`,
+      `this repository's own update blocks go below "${DEPENDABOT_MARKER.trimStart()}"`,
     );
   });
 
@@ -1582,7 +1582,7 @@ describe('Dependabot config split', () => {
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(
-      `${DEPENDABOT} has no "${DEPENDABOT_MARKER}" line`,
+      `${DEPENDABOT} has no "${DEPENDABOT_MARKER.trimStart()}" line`,
     );
     expect(snapshotTree(consumer)).toEqual(before);
   });
@@ -1636,8 +1636,58 @@ describe('Dependabot config validation', () => {
 
     expect(doctor.status).toBe(1);
     expect(doctor.stderr).toContain(
-      `${DEPENDABOT} has no "${DEPENDABOT_MARKER}" line`,
+      `${DEPENDABOT} has no "${DEPENDABOT_MARKER.trimStart()}" line`,
     );
+  });
+});
+
+describe('Dependabot config safety in sync', () => {
+  // A consumer with its own blocks and an upstream change waiting to sync.
+  const pendingSync = (own: string): { up: string; consumer: string } => {
+    const up = buildUpstream();
+    const { consumer } = initConsumer(up);
+    write(consumer, DEPENDABOT, `${read(consumer, DEPENDABOT)}${own}`);
+    write(up, 'managed/a.txt', 'alpha v2\n');
+    return { up, consumer };
+  };
+
+  it.each([
+    [
+      'a line that extends the last shared block',
+      '    open-pull-requests-limit: 0\n',
+      `${DEPENDABOT} changes shared update block 2 below "# Project-specific updates"`,
+    ],
+    [
+      'a second marker line',
+      `${OWN_UPDATES}${DEPENDABOT_MARKER}\n`,
+      `${DEPENDABOT} has more than one "# Project-specific updates" line`,
+    ],
+  ])('refuses %s before writing anything', (_label, own, message) => {
+    const { up, consumer } = pendingSync(own);
+    const before = snapshotTree(consumer);
+
+    for (const args of [['--dry-run'], []]) {
+      const result = sync(up, consumer, args);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(message);
+    }
+    expect(snapshotTree(consumer)).toEqual(before);
+    const check = run(consumer, ['check', '--dir', consumer]);
+    expect(check.status).toBe(1);
+    expect(check.stderr).toContain(message);
+  });
+
+  it("keeps the first own block when the source's marker line ends the file", () => {
+    const { up, consumer } = pendingSync(OWN_UPDATES);
+    write(up, DEPENDABOT, DEPENDABOT_HEAD.replace('weekly', 'daily').trimEnd());
+
+    const synced = sync(up, consumer);
+
+    expect(synced.status).toBe(0);
+    expect(read(consumer, DEPENDABOT)).toBe(
+      `${DEPENDABOT_HEAD.replace('weekly', 'daily')}${OWN_UPDATES}`,
+    );
+    expect(run(consumer, ['check', '--dir', consumer]).status).toBe(0);
   });
 });
 
@@ -2524,7 +2574,10 @@ describe('canonical standards workflow settings security', () => {
     expect(() => assertSettingsTrustBoundary(hoistedSkipWorkflow)).toThrow();
   });
 
-  it('pins the isolated settings checker to the sync workflow minimum', () => {
+  // The checker downloads a published release by its hash, so it can follow a
+  // raised minimum only once that release exists: until then it trails the
+  // minimum. Raise it to the minimum, with the new hash, after the release.
+  it('pins the isolated settings checker no later than the sync workflow minimum', () => {
     const [, installStep] = assertSettingsTrustBoundary(
       parseWorkflow(STANDARDS_WORKFLOW),
     );
@@ -2534,10 +2587,15 @@ describe('canonical standards workflow settings security', () => {
       PINNED_STANDARDS_VERSION_PATTERN.exec(installRun)?.groups?.version;
     const minimumVersion =
       MINIMUM_STANDARDS_VERSION_PATTERN.exec(syncWorkflow)?.groups?.version;
+    const sortable = (version = ''): string =>
+      version
+        .split('.')
+        .map((part) => part.padStart(6, '0'))
+        .join('.');
 
     expect(pinnedVersion).toBeDefined();
     expect(minimumVersion).toBeDefined();
-    expect(pinnedVersion).toBe(minimumVersion);
+    expect(sortable(pinnedVersion) <= sortable(minimumVersion)).toBe(true);
   });
 });
 
@@ -3630,9 +3688,10 @@ describe('standards sync workflow policy', () => {
     expect(output).toBe('');
   });
 
-  // A lower minor that sorts after the minimum as text, a prerelease, and the
-  // adjacent minor cover the SemVer gate and the version comparison.
-  it.each(['0.9.0', '0.10.0-beta.1', '0.20.0'])(
+  // A lower minor that sorts after the minimum as text, a prerelease of the
+  // minimum, the adjacent minor, and 0.21.0, which can't read the payload
+  // manifest, cover the SemVer gate and the version comparison.
+  it.each(['0.4.0', '0.34.0-beta.1', '0.33.0', '0.21.0'])(
     'rejects installed CLI version %s without a policy file',
     (version) => {
       const result = runWorkflowVersionGuard(version);
@@ -3641,15 +3700,15 @@ describe('standards sync workflow policy', () => {
     },
   );
 
-  it('makes the 0.21.0 guard unconditional', () => {
+  it('makes the 0.34.0 guard unconditional', () => {
     const workflow = readFileSync(SYNC_WORKFLOW, 'utf8');
-    expect(workflow).toContain('MINIMUM_STANDARDS_VERSION: "0.21.0"');
+    expect(workflow).toContain('MINIMUM_STANDARDS_VERSION: "0.34.0"');
     expect(workflow).not.toContain(
       "if: needs.policy.outputs.present == 'true'",
     );
   });
 
-  it.each(['0.21.0', '0.21.1', '1.0.0'])(
+  it.each(['0.34.0', '0.34.1', '1.0.0'])(
     'accepts installed CLI version %s without a policy file',
     (version) => {
       expect(runWorkflowVersionGuard(version).status).toBe(0);

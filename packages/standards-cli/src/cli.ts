@@ -36,6 +36,15 @@ import {
   interposedAncestor,
   unlockedPathsUnder,
 } from './managed-path-ownership';
+import {
+  AGENTS_FILE,
+  isSplitFile,
+  leavingOwnPartProblems,
+  ownPartHint,
+  splitAgents,
+  splitManaged,
+  withOwnPart,
+} from './own-part';
 import { runScreenshotsCommand } from './screenshots-commands';
 import { collectSopsActionCallerProblems } from './sops-action-callers';
 import { collectSourceTextProblems } from './source-text';
@@ -43,17 +52,11 @@ import { collectStructureProblems } from './structure-check';
 import type { StructureProfile } from './structure-profile';
 import { hasSafeCommand } from './structure-script';
 import {
-  AGENTS_FILE,
   assertSafeRelativePath,
-  isSplitFile,
   loadManifest,
   type Manifest,
-  ownPartHint,
   readManifestUpstream,
   readSourceAgents,
-  splitAgents,
-  splitManaged,
-  withOwnPart,
   withPayloadPlan,
 } from './sync-payload';
 import {
@@ -358,14 +361,14 @@ const directoryCollision = (
   return `${rel} should be a symlink to the canonical ${canonical}, but it is a directory holding ${holding}; copy and zip tools that follow links can cause this. First move any of your own files out of ${rel}, then run \`rm -rf ${rel} && bun standards ${command}\``;
 };
 
-// Two things init/sync must settle before their first write: an escaping
-// canonical link target, and a managed destination that is a directory holding
-// paths the lock does not record. The lock is the only record of what this
-// engine put in a consumer, so whether the destination itself is locked decides
-// nothing — a consumer can replace a locked link with a directory of its own
-// skills, and that directory is still consumer work. Both problems are decided
-// from data already in hand, and both are reported together so one run surfaces
-// every offending managed path.
+// What init/sync must settle before their first write: an escaping canonical
+// link target, a managed destination that is a directory holding paths the lock
+// does not record, and a split file leaving the payload with the repository's
+// own part still in it. The lock is the only record of what this engine put in
+// a consumer, so whether the destination itself is locked decides nothing — a
+// consumer can replace a locked link with a directory of its own skills, and
+// that directory is still consumer work. The problems are reported together so
+// one run surfaces every offending managed path.
 const mirrorPreconditionProblems = async (
   consumer: string,
   upstream: ReadonlyMap<string, ManagedEntry>,
@@ -393,6 +396,11 @@ const mirrorPreconditionProblems = async (
     ...symlinkTargetProblems(upstream, true),
     ...(await collectSopsActionCallerProblems(consumer, upstream)),
     ...collisions.filter((problem): problem is string => problem !== null),
+    ...(await leavingOwnPartProblems(
+      consumer,
+      [...locked].filter((rel) => !upstream.has(rel)),
+      upstream,
+    )),
   ];
 };
 
