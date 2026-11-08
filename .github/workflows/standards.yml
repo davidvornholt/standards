@@ -280,23 +280,23 @@ jobs:
       # a broken workflow only fails when its trigger fires, after merge. Lint
       # them first: it is the cheapest step, so certain failures cost nothing.
       # CodeBuild runners occasionally see a pinned download stall for two
-      # minutes and end in an HTTP error, so every pinned download in this
-      # workflow caps each attempt and retries. The checksum still decides
-      # what runs.
+      # minutes and end in an HTTP error. Bounded retries fall back to the
+      # official release-assets API; the checksum still decides what runs.
       - name: Lint workflows
         run: |
           set -euo pipefail
           version=1.7.12
           case "$(uname -m)" in
-            x86_64) arch=amd64; sha=8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8 ;;
-            aarch64) arch=arm64; sha=325e971b6ba9bfa504672e29be93c24981eeb1c07576d730e9f7c8805afff0c6 ;;
+            x86_64) arch=amd64; asset=384924896; sha=8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8 ;;
+            aarch64) arch=arm64; asset=384924897; sha=325e971b6ba9bfa504672e29be93c24981eeb1c07576d730e9f7c8805afff0c6 ;;
             *)
               echo "::error::No pinned actionlint binary for runner architecture $(uname -m)"
               exit 1
               ;;
           esac
           archive="$RUNNER_TEMP/actionlint.tar.gz"
-          curl -sSfLo "$archive" --retry 3 --retry-all-errors --connect-timeout 10 --max-time 60 "https://github.com/rhysd/actionlint/releases/download/v${version}/actionlint_${version}_linux_${arch}.tar.gz"
+          curl -sSfLo "$archive" --retry 3 --retry-all-errors --connect-timeout 10 --max-time 60 "https://github.com/rhysd/actionlint/releases/download/v${version}/actionlint_${version}_linux_${arch}.tar.gz" || \
+            curl -sSfLo "$archive" --retry 3 --retry-all-errors --connect-timeout 10 --max-time 60 -H "Accept: application/octet-stream" "https://api.github.com/repos/rhysd/actionlint/releases/assets/${asset}"
           echo "$sha  $archive" | sha256sum --check --quiet
           tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
           # The v3 GitHub App token action takes client-id in place of the
@@ -365,9 +365,21 @@ jobs:
       # repository's CLI suite spawns `just` against them, and one uniform file
       # serves every repo (see the Postgres note above).
       - name: Install just
-        uses: extractions/setup-just@v4
-        with:
-          just-version: "1.58.0"
+        run: |
+          set -euo pipefail
+          version=1.58.0
+          case "$(uname -m)" in
+            x86_64) arch=x86_64; asset=500509978; sha=4a5cc2f53e6f0f8c59092a6cc38291eb729d46a7dd95d3ae582008881b84931d ;;
+            aarch64) arch=aarch64; asset=500510099; sha=748237128c4c40cbdabc65e841d05ceba13cc23a91eaba395495894c1d9764df ;;
+            *) echo "::error::No pinned just binary for runner architecture $(uname -m)"; exit 1 ;;
+          esac
+          archive="$RUNNER_TEMP/just.tar.gz"
+          curl -sSfLo "$archive" --retry 3 --retry-all-errors --connect-timeout 10 --max-time 60 "https://github.com/casey/just/releases/download/${version}/just-${version}-${arch}-unknown-linux-musl.tar.gz" || \
+            curl -sSfLo "$archive" --retry 3 --retry-all-errors --connect-timeout 10 --max-time 60 -H "Accept: application/octet-stream" "https://api.github.com/repos/casey/just/releases/assets/${asset}"
+          echo "$sha  $archive" | sha256sum --check --quiet
+          mkdir -p "$RUNNER_TEMP/just-bin"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/just-bin" just
+          echo "$RUNNER_TEMP/just-bin" >> "$GITHUB_PATH"
 
       - name: Detect browser a11y suite
         id: a11y
@@ -816,8 +828,8 @@ jobs:
           set -euo pipefail
           bun_version=1.4.3
           case "$(uname -m)" in
-            x86_64) bun_arch=x64; bun_sha=3e730528d89775f03f87f05c06787c4df4099d0a37f3f252e7b829cb23816e18 ;;
-            aarch64) bun_arch=aarch64; bun_sha=efa9813da5ed72423bf847f916e8d2c47c0d776add972354026a75e10da9aa21 ;;
+            x86_64) bun_arch=x64; bun_asset=626788717; bun_sha=3e730528d89775f03f87f05c06787c4df4099d0a37f3f252e7b829cb23816e18 ;;
+            aarch64) bun_arch=aarch64; bun_asset=626788529; bun_sha=efa9813da5ed72423bf847f916e8d2c47c0d776add972354026a75e10da9aa21 ;;
             *)
               echo "::error::No pinned Bun binary for runner architecture $(uname -m)"
               exit 1
@@ -825,7 +837,8 @@ jobs:
           esac
           bun_archive="$RUNNER_TEMP/bun.zip"
           bun_root="$RUNNER_TEMP/standards-bin"
-          curl -sSfLo "$bun_archive" --retry 3 --retry-all-errors --connect-timeout 10 --max-time 60 "https://github.com/oven-sh/bun/releases/download/bun-v${bun_version}/bun-linux-${bun_arch}.zip"
+          curl -sSfLo "$bun_archive" --retry 3 --retry-all-errors --connect-timeout 10 --max-time 60 "https://github.com/oven-sh/bun/releases/download/bun-v${bun_version}/bun-linux-${bun_arch}.zip" || \
+            curl -sSfLo "$bun_archive" --retry 3 --retry-all-errors --connect-timeout 10 --max-time 60 -H "Accept: application/octet-stream" "https://api.github.com/repos/oven-sh/bun/releases/assets/${bun_asset}"
           echo "$bun_sha  $bun_archive" | sha256sum --check --quiet
           mkdir "$bun_root"
           unzip -q "$bun_archive" -d "$bun_root"
