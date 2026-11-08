@@ -20,7 +20,15 @@ let
   standardsBun = bun.overrideAttrs {
     version = bunVersion;
     src = fetchurl {
-      url = "https://github.com/oven-sh/bun/releases/download/bun-v${bunVersion}/bun-linux-${systemMetadata.archivePlatform}.zip";
+      name = "bun-linux-${systemMetadata.archivePlatform}.zip";
+      urls = [
+        "https://github.com/oven-sh/bun/releases/download/bun-v${bunVersion}/bun-linux-${systemMetadata.archivePlatform}.zip"
+        "https://api.github.com/repos/oven-sh/bun/releases/assets/${toString systemMetadata.archiveAssetId}"
+      ];
+      curlOptsList = [
+        "-H"
+        "Accept: application/octet-stream"
+      ];
       hash = systemMetadata.archiveHash;
     };
   };

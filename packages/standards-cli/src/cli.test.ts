@@ -62,7 +62,7 @@ const NIX_SYSTEM_MATRIX_FILTER = join(
 const SOPS_VERSION_ASSIGNMENT = /version=v\d+\.\d+\.\d+/gu;
 const SOPS_CHECKSUM_ASSIGNMENT = /sha=[a-f0-9]{64}/gu;
 const SOPS_ARCHITECTURE_PIN =
-  /(?:x86_64|aarch64)\) arch=[a-z0-9]+ sha=[a-f0-9]{64}/gu;
+  /(?:x86_64|aarch64)\) arch=[a-z0-9]+ asset=[0-9]+ sha=[a-f0-9]{64}/gu;
 // `sha=`/`version=` alone also match the Bun, CLI, and actionlint pins that
 // legitimately live in the canonical workflow, so ownership is asked of the one
 // string only a SOPS installer has.
@@ -2785,8 +2785,11 @@ describe('canonical standards workflow settings credential', () => {
 
   it('installs a version-pinned just for the canonical justfile gate tests', () => {
     const workflow = readFileSync(STANDARDS_WORKFLOW, 'utf8');
-    expect(workflow).toContain('uses: extractions/setup-just@v4');
-    expect(workflow).toContain('just-version: "1.58.0"');
+    expect(workflow).not.toContain('uses: extractions/setup-just');
+    const install = yamlRunScript(STANDARDS_WORKFLOW, 'Install just');
+    expect(install).toContain('version=1.58.0');
+    expect(install.match(/sha=[a-f0-9]{64}/gu)).toHaveLength(2);
+    expect(install).toContain('sha256sum --check --quiet');
   });
 });
 
