@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Run manually when changing Bun fetchers. Fresh fixed-output names avoid a
+# Run manually when changing the Bun fetcher. Fresh fixed-output names avoid a
 # cached archive hiding a broken fallback; only the test derivations change.
 export BUN_DOWNLOAD_REPO
 BUN_DOWNLOAD_REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -11,24 +11,16 @@ let
   flake = builtins.getFlake (builtins.getEnv "BUN_DOWNLOAD_REPO");
   pkgs = flake.inputs.nixpkgs.legacyPackages.${builtins.currentSystem};
   system = builtins.getEnv "BUN_DOWNLOAD_SYSTEM";
-  kind = builtins.getEnv "BUN_DOWNLOAD_KIND";
-  metadata = builtins.fromJSON (builtins.readFile (flake.outPath + "/nix/bun-system-metadata.json"));
-  source = if kind == "cli" then
-    (pkgs.callPackage (flake.outPath + "/nix/standards-cli.nix") {
-      src = flake.outPath;
-      bunSystemMetadata = { ${builtins.currentSystem} = metadata.${system}; };
-    }).bun.src
-  else
-    (pkgs.callPackage (flake.outPath + "/nix/standards-bun.nix") {
-      packageManager = "bun@${builtins.getEnv "BUN_DOWNLOAD_VERSION"}";
-      stdenv = { hostPlatform = { inherit system; }; };
-    }).src;
-  platform = if system == "aarch64-linux" then "aarch64"
-    else if kind == "cli" then "x64" else "x64-baseline";
+  version = builtins.getEnv "BUN_DOWNLOAD_VERSION";
+  archives = builtins.fromJSON (builtins.readFile (flake.outPath + "/nix/bun-archives.json"));
+  source = (pkgs.callPackage (flake.outPath + "/nix/standards-bun.nix") {
+    packageManager = "bun@${version}";
+    stdenv = { hostPlatform = { inherit system; }; };
+  }).src;
 in
-assert source.name == "bun-linux-${platform}.zip";
+assert source.name == archives.${version}.${system}.asset;
 source.overrideAttrs {
-  name = "bun-download-${builtins.getEnv "BUN_DOWNLOAD_PROBE"}-${kind}-${system}-${builtins.getEnv "BUN_DOWNLOAD_VERSION"}-${builtins.getEnv "BUN_DOWNLOAD_CORRUPT"}.zip";
+  name = "bun-download-${builtins.getEnv "BUN_DOWNLOAD_PROBE"}-${system}-${version}-${builtins.getEnv "BUN_DOWNLOAD_CORRUPT"}.zip";
   urls = [ "file:///missing-bun-browser-download" ] ++ builtins.tail source.urls;
   curlOptsList = source.curlOptsList ++ [ "--retry" "0" "--connect-timeout" "10" "--max-time" "60" ];
   preferHashedMirrors = false;
@@ -38,18 +30,15 @@ source.overrideAttrs {
 }
 '
 
-export BUN_DOWNLOAD_KIND BUN_DOWNLOAD_SYSTEM BUN_DOWNLOAD_VERSION BUN_DOWNLOAD_CORRUPT=no
-for BUN_DOWNLOAD_KIND in cli shell; do
-  versions=(1.4.3)
-  if [[ "$BUN_DOWNLOAD_KIND" = shell ]]; then versions=(1.4.0 1.4.2 1.4.3); fi
-  for BUN_DOWNLOAD_VERSION in "${versions[@]}"; do
-    for BUN_DOWNLOAD_SYSTEM in x86_64-linux aarch64-linux; do
-      nix build --no-link --impure --expr "$expression" -L
-    done
-  done
-done
+export BUN_DOWNLOAD_SYSTEM BUN_DOWNLOAD_VERSION BUN_DOWNLOAD_CORRUPT=no
+# A plain assignment, unlike a process substitution, stops the script when the
+# table can't be read.
+archives=$(jq -er 'to_entries[] | .key as $version | .value | keys[] | [$version, .] | @tsv' "$BUN_DOWNLOAD_REPO/nix/bun-archives.json")
+while IFS=$'\t' read -r BUN_DOWNLOAD_VERSION BUN_DOWNLOAD_SYSTEM; do
+  nix build --no-link --impure --expr "$expression" -L
+done <<<"$archives"
 
-BUN_DOWNLOAD_KIND=cli
+BUN_DOWNLOAD_VERSION=$(jq -er '.packageManager | ltrimstr("bun@")' "$BUN_DOWNLOAD_REPO/package.json")
 BUN_DOWNLOAD_SYSTEM=x86_64-linux
 BUN_DOWNLOAD_CORRUPT=yes
 log=$(mktemp)
@@ -59,4 +48,4 @@ if nix build --no-link --impure --expr "$expression" -L >"$log" 2>&1; then
   exit 1
 fi
 grep -F 'hash mismatch in fixed-output derivation' "$log"
-echo 'Both Bun fetchers recovered through the API on both architectures; incorrect checksum rejected.'
+echo 'Every pinned Bun archive recovered through the API; incorrect checksum rejected.'

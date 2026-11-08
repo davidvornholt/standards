@@ -6,10 +6,17 @@
   outputs =
     { self, nixpkgs }:
     let
-      bunSystemMetadata = builtins.fromJSON (builtins.readFile ./nix/bun-system-metadata.json);
       manifest = builtins.fromJSON (builtins.readFile ./package.json);
-      systems = builtins.attrNames bunSystemMetadata;
+      bunArchives = builtins.fromJSON (builtins.readFile ./nix/bun-archives.json);
+      # The flake supports exactly the systems with a pinned archive of the
+      # root packageManager's Bun.
+      systems = builtins.attrNames bunArchives.${nixpkgs.lib.removePrefix "bun@" manifest.packageManager};
       forAllSystems = nixpkgs.lib.genAttrs systems;
+      standardsBun =
+        system:
+        nixpkgs.legacyPackages.${system}.callPackage ./nix/standards-bun.nix {
+          inherit (manifest) packageManager;
+        };
     in
     {
       packages = forAllSystems (
@@ -17,8 +24,8 @@
         let
           pkgs = nixpkgs.legacyPackages.${system};
           standardsCli = pkgs.callPackage ./nix/standards-cli.nix {
-            inherit bunSystemMetadata;
             src = self;
+            standardsBun = standardsBun system;
           };
         in
         {
@@ -38,7 +45,7 @@
         in
         {
           standards-cli = pkgs.callPackage ./nix/standards-cli-check.nix {
-            inherit bunSystemMetadata standardsCli;
+            inherit standardsCli systems;
           };
           app-release = pkgs.callPackage ./nix/app-release/check.nix {
             appRelease = self.packages.${system}.app-release;
@@ -50,19 +57,10 @@
         }
       );
 
-      devShells = forAllSystems (
-        system:
-        let
-          pkgs = nixpkgs.legacyPackages.${system};
-          bun = pkgs.callPackage ./nix/standards-bun.nix {
-            inherit (manifest) packageManager;
-          };
-        in
-        {
-          default = pkgs.mkShell {
-            packages = [ bun ];
-          };
-        }
-      );
+      devShells = forAllSystems (system: {
+        default = nixpkgs.legacyPackages.${system}.mkShell {
+          packages = [ (standardsBun system) ];
+        };
+      });
     };
 }

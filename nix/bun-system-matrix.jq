@@ -1,52 +1,37 @@
-def nonempty_string:
-  type == "string" and length > 0;
+# Maps every system with a pinned archive of the root packageManager's Bun to
+# the native GitHub runner that builds its Nix checks. Run with
+# `--slurpfile manifest package.json` on nix/bun-archives.json.
+def runners: {
+  "aarch64-linux": "ubuntu-24.04-arm",
+  "x86_64-linux": "ubuntu-24.04"
+};
 
-if type != "object" then
-  error("Bun system metadata must be a JSON object")
-else
-  .
-end
-| to_entries
-| if length == 0 then
-    error("Bun system metadata must define at least one system")
+$manifest[0].packageManager as $packageManager
+| if ($packageManager | type == "string") and ($packageManager | test("^bun@(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$")) then
+    .
+  else
+    error("package.json packageManager must pin an exact bun@x.y.z version")
+  end
+| ($packageManager | ltrimstr("bun@")) as $version
+| if type != "object" then
+    error("nix/bun-archives.json must be a JSON object")
   else
     .
   end
+| .[$version]
+| if type != "object" or length == 0 then
+    error("nix/bun-archives.json has no archives for Bun \($version)")
+  else
+    .
+  end
+| keys
 | map(
-    . as $entry
-    | if (($entry.key | nonempty_string) and ($entry.key | test("^[A-Za-z0-9_+.-]+$"))) then
-        .
+    . as $system
+    | (runners | .[$system]) as $runner
+    | if $runner == null then
+        error("No native GitHub runner builds the Nix checks for \($system); add one to nix/bun-system-matrix.jq")
       else
-        error("Bun system metadata contains an invalid system key")
-      end
-    | if (.value | type == "object") then
-        .
-      else
-        error("Bun system metadata for \(.key) must be an object")
-      end
-    | if ((.value.archivePlatform | nonempty_string) and (.value.archivePlatform | test("^[A-Za-z0-9_-]+$"))) then
-        .
-      else
-        error("Bun system metadata for \(.key) has an invalid archivePlatform")
-      end
-    | if ((.value.bunVersion | nonempty_string) and (.value.bunVersion | test("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"))) then
-        .
-      else
-        error("Bun system metadata for \(.key) has an invalid bunVersion")
-      end
-    | if ((.value.archiveHash | nonempty_string) and (.value.archiveHash | test("^sha256-[A-Za-z0-9+/]{43}=$"))) then
-        .
-      else
-        error("Bun system metadata for \(.key) has an invalid archiveHash")
-      end
-    | if ((.value.runner | nonempty_string) and (.value.runner | test("^ubuntu-[0-9]{2}\\.[0-9]{2}(-arm)?$"))) then
-        {
-          runner: .value.runner,
-          system: .key
-        }
-      else
-        error("Bun system metadata for \(.key) has an invalid native GitHub runner")
+        { runner: $runner, system: $system }
       end
   )
-| sort_by(.system)
 | { include: . }

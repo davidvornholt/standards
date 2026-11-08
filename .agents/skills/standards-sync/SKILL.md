@@ -29,7 +29,7 @@ A change every consumer should get belongs upstream. A change for one consumer b
 | `.agents/skills/*` | Unmanaged sibling skill directories |
 | `.github/workflows/standards-sync.yml` | `sync-standards.local.json` |
 | `.mise/config.toml` | `mise.toml` |
-| `nix/standards-bun.nix` | `flake.nix` and `dev-shell.local.nix` |
+| `nix/standards-bun.nix` and `nix/bun-archives.json` | `flake.nix` and `dev-shell.local.nix` |
 
 A core consumer has only the `AGENTS.md`, skills, and sync workflow rows. An extension adds to its canonical file and doesn't replace it. GitHub settings can only add stricter settings, rulesets, and labels. A repository's own Dependabot blocks can't repeat a shared block's ecosystem, directory, and target branch, so a hold on a shared block goes upstream. Blocks that share an ecosystem and target branch list their directories without globs, because `check` can't tell whether two globs overlap.
 

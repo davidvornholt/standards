@@ -1,11 +1,9 @@
 {
-  bun,
-  bunSystemMetadata,
   cacert,
-  fetchurl,
   lib,
   makeWrapper,
   src,
+  standardsBun,
   stdenvNoCC,
 }:
 let
@@ -13,25 +11,7 @@ let
   cliManifest = builtins.fromJSON (builtins.readFile (src + "/packages/standards-cli/package.json"));
   packageName = cliManifest.name;
   version = cliManifest.version;
-  bunVersion =
-    assert builtins.match "^bun@(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$" rootManifest.packageManager != null;
-    lib.removePrefix "bun@" rootManifest.packageManager;
-  systemMetadata = bunSystemMetadata.${stdenvNoCC.hostPlatform.system};
-  standardsBun = bun.overrideAttrs {
-    version = bunVersion;
-    src = fetchurl {
-      name = "bun-linux-${systemMetadata.archivePlatform}.zip";
-      urls = [
-        "https://github.com/oven-sh/bun/releases/download/bun-v${bunVersion}/bun-linux-${systemMetadata.archivePlatform}.zip"
-        "https://api.github.com/repos/oven-sh/bun/releases/assets/${toString systemMetadata.archiveAssetId}"
-      ];
-      curlOptsList = [
-        "-H"
-        "Accept: application/octet-stream"
-      ];
-      hash = systemMetadata.archiveHash;
-    };
-  };
+  bunVersion = standardsBun.version;
   runtimeDependencies = stdenvNoCC.mkDerivation {
     pname = "standards-cli-runtime-dependencies";
     inherit src version;
@@ -62,7 +42,6 @@ let
   };
 in
 assert rootManifest.packageManager == "bun@${bunVersion}";
-assert systemMetadata.bunVersion == bunVersion;
 assert cliManifest.engines.bun == ">=${bunVersion}";
 stdenvNoCC.mkDerivation {
   pname = "standards-cli";
@@ -93,6 +72,6 @@ stdenvNoCC.mkDerivation {
     homepage = cliManifest.homepage;
     license = lib.licenses.mit;
     mainProgram = "standards";
-    platforms = builtins.attrNames bunSystemMetadata;
+    inherit (standardsBun.meta) platforms;
   };
 }
