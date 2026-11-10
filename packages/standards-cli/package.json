@@ -146,7 +146,7 @@
   "devDependencies": {
     "@davidvornholt/typescript-config": "workspace:*",
     "@types/bun": "^1.4.3",
-    "sigstore": "5.0.0",
+    "sigstore": "5.0.1",
     "typescript": "7.0.2"
   },
   "engines": {
