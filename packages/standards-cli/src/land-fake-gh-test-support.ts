@@ -20,6 +20,7 @@ const EXECUTABLE = 0o755;
 const UNKNOWN_CALL = 99;
 const WORKFLOWS_DIR = '.github/workflows/';
 const MILLISECONDS = /\.\d+Z$/u;
+const INT32_BYTES = 4;
 
 export type FakePr = Record<string, unknown> & {
   // Each poll of the checks applies the next entry; the last one stays.
@@ -44,6 +45,10 @@ export type FakeGithub = {
   // Each lookup of the base branch's tip applies the next entry; the last one
   // stays. Empty when the branch doesn't exist.
   baseTips: Array<string>;
+  // The checks that rulesets and classic branch protection require on every
+  // branch.
+  rulesetChecks: Array<string>;
+  protectionChecks: Array<string>;
 };
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -75,12 +80,23 @@ const notFound = (): FakeGhResult => failure('gh: Not Found (HTTP 404)\n');
 const nextOf = <T>(queue: Array<T>): T | undefined =>
   queue.length > 1 ? queue.shift() : queue[0];
 
+// A poll whose entry sets hangMs answers only after that long, like a gh
+// call that hangs.
 const viewPr = ({ args, pr, savePr }: Call): FakeGhResult => {
   if ((args.at(-1) ?? '').includes('statusCheckRollup')) {
     const poll = nextOf(pr.polls);
     if (poll !== undefined) {
       Object.assign(pr, poll);
       savePr();
+    }
+    const hangMs = Number(pr.hangMs ?? 0);
+    if (hangMs > 0) {
+      Atomics.wait(
+        new Int32Array(new SharedArrayBuffer(INT32_BYTES)),
+        0,
+        0,
+        hangMs,
+      );
     }
   }
   return json(pr);
@@ -177,6 +193,49 @@ const graphql = (call: Call): FakeGhResult => {
 const compare = ({ github }: Call): FakeGhResult =>
   github.compare === null ? notFound() : ok(`${github.compare}\n`);
 
+const branchRules = ({ github }: Call): FakeGhResult =>
+  json([
+    { type: 'deletion' },
+    {
+      type: 'required_status_checks',
+      parameters: {
+        // biome-ignore lint/style/useNamingConvention: GitHub's REST field.
+        required_status_checks: github.rulesetChecks.map((context) => ({
+          context,
+          // biome-ignore lint/style/useNamingConvention: GitHub's REST field.
+          integration_id: 1,
+        })),
+      },
+    },
+  ]);
+
+const branch = ({ github }: Call): FakeGhResult => {
+  const required = github.protectionChecks;
+  return json({
+    name: 'trunk',
+    protected: true,
+    protection: {
+      enabled: required.length > 0,
+      // biome-ignore lint/style/useNamingConvention: GitHub's REST field.
+      required_status_checks: {
+        // biome-ignore lint/style/useNamingConvention: GitHub's REST field.
+        enforcement_level: required.length > 0 ? 'everyone' : 'off',
+        contexts: required,
+        // biome-ignore lint/style/useNamingConvention: GitHub's REST field.
+        checks: required.map((context) => ({ context, app_id: null })),
+      },
+    },
+  });
+};
+
+const REST_ROUTES: ReadonlyArray<
+  readonly [RegExp, (call: Call) => FakeGhResult]
+> = [
+  [/^repos\/[^/]+\/[^/]+\/compare\//u, compare],
+  [/^repos\/[^/]+\/[^/]+\/rules\/branches\//u, branchRules],
+  [/^repos\/[^/]+\/[^/]+\/branches\//u, branch],
+];
+
 const repoView = ({ env }: Call): FakeGhResult =>
   json({
     url: 'https://github.com/test/repo',
@@ -199,8 +258,12 @@ const route = (call: Call): FakeGhResult => {
   if (handler !== undefined) {
     return handler(call);
   }
-  if (call.args[0] === 'api' && (call.args[1] ?? '').includes('/compare/')) {
-    return compare(call);
+  const rest =
+    call.args[0] === 'api'
+      ? REST_ROUTES.find(([path]) => path.test(call.args[1] ?? ''))
+      : undefined;
+  if (rest !== undefined) {
+    return rest[1](call);
   }
   return failure(`Unexpected gh call: ${call.args.join(' ')}\n`, UNKNOWN_CALL);
 };
@@ -237,6 +300,9 @@ export const installFakeGh = (root: string): string => {
     [
       `#!${process.execPath}`,
       `import { fakeGh } from ${JSON.stringify(join(import.meta.dir, 'land-fake-gh-test-support.ts'))};`,
+      // Like gh waiting on a helper that ignores SIGTERM, so a timeout has to
+      // kill it.
+      "process.on('SIGTERM', () => {});",
       'const result = fakeGh(process.argv.slice(2), process.env);',
       'process.stdout.write(result.stdout);',
       'process.stderr.write(result.stderr);',

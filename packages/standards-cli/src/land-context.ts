@@ -14,6 +14,15 @@ export const QUIET_SECONDS = 60;
 export const GREEN = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
 const MS_PER_SECOND = 1000;
 const SECONDS_PER_MINUTE = 60;
+const WAIT_MINUTES = 45;
+export const WAIT_SECONDS = WAIT_MINUTES * SECONDS_PER_MINUTE;
+// gh answers within seconds, so a call that takes minutes has hung.
+const COMMAND_TIMEOUT_MINUTES = 5;
+// A call that hangs in a helper, such as git's ssh, may ignore SIGTERM, so the
+// wait's deadline kills it. Outside the wait SIGTERM lets git remove its
+// index lock.
+const killSignal = (context: LandContext): NodeJS.Signals =>
+  context.deadline === null ? 'SIGTERM' : 'SIGKILL';
 const SHORT_SHA_LENGTH = 7;
 const RUN_ID_PATTERN = /\/actions\/runs\/(?<id>\d+)\//u;
 
@@ -22,6 +31,11 @@ export type LandContext = {
   // repository from this checkout.
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly pollDelayMs: number;
+  // How long land waits for checks.
+  readonly waitMs: number;
+  // While land waits, the time the wait ends, which also ends each git and gh
+  // call that runs past it. Null outside the wait.
+  readonly deadline: number | null;
   readonly print: (line: string) => void;
   readonly warn: (line: string) => void;
 };
@@ -46,8 +60,22 @@ export type PullRequest = {
 
 export class LandError extends Error {}
 
-export const polls = (minutes: number): number =>
-  Math.floor((minutes * SECONDS_PER_MINUTE) / POLL_SECONDS);
+// The cause of the error for a git or gh call that ran past its timeout and
+// was stopped.
+const TIMED_OUT = 'timed out';
+
+export const isCommandTimeout = (error: unknown): boolean =>
+  error instanceof LandError && error.cause === TIMED_OUT;
+
+// A wait as the messages state it, such as "45 minutes".
+export const durationText = (ms: number): string => {
+  const seconds = ms / MS_PER_SECOND;
+  const [count, unit] =
+    seconds % SECONDS_PER_MINUTE === 0
+      ? [seconds / SECONDS_PER_MINUTE, 'minute']
+      : [seconds, 'second'];
+  return `${count} ${unit}${count === 1 ? '' : 's'}`;
+};
 
 export const shortSha = (sha: string): string => sha.slice(0, SHORT_SHA_LENGTH);
 
@@ -63,10 +91,43 @@ export const sleep = (ms: number): Promise<void> =>
     setTimeout(done, ms);
   });
 
-export const pollDelay = (context: LandContext): Promise<void> =>
-  sleep(context.pollDelayMs);
-
 export const secondsToMs = (seconds: number): number => seconds * MS_PER_SECOND;
+
+// The poll delay, cut short where the wait ends sooner.
+export const pollDelay = (context: LandContext): Promise<void> =>
+  sleep(
+    Math.max(
+      0,
+      Math.min(
+        context.pollDelayMs,
+        (context.deadline ?? Number.POSITIVE_INFINITY) - Date.now(),
+      ),
+    ),
+  );
+
+// spawnSync treats a timeout of 0 as none, so a call that starts at the
+// deadline still gets a millisecond.
+const timeoutMs = (context: LandContext): number =>
+  Math.max(
+    1,
+    Math.min(
+      secondsToMs(COMMAND_TIMEOUT_MINUTES * SECONDS_PER_MINUTE),
+      (context.deadline ?? Number.POSITIVE_INFINITY) - Date.now(),
+    ),
+  );
+
+const failedToRun = (
+  command: string,
+  args: ReadonlyArray<string>,
+  error: Error,
+  timeout: number,
+): LandError =>
+  'code' in error && error.code === 'ETIMEDOUT'
+    ? new LandError(
+        `${[command, ...args.slice(0, 2)].join(' ')} didn't finish within ${durationText(timeout)}.`,
+        { cause: TIMED_OUT },
+      )
+    : new LandError(`Cannot run ${command}: ${error.message}`);
 
 export type RunResult = {
   readonly status: number;
@@ -80,12 +141,15 @@ export const run = (
   args: ReadonlyArray<string>,
   check = true,
 ): RunResult => {
+  const timeout = timeoutMs(context);
   const result = spawnSync(command, args, {
     encoding: 'utf8',
     env: context.env,
+    timeout,
+    killSignal: killSignal(context),
   });
   if (result.error !== undefined) {
-    throw new LandError(`Cannot run ${command}: ${result.error.message}`);
+    throw failedToRun(command, args, result.error, timeout);
   }
   const outcome = {
     status: result.status ?? 1,
@@ -105,12 +169,15 @@ export const runVisibly = (
   command: string,
   args: ReadonlyArray<string>,
 ): boolean => {
+  const timeout = timeoutMs(context);
   const result = spawnSync(command, args, {
     env: context.env,
     stdio: 'inherit',
+    timeout,
+    killSignal: killSignal(context),
   });
   if (result.error !== undefined) {
-    throw new LandError(`Cannot run ${command}: ${result.error.message}`);
+    throw failedToRun(command, args, result.error, timeout);
   }
   return result.status === 0;
 };
