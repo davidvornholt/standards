@@ -3,6 +3,7 @@ import {
   chmodSync,
   existsSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -142,6 +143,25 @@ describe('standards land keeping a branch with local work', () => {
       });
       git(fixture, ['worktree', 'remove', worktree]);
     }
+  });
+
+  it('finds a rebase in a moved worktree or with GIT_DIR set', () => {
+    const worktree = join(fixture.root, 'rebasing');
+    git(fixture, ['worktree', 'add', worktree, 'feature/topic']);
+    git(fixture, ['rebase', '--exec', 'false', 'HEAD~1'], {
+      cwd: worktree,
+      check: false,
+    });
+    fixture.env.GIT_DIR = join(fixture.checkout, '.git');
+    const withGitDir = land(fixture, ['123']);
+    fixture.env.GIT_DIR = undefined;
+    expect(withGitDir.status).not.toBe(0);
+    expect(withGitDir.stderr).toContain('being rebased');
+    renameSync(worktree, `${worktree}-moved`);
+    const moved = land(fixture, ['123']);
+    expect(moved.status).not.toBe(0);
+    expect(moved.stderr).toContain('being rebased');
+    expect(branchExists(fixture)).toBe(true);
   });
 
   it('keeps a branch with extra local commits', () => {

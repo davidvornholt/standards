@@ -2,8 +2,8 @@
 // every commit on it is part of the merged pull request, and fast-forward a
 // checkout on the base branch.
 
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import {
   currentBranch,
   errorMessage,
@@ -139,31 +139,44 @@ const leaveBranch = (
   git(context, 'switch', '--no-guess', '--', base);
 };
 
-// How a worktree uses the branch in a way that makes `git branch -D` refuse
-// to delete it: checked out, or rebased or bisected from a detached HEAD.
-const branchUse = (
+// A worktree's Git directory and its folder. The main worktree's is the
+// common directory, and each linked worktree's is under its `worktrees`
+// folder, which outlives a linked worktree's moved or deleted folder.
+type WorktreeGitDir = { readonly gitDir: string; readonly path: string };
+
+const worktreeGitDirs = (
   context: LandContext,
-  worktree: Worktree,
-  ref: string,
-): string | null => {
-  if (worktree.branch === ref) {
-    return 'checked out';
-  }
-  if (worktree.worktree === undefined) {
-    return null;
-  }
-  const gitDir = run(
+  worktrees: ReadonlyArray<Worktree>,
+): ReadonlyArray<WorktreeGitDir> => {
+  const common = git(
     context,
-    'git',
-    ['-C', worktree.worktree, 'rev-parse', '--absolute-git-dir'],
-    false,
+    'rev-parse',
+    '--path-format=absolute',
+    '--git-common-dir',
   );
-  // Nothing can resume in a worktree whose folder is gone.
-  if (gitDir.status !== 0) {
-    return null;
-  }
+  const linked = join(common, 'worktrees');
+  const names = existsSync(linked) ? readdirSync(linked) : [];
+  return [
+    // Git lists the main worktree first.
+    { gitDir: common, path: worktrees[0]?.worktree ?? common },
+    ...names.map((name) => {
+      const gitDir = join(linked, name);
+      const link = join(gitDir, 'gitdir');
+      return {
+        gitDir,
+        path: existsSync(link)
+          ? dirname(readFileSync(link, 'utf8').trim())
+          : gitDir,
+      };
+    }),
+  ];
+};
+
+// What a worktree does with the branch from a detached HEAD that makes `git
+// branch -D` refuse to delete it, read from the files Git keeps for it.
+const detachedUse = (gitDir: string, ref: string): string | null => {
   const state = (name: string): string | null => {
-    const path = join(gitDir.stdout.trim(), name);
+    const path = join(gitDir, name);
     return existsSync(path) ? readFileSync(path, 'utf8').trim() : null;
   };
   if (
@@ -177,19 +190,31 @@ const branchUse = (
     : null;
 };
 
+// Refuses to delete a branch that a worktree other than `except` has checked
+// out, or that any worktree is rebasing or bisecting.
 const keepIfInUse = (
   context: LandContext,
   branch: string,
-  worktrees: ReadonlyArray<Worktree>,
+  except: string | null,
 ): void => {
-  for (const worktree of worktrees) {
-    const use = branchUse(context, worktree, `refs/heads/${branch}`);
+  const ref = `refs/heads/${branch}`;
+  const worktrees = listWorktrees(context);
+  const holder = worktrees.find(
+    (worktree) =>
+      worktree.branch === ref &&
+      resolvedPath(worktree.worktree ?? '') !== except,
+  );
+  if (holder !== undefined) {
+    throw new LandError(
+      `Keeping ${quoted(branch)}: checked out at ${quoted(holder.worktree ?? '')}. ` +
+        'Switch that worktree to another branch, or remove it explicitly, then retry.',
+    );
+  }
+  for (const { gitDir, path } of worktreeGitDirs(context, worktrees)) {
+    const use = detachedUse(gitDir, ref);
     if (use !== null) {
       throw new LandError(
-        `Keeping ${quoted(branch)}: ${use} at ${quoted(worktree.worktree ?? '')}. ` +
-          (use === 'checked out'
-            ? 'Switch that worktree to another branch, or remove it explicitly, then retry.'
-            : 'Finish or abort that there, then retry.'),
+        `Keeping ${quoted(branch)}: ${use} at ${quoted(path)}. Finish or abort that there, then retry.`,
       );
     }
   }
@@ -250,20 +275,13 @@ export const deleteBranch = (
       `Keeping ${quoted(branch)}: its tip isn't part of merged PR #${pr.number}. It may contain additional or rewritten work.`,
     );
   }
-  const worktrees = listWorktrees(context);
-  keepIfInUse(
-    context,
-    branch,
-    worktrees.filter(
-      (worktree) => resolvedPath(worktree.worktree ?? '') !== checkout.root,
-    ),
-  );
+  keepIfInUse(context, branch, checkout.root);
   if (checkout.current === branch) {
-    leaveBranch(context, pr.baseRefName, worktrees);
+    leaveBranch(context, pr.baseRefName, listWorktrees(context));
   }
   // Check every worktree again, this one included: switching runs user hooks,
   // and other work may have moved onto the branch since land started.
-  keepIfInUse(context, branch, listWorktrees(context));
+  keepIfInUse(context, branch, null);
   removeBranch(context, branch, tip);
 };
 
