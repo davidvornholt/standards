@@ -75,7 +75,7 @@ Operator tooling with real logic, such as validation, credential resolution, pro
 
 ### Dependency version holds
 
-Declare template-wide holds as `ignore` entries in the shared blocks of `.github/dependabot.yml`, above its `# Project-specific updates` line, each with a comment giving the reason and the lift condition. Never hold a version by closing Dependabot PRs or with `@dependabot ignore` comments. When a hold or held pin changes, update the hold entry and every affected pin in the root `package.json`, `template/package.json`, and the `biome.base.jsonc` schema URL together.
+Declare template-wide holds as `ignore` entries in the shared blocks of `.github/dependabot.yml`, above its `# Project-specific updates` line, each with a comment giving the reason and the lift condition. Every dependency that a synced package manifest declares needs such an entry, without a lift condition, because a bump rewrites a read-only file and fails `standards check` in every consumer. Never hold a version by closing Dependabot PRs or with `@dependabot ignore` comments. When a hold or held pin changes, update the hold entry and every affected pin in the root `package.json`, `template/package.json`, and the `biome.base.jsonc` schema URL together.
 
 ### Authoring the canonical Biome base
 
