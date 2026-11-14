@@ -127,6 +127,8 @@ const leaveBranch = (
     return;
   }
   // Do not fetch, create a base branch, or guess a remote during cleanup.
+  // `git status` doesn't list ignored files, and `git switch` overwrites one
+  // that the base tracks unless told not to.
   const baseRef = `refs/heads/${base}`;
   if (
     run(context, 'git', ['show-ref', '--verify', '--quiet', baseRef], false)
@@ -136,7 +138,7 @@ const leaveBranch = (
       `Base branch ${quoted(base)} is not local. Switch to another branch, then retry.`,
     );
   }
-  git(context, 'switch', '--no-guess', '--', base);
+  git(context, 'switch', '--no-guess', '--no-overwrite-ignore', '--', base);
 };
 
 // A worktree's Git directory and its folder. The main worktree's is the
@@ -301,7 +303,19 @@ export const updateBase = (context: LandContext, base: string): void => {
   ) {
     return;
   }
-  if (!runVisibly(context, 'git', ['pull', '--ff-only', '--prune'])) {
+  // `git pull` can't refuse to overwrite ignored files, so fetch and merge
+  // separately.
+  if (
+    !(
+      runVisibly(context, 'git', ['fetch', '--prune']) &&
+      runVisibly(context, 'git', [
+        'merge',
+        '--ff-only',
+        '--no-overwrite-ignore',
+        '@{upstream}',
+      ])
+    )
+  ) {
     throw new LandError(
       `Could not fast-forward ${quoted(base)}; update it manually.`,
     );
