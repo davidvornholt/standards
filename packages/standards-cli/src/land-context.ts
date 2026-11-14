@@ -18,6 +18,8 @@ const WAIT_MINUTES = 45;
 export const WAIT_SECONDS = WAIT_MINUTES * SECONDS_PER_MINUTE;
 // gh answers within seconds, so a call that takes minutes has hung.
 const COMMAND_TIMEOUT_MINUTES = 5;
+// A call that hangs in a helper, such as git's ssh, may ignore SIGTERM.
+const KILL_SIGNAL = 'SIGKILL';
 const SHORT_SHA_LENGTH = 7;
 const RUN_ID_PATTERN = /\/actions\/runs\/(?<id>\d+)\//u;
 
@@ -141,6 +143,7 @@ export const run = (
     encoding: 'utf8',
     env: context.env,
     timeout,
+    killSignal: KILL_SIGNAL,
   });
   if (result.error !== undefined) {
     throw failedToRun(command, args, result.error, timeout);
@@ -168,6 +171,7 @@ export const runVisibly = (
     env: context.env,
     stdio: 'inherit',
     timeout,
+    killSignal: KILL_SIGNAL,
   });
   if (result.error !== undefined) {
     throw failedToRun(command, args, result.error, timeout);

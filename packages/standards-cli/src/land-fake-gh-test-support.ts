@@ -193,7 +193,6 @@ const graphql = (call: Call): FakeGhResult => {
 const compare = ({ github }: Call): FakeGhResult =>
   github.compare === null ? notFound() : ok(`${github.compare}\n`);
 
-// GitHub's REST fields are snake_case.
 const branchRules = ({ github }: Call): FakeGhResult =>
   json([
     { type: 'deletion' },
@@ -301,6 +300,9 @@ export const installFakeGh = (root: string): string => {
     [
       `#!${process.execPath}`,
       `import { fakeGh } from ${JSON.stringify(join(import.meta.dir, 'land-fake-gh-test-support.ts'))};`,
+      // Like gh waiting on a helper that ignores SIGTERM, so a timeout has to
+      // kill it.
+      "process.on('SIGTERM', () => {});",
       'const result = fakeGh(process.argv.slice(2), process.env);',
       'process.stdout.write(result.stdout);',
       'process.stderr.write(result.stderr);',
