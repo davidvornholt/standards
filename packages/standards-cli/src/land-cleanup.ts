@@ -199,7 +199,19 @@ export const updateBase = (context: LandContext, base: string): void => {
   ) {
     return;
   }
-  if (!runVisibly(context, 'git', ['pull', '--ff-only', '--prune'])) {
+  // `git pull` can't refuse to overwrite ignored files, so fetch and merge
+  // separately.
+  if (
+    !(
+      runVisibly(context, 'git', ['fetch', '--prune']) &&
+      runVisibly(context, 'git', [
+        'merge',
+        '--ff-only',
+        '--no-overwrite-ignore',
+        '@{upstream}',
+      ])
+    )
+  ) {
     throw new LandError(
       `Could not fast-forward ${quoted(base)}; update it manually.`,
     );

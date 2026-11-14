@@ -238,6 +238,24 @@ describe('standards land updating the base', () => {
     expect(local).not.toBe(merged);
     expect(branchExists(fixture)).toBe(false);
   });
+
+  it('leaves the base behind when its upstream tracks an ignored file', () => {
+    writeFileSync(join(fixture.checkout, 'local.env'), 'base\n');
+    git(fixture, ['add', 'local.env']);
+    git(fixture, ['commit', '-m', 'track local.env']);
+    const merged = addUpstream(fixture);
+    git(fixture, ['reset', '--hard', 'HEAD~1']);
+    const local = gitOutput(fixture, ['rev-parse', 'trunk']);
+    writeFileSync(join(fixture.checkout, '.git/info/exclude'), 'local.env\n');
+    const target = join(fixture.checkout, 'local.env');
+    writeFileSync(target, 'local secret\n');
+    const result = land(fixture, ['123']);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('Could not fast-forward "trunk"');
+    expect(readFileSync(target, 'utf8')).toBe('local secret\n');
+    expect(gitOutput(fixture, ['rev-parse', 'trunk'])).toBe(local);
+    expect(gitOutput(fixture, ['rev-parse', 'origin/trunk'])).toBe(merged);
+  });
 });
 
 describe('standards land cleaning up after its own merge', () => {
