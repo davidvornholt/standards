@@ -206,6 +206,7 @@ describe('standards land keeping a branch a detached worktree uses', () => {
 
   it('finds a rebase in a moved worktree or with GIT_DIR set', () => {
     const worktree = join(fixture.root, 'rebasing');
+    git(fixture, ['config', 'worktree.useRelativePaths', 'true']);
     git(fixture, ['worktree', 'add', worktree, 'feature/topic']);
     git(fixture, ['rebase', '--exec', 'false', 'HEAD~1'], {
       cwd: worktree,
@@ -215,7 +216,9 @@ describe('standards land keeping a branch a detached worktree uses', () => {
     const withGitDir = land(fixture, ['123']);
     fixture.env.GIT_DIR = undefined;
     expect(withGitDir.status).not.toBe(0);
-    expect(withGitDir.stderr).toContain('being rebased');
+    expect(withGitDir.stderr).toContain(
+      `being rebased at ${JSON.stringify(worktree)}`,
+    );
     renameSync(worktree, `${worktree}-moved`);
     const moved = land(fixture, ['123']);
     expect(moved.status).not.toBe(0);

@@ -3,7 +3,7 @@
 // checkout on the base branch.
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import {
   currentBranch,
   errorMessage,
@@ -167,7 +167,7 @@ const worktreeGitDirs = (
       return {
         gitDir,
         path: existsSync(link)
-          ? dirname(readFileSync(link, 'utf8').trim())
+          ? dirname(resolve(gitDir, readFileSync(link, 'utf8').trim()))
           : gitDir,
       };
     }),
