@@ -4,7 +4,7 @@ Bootstrap only when a host or zone has no infrastructure home yet. Connecting an
 
 Reuse means copying. Copy the patterns below into the host repo and adapt them, and improve the patterns here, upstream, instead of creating infrastructure flakes or modules that several repos depend on. The one shared module is app-release.
 
-A dedicated infra repo is a full standards consumer, so run `standards init` before laying out the infrastructure. There is no partial consumer profile, so the synced TypeScript payload stays in the repo, inert. Put the Nix and OpenTofu Dependabot update blocks below the `# Project-specific updates` line at the end of `.github/dependabot.yml`.
+A dedicated infra repo isn't a Bun workspace, so it takes the core payload. Before laying out the infrastructure, follow [Repository outside Bun](../../../../docs/adoption.md#repository-outside-bun), which selects the payload and runs `init`. Run the CLI as `bunx @davidvornholt/standards` wherever this skill writes `bun standards`. Add the Nix and OpenTofu Dependabot update blocks to `.github/dependabot.yml`: the core payload doesn't ship that file, so the repo writes its own, and a repo that does receive it puts the blocks below the `# Project-specific updates` line at the end.
 
 ## Layout
 
@@ -135,4 +135,4 @@ GitHub has no API for classic PATs, so `bun standards creds` does not manage thi
 - deploy-rs rolls back inside its SSH session, and that rollback dies when deploy-rs disconnects, which can leave a host half-switched with units stopped. After a failed deployment the workflow therefore waits for deploy-rs on the host to exit, points the system profile back at the pre-deployment system if deploy-rs did not, and activates it again in a `systemd-run` unit, which outlives the session. The job still fails.
 - After a successful deployment to a host with app-release units, the workflow runs `app-release check` there with the deploy key. A failing check fails the job without a restore, because the activation succeeded. It is also the only deployment signal for a running recreate app that fails its health check, which the activation's reconcile does not restart.
 - PR workflows run only the validation gates, with read-only credentials or `-backend=false`.
-- Synced GitHub settings bring branch protection. Add the infra PR gates as required status checks in `.github/settings.local.json`.
+- The core payload ships no GitHub settings, so require the infra PR gates as status checks in the repo's own branch protection. A repo that receives `.github/settings.json` gets branch protection from it and adds the gates in `.github/settings.local.json`.
