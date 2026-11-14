@@ -28,6 +28,12 @@ updates:
       # fails every update grouped with it. Upgrades happen in the standards
       # template and roll out through sync.
       - dependency-name: "@types/bun"
+      # Not a temporary hold, for the same reason as @types/bun: the canonical
+      # packages/a11y-testing manifest declares these three. Every dependency
+      # that a synced manifest declares needs an entry here.
+      - dependency-name: "@axe-core/playwright"
+      - dependency-name: "@playwright/test"
+      - dependency-name: "playwright-core"
       # Temporary hold: Next.js does not support TypeScript releases above
       # 7.0.x. Lift here when Next declares support.
       - dependency-name: "typescript"
