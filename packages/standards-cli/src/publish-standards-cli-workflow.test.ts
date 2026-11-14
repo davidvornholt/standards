@@ -57,7 +57,7 @@ describe('standards CLI publish recovery workflow', () => {
       readonly dependencies?: Readonly<Record<string, unknown>>;
       readonly files?: ReadonlyArray<string>;
     };
-    expect(manifest.devDependencies?.sigstore).toBe('5.0.0');
+    expect(manifest.devDependencies?.sigstore).toBe('5.0.1');
     expect(manifest.dependencies?.sigstore).toBeUndefined();
     for (const excluded of [
       'src/release-provenance.ts',
