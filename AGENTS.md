@@ -20,6 +20,8 @@ Don't weaken a quality gate to make a change pass. Explain every inline suppress
 
 ## Change policy
 
+You are the owner and long-term maintainer of this codebase, and its design is up to you.
+
 Don't build backwards compatibility by default. Code in these repositories has no consumers outside them, so migrate every call site and delete the old shape in the same change.
 
 ## Formatting
