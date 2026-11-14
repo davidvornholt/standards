@@ -7,6 +7,7 @@ import {
   CI,
   check,
   createLand,
+  fileLookups,
   type Land,
   land,
   mergeCall,
@@ -18,6 +19,11 @@ import {
 import { workflowTriggersCi } from './land-workflows';
 
 const SCHEDULED = '.github/workflows/standards-sync.yml';
+const TARGET = {
+  base: 'trunk',
+  head: 'feature/topic',
+  changedFiles: () => ['src/app.ts'],
+};
 const SCHEDULE_ONLY =
   "on:\n  schedule:\n    - cron: '0 4 * * 1'\n  workflow_dispatch:\n";
 
@@ -40,7 +46,7 @@ describe('workflowTriggersCi', () => {
     ['on: schedule\n', false],
     ['on: workflow_dispatch\n', false],
   ])('reads `on` as one event: %j', (text, expected) => {
-    expect(workflowTriggersCi(text)).toBe(expected);
+    expect(workflowTriggersCi(text, TARGET)).toBe(expected);
   });
 
   it.each([
@@ -48,11 +54,11 @@ describe('workflowTriggersCi', () => {
     ['on:\n  - schedule\n  - pull_request\n', true],
     ['on: [schedule, workflow_dispatch]\n', false],
   ])('reads `on` as a list of events: %j', (text, expected) => {
-    expect(workflowTriggersCi(text)).toBe(expected);
+    expect(workflowTriggersCi(text, TARGET)).toBe(expected);
   });
 
   it.each([
-    ['on:\n  push:\n    branches: [main]\n', true],
+    ['on:\n  push:\n    branches: [feature/topic]\n', true],
     ['on:\n  pull_request:\n  workflow_dispatch:\n', true],
     [
       "on:\n  schedule:\n    - cron: '0 4 * * 1'\n  workflow_dispatch:\n",
@@ -61,7 +67,7 @@ describe('workflowTriggersCi', () => {
     // A chained run reports on the default branch, not the pull request.
     ['on:\n  workflow_run:\n    workflows: [CI]\n', false],
   ])('reads `on` as a map of events: %j', (text, expected) => {
-    expect(workflowTriggersCi(text)).toBe(expected);
+    expect(workflowTriggersCi(text, TARGET)).toBe(expected);
   });
 
   it.each([
@@ -73,7 +79,7 @@ describe('workflowTriggersCi', () => {
     ['an event that is not a name', 'on: [[schedule]]\n'],
     ['a file GitHub could not return in full', null],
   ])('counts %s as CI', (_case, text) => {
-    expect(workflowTriggersCi(text)).toBe(true);
+    expect(workflowTriggersCi(text, TARGET)).toBe(true);
   });
 });
 
@@ -182,5 +188,106 @@ describe('standards land without CI', () => {
     expect(result.stderr).toContain('standards land: GitHub unavailable');
     expect(mergeCalls(fixture)).toEqual([]);
     expect(branchExists(fixture)).toBe(true);
+  });
+});
+
+describe('standards land with workflows whose filters exclude the pull request', () => {
+  it.each([
+    ['runs only on pushes to main', 'on:\n  push:\n    branches: [main]\n'],
+    [
+      'runs only on closed pull requests',
+      'on:\n  pull_request:\n    types: [closed]\n',
+    ],
+    ['runs only on tags', "on:\n  push:\n    tags: ['v*']\n"],
+    [
+      'runs only for another base branch',
+      'on:\n  pull_request:\n    branches: [release]\n',
+    ],
+  ])('merges at once when the only workflow %s', (_case, text) => {
+    fixture.github.workflowFiles = { [CI]: text };
+    Object.assign(fixture.pr, {
+      statusCheckRollup: [],
+      polls: [{}, { state: 'CLOSED' }],
+    });
+    const result = land(fixture, ['123']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(mergeCalls(fixture)).toEqual([mergeCall(fixture)]);
+    expect(result.stdout).not.toContain('Waiting for');
+  });
+
+  it('merges at once when no changed file matches the path filters', () => {
+    fixture.github.workflowFiles = {
+      [CI]: "on:\n  pull_request:\n    paths: ['src/**']\n",
+    };
+    fixture.pr.files = [{ filename: 'README.md' }];
+    Object.assign(fixture.pr, {
+      statusCheckRollup: [],
+      polls: [{}, { state: 'CLOSED' }],
+    });
+    const result = land(fixture, ['123']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(mergeCalls(fixture)).toEqual([mergeCall(fixture)]);
+    // The head's changed files are listed once, for both commits' workflows.
+    expect(fileLookups(fixture)).toHaveLength(1);
+  });
+
+  it.each([
+    ['a changed file', [{ filename: 'src/app.ts' }]],
+    [
+      'the old path of a renamed file',
+      // biome-ignore lint/style/useNamingConvention: GitHub's REST field.
+      [{ filename: 'docs/app.ts', previous_filename: 'src/app.ts' }],
+    ],
+  ])('waits for checks when %s matches the path filters', (_case, files) => {
+    fixture.github.workflowFiles = {
+      [CI]: "on:\n  pull_request:\n    paths: ['src/**']\n",
+    };
+    fixture.pr.files = files;
+    Object.assign(fixture.pr, {
+      statusCheckRollup: [],
+      polls: [{}, { state: 'CLOSED' }],
+    });
+    const result = land(fixture, ['123']);
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain('Waiting for checks');
+    expect(result.stderr).toContain('became CLOSED while land waited');
+    expect(mergeCalls(fixture)).toEqual([]);
+  });
+
+  it('waits for checks when a push to the head branch runs CI', () => {
+    fixture.github.workflowFiles = {
+      [CI]: "on:\n  push:\n    branches: ['feature/**']\n",
+    };
+    Object.assign(fixture.pr, {
+      statusCheckRollup: [],
+      polls: [{}, { state: 'CLOSED' }],
+    });
+    const result = land(fixture, ['123']);
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain('Waiting for checks');
+    expect(mergeCalls(fixture)).toEqual([]);
+  });
+
+  it('lists the changed files again when the base branch changes', () => {
+    // The first workflow keeps land waiting on trunk. Retargeted to release,
+    // the pull request changes src/app.ts, which the second one runs for.
+    fixture.github.workflowFiles = {
+      '.github/workflows/a.yml':
+        "on:\n  pull_request:\n    paths: ['src/**']\n",
+      [CI]: 'on:\n  pull_request:\n    branches: [trunk]\n',
+    };
+    fixture.pr.files = [{ filename: 'README.md' }];
+    Object.assign(fixture.pr, {
+      statusCheckRollup: [],
+      polls: [
+        {},
+        { baseRefName: 'release', files: [{ filename: 'src/app.ts' }] },
+        { state: 'CLOSED' },
+      ],
+    });
+    const result = land(fixture, ['123']);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('became CLOSED while land waited');
+    expect(mergeCalls(fixture)).toEqual([]);
   });
 });

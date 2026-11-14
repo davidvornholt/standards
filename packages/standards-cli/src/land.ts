@@ -70,7 +70,7 @@ export const land = async (
     prNumber: pr.number,
     repo,
     noWait,
-    hasCi: ciDetector(waiting, repo),
+    hasCi: ciDetector(waiting, repo, pr),
   });
   // gh reports progress itself, so its output stays on the terminal.
   const merged = runVisibly(context, 'gh', [

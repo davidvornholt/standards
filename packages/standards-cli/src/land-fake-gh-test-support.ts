@@ -22,7 +22,15 @@ const WORKFLOWS_DIR = '.github/workflows/';
 const MILLISECONDS = /\.\d+Z$/u;
 const INT32_BYTES = 4;
 
+type FakeFile = {
+  filename: string;
+  // biome-ignore lint/style/useNamingConvention: GitHub's REST field.
+  previous_filename?: string;
+};
+
 export type FakePr = Record<string, unknown> & {
+  // The changed files, as GitHub's REST API lists them.
+  files: Array<FakeFile>;
   // Each poll of the checks applies the next entry; the last one stays.
   polls: Array<Record<string, unknown>>;
 };
@@ -193,6 +201,20 @@ const graphql = (call: Call): FakeGhResult => {
 const compare = ({ github }: Call): FakeGhResult =>
   github.compare === null ? notFound() : ok(`${github.compare}\n`);
 
+// land asks gh's --jq for one JSON array of names per file.
+const prFiles = ({ pr }: Call): FakeGhResult =>
+  ok(
+    `${pr.files
+      .map((file) =>
+        JSON.stringify(
+          file.previous_filename === undefined
+            ? [file.filename]
+            : [file.filename, file.previous_filename],
+        ),
+      )
+      .join('\n')}\n`,
+  );
+
 const branchRules = ({ github }: Call): FakeGhResult =>
   json([
     { type: 'deletion' },
@@ -234,6 +256,7 @@ const REST_ROUTES: ReadonlyArray<
   [/^repos\/[^/]+\/[^/]+\/compare\//u, compare],
   [/^repos\/[^/]+\/[^/]+\/rules\/branches\//u, branchRules],
   [/^repos\/[^/]+\/[^/]+\/branches\//u, branch],
+  [/^repos\/[^/]+\/[^/]+\/pulls\/\d+\/files/u, prFiles],
 ];
 
 const repoView = ({ env }: Call): FakeGhResult =>

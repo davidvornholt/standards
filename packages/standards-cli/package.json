@@ -113,6 +113,7 @@
     "src/land-command.ts",
     "src/land-context.ts",
     "src/land-required-checks.ts",
+    "src/land-triggers.ts",
     "src/land-wait.ts",
     "src/land-workflows.ts",
     "src/managed-files.ts",
