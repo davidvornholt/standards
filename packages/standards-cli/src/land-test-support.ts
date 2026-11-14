@@ -94,6 +94,7 @@ const initialPr = (head: string): FakePr => ({
   statusCheckRollup: [check()],
   updatedAt: OLD_UPDATE,
   mergeCommit: null,
+  files: [{ filename: 'tracked' }],
   polls: [],
 });
 
@@ -205,6 +206,9 @@ export const workflowReads = (fixture: Land): Array<string> =>
         ?.slice('tree='.length)
         .replace(':.github/workflows', '') ?? '',
   );
+
+export const fileLookups = (fixture: Land): Array<Array<string>> =>
+  calls(fixture, 'api').filter((call) => call[1]?.includes('/files'));
 
 // Lookups of the base branch's current tip.
 export const tipLookups = (fixture: Land): Array<Array<string>> =>
