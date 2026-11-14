@@ -207,7 +207,6 @@ export const workflowReads = (fixture: Land): Array<string> =>
         .replace(':.github/workflows', '') ?? '',
   );
 
-// Lookups of the pull request's changed files.
 export const fileLookups = (fixture: Land): Array<Array<string>> =>
   calls(fixture, 'api').filter((call) => call[1]?.includes('/files'));
 

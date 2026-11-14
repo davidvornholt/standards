@@ -41,7 +41,6 @@ const tokenSource = (token: string): string => {
   return REGEXP_SYNTAX.test(literal) ? `\\${literal}` : literal;
 };
 
-// Null for a pattern that isn't valid.
 const patternRegExp = (pattern: string): RegExp | null => {
   try {
     const source = (pattern.match(PATTERN_TOKEN) ?? []).map(tokenSource);
@@ -51,8 +50,6 @@ const patternRegExp = (pattern: string): RegExp | null => {
   }
 };
 
-// The patterns of a filter, which is a pattern or a list of them. Null for
-// any other shape.
 const patterns = (filter: unknown): ReadonlyArray<string> | null => {
   const list = typeof filter === 'string' ? [filter] : filter;
   return Array.isArray(list) &&
