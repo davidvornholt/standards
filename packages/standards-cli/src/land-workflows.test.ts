@@ -219,7 +219,7 @@ describe('standards land with workflows whose filters exclude the pull request',
     fixture.github.workflowFiles = {
       [CI]: "on:\n  pull_request:\n    paths: ['src/**']\n",
     };
-    fixture.github.prFiles = [{ filename: 'README.md' }];
+    fixture.pr.files = [{ filename: 'README.md' }];
     Object.assign(fixture.pr, {
       statusCheckRollup: [],
       polls: [{}, { state: 'CLOSED' }],
@@ -242,7 +242,7 @@ describe('standards land with workflows whose filters exclude the pull request',
     fixture.github.workflowFiles = {
       [CI]: "on:\n  pull_request:\n    paths: ['src/**']\n",
     };
-    fixture.github.prFiles = files;
+    fixture.pr.files = files;
     Object.assign(fixture.pr, {
       statusCheckRollup: [],
       polls: [{}, { state: 'CLOSED' }],
@@ -265,6 +265,29 @@ describe('standards land with workflows whose filters exclude the pull request',
     const result = land(fixture, ['123']);
     expect(result.status).toBe(1);
     expect(result.stdout).toContain('Waiting for checks');
+    expect(mergeCalls(fixture)).toEqual([]);
+  });
+
+  it('lists the changed files again when the base branch changes', () => {
+    // The first workflow keeps land waiting on trunk. Retargeted to release,
+    // the pull request changes src/app.ts, which the second one runs for.
+    fixture.github.workflowFiles = {
+      '.github/workflows/a.yml':
+        "on:\n  pull_request:\n    paths: ['src/**']\n",
+      [CI]: 'on:\n  pull_request:\n    branches: [trunk]\n',
+    };
+    fixture.pr.files = [{ filename: 'README.md' }];
+    Object.assign(fixture.pr, {
+      statusCheckRollup: [],
+      polls: [
+        {},
+        { baseRefName: 'release', files: [{ filename: 'src/app.ts' }] },
+        { state: 'CLOSED' },
+      ],
+    });
+    const result = land(fixture, ['123']);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('became CLOSED while land waited');
     expect(mergeCalls(fixture)).toEqual([]);
   });
 });

@@ -68,9 +68,24 @@ describe('workflowTriggersCi with path filters', () => {
     ["on:\n  pull_request:\n    paths: ['src/**', '!src/app.ts']\n", false],
     ["on:\n  pull_request:\n    paths-ignore: ['src/**']\n", false],
     ["on:\n  pull_request:\n    paths-ignore: ['docs/**']\n", true],
-    ["on:\n  push:\n    branches: ['**']\n    paths: ['docs/**']\n", false],
+    // A push compares its own commits, which may change files the pull
+    // request's diff no longer shows.
+    ["on:\n  push:\n    branches: ['**']\n    paths: ['docs/**']\n", true],
+    ["on:\n  push:\n    paths-ignore: ['src/**']\n", true],
   ])('reads %j', (text, expected) => {
     expect(triggers(text)).toBe(expected);
+  });
+
+  it.each([
+    ["'src/**'", 'src/a\nb.ts'],
+    ["'**/app.ts'", 'a\nb/app.ts'],
+    ["'**/app.ts'", 'app.ts'],
+    ["'*.jsx?'", 'page.js'],
+    ["'[a-z]+.ts'", 'app.ts'],
+    ["'src/app\\*'", 'src/app*'],
+  ])('matches %s to %j', (pattern, file) => {
+    const text = `on:\n  pull_request:\n    paths: [${pattern}]\n`;
+    expect(triggers(text, [file])).toBeTrue();
   });
 
   it('runs when any changed file matches', () => {

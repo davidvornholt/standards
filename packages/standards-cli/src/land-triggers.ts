@@ -19,7 +19,8 @@ const CLOSED = 'closed';
 // The characters that a pattern's literal text escapes in a RegExp.
 const REGEXP_SYNTAX = /[\^$\\.*+?()[\]{}|/]/u;
 // The tokens of GitHub's filter patterns, in the order they take precedence.
-const PATTERN_TOKEN = /\\.|\*\*\/|\*\*|\*|\?|\+|\[(?:\\.|[^\]])*\]|./gu;
+// A file name may hold any character, a newline too.
+const PATTERN_TOKEN = /\\.|\*\*\/|\*\*|\*|\?|\+|\[(?:\\.|[^\]])*\]|./gsu;
 
 const tokenSource = (token: string): string => {
   // `**/` also matches no folder, so `**/a` matches `a`.
@@ -44,7 +45,7 @@ const tokenSource = (token: string): string => {
 const patternRegExp = (pattern: string): RegExp | null => {
   try {
     const source = (pattern.match(PATTERN_TOKEN) ?? []).map(tokenSource);
-    return new RegExp(`^(?:${source.join('')})$`, 'u');
+    return new RegExp(`^(?:${source.join('')})$`, 'su');
   } catch {
     return null;
   }
@@ -140,5 +141,11 @@ export const eventRuns = (
     event === 'push'
       ? pushRuns(config, target)
       : pullRequestRuns(config, target);
-  return refRuns && passes(config, 'paths', target.changedFiles);
+  // A push compares its own commits, which may change files that the pull
+  // request's diff no longer shows, so only a pull request event's path
+  // filters can leave it out.
+  return (
+    refRuns &&
+    (event === 'push' || passes(config, 'paths', target.changedFiles))
+  );
 };

@@ -183,25 +183,27 @@ const changedFiles = (
     : lines.flatMap((line) => JSON.parse(line) as Array<string>);
 };
 
-// Returns a lookup that reads each commit's workflows and each head's changed
-// files once, because neither changes for a commit.
+// Returns a lookup that reads each commit's workflows once, because the files
+// at a commit never change. The changed files depend on the base branch too,
+// which may change while land waits, so each call lists them again when a
+// path filter needs them.
 export const ciDetector = (
   context: LandContext,
   repo: Repository,
   pr: { readonly number: number; readonly headRefName: string },
 ): ((head: string, base: string) => boolean) => {
   const texts = new Map<string, ReadonlyArray<string | null>>();
-  const files = new Map<string, ReadonlyArray<string> | null>();
-  const target = (head: string, base: string): TriggerTarget => ({
-    base,
-    head: pr.headRefName,
-    changedFiles: () => {
-      if (!files.has(head)) {
-        files.set(head, changedFiles(context, repo, pr.number));
-      }
-      return files.get(head) ?? null;
-    },
-  });
+  const target = (base: string): TriggerTarget => {
+    let files: ReadonlyArray<string> | null | undefined;
+    return {
+      base,
+      head: pr.headRefName,
+      changedFiles: () => {
+        files ??= changedFiles(context, repo, pr.number);
+        return files;
+      },
+    };
+  };
   const commit = (sha: string, on: TriggerTarget): boolean => {
     const known = texts.get(sha) ?? workflowTexts(context, repo, sha);
     texts.set(sha, known);
@@ -213,7 +215,7 @@ export const ciDetector = (
   // can move while land waits, so each call looks up its tip again. A base
   // branch that can't be found counts as CI.
   return (head: string, base: string): boolean => {
-    const on = target(head, base);
+    const on = target(base);
     if (commit(head, on)) {
       return true;
     }

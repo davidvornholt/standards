@@ -94,6 +94,7 @@ const initialPr = (head: string): FakePr => ({
   statusCheckRollup: [check()],
   updatedAt: OLD_UPDATE,
   mergeCommit: null,
+  files: [{ filename: 'tracked' }],
   polls: [],
 });
 
@@ -110,7 +111,6 @@ const initialGithub = (): FakeGithub => ({
   baseTips: [BASE_TIP],
   rulesetChecks: [],
   protectionChecks: [],
-  prFiles: [{ filename: 'tracked' }],
 });
 
 // Git configuration outside the fixture, such as signing, and a GIT_DIR from

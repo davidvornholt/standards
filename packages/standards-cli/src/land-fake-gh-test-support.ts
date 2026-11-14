@@ -22,7 +22,15 @@ const WORKFLOWS_DIR = '.github/workflows/';
 const MILLISECONDS = /\.\d+Z$/u;
 const INT32_BYTES = 4;
 
+type FakeFile = {
+  filename: string;
+  // biome-ignore lint/style/useNamingConvention: GitHub's REST field.
+  previous_filename?: string;
+};
+
 export type FakePr = Record<string, unknown> & {
+  // The changed files, as GitHub's REST API lists them.
+  files: Array<FakeFile>;
   // Each poll of the checks applies the next entry; the last one stays.
   polls: Array<Record<string, unknown>>;
 };
@@ -49,12 +57,6 @@ export type FakeGithub = {
   // branch.
   rulesetChecks: Array<string>;
   protectionChecks: Array<string>;
-  // The pull request's changed files, as GitHub's REST API lists them.
-  prFiles: Array<{
-    filename: string;
-    // biome-ignore lint/style/useNamingConvention: GitHub's REST field.
-    previous_filename?: string;
-  }>;
 };
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -200,9 +202,9 @@ const compare = ({ github }: Call): FakeGhResult =>
   github.compare === null ? notFound() : ok(`${github.compare}\n`);
 
 // land asks gh's --jq for one JSON array of names per file.
-const prFiles = ({ github }: Call): FakeGhResult =>
+const prFiles = ({ pr }: Call): FakeGhResult =>
   ok(
-    `${github.prFiles
+    `${pr.files
       .map((file) =>
         JSON.stringify(
           file.previous_filename === undefined
