@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { parse as parseYaml } from 'yaml';
 import { ACTUAL_UPSTREAM } from './cli-test-support';
 import {
   DEPENDABOT_FILE,
@@ -218,5 +219,64 @@ describe('Dependabot config problems', () => {
     ],
   ])('reports %s', (_label, raw, message) => {
     expect(inspectDependabot(raw)).toEqual([expect.stringContaining(message)]);
+  });
+});
+
+const DEPENDENCY_SECTIONS = [
+  'dependencies',
+  'devDependencies',
+  'peerDependencies',
+  'optionalDependencies',
+] as const;
+
+const readJson = (path: string): Record<string, unknown> =>
+  JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+
+// Every registry dependency declared by a package manifest the sync copies:
+// the manifest of each synced path or of each package inside a synced folder.
+const syncedDependencies = (): ReadonlyArray<string> => {
+  const payloads = readJson(join(ACTUAL_UPSTREAM, 'sync-standards.json'))
+    .payloads as Record<string, { paths: ReadonlyArray<string> }>;
+  const names = new Set<string>();
+  const manifests = Object.values(payloads)
+    .flatMap(({ paths }) => paths)
+    .map((path) => join(ACTUAL_UPSTREAM, path, 'package.json'))
+    .filter((manifest) => existsSync(manifest));
+  for (const manifest of manifests) {
+    const json = readJson(manifest);
+    for (const section of DEPENDENCY_SECTIONS) {
+      const entries = (json[section] ?? {}) as Record<string, string>;
+      for (const [name, spec] of Object.entries(entries)) {
+        if (!spec.startsWith('workspace:')) {
+          names.add(name);
+        }
+      }
+    }
+  }
+  return [...names].sort();
+};
+
+describe('Dependabot ignores for synced manifests', () => {
+  // A bump to a dependency in a read-only synced manifest fails `standards
+  // check` in every consumer, and with it every update grouped with it.
+  it('ignores every dependency that a synced package manifest declares', () => {
+    const config = parseYaml(
+      readFileSync(join(ACTUAL_UPSTREAM, DEPENDABOT_FILE), 'utf8'),
+    ) as {
+      updates: ReadonlyArray<{
+        'package-ecosystem': string;
+        ignore?: ReadonlyArray<{ 'dependency-name': string }>;
+      }>;
+    };
+    const bun = config.updates.find(
+      (update) => update['package-ecosystem'] === 'bun',
+    );
+    const ignored = new Set(
+      (bun?.ignore ?? []).map((entry) => entry['dependency-name']),
+    );
+
+    expect(syncedDependencies().filter((name) => !ignored.has(name))).toEqual(
+      [],
+    );
   });
 });
