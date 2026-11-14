@@ -3,7 +3,12 @@
 // cli.ts hands it the process environment and output.
 
 import { land } from './land';
-import { errorMessage, POLL_SECONDS, secondsToMs } from './land-context';
+import {
+  errorMessage,
+  POLL_SECONDS,
+  secondsToMs,
+  WAIT_SECONDS,
+} from './land-context';
 
 const LAND_USAGE = `Usage: standards land [PR_OR_BRANCH] [--no-wait]
 
@@ -16,14 +21,21 @@ Options:
 
 Exit code 1 means the pull request isn't merged, or that cleaning up after an earlier merge stopped. Once land merges, a cleanup problem is only a warning.`;
 
-// Tests set LAND_POLL_SECONDS=0 to poll without delay.
+// Tests set LAND_POLL_SECONDS=0 to poll without delay, and LAND_WAIT_SECONDS
+// to wait out a short limit.
 const POLL_SECONDS_ENV = 'LAND_POLL_SECONDS';
+const WAIT_SECONDS_ENV = 'LAND_WAIT_SECONDS';
 
-const pollDelayMs = (value: string | undefined): number => {
-  const seconds = value === undefined ? POLL_SECONDS : Number(value);
+const envMs = (
+  env: LandProcess['env'],
+  name: string,
+  fallback: number,
+): number => {
+  const value = env[name];
+  const seconds = value === undefined ? fallback : Number(value);
   if (value?.trim() === '' || !Number.isFinite(seconds) || seconds < 0) {
     throw new Error(
-      `${POLL_SECONDS_ENV} must be a non-negative number of seconds: ${value}`,
+      `${name} must be a non-negative number of seconds: ${value}`,
     );
   }
   return secondsToMs(seconds);
@@ -59,7 +71,9 @@ export const runLandCommand = async (
       env: Object.fromEntries(
         Object.entries(edge.env).filter(([key]) => key !== 'GH_REPO'),
       ),
-      pollDelayMs: pollDelayMs(edge.env[POLL_SECONDS_ENV]),
+      pollDelayMs: envMs(edge.env, POLL_SECONDS_ENV, POLL_SECONDS),
+      waitMs: envMs(edge.env, WAIT_SECONDS_ENV, WAIT_SECONDS),
+      deadline: null,
       print: edge.out,
       warn: (line: string) => edge.err(`standards land: ${line}`),
     };
