@@ -116,54 +116,6 @@ describe('standards land keeping a branch with local work', () => {
     expect(branchExists(fixture)).toBe(true);
   });
 
-  it('keeps a branch that another worktree is rebasing or bisecting', () => {
-    for (const [use, start, finish] of [
-      ['being rebased', [['rebase', '--exec', 'false', 'HEAD~1']], 'rebase'],
-      [
-        'being bisected',
-        [
-          ['bisect', 'start'],
-          ['switch', '--detach'],
-        ],
-        'bisect',
-      ],
-    ] as const) {
-      const worktree = join(fixture.root, use.replace(' ', '-'));
-      git(fixture, ['worktree', 'add', worktree, 'feature/topic']);
-      for (const args of start) {
-        git(fixture, args, { cwd: worktree, check: false });
-      }
-      expect(currentBranchOf(fixture, worktree), use).toBe('');
-      const result = land(fixture, ['123']);
-      expect(result.status, use).not.toBe(0);
-      expect(result.stderr).toContain(`${use} at ${JSON.stringify(worktree)}`);
-      expect(branchExists(fixture)).toBe(true);
-      git(fixture, [finish, finish === 'rebase' ? '--abort' : 'reset'], {
-        cwd: worktree,
-      });
-      git(fixture, ['worktree', 'remove', worktree]);
-    }
-  });
-
-  it('finds a rebase in a moved worktree or with GIT_DIR set', () => {
-    const worktree = join(fixture.root, 'rebasing');
-    git(fixture, ['worktree', 'add', worktree, 'feature/topic']);
-    git(fixture, ['rebase', '--exec', 'false', 'HEAD~1'], {
-      cwd: worktree,
-      check: false,
-    });
-    fixture.env.GIT_DIR = join(fixture.checkout, '.git');
-    const withGitDir = land(fixture, ['123']);
-    fixture.env.GIT_DIR = undefined;
-    expect(withGitDir.status).not.toBe(0);
-    expect(withGitDir.stderr).toContain('being rebased');
-    renameSync(worktree, `${worktree}-moved`);
-    const moved = land(fixture, ['123']);
-    expect(moved.status).not.toBe(0);
-    expect(moved.stderr).toContain('being rebased');
-    expect(branchExists(fixture)).toBe(true);
-  });
-
   it('keeps a branch with extra local commits', () => {
     git(fixture, ['switch', 'feature/topic']);
     git(fixture, ['commit', '--allow-empty', '-m', 'unpublished']);
@@ -218,6 +170,56 @@ describe('standards land keeping a branch with local work', () => {
     const result = land(fixture);
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('tip changed during cleanup');
+    expect(branchExists(fixture)).toBe(true);
+  });
+});
+
+describe('standards land keeping a branch a detached worktree uses', () => {
+  it('keeps a branch that another worktree is rebasing or bisecting', () => {
+    for (const [use, start, finish] of [
+      ['being rebased', [['rebase', '--exec', 'false', 'HEAD~1']], 'rebase'],
+      [
+        'being bisected',
+        [
+          ['bisect', 'start'],
+          ['switch', '--detach'],
+        ],
+        'bisect',
+      ],
+    ] as const) {
+      const worktree = join(fixture.root, use.replace(' ', '-'));
+      git(fixture, ['worktree', 'add', worktree, 'feature/topic']);
+      for (const args of start) {
+        git(fixture, args, { cwd: worktree, check: false });
+      }
+      expect(currentBranchOf(fixture, worktree), use).toBe('');
+      const result = land(fixture, ['123']);
+      expect(result.status, use).not.toBe(0);
+      expect(result.stderr).toContain(`${use} at ${JSON.stringify(worktree)}`);
+      expect(branchExists(fixture)).toBe(true);
+      git(fixture, [finish, finish === 'rebase' ? '--abort' : 'reset'], {
+        cwd: worktree,
+      });
+      git(fixture, ['worktree', 'remove', worktree]);
+    }
+  });
+
+  it('finds a rebase in a moved worktree or with GIT_DIR set', () => {
+    const worktree = join(fixture.root, 'rebasing');
+    git(fixture, ['worktree', 'add', worktree, 'feature/topic']);
+    git(fixture, ['rebase', '--exec', 'false', 'HEAD~1'], {
+      cwd: worktree,
+      check: false,
+    });
+    fixture.env.GIT_DIR = join(fixture.checkout, '.git');
+    const withGitDir = land(fixture, ['123']);
+    fixture.env.GIT_DIR = undefined;
+    expect(withGitDir.status).not.toBe(0);
+    expect(withGitDir.stderr).toContain('being rebased');
+    renameSync(worktree, `${worktree}-moved`);
+    const moved = land(fixture, ['123']);
+    expect(moved.status).not.toBe(0);
+    expect(moved.stderr).toContain('being rebased');
     expect(branchExists(fixture)).toBe(true);
   });
 });
