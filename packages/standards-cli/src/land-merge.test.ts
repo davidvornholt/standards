@@ -18,9 +18,6 @@ import {
   OLD_UPDATE,
 } from './land-test-support';
 
-// The 45-minute wait takes 180 polls, each a fake gh process.
-const FULL_WAIT_MS = 120_000;
-
 let fixture: Land;
 
 beforeEach(() => {
@@ -180,35 +177,31 @@ describe('standards land with failed or cancelled checks', () => {
 });
 
 describe('standards land with checks skipped as a draft', () => {
-  it(
-    'never merges on a check skipped as a draft',
-    () => {
-      // CI that skips its job on drafts leaves a skipped check, which GitHub
-      // counts as passed.
-      for (const options of [[], ['--no-wait']]) {
-        openPr({
-          isDraft: true,
-          mergeStateStatus: 'DRAFT',
-          statusCheckRollup: [check({ conclusion: 'SKIPPED' })],
-          polls: [{}, { mergeStateStatus: 'CLEAN' }, {}, { state: 'CLOSED' }],
-        });
-        const result = land(fixture, ['123', ...options]);
-        expect(result.status, result.stderr).toBe(1);
-        expect(result.stderr).toContain('became CLOSED while land waited');
-        expect(mergeCalls(fixture)).toEqual([]);
-      }
-      // When no run replaces the skipped check, the 45-minute wait ends with
-      // the reason.
-      fixture.pr.polls = [{}, { mergeStateStatus: 'CLEAN' }];
-      const result = land(fixture, ['123']);
+  it('never merges on a check skipped as a draft', () => {
+    // CI that skips its job on drafts leaves a skipped check, which GitHub
+    // counts as passed.
+    for (const options of [[], ['--no-wait']]) {
+      openPr({
+        isDraft: true,
+        mergeStateStatus: 'DRAFT',
+        statusCheckRollup: [check({ conclusion: 'SKIPPED' })],
+        polls: [{}, { mergeStateStatus: 'CLEAN' }, {}, { state: 'CLOSED' }],
+      });
+      const result = land(fixture, ['123', ...options]);
       expect(result.status, result.stderr).toBe(1);
-      expect(result.stderr).toContain(
-        "check skipped while it was a draft and didn't run again",
-      );
+      expect(result.stderr).toContain('became CLOSED while land waited');
       expect(mergeCalls(fixture)).toEqual([]);
-    },
-    FULL_WAIT_MS,
-  );
+    }
+    // When no run replaces the skipped check, the wait ends with the reason.
+    fixture.env.LAND_WAIT_SECONDS = '1';
+    fixture.pr.polls = [{}, { mergeStateStatus: 'CLEAN' }];
+    const result = land(fixture, ['123']);
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stderr).toContain(
+      "check skipped while it was a draft and didn't run again",
+    );
+    expect(mergeCalls(fixture)).toEqual([]);
+  });
 
   it('waits for the replacement of a check skipped as a draft', () => {
     const skipped = check({ conclusion: 'SKIPPED' });
