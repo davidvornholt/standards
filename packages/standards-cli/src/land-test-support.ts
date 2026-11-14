@@ -110,6 +110,7 @@ const initialGithub = (): FakeGithub => ({
   baseTips: [BASE_TIP],
   rulesetChecks: [],
   protectionChecks: [],
+  prFiles: [{ filename: 'tracked' }],
 });
 
 // Git configuration outside the fixture, such as signing, and a GIT_DIR from
@@ -205,6 +206,10 @@ export const workflowReads = (fixture: Land): Array<string> =>
         ?.slice('tree='.length)
         .replace(':.github/workflows', '') ?? '',
   );
+
+// Lookups of the pull request's changed files.
+export const fileLookups = (fixture: Land): Array<Array<string>> =>
+  calls(fixture, 'api').filter((call) => call[1]?.includes('/files'));
 
 // Lookups of the base branch's current tip.
 export const tipLookups = (fixture: Land): Array<Array<string>> =>
