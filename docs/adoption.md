@@ -20,7 +20,30 @@ echo '{ "payload": "core" }' > sync-standards.local.json
 bunx @davidvornholt/standards init
 ```
 
-Commit `sync-standards.lock` and `sync-standards.local.json`, and check for drift with `bunx @davidvornholt/standards check`. For the weekly sync pull request, do steps 1 and 2 of [Connect CI and GitHub](#connect-ci-and-github), running `bunx @davidvornholt/standards` in place of `bun standards`.
+Commit `sync-standards.lock` and `sync-standards.local.json`, and check for drift with `bunx @davidvornholt/standards check`.
+
+For the weekly sync pull request, the repository needs a CI age key and an encrypted `secrets/ci.yaml`. The core payload ships no `justfile` or secrets recipes, so create them with `age`, `sops`, and `gh` signed in with admin access to the repository, which `gh secret set` needs:
+
+```sh
+mkdir -p ~/.config/sops/age secrets
+[ -f ~/.config/sops/age/keys.txt ] || age-keygen -o ~/.config/sops/age/keys.txt
+d=$(mktemp -d)
+age-keygen -o "$d/ci.key"
+cat > .sops.yaml <<EOF
+creation_rules:
+  - path_regex: secrets/ci\.yaml$
+    key_groups:
+      - age:
+          - &personal $(age-keygen -y ~/.config/sops/age/keys.txt)
+          # GitHub Actions CI recipient (private key: SOPS_AGE_KEY Actions secret).
+          - &ci $(age-keygen -y "$d/ci.key")
+EOF
+printf 'ci: {}\n' | sops encrypt --filename-override secrets/ci.yaml --output secrets/ci.yaml /dev/stdin
+grep AGE-SECRET-KEY "$d/ci.key" | gh secret set SOPS_AGE_KEY
+rm -rf "$d"
+```
+
+Rename `&personal` to identify the person and machine, as [Secrets bootstrap](../.agents/skills/declarative-infra/references/secrets.md#identities-and-recipients) describes, and commit `.sops.yaml` and `secrets/ci.yaml`. Then do step 2 of [Connect CI and GitHub](#connect-ci-and-github), running `bunx @davidvornholt/standards` in place of `bun standards`.
 
 ## Existing repository
 
