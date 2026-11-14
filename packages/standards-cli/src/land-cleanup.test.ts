@@ -8,6 +8,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
+import { which } from 'bun';
 import { cleanupTmpDirs } from './cli-test-support';
 import {
   addUpstream,
@@ -37,9 +38,18 @@ describe('standards land deleting a merged branch', () => {
     git(fixture, ['branch', 'unrelated', 'feature/topic']);
     git(fixture, ['config', 'branch.unrelated.remote', 'origin']);
     git(fixture, ['config', 'branch.unrelated.merge', 'refs/heads/gone']);
+    git(fixture, ['config', 'branch.feature/topic.remote', 'origin']);
     const first = land(fixture, ['123']);
     expect(first.status, first.stderr).toBe(0);
+    expect(first.stdout).toContain('Deleted branch feature/topic');
     expect(branchExists(fixture)).toBe(false);
+    expect(
+      git(fixture, ['config', 'branch.feature/topic.remote'], { check: false })
+        .status,
+    ).not.toBe(0);
+    expect(gitOutput(fixture, ['config', 'branch.unrelated.remote'])).toBe(
+      'origin',
+    );
     git(fixture, ['show-ref', '--verify', 'refs/heads/unrelated']);
     expect(currentBranchOf(fixture)).toBe('trunk');
     const second = land(fixture, ['123']);
@@ -144,6 +154,38 @@ describe('standards land keeping a branch with local work', () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('tip changed during cleanup');
     expect(branchExists(fixture)).toBe(true);
+  });
+});
+
+describe('standards land racing another writer of the branch', () => {
+  it('keeps a branch that gains a commit just before its deletion', () => {
+    git(fixture, ['switch', '-c', 'unpublished', 'feature/topic']);
+    git(fixture, ['commit', '--allow-empty', '-m', 'unpublished']);
+    const unpublished = gitOutput(fixture, ['rev-parse', 'HEAD']);
+    git(fixture, ['switch', 'trunk']);
+    // A git on PATH that moves the branch to the unpublished commit right
+    // before land's command that deletes it, as another agent committing
+    // during cleanup would.
+    const realGit = which('git') ?? 'git';
+    const wrapper = join(fixture.root, 'bin', 'git');
+    writeFileSync(
+      wrapper,
+      [
+        '#!/bin/sh',
+        'case "$1 $2" in',
+        `  "branch -D"|"update-ref "*) '${realGit}' update-ref refs/heads/feature/topic ${unpublished} ;;`,
+        'esac',
+        `exec '${realGit}' "$@"`,
+        '',
+      ].join('\n'),
+    );
+    chmodSync(wrapper, 0o755);
+    const result = land(fixture, ['123']);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('tip changed during cleanup');
+    expect(gitOutput(fixture, ['rev-parse', 'refs/heads/feature/topic'])).toBe(
+      unpublished,
+    );
   });
 });
 

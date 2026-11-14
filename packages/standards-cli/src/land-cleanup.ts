@@ -137,6 +137,57 @@ const leaveBranch = (
   git(context, 'switch', '--no-guess', '--', base);
 };
 
+const keepIfCheckedOut = (
+  branch: string,
+  worktrees: ReadonlyArray<Worktree>,
+): void => {
+  const holder = worktrees.find(
+    (worktree) => worktree.branch === `refs/heads/${branch}`,
+  );
+  if (holder !== undefined) {
+    throw new LandError(
+      `Keeping ${quoted(branch)}: checked out at ${quoted(holder.worktree ?? '')}. ` +
+        'Switch that worktree to another branch, or remove it explicitly, then retry.',
+    );
+  }
+};
+
+// Deletes the branch only while it still points at the checked tip, so a
+// commit made during cleanup, by a hook or another agent, survives. `git
+// branch -D` can't make the deletion conditional, so this does its two steps:
+// the ref, including its reflog, and then the branch's configuration.
+const removeBranch = (
+  context: LandContext,
+  branch: string,
+  tip: string,
+): void => {
+  const ref = `refs/heads/${branch}`;
+  const deletion = run(
+    context,
+    'git',
+    ['update-ref', '--no-deref', '-d', ref, tip],
+    false,
+  );
+  if (deletion.status !== 0) {
+    if (localTip(context, ref) !== tip) {
+      throw new LandError(
+        `Keeping ${quoted(branch)}: its tip changed during cleanup.`,
+      );
+    }
+    throw new LandError(
+      deletion.stderr.trim() || `Cannot delete ${quoted(branch)}.`,
+    );
+  }
+  // This fails when the branch has no configuration, which is fine.
+  run(
+    context,
+    'git',
+    ['config', '--remove-section', `branch.${branch}`],
+    false,
+  );
+  context.print(`Deleted branch ${branch} (was ${shortSha(tip)}).`);
+};
+
 export const deleteBranch = (
   context: LandContext,
   pr: PullRequest,
@@ -157,28 +208,18 @@ export const deleteBranch = (
     );
   }
   const worktrees = listWorktrees(context);
-  const elsewhere = worktrees.find(
-    (worktree) =>
-      worktree.branch === ref &&
-      resolvedPath(worktree.worktree ?? '') !== checkout.root,
+  keepIfCheckedOut(
+    branch,
+    worktrees.filter(
+      (worktree) => resolvedPath(worktree.worktree ?? '') !== checkout.root,
+    ),
   );
-  if (elsewhere !== undefined) {
-    throw new LandError(
-      `Keeping ${quoted(branch)}: checked out at ${quoted(elsewhere.worktree ?? '')}. ` +
-        'Switch that worktree to another branch, or remove it explicitly, then retry.',
-    );
-  }
   if (checkout.current === branch) {
     leaveBranch(context, pr.baseRefName, worktrees);
+    // Switching runs user hooks, which can check the branch out again.
+    keepIfCheckedOut(branch, listWorktrees(context));
   }
-  // Recheck after switching, which can run user hooks. Squash merges need -D
-  // because the original commits are not ancestors of the merge commit.
-  if (git(context, 'rev-parse', '--verify', ref) !== tip) {
-    throw new LandError(
-      `Keeping ${quoted(branch)}: its tip changed during cleanup.`,
-    );
-  }
-  context.print(git(context, 'branch', '-D', '--', branch));
+  removeBranch(context, branch, tip);
 };
 
 // The merge happened on GitHub, so a checkout on the base is now behind. Only
