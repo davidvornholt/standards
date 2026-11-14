@@ -132,6 +132,22 @@ describe('standards land keeping a branch with local work', () => {
     }
   });
 
+  it('refuses to switch over an ignored file that the base tracks', () => {
+    writeFileSync(join(fixture.checkout, 'local.env'), 'base\n');
+    git(fixture, ['add', 'local.env']);
+    git(fixture, ['commit', '-m', 'track local.env']);
+    writeFileSync(join(fixture.checkout, '.git/info/exclude'), 'local.env\n');
+    git(fixture, ['switch', 'feature/topic']);
+    const target = join(fixture.checkout, 'local.env');
+    writeFileSync(target, 'local secret\n');
+    const result = land(fixture);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('local.env');
+    expect(readFileSync(target, 'utf8')).toBe('local secret\n');
+    expect(currentBranchOf(fixture)).toBe('feature/topic');
+    expect(branchExists(fixture)).toBe(true);
+  });
+
   it('keeps a branch that a checkout hook moves', () => {
     git(fixture, ['switch', 'feature/topic']);
     const hook = join(fixture.checkout, '.git/hooks/post-checkout');

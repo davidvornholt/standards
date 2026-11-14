@@ -125,6 +125,8 @@ const leaveBranch = (
     return;
   }
   // Do not fetch, create a base branch, or guess a remote during cleanup.
+  // `git status` doesn't list ignored files, and `git switch` overwrites one
+  // that the base tracks unless told not to.
   const baseRef = `refs/heads/${base}`;
   if (
     run(context, 'git', ['show-ref', '--verify', '--quiet', baseRef], false)
@@ -134,7 +136,7 @@ const leaveBranch = (
       `Base branch ${quoted(base)} is not local. Switch to another branch, then retry.`,
     );
   }
-  git(context, 'switch', '--no-guess', '--', base);
+  git(context, 'switch', '--no-guess', '--no-overwrite-ignore', '--', base);
 };
 
 export const deleteBranch = (
