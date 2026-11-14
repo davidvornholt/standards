@@ -6,7 +6,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import process from 'node:process';
 import { which } from 'bun';
 import { cleanupTmpDirs } from './cli-test-support';
@@ -115,6 +115,35 @@ describe('standards land keeping a branch with local work', () => {
     expect(branchExists(fixture)).toBe(true);
   });
 
+  it('keeps a branch that another worktree is rebasing or bisecting', () => {
+    for (const [use, start, finish] of [
+      ['being rebased', [['rebase', '--exec', 'false', 'HEAD~1']], 'rebase'],
+      [
+        'being bisected',
+        [
+          ['bisect', 'start'],
+          ['switch', '--detach'],
+        ],
+        'bisect',
+      ],
+    ] as const) {
+      const worktree = join(fixture.root, use.replace(' ', '-'));
+      git(fixture, ['worktree', 'add', worktree, 'feature/topic']);
+      for (const args of start) {
+        git(fixture, args, { cwd: worktree, check: false });
+      }
+      expect(currentBranchOf(fixture, worktree), use).toBe('');
+      const result = land(fixture, ['123']);
+      expect(result.status, use).not.toBe(0);
+      expect(result.stderr).toContain(`${use} at ${JSON.stringify(worktree)}`);
+      expect(branchExists(fixture)).toBe(true);
+      git(fixture, [finish, finish === 'rebase' ? '--abort' : 'reset'], {
+        cwd: worktree,
+      });
+      git(fixture, ['worktree', 'remove', worktree]);
+    }
+  });
+
   it('keeps a branch with extra local commits', () => {
     git(fixture, ['switch', 'feature/topic']);
     git(fixture, ['commit', '--allow-empty', '-m', 'unpublished']);
@@ -157,35 +186,52 @@ describe('standards land keeping a branch with local work', () => {
   });
 });
 
-describe('standards land racing another writer of the branch', () => {
+// Puts a git on PATH that runs `command` once, right before the first git
+// command whose first two arguments match the shell `pattern`, as another
+// agent working in the repository during cleanup would.
+const beforeGit = (pattern: string, command: string): void => {
+  const realGit = which('git') ?? 'git';
+  const done = join(fixture.root, 'interposed');
+  const wrapper = join(fixture.root, 'bin', 'git');
+  writeFileSync(
+    wrapper,
+    [
+      '#!/bin/sh',
+      'case "$1 $2" in',
+      `  ${pattern}) [ -e '${done}' ] || { : > '${done}'; PATH='${dirname(realGit)}':"$PATH" ${command}; } ;;`,
+      'esac',
+      `exec '${realGit}' "$@"`,
+      '',
+    ].join('\n'),
+  );
+  chmodSync(wrapper, 0o755);
+};
+
+describe('standards land racing other work in the repository', () => {
   it('keeps a branch that gains a commit just before its deletion', () => {
     git(fixture, ['switch', '-c', 'unpublished', 'feature/topic']);
     git(fixture, ['commit', '--allow-empty', '-m', 'unpublished']);
     const unpublished = gitOutput(fixture, ['rev-parse', 'HEAD']);
     git(fixture, ['switch', 'trunk']);
-    // A git on PATH that moves the branch to the unpublished commit right
-    // before land's command that deletes it, as another agent committing
-    // during cleanup would.
-    const realGit = which('git') ?? 'git';
-    const wrapper = join(fixture.root, 'bin', 'git');
-    writeFileSync(
-      wrapper,
-      [
-        '#!/bin/sh',
-        'case "$1 $2" in',
-        `  "branch -D"|"update-ref "*) '${realGit}' update-ref refs/heads/feature/topic ${unpublished} ;;`,
-        'esac',
-        `exec '${realGit}' "$@"`,
-        '',
-      ].join('\n'),
+    beforeGit(
+      '"branch -D"|"update-ref "*',
+      `git update-ref refs/heads/feature/topic ${unpublished}`,
     );
-    chmodSync(wrapper, 0o755);
     const result = land(fixture, ['123']);
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('tip changed during cleanup');
     expect(gitOutput(fixture, ['rev-parse', 'refs/heads/feature/topic'])).toBe(
       unpublished,
     );
+  });
+
+  it('keeps a branch that this checkout switches to after land starts', () => {
+    beforeGit('"worktree list"', 'git switch --quiet feature/topic');
+    const result = land(fixture, ['123']);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('checked out at');
+    expect(branchExists(fixture)).toBe(true);
+    expect(currentBranchOf(fixture)).toBe('feature/topic');
   });
 });
 

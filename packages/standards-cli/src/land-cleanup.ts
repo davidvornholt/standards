@@ -2,6 +2,8 @@
 // every commit on it is part of the merged pull request, and fast-forward a
 // checkout on the base branch.
 
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   currentBranch,
   errorMessage,
@@ -137,18 +139,59 @@ const leaveBranch = (
   git(context, 'switch', '--no-guess', '--', base);
 };
 
-const keepIfCheckedOut = (
+// How a worktree uses the branch in a way that makes `git branch -D` refuse
+// to delete it: checked out, or rebased or bisected from a detached HEAD.
+const branchUse = (
+  context: LandContext,
+  worktree: Worktree,
+  ref: string,
+): string | null => {
+  if (worktree.branch === ref) {
+    return 'checked out';
+  }
+  if (worktree.worktree === undefined) {
+    return null;
+  }
+  const gitDir = run(
+    context,
+    'git',
+    ['-C', worktree.worktree, 'rev-parse', '--absolute-git-dir'],
+    false,
+  );
+  // Nothing can resume in a worktree whose folder is gone.
+  if (gitDir.status !== 0) {
+    return null;
+  }
+  const state = (name: string): string | null => {
+    const path = join(gitDir.stdout.trim(), name);
+    return existsSync(path) ? readFileSync(path, 'utf8').trim() : null;
+  };
+  if (
+    state('rebase-merge/head-name') === ref ||
+    state('rebase-apply/head-name') === ref
+  ) {
+    return 'being rebased';
+  }
+  return state('BISECT_START') === ref.slice('refs/heads/'.length)
+    ? 'being bisected'
+    : null;
+};
+
+const keepIfInUse = (
+  context: LandContext,
   branch: string,
   worktrees: ReadonlyArray<Worktree>,
 ): void => {
-  const holder = worktrees.find(
-    (worktree) => worktree.branch === `refs/heads/${branch}`,
-  );
-  if (holder !== undefined) {
-    throw new LandError(
-      `Keeping ${quoted(branch)}: checked out at ${quoted(holder.worktree ?? '')}. ` +
-        'Switch that worktree to another branch, or remove it explicitly, then retry.',
-    );
+  for (const worktree of worktrees) {
+    const use = branchUse(context, worktree, `refs/heads/${branch}`);
+    if (use !== null) {
+      throw new LandError(
+        `Keeping ${quoted(branch)}: ${use} at ${quoted(worktree.worktree ?? '')}. ` +
+          (use === 'checked out'
+            ? 'Switch that worktree to another branch, or remove it explicitly, then retry.'
+            : 'Finish or abort that there, then retry.'),
+      );
+    }
   }
 };
 
@@ -208,7 +251,8 @@ export const deleteBranch = (
     );
   }
   const worktrees = listWorktrees(context);
-  keepIfCheckedOut(
+  keepIfInUse(
+    context,
     branch,
     worktrees.filter(
       (worktree) => resolvedPath(worktree.worktree ?? '') !== checkout.root,
@@ -216,9 +260,10 @@ export const deleteBranch = (
   );
   if (checkout.current === branch) {
     leaveBranch(context, pr.baseRefName, worktrees);
-    // Switching runs user hooks, which can check the branch out again.
-    keepIfCheckedOut(branch, listWorktrees(context));
   }
+  // Check every worktree again, this one included: switching runs user hooks,
+  // and other work may have moved onto the branch since land started.
+  keepIfInUse(context, branch, listWorktrees(context));
   removeBranch(context, branch, tip);
 };
 
