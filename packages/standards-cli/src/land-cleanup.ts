@@ -2,6 +2,8 @@
 // every commit on it is part of the merged pull request, and fast-forward a
 // checkout on the base branch.
 
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import {
   currentBranch,
   errorMessage,
@@ -139,6 +141,123 @@ const leaveBranch = (
   git(context, 'switch', '--no-guess', '--no-overwrite-ignore', '--', base);
 };
 
+// A worktree's Git directory and its folder. The main worktree's is the
+// common directory, and each linked worktree's is under its `worktrees`
+// folder, which outlives a linked worktree's moved or deleted folder.
+type WorktreeGitDir = { readonly gitDir: string; readonly path: string };
+
+const worktreeGitDirs = (
+  context: LandContext,
+  worktrees: ReadonlyArray<Worktree>,
+): ReadonlyArray<WorktreeGitDir> => {
+  const common = git(
+    context,
+    'rev-parse',
+    '--path-format=absolute',
+    '--git-common-dir',
+  );
+  const linked = join(common, 'worktrees');
+  const names = existsSync(linked) ? readdirSync(linked) : [];
+  return [
+    // Git lists the main worktree first.
+    { gitDir: common, path: worktrees[0]?.worktree ?? common },
+    ...names.map((name) => {
+      const gitDir = join(linked, name);
+      const link = join(gitDir, 'gitdir');
+      return {
+        gitDir,
+        path: existsSync(link)
+          ? dirname(resolve(gitDir, readFileSync(link, 'utf8').trim()))
+          : gitDir,
+      };
+    }),
+  ];
+};
+
+// What a worktree does with the branch from a detached HEAD that makes `git
+// branch -D` refuse to delete it, read from the files Git keeps for it.
+const detachedUse = (gitDir: string, ref: string): string | null => {
+  const state = (name: string): string | null => {
+    const path = join(gitDir, name);
+    return existsSync(path) ? readFileSync(path, 'utf8').trim() : null;
+  };
+  if (
+    state('rebase-merge/head-name') === ref ||
+    state('rebase-apply/head-name') === ref
+  ) {
+    return 'being rebased';
+  }
+  return state('BISECT_START') === ref.slice('refs/heads/'.length)
+    ? 'being bisected'
+    : null;
+};
+
+// Refuses to delete a branch that a worktree other than `except` has checked
+// out, or that any worktree is rebasing or bisecting.
+const keepIfInUse = (
+  context: LandContext,
+  branch: string,
+  except: string | null,
+): void => {
+  const ref = `refs/heads/${branch}`;
+  const worktrees = listWorktrees(context);
+  const holder = worktrees.find(
+    (worktree) =>
+      worktree.branch === ref &&
+      resolvedPath(worktree.worktree ?? '') !== except,
+  );
+  if (holder !== undefined) {
+    throw new LandError(
+      `Keeping ${quoted(branch)}: checked out at ${quoted(holder.worktree ?? '')}. ` +
+        'Switch that worktree to another branch, or remove it explicitly, then retry.',
+    );
+  }
+  for (const { gitDir, path } of worktreeGitDirs(context, worktrees)) {
+    const use = detachedUse(gitDir, ref);
+    if (use !== null) {
+      throw new LandError(
+        `Keeping ${quoted(branch)}: ${use} at ${quoted(path)}. Finish or abort that there, then retry.`,
+      );
+    }
+  }
+};
+
+// Deletes the branch only while it still points at the checked tip, so a
+// commit made during cleanup, by a hook or another agent, survives. `git
+// branch -D` can't make the deletion conditional, so this does its two steps:
+// the ref, including its reflog, and then the branch's configuration.
+const removeBranch = (
+  context: LandContext,
+  branch: string,
+  tip: string,
+): void => {
+  const ref = `refs/heads/${branch}`;
+  const deletion = run(
+    context,
+    'git',
+    ['update-ref', '--no-deref', '-d', ref, tip],
+    false,
+  );
+  if (deletion.status !== 0) {
+    if (localTip(context, ref) !== tip) {
+      throw new LandError(
+        `Keeping ${quoted(branch)}: its tip changed during cleanup.`,
+      );
+    }
+    throw new LandError(
+      deletion.stderr.trim() || `Cannot delete ${quoted(branch)}.`,
+    );
+  }
+  // This fails when the branch has no configuration, which is fine.
+  run(
+    context,
+    'git',
+    ['config', '--remove-section', `branch.${branch}`],
+    false,
+  );
+  context.print(`Deleted branch ${branch} (was ${shortSha(tip)}).`);
+};
+
 export const deleteBranch = (
   context: LandContext,
   pr: PullRequest,
@@ -158,29 +277,14 @@ export const deleteBranch = (
       `Keeping ${quoted(branch)}: its tip isn't part of merged PR #${pr.number}. It may contain additional or rewritten work.`,
     );
   }
-  const worktrees = listWorktrees(context);
-  const elsewhere = worktrees.find(
-    (worktree) =>
-      worktree.branch === ref &&
-      resolvedPath(worktree.worktree ?? '') !== checkout.root,
-  );
-  if (elsewhere !== undefined) {
-    throw new LandError(
-      `Keeping ${quoted(branch)}: checked out at ${quoted(elsewhere.worktree ?? '')}. ` +
-        'Switch that worktree to another branch, or remove it explicitly, then retry.',
-    );
-  }
+  keepIfInUse(context, branch, checkout.root);
   if (checkout.current === branch) {
-    leaveBranch(context, pr.baseRefName, worktrees);
+    leaveBranch(context, pr.baseRefName, listWorktrees(context));
   }
-  // Recheck after switching, which can run user hooks. Squash merges need -D
-  // because the original commits are not ancestors of the merge commit.
-  if (git(context, 'rev-parse', '--verify', ref) !== tip) {
-    throw new LandError(
-      `Keeping ${quoted(branch)}: its tip changed during cleanup.`,
-    );
-  }
-  context.print(git(context, 'branch', '-D', '--', branch));
+  // Check every worktree again, this one included: switching runs user hooks,
+  // and other work may have moved onto the branch since land started.
+  keepIfInUse(context, branch, null);
+  removeBranch(context, branch, tip);
 };
 
 // The merge happened on GitHub, so a checkout on the base is now behind. Only

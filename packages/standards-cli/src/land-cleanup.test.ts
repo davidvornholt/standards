@@ -3,11 +3,13 @@ import {
   chmodSync,
   existsSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import process from 'node:process';
+import { which } from 'bun';
 import { cleanupTmpDirs } from './cli-test-support';
 import {
   addUpstream,
@@ -37,9 +39,18 @@ describe('standards land deleting a merged branch', () => {
     git(fixture, ['branch', 'unrelated', 'feature/topic']);
     git(fixture, ['config', 'branch.unrelated.remote', 'origin']);
     git(fixture, ['config', 'branch.unrelated.merge', 'refs/heads/gone']);
+    git(fixture, ['config', 'branch.feature/topic.remote', 'origin']);
     const first = land(fixture, ['123']);
     expect(first.status, first.stderr).toBe(0);
+    expect(first.stdout).toContain('Deleted branch feature/topic');
     expect(branchExists(fixture)).toBe(false);
+    expect(
+      git(fixture, ['config', 'branch.feature/topic.remote'], { check: false })
+        .status,
+    ).not.toBe(0);
+    expect(gitOutput(fixture, ['config', 'branch.unrelated.remote'])).toBe(
+      'origin',
+    );
     git(fixture, ['show-ref', '--verify', 'refs/heads/unrelated']);
     expect(currentBranchOf(fixture)).toBe('trunk');
     const second = land(fixture, ['123']);
@@ -160,6 +171,108 @@ describe('standards land keeping a branch with local work', () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('tip changed during cleanup');
     expect(branchExists(fixture)).toBe(true);
+  });
+});
+
+describe('standards land keeping a branch a detached worktree uses', () => {
+  it('keeps a branch that another worktree is rebasing or bisecting', () => {
+    for (const [use, start, finish] of [
+      ['being rebased', [['rebase', '--exec', 'false', 'HEAD~1']], 'rebase'],
+      [
+        'being bisected',
+        [
+          ['bisect', 'start'],
+          ['switch', '--detach'],
+        ],
+        'bisect',
+      ],
+    ] as const) {
+      const worktree = join(fixture.root, use.replace(' ', '-'));
+      git(fixture, ['worktree', 'add', worktree, 'feature/topic']);
+      for (const args of start) {
+        git(fixture, args, { cwd: worktree, check: false });
+      }
+      expect(currentBranchOf(fixture, worktree), use).toBe('');
+      const result = land(fixture, ['123']);
+      expect(result.status, use).not.toBe(0);
+      expect(result.stderr).toContain(`${use} at ${JSON.stringify(worktree)}`);
+      expect(branchExists(fixture)).toBe(true);
+      git(fixture, [finish, finish === 'rebase' ? '--abort' : 'reset'], {
+        cwd: worktree,
+      });
+      git(fixture, ['worktree', 'remove', worktree]);
+    }
+  });
+
+  it('finds a rebase in a moved worktree or with GIT_DIR set', () => {
+    const worktree = join(fixture.root, 'rebasing');
+    git(fixture, ['config', 'worktree.useRelativePaths', 'true']);
+    git(fixture, ['worktree', 'add', worktree, 'feature/topic']);
+    git(fixture, ['rebase', '--exec', 'false', 'HEAD~1'], {
+      cwd: worktree,
+      check: false,
+    });
+    fixture.env.GIT_DIR = join(fixture.checkout, '.git');
+    const withGitDir = land(fixture, ['123']);
+    fixture.env.GIT_DIR = undefined;
+    expect(withGitDir.status).not.toBe(0);
+    expect(withGitDir.stderr).toContain(
+      `being rebased at ${JSON.stringify(worktree)}`,
+    );
+    renameSync(worktree, `${worktree}-moved`);
+    const moved = land(fixture, ['123']);
+    expect(moved.status).not.toBe(0);
+    expect(moved.stderr).toContain('being rebased');
+    expect(branchExists(fixture)).toBe(true);
+  });
+});
+
+// Puts a git on PATH that runs `command` once, right before the first git
+// command whose first two arguments match the shell `pattern`, as another
+// agent working in the repository during cleanup would.
+const beforeGit = (pattern: string, command: string): void => {
+  const realGit = which('git') ?? 'git';
+  const done = join(fixture.root, 'interposed');
+  const wrapper = join(fixture.root, 'bin', 'git');
+  writeFileSync(
+    wrapper,
+    [
+      '#!/bin/sh',
+      'case "$1 $2" in',
+      `  ${pattern}) [ -e '${done}' ] || { : > '${done}'; PATH='${dirname(realGit)}':"$PATH" ${command}; } ;;`,
+      'esac',
+      `exec '${realGit}' "$@"`,
+      '',
+    ].join('\n'),
+  );
+  chmodSync(wrapper, 0o755);
+};
+
+describe('standards land racing other work in the repository', () => {
+  it('keeps a branch that gains a commit just before its deletion', () => {
+    git(fixture, ['switch', '-c', 'unpublished', 'feature/topic']);
+    git(fixture, ['commit', '--allow-empty', '-m', 'unpublished']);
+    const unpublished = gitOutput(fixture, ['rev-parse', 'HEAD']);
+    git(fixture, ['switch', 'trunk']);
+    beforeGit(
+      '"branch -D"|"update-ref "*',
+      `git update-ref refs/heads/feature/topic ${unpublished}`,
+    );
+    const result = land(fixture, ['123']);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('tip changed during cleanup');
+    expect(gitOutput(fixture, ['rev-parse', 'refs/heads/feature/topic'])).toBe(
+      unpublished,
+    );
+  });
+
+  it('keeps a branch that this checkout switches to after land starts', () => {
+    beforeGit('"worktree list"', 'git switch --quiet feature/topic');
+    const result = land(fixture, ['123']);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('checked out at');
+    expect(branchExists(fixture)).toBe(true);
+    expect(currentBranchOf(fixture)).toBe('feature/topic');
   });
 });
 
