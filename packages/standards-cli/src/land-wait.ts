@@ -270,7 +270,7 @@ const pollUntilReady = async (
 };
 
 // Returns the head commit once GitHub may merge it and its checks have
-// passed. The wait ends at the context's deadline.
+// passed.
 export const waitForChecks = (
   context: LandContext,
   request: WaitRequest,

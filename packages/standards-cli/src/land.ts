@@ -65,7 +65,6 @@ export const land = async (
   if (pr.state !== 'OPEN') {
     throw new LandError(`PR #${pr.number} is ${pr.state}, not merged.`);
   }
-  // Every git and gh call in the wait ends by its deadline.
   const waiting = { ...context, deadline: Date.now() + context.waitMs };
   const head = await waitForChecks(waiting, {
     prNumber: pr.number,

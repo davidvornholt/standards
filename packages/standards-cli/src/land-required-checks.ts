@@ -9,7 +9,6 @@ import { ghJson, type LandContext, type Repository } from './land-context';
 // misconfiguration.
 const RULES_PER_PAGE = 100;
 
-// GitHub's REST fields are snake_case.
 type Rule = {
   readonly type?: string;
   readonly parameters?: {

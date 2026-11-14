@@ -18,7 +18,6 @@ const WAIT_SECONDS = 2;
 const LIMIT_MS = 8000;
 // A gh call that hangs far longer than the limit.
 const HANG_MS = 20_000;
-// Without the limit, the slow tests would run 180 polls.
 const SLOW_TEST_MS = 120_000;
 const SLOW_POLL_MS = 300;
 
