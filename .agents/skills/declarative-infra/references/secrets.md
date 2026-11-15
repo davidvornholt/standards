@@ -2,6 +2,20 @@
 
 This applies to every repo with encrypted secrets, with or without hosts. Host recipients are in [bootstrap.md](bootstrap.md#host-secrets). Which values are secret, where each is documented, and the development environment layers are in the [secrets-and-config skill](../../secrets-and-config/SKILL.md).
 
+## Commands
+
+A repository on the `bun` payload runs the steps on this page through its `just secrets` recipes. A target name binds `infra/hosts/<target>/secrets.yaml` or `secrets/<target>.yaml`, and there is no per-repo target map. A repository on the core payload has no `justfile`, so it installs `age`, `sops`, and, for host recipients, `ssh-to-age`, exports `SOPS_AGE_KEY_FILE` as [Repository outside Bun](https://github.com/davidvornholt/standards/blob/main/docs/adoption.md#repository-outside-bun) describes, and runs the tools on the file path directly:
+
+| Step | `bun` payload | Core payload |
+| --- | --- | --- |
+| Create an age key and print its recipient | `just secrets age-create [<file>]` | `age-keygen -o <file>`, after `mkdir -p` of its directory. It prints the recipient as `Public key: age1...` and refuses to overwrite an existing file. |
+| Print an age key's recipient | `just secrets age-recipient [<file>]` | `age-keygen -y <file>` |
+| Create or edit a target | `just secrets edit <target>` | `sops <path>` |
+| Re-encrypt a target for the recipients `.sops.yaml` now lists | `just secrets updatekeys <target>` | `sops updatekeys <path>` |
+| Run the standards CLI | `bun standards <command>` | `bunx @davidvornholt/standards <command>` |
+
+`<file>` defaults to `~/.config/sops/age/keys.txt` for the recipes.
+
 ## Identities and recipients
 
 - A personal identity is a standalone age key at `~/.config/sops/age/keys.txt`, one per person and machine. Create it with `just secrets age-create`.
@@ -13,12 +27,10 @@ Create an automation keypair in a temporary directory, so the private key ends u
 
 ```sh
 d=$(mktemp -d)
-just secrets age-create "$d/key"    # prints the recipient for .sops.yaml
+just secrets age-create "$d/key"    # prints the recipient for .sops.yaml; core payload: age-keygen -o "$d/key"
 grep AGE-SECRET-KEY "$d/key" | gh secret set SOPS_AGE_KEY
 rm -rf "$d"
 ```
-
-A `just secrets` target name binds `infra/hosts/<target>/secrets.yaml` or `secrets/<target>.yaml`. There is no per-repo target map.
 
 ## GitHub Actions
 
