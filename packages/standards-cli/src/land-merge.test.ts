@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import process from 'node:process';
 import { cleanupTmpDirs } from './cli-test-support';
 import {
@@ -116,6 +117,9 @@ describe('standards land when GitHub only accepts the merge', () => {
     expect(result.status, result.stdout).toBe(1);
     expect(result.stderr).toContain('Cannot confirm that PR #123 is merged');
     expect(result.stderr).toContain('standards land 123');
+    expect(
+      JSON.parse(readFileSync(fixture.env.GH_FIXTURE ?? '', 'utf8')).state,
+    ).toBe('MERGED');
   });
 });
 
@@ -378,6 +382,7 @@ describe('standards land arguments and merge failures', () => {
     const result = land(fixture, ['--help']);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('Usage: standards land [PR_OR_BRANCH]');
+    expect(result.stdout).toContain("land couldn't confirm that it is");
     expect(calls(fixture)).toEqual([]);
   });
 });
