@@ -15,9 +15,8 @@ export const createA11yPlaywrightConfig = (options: {
     testMatch: a11ySpecPattern,
     fullyParallel: true,
     // A CI runner exists only for the gate, so the suite takes every core.
-    // Playwright's default of half the cores left two of four idle and
-    // doubled the longest task of a consumer gate. Local runs keep the default
-    // and leave room for the developer's other work.
+    // Local runs keep Playwright's default and leave room for the developer's
+    // other work.
     ...(isCi ? { workers: '100%' } : {}),
     forbidOnly: isCi,
     retries: isCi ? 1 : 0,
