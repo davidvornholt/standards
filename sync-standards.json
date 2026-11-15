@@ -35,6 +35,8 @@
         "secrets.just",
         "nix/standards-bun.nix",
         "nix/bun-archives.json",
+        "nix/package-source.nix",
+        "nix/package-source-check.nix",
         ".github/settings.json",
         ".github/dependabot.yml",
         ".github/actions/app-release",

@@ -3260,7 +3260,7 @@ describe('canonical standards workflow Nix steps', () => {
         }),
         expect.objectContaining({
           name: 'Build Nix check',
-          run: `nix build ".#checks.${githubMatrixExpression('system')}.standards-cli" -L`,
+          run: `nix build ".#checks.${githubMatrixExpression('system')}.standards-cli" ".#checks.${githubMatrixExpression('system')}.package-source" -L`,
         }),
         expect.objectContaining({
           name: 'Build app-release check',
@@ -3268,6 +3268,28 @@ describe('canonical standards workflow Nix steps', () => {
         }),
       ]),
     );
+  });
+
+  it('checks the package source in a repository that packages a CLI', () => {
+    const steps = yamlJobs(STANDARDS_WORKFLOW).quality.steps as ReadonlyArray<
+      Readonly<Record<string, unknown>>
+    >;
+    const nixStepNames = steps
+      .filter((step) => String(step.uses ?? step.run).includes('nix'))
+      .map((step) => step.name);
+
+    expect(nixStepNames).toEqual([
+      'Install Nix for the package source check',
+      'Check the Nix package source',
+    ]);
+    for (const name of nixStepNames) {
+      expect(steps.find((step) => step.name === name)?.if).toBe(
+        "hashFiles('nix/package.nix') != ''",
+      );
+    }
+    expect(
+      steps.find((step) => step.name === 'Check the Nix package source')?.run,
+    ).toContain('nix build ".#checks.$system.package-source"');
   });
 
   it('runs the app-release VM test only where the runner provides KVM', () => {
