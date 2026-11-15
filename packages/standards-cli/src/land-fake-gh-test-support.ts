@@ -91,6 +91,13 @@ const nextOf = <T>(queue: Array<T>): T | undefined =>
 // A poll whose entry sets hangMs answers only after that long, like a gh
 // call that hangs.
 const viewPr = ({ args, pr, savePr }: Call): FakeGhResult => {
+  // After a merge, the next readBackFailures reads fail, like an API outage.
+  const failures = Number(pr.readBackFailures ?? 0);
+  if (pr.mergeRequested === true && failures > 0) {
+    pr.readBackFailures = failures - 1;
+    savePr();
+    return failure('HTTP 503: read-back unavailable\n');
+  }
   if ((args.at(-1) ?? '').includes('statusCheckRollup')) {
     const poll = nextOf(pr.polls);
     if (poll !== undefined) {
@@ -121,6 +128,12 @@ const markReady = ({ pr, github, savePr, saveGithub }: Call): FakeGhResult => {
 const merge = ({ env, pr, savePr }: Call): FakeGhResult => {
   if (env.GH_MERGE_FAIL) {
     return failure('');
+  }
+  pr.mergeRequested = true;
+  // A pull request that only joins a merge queue stays open.
+  if (pr.queued === true) {
+    savePr();
+    return ok('Added pull request to merge queue.\n');
   }
   Object.assign(pr, { state: 'MERGED', mergeCommit: { oid: MERGE_COMMIT } });
   savePr();

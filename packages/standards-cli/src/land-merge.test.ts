@@ -82,6 +82,43 @@ describe('standards land on an open pull request', () => {
   });
 });
 
+describe('standards land when GitHub only accepts the merge', () => {
+  it('fails when a queued pull request cannot be read back', () => {
+    openPr({ queued: true, readBackFailures: 99 });
+    const result = land(fixture, ['123']);
+    expect(result.status, result.stdout).toBe(1);
+    expect(result.stderr).toContain('Cannot confirm that PR #123 is merged');
+    expect(result.stderr).toContain('HTTP 503: read-back unavailable');
+    expect(result.stderr).not.toContain('is merged, but');
+    expect(mergeCalls(fixture)).toEqual([mergeCall(fixture)]);
+    expect(branchExists(fixture)).toBe(true);
+  });
+
+  it('fails when a queued pull request is still open', () => {
+    openPr({ queued: true });
+    const result = land(fixture, ['123']);
+    expect(result.status, result.stdout).toBe(1);
+    expect(result.stderr).toContain("hasn't merged it yet");
+    expect(branchExists(fixture)).toBe(true);
+  });
+
+  it('retries a failed read-back and then reports the merge', () => {
+    openPr({ readBackFailures: 2 });
+    const result = land(fixture, ['123']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain('PR #123 is merged as fffffff.');
+    expect(branchExists(fixture)).toBe(false);
+  });
+
+  it('fails when a merged pull request cannot be read back', () => {
+    openPr({ readBackFailures: 99 });
+    const result = land(fixture, ['123']);
+    expect(result.status, result.stdout).toBe(1);
+    expect(result.stderr).toContain('Cannot confirm that PR #123 is merged');
+    expect(result.stderr).toContain('standards land 123');
+  });
+});
+
 describe('standards land with failed or cancelled checks', () => {
   it('does not merge over failed checks', () => {
     const cases: ReadonlyArray<

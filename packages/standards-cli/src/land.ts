@@ -86,5 +86,5 @@ export const land = async (
   if (!merged) {
     throw new LandError(`PR #${pr.number} was not merged.`);
   }
-  finishMerge(context, pr.number, repo, checkout);
+  await finishMerge(context, pr.number, repo, checkout);
 };
