@@ -4,7 +4,7 @@ A same-repository PR labeled `pr-preview` gets `https://<pr>.pr.<domain>` with i
 
 ## Convergence model
 
-- Previews are the one exception to keeping desired state in git. Their only runtime state is the active preview set in host-local `/var/lib/<repo>/pr-previews/active.json`, a JSON array of `{ number, image, headSha, updatedAt }`. Only the forced SSH command changes it, under an exclusive `flock`, and then runs `nixos-rebuild switch` on the production flake. Each switch replays the whole set, so an interrupted deploy heals on the next one.
+- Previews are the one exception to keeping desired state in git. Their only runtime state is the active preview set in host-local `/var/lib/<repo>/pr-previews/active.json`, a JSON array of `{ number, image, headSha, updatedAt }`, plus a `slot` where [identity](#isolation) uses one. Only the forced SSH command changes it, under an exclusive `flock`, and then runs `nixos-rebuild switch` on the production flake. Each switch replays the whole set, so an interrupted deploy heals on the next one.
 - The flake reads the file path from an environment variable with `builtins.getEnv`, defaults to an empty set, and passes the set through `specialArgs`. `nix flake check` therefore sees no previews. The host rebuild sets the variable and runs with `--impure`.
 
 ## Workflows
@@ -52,7 +52,7 @@ Migrations run as a one-shot container under the preview's UID, against its own 
 
 Each preview gets, from the modules:
 
-- A system user and group in a reserved UID/GID range, such as 200000 plus index. The container runs as that identity with all capabilities dropped, `no-new-privileges`, CPU, memory, and pids caps, and a tmpfs `/tmp`.
+- A system user and group in a reserved UID/GID range, such as 200000 plus the preview's number or slot. The container runs as that identity with all capabilities dropped, `no-new-privileges`, CPU, memory, and pids caps, and a tmpfs `/tmp`.
 - Its own database `<app>_pr_<number>`, peer-mapped only to that user through the PostgreSQL module's `databaseSystemUsers`.
 - An internal Podman network with a non-overlapping, host-reachable subnet and a fixed container address, so previews reach neither each other nor the internet. The [sign-in proxy](#sign-in-and-sample-data) is their only way out.
 - A Caddy virtual host `<pr>.pr.<domain>` that proxies the container address directly and sends `X-Robots-Tag: noindex, nofollow, noarchive`. Never publish a host port: rootful Podman's internal bridge disables the forwarding it needs. Never restore forwarding or outbound access to make one work.
@@ -60,6 +60,7 @@ Each preview gets, from the modules:
 
 Also:
 
+- A preview's user and group IDs, subnet, gateway, container address, and any host port must stay the same for as long as the preview exists, so adding, updating, or removing one preview never restarts or readdresses another, and the IDs NixOS recorded never drift from what runs. Never derive them from a preview's position in the set. Derive them from the PR number when that can't collide, or give each state entry a `slot` from 0 to the preview capacity minus one: the first deploy takes the lowest free slot, every redeploy keeps it, and only destroy frees it. The state validator and the module's assertions reject a missing, out-of-range, or shared slot instead of deriving one. Add a flake check that adds and removes a preview and asserts that the others' unit store paths, IDs, and virtual hosts stay the same, and that two previews with the same identity fail evaluation.
 - The preview UID overrides the image's user, so every non-secret runtime file and its directories must be readable and traversable by any unprivileged UID. In the build workflow, smoke-test the image with `--user=<base-uid>:<base-gid>` and the host's read-only root, tmpfs mounts, capabilities, and security options.
 - With Caddy's admin API `off`, set `services.caddy.enableReload = false`, or the reload fails an otherwise healthy activation. Changes then restart Caddy, which is the interruption [Deploy downtime](bootstrap.md#deploy-downtime) accepts.
 
