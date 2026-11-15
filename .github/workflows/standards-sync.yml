@@ -14,6 +14,9 @@ name: Standards sync
 #   { "ref": "v0.7.0" }    tag, branch, or full commit sha to sync from
 #                          instead of main. The CLI reads the same file, so a
 #                          local `bun standards sync` obeys the same pin.
+#                          Without a ref, each run in a Bun consumer also
+#                          raises @davidvornholt/standards in package.json
+#                          to the newest release.
 #   { "payload": "core" }  receive only the language-neutral standards, for a
 #                          repository that isn't a Bun workspace. This
 #                          workflow then runs the CLI from the upstream
@@ -390,12 +393,55 @@ jobs:
             "${cli[@]}" sync --from "$trusted_source" --dir "$GITHUB_WORKSPACE"
           fi
 
-      # Canonical package manifests can change dependency ranges after the
-      # frozen pre-sync install. Refresh the consumer lock before deciding
-      # whether the mirror produced a change, so the sync branch remains
-      # installable with --frozen-lockfile. Bun reads the trusted empty config
-      # only as `--config=<path>`: a separate path argument becomes a package
-      # to add, and the branch's own bunfig.toml loads instead.
+      # Nothing else raises the consumer's exact CLI pin, and a pin left far
+      # behind can't read newer canonical content. So each sync raises it to
+      # the newest npm release, and the refresh below records that release in
+      # bun.lock. This job still ran the CLI preserved above; the new release
+      # first runs in the sync PR's required checks, so a release that breaks
+      # the consumer holds the PR open with a red check. A `ref` policy holds
+      # the content at an older commit the newest CLI may not read, so it holds
+      # the pin too. No release-age hold as in Dependabot: the release comes
+      # from the upstream whose content this sync mirrors without one. A
+      # failed registry read only skips the raise until the next run.
+      - name: Raise standards CLI pin
+        id: cli-pin
+        if: needs.policy.outputs.payload == 'bun' && needs.policy.outputs.ref == ''
+        run: |
+          set -o pipefail
+          name=@davidvornholt/standards
+          stable='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          if ! latest=$(curl --fail --silent --show-error --max-time 60 "https://registry.npmjs.org/-/package/${name/\//%2F}/dist-tags" | jq -er '.latest | strings'); then
+            echo "::warning::Could not read the newest $name release from npm, so this sync leaves its pin in package.json as it is."
+            exit 0
+          fi
+          if [[ ! "$latest" =~ $stable ]]; then
+            echo "::warning::The newest $name release on npm is not a stable SemVer: $latest. This sync leaves its pin in package.json as it is."
+            exit 0
+          fi
+          current=$(jq -r --arg name "$name" '.devDependencies[$name] // empty' package.json)
+          if [[ ! "$current" =~ $stable ]]; then
+            echo "::notice::package.json doesn't pin $name to an exact release (\"$current\"), so this sync leaves it as it is."
+            exit 0
+          fi
+          if [ "$(printf '%s\n%s\n' "$current" "$latest" | sort -V | tail -n 1)" = "$current" ]; then
+            echo "package.json already pins $name $current, the newest release or later."
+            exit 0
+          fi
+          jq --indent 2 --arg name "$name" --arg version "$latest" '.devDependencies[$name] = $version' package.json > "$RUNNER_TEMP/package.json"
+          mv "$RUNNER_TEMP/package.json" package.json
+          echo "Raised $name in package.json from $current to $latest."
+          {
+            echo "from=$current"
+            echo "to=$latest"
+          } >> "$GITHUB_OUTPUT"
+
+      # Canonical package manifests can change dependency ranges, and the step
+      # above can raise the CLI pin, after the frozen pre-sync install. Refresh
+      # the consumer lock before deciding whether the mirror produced a change,
+      # so the sync branch remains installable with --frozen-lockfile. Bun
+      # reads the trusted empty config only as `--config=<path>`: a separate
+      # path argument becomes a package to add, and the branch's own
+      # bunfig.toml loads instead.
       - name: Refresh consumer lockfile
         if: needs.policy.outputs.payload == 'bun'
         run: bun install --lockfile-only --ignore-scripts --no-env-file --config="$STANDARDS_SYNC_RUNTIME/bunfig.toml"
@@ -446,6 +492,8 @@ jobs:
       # holds no broker token: the read-only job token reads the public upstream
       # comparison, and a failed comparison drops only the commit list. Commit
       # subjects and paths reach the file through jq and printf arguments only.
+      # The CLI pin comes from the base and branch manifests, not from the raise
+      # step, because an earlier run may have raised it on a reused branch.
       - name: Describe sync pull request
         if: steps.mirror.outputs.changed == 'true'
         env:
@@ -471,7 +519,17 @@ jobs:
           previous=$(git show "origin/$SYNC_BASE_REF:sync-standards.lock" 2>/dev/null | jq -r '.sha // empty' 2>/dev/null || true)
           [[ "$previous" =~ $sha_pattern ]] || previous=
           paths=$(git diff --name-only -z "origin/$SYNC_BASE_REF" HEAD | jq -Rs 'split("\u0000") | map(select(length > 0))')
-          mirrored=$(jq '[.[] | select(. != "sync-standards.lock")] | length' <<<"$paths")
+          stable='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          pin() { git show "$1:package.json" 2>/dev/null | jq -r '.devDependencies["@davidvornholt/standards"] // empty' 2>/dev/null || true; }
+          pin_before=$(pin "origin/$SYNC_BASE_REF")
+          pin_after=$(pin HEAD)
+          raised=
+          if [[ "$pin_before" =~ $stable && "$pin_after" =~ $stable && "$pin_before" != "$pin_after" ]]; then
+            raised=true
+          fi
+          # The root manifest and bun.lock are never mirrored, so a raised pin
+          # alone changes no mirrored file.
+          mirrored=$(jq --arg raised "$raised" '[.[] | select(. != "sync-standards.lock" and ($raised == "" or (. != "package.json" and . != "bun.lock")))] | length' <<<"$paths")
           compare_url=
           commits=
           if [ -n "$previous" ] && [ "$previous" != "$current" ] && [ -n "$repo" ]; then
@@ -487,6 +545,8 @@ jobs:
           fi
           if [ -z "$previous" ]; then
             before="\`sync-standards.lock\` on the base branch does not say which upstream commit this repository mirrors."
+          elif [ "$previous" = "$current" ] && [ "$mirrored" -eq 0 ] && ! jq -e 'any(.[]; . == "sync-standards.lock")' <<<"$paths" > /dev/null; then
+            before="This repository already mirrors \`$source\` at \`${current:0:7}\`."
           elif [ "$previous" = "$current" ]; then
             before="\`sync-standards.lock\` already points to \`$source\` at \`${current:0:7}\`, but"
             if [ "$mirrored" -eq 0 ]; then
@@ -509,6 +569,9 @@ jobs:
               printf '**Now.** `sync-standards.lock` points to `%s`. No mirrored files change.\n' "${current:0:7}"
             else
               printf '**Now.** The mirrored files match `%s` at `%s`.\n' "$source" "${current:0:7}"
+            fi
+            if [ -n "$raised" ]; then
+              printf '\n**CLI.** This sync also raises `@davidvornholt/standards` in `package.json` from `%s` to `%s` and updates `bun.lock` to match. The sync run itself used `%s`, so the required checks on this pull request are the first to run `%s`. If they fail, the new release may be the cause. This pull request does not merge until they pass.\n' "$pin_before" "$pin_after" "$pin_before" "$pin_after"
             fi
             if [ -n "$compare_url" ]; then
               printf '\n## Upstream changes\n\n[Compare `%s...%s`](%s)\n' "${previous:0:7}" "${current:0:7}" "$compare_url"

@@ -17,6 +17,8 @@ CI checks with its restricted workflow token, which can't see who may bypass a r
 
 Unless `sync-standards.local.json` sets `"autoSync": false`, a weekly run keeps one sync pull request open from the branch `standards-sync/update` while canonical content differs. Each run rebases that branch and updates it, so commits you add to adapt the consumer survive. The pull request description doesn't: every run that changes the branch rewrites it.
 
+In a Bun consumer, each run also raises the exact `@davidvornholt/standards` version in `package.json` to the newest npm release and updates `bun.lock`, unless the policy sets `ref`. The run itself still uses the CLI on the base branch, so the new release first runs in the sync pull request's required checks. When the release breaks the consumer, `check` fails, the pull request stays open without merging, and its description names both versions.
+
 When no open pull request uses the branch, the run rebuilds the branch from the base branch instead of rebasing the old one. The workflow owns the `standards-sync/` branch namespace. It closes every other open same-repository pull request there, and closes all of them once the base branch already matches upstream.
 
 Sync branches contain trusted upstream code, so consumer CI may run on them before anyone reviews the generated pull request.
