@@ -483,7 +483,20 @@ fi
 # Playwright downloads its own Chromium. The runner's unused Chrome APT
 # repository can break dependency installation with inconsistent metadata.
 sudo rm -f /etc/apt/sources.list.d/google-chrome.list /etc/apt/sources.list.d/google-chrome.sources
-"$playwright" install --with-deps chromium
+# Other third-party repositories on runner images publish their indexes
+# non-atomically, so apt-get update fails while a mirror syncs. Retry that
+# short window instead of failing the gate; a lasting failure still fails.
+for attempt in 1 2 3; do
+  if "$playwright" install --with-deps chromium; then
+    exit 0
+  fi
+  if [ "$attempt" -lt 3 ]; then
+    echo "::warning::Playwright install attempt $attempt failed; retrying in 30 seconds."
+    sleep 30
+  fi
+done
+echo "::error::Playwright could not install Chromium and its system dependencies."
+exit 1
 `,
     },
     {
