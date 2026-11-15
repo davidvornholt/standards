@@ -28,7 +28,7 @@ const MATCHED = `**Now.** The mirrored files match \`${UPSTREAM}\` at \`2daab29\
 const LOCK_ONLY =
   '**Now.** `sync-standards.lock` points to `2daab29`. No mirrored files change.';
 const RAISED =
-  '**CLI.** This sync also raises `@davidvornholt/standards` in `package.json` from `0.31.0` to `0.38.0` and updates `bun.lock` to match. The sync run itself used `0.31.0`, so the required checks on this pull request are the first to run `0.38.0`. If they fail, the new release breaks this repository, and this pull request does not merge until someone fixes it.';
+  '**CLI.** This sync also raises `@davidvornholt/standards` in `package.json` from `0.31.0` to `0.38.0` and updates `bun.lock` to match. The sync run itself used `0.31.0`, so the required checks on this pull request are the first to run `0.38.0`. If they fail, the new release may be the cause. This pull request does not merge until they pass.';
 
 const lock = (
   sha: string,
@@ -211,6 +211,28 @@ const scenarios: Array<Scenario> = [
       VERIFICATION,
     ),
     apiCalls: `repos/${UPSTREAM}/compare/${PREVIOUS}...${CURRENT}\n`,
+  },
+  {
+    // A settings change also fails `check`, so the CLI paragraph must not
+    // blame every failure on the release.
+    name: 'a raised CLI pin with a settings change keeps the settings steps',
+    base: {
+      'package.json': manifest('0.31.0'),
+      'sync-standards.lock': lock(CURRENT),
+    },
+    head: {
+      '.github/settings.json': '{}\n',
+      'package.json': manifest('0.38.0'),
+    },
+    expected: body(
+      `**Before.** \`sync-standards.lock\` already points to \`${UPSTREAM}\` at \`2daab29\`, but some mirrored files here no longer match that commit.`,
+      MATCHED,
+      RAISED,
+      changedFiles(['.github/settings.json', 'package.json']),
+      BEFORE_MERGING,
+      VERIFICATION,
+    ),
+    apiCalls: '',
   },
   {
     name: 'a pin that is not an exact release gets no CLI paragraph',

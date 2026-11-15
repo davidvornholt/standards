@@ -571,7 +571,7 @@ jobs:
               printf '**Now.** The mirrored files match `%s` at `%s`.\n' "$source" "${current:0:7}"
             fi
             if [ -n "$raised" ]; then
-              printf '\n**CLI.** This sync also raises `@davidvornholt/standards` in `package.json` from `%s` to `%s` and updates `bun.lock` to match. The sync run itself used `%s`, so the required checks on this pull request are the first to run `%s`. If they fail, the new release breaks this repository, and this pull request does not merge until someone fixes it.\n' "$pin_before" "$pin_after" "$pin_before" "$pin_after"
+              printf '\n**CLI.** This sync also raises `@davidvornholt/standards` in `package.json` from `%s` to `%s` and updates `bun.lock` to match. The sync run itself used `%s`, so the required checks on this pull request are the first to run `%s`. If they fail, the new release may be the cause. This pull request does not merge until they pass.\n' "$pin_before" "$pin_after" "$pin_before" "$pin_after"
             fi
             if [ -n "$compare_url" ]; then
               printf '\n## Upstream changes\n\n[Compare `%s...%s`](%s)\n' "${previous:0:7}" "${current:0:7}" "$compare_url"
