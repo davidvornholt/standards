@@ -42,6 +42,7 @@ describe('createA11yPlaywrightConfig', () => {
     expect(config.forbidOnly).toBe(false);
     expect(config.retries).toBe(0);
     expect(config.reporter).toBe('list');
+    expect(config.workers).toBeUndefined();
     expect(config.use).toEqual({
       baseURL: 'http://127.0.0.1:3000',
     });
@@ -68,5 +69,6 @@ describe('createA11yPlaywrightConfig', () => {
     expect(config.forbidOnly).toBe(true);
     expect(config.retries).toBe(1);
     expect(config.reporter).toBe('dot');
+    expect(config.workers).toBe('100%');
   });
 });

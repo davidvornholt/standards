@@ -14,6 +14,10 @@ export const createA11yPlaywrightConfig = (options: {
     testDir: './a11y',
     testMatch: a11ySpecPattern,
     fullyParallel: true,
+    // A CI runner exists only for the gate, so the suite takes every core.
+    // Local runs keep Playwright's default and leave room for the developer's
+    // other work.
+    ...(isCi ? { workers: '100%' } : {}),
     forbidOnly: isCi,
     retries: isCi ? 1 : 0,
     reporter: isCi ? 'dot' : 'list',
