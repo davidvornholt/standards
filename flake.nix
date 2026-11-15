@@ -24,7 +24,8 @@
         let
           pkgs = nixpkgs.legacyPackages.${system};
           standardsCli = pkgs.callPackage ./nix/standards-cli.nix {
-            src = self;
+            # The files git doesn't ignore; package-source.nix says what that protects.
+            src = import ./nix/package-source.nix { inherit (pkgs) lib; } ./.;
             standardsBun = standardsBun system;
           };
         in
@@ -46,6 +47,9 @@
         {
           standards-cli = pkgs.callPackage ./nix/standards-cli-check.nix {
             inherit standardsCli systems;
+          };
+          package-source = pkgs.callPackage ./nix/package-source-check.nix {
+            inherit (standardsCli) src;
           };
           app-release = pkgs.callPackage ./nix/app-release/check.nix {
             appRelease = self.packages.${system}.app-release;

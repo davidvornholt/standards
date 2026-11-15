@@ -593,6 +593,23 @@ jobs:
           TURBO_RUN_SUMMARY: "true"
         run: bun run check
 
+      # A repository that packages its CLI in nix/package.nix must build it
+      # from nix/package-source.nix, which keeps files git ignores, such as
+      # .env.local and decrypted secrets, out of the package source. This
+      # proves that the filter agrees with git on this checkout. It runs here
+      # rather than in a job of its own, which would bill a runner minute in
+      # every repository without a CLI.
+      - name: Install Nix for the package source check
+        if: hashFiles('nix/package.nix') != ''
+        uses: cachix/install-nix-action@v31
+
+      - name: Check the Nix package source
+        if: hashFiles('nix/package.nix') != ''
+        run: |
+          set -euo pipefail
+          system=$(nix eval --impure --raw --expr builtins.currentSystem)
+          nix build ".#checks.$system.package-source" --no-link -L
+
       # Consumers run Turbo with --output-logs=errors-only, so this table is
       # the only per-task record of where the gate spends its time and what
       # missed the cache. It also goes to the log, where `gh run view --log`
@@ -757,7 +774,7 @@ jobs:
         run: bash nix/bun-systems.test.sh
 
       - name: Build Nix check
-        run: nix build ".#checks.${{ matrix.system }}.standards-cli" -L
+        run: nix build ".#checks.${{ matrix.system }}.standards-cli" ".#checks.${{ matrix.system }}.package-source" -L
 
       - name: Build app-release check
         run: nix build ".#checks.${{ matrix.system }}.app-release" -L
