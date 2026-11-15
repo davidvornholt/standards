@@ -30,8 +30,6 @@ const openCheckout = (context: LandContext): Checkout => ({
   current: currentBranch(context),
 });
 
-// Throws a LandError when the pull request isn't merged, or when cleaning up
-// after an earlier merge stops.
 export const land = async (
   context: LandContext,
   selector: string | null,
@@ -86,5 +84,5 @@ export const land = async (
   if (!merged) {
     throw new LandError(`PR #${pr.number} was not merged.`);
   }
-  finishMerge(context, pr.number, repo, checkout);
+  await finishMerge(context, pr.number, repo, checkout);
 };

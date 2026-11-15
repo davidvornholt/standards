@@ -19,7 +19,7 @@ PR_OR_BRANCH is a pull request number, URL, or branch (default: the current bran
 Options:
   --no-wait  Merge without waiting for pending checks, where GitHub allows that. Use it only when the change can't affect the checks, or when no workflow reports on the pull request.
 
-Exit code 1 means the pull request isn't merged, or that cleaning up after an earlier merge stopped. Once land merges, a cleanup problem is only a warning.`;
+Exit code 1 means the pull request isn't merged, land couldn't confirm that it is, or cleaning up after an earlier merge stopped. Once land merges, a cleanup problem is only a warning.`;
 
 // Tests set LAND_POLL_SECONDS=0 to poll without delay, and LAND_WAIT_SECONDS
 // to wait out a short limit.
