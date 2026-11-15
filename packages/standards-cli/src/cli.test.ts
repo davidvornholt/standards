@@ -2757,96 +2757,106 @@ it('requires database resolution before dependency installation', () => {
 });
 
 describe('canonical standards workflow database resolver', () => {
-  it('keeps shell-significant coordinates inert, encodes credentials, and prefers the CodeBuild service', () => {
-    const workflow = parseWorkflow(STANDARDS_WORKFLOW);
-    const resolverStep = qualityStep(workflow, DATABASE_RESOLVER_STEP_NAME);
-    expect(resolverStep.env).toEqual(DATABASE_RESOLVER_ENV);
+  it.each([
+    ['prefers the stable bridge gateway', '127.0.0.3', '127.0.0.3'],
+    [
+      'falls back to the service when the bridge gateway is unreachable',
+      '127.0.0.4',
+      '127.0.0.2',
+    ],
+  ])(
+    'keeps shell-significant coordinates inert, encodes credentials, and %s',
+    (_case, bridgeGateway, endpoint) => {
+      const workflow = parseWorkflow(STANDARDS_WORKFLOW);
+      const resolverStep = qualityStep(workflow, DATABASE_RESOLVER_STEP_NAME);
+      expect(resolverStep.env).toEqual(DATABASE_RESOLVER_ENV);
 
-    const fixture = mkTmp('standards-database-resolver-');
-    write(
-      fixture,
-      'bin/docker',
-      [
-        '#!/bin/sh',
-        'case "$1" in',
-        '  ps)',
-        '    [ "$#" -eq 5 ] || exit 1',
-        '    [ "$2" = "--filter" ] || exit 1',
-        '    [ "$3" = "ancestor=public.ecr.aws/docker/library/postgres:18-alpine" ] || exit 1',
-        '    [ "$4" = "--format" ] || exit 1',
-        '    [ "$5" = "{{.ID}}" ] || exit 1',
-        "    printf '%s\\n' postgres-service",
-        '    ;;',
-        '  inspect)',
-        "    printf '%s\\n' '127.0.0.2 127.0.0.2'",
-        '    ;;',
-        '  network)',
-        '    exit 0',
-        '    ;;',
-        '  *)',
-        '    exit 1',
-        '    ;;',
-        'esac',
-        '',
-      ].join('\n'),
-    );
-    write(fixture, 'bin/ip', '#!/bin/sh\nexit 0\n');
-    write(
-      fixture,
-      'bin/timeout',
-      [
-        '#!/bin/sh',
-        'for argument in "$@"; do',
-        '  case "$argument" in',
-        '    *127.0.0.1*|*127.0.0.2*)',
-        '      exit 0',
-        '      ;;',
-        '  esac',
-        'done',
-        'exit 1',
-        '',
-      ].join('\n'),
-    );
-    chmodSync(join(fixture, 'bin/docker'), EXECUTABLE_MODE);
-    chmodSync(join(fixture, 'bin/ip'), EXECUTABLE_MODE);
-    chmodSync(join(fixture, 'bin/timeout'), EXECUTABLE_MODE);
+      const fixture = mkTmp('standards-database-resolver-');
+      write(
+        fixture,
+        'bin/docker',
+        [
+          '#!/bin/sh',
+          'case "$1" in',
+          '  ps)',
+          '    [ "$#" -eq 5 ] || exit 1',
+          '    [ "$2" = "--filter" ] || exit 1',
+          '    [ "$3" = "ancestor=public.ecr.aws/docker/library/postgres:18-alpine" ] || exit 1',
+          '    [ "$4" = "--format" ] || exit 1',
+          '    [ "$5" = "{{.ID}}" ] || exit 1',
+          "    printf '%s\\n' postgres-service",
+          '    ;;',
+          '  inspect)',
+          "    printf '%s\\n' '127.0.0.2 127.0.0.2'",
+          '    ;;',
+          '  network)',
+          `    printf '%s\\n' '${bridgeGateway}'`,
+          '    ;;',
+          '  *)',
+          '    exit 1',
+          '    ;;',
+          'esac',
+          '',
+        ].join('\n'),
+      );
+      write(fixture, 'bin/ip', '#!/bin/sh\nexit 0\n');
+      write(
+        fixture,
+        'bin/timeout',
+        [
+          '#!/bin/sh',
+          'for argument in "$@"; do',
+          '  case "$argument" in',
+          '    *127.0.0.1*|*127.0.0.2*|*127.0.0.3*)',
+          '      exit 0',
+          '      ;;',
+          '  esac',
+          'done',
+          'exit 1',
+          '',
+        ].join('\n'),
+      );
+      chmodSync(join(fixture, 'bin/docker'), EXECUTABLE_MODE);
+      chmodSync(join(fixture, 'bin/ip'), EXECUTABLE_MODE);
+      chmodSync(join(fixture, 'bin/timeout'), EXECUTABLE_MODE);
 
-    const environmentPath = join(fixture, 'github-env');
-    const marker = join(fixture, 'command-substitution-ran');
-    const user = 'app;printf unsafe';
-    const password = ['p@ss:w%rd$(touch ', marker, ')'].join('');
-    const database = 'app$(printf unsafe)';
-    const result = runExecutable(
-      'bash',
-      fixture,
-      [
-        '-euo',
-        'pipefail',
-        '-c',
-        yamlRunScript(STANDARDS_WORKFLOW, DATABASE_RESOLVER_STEP_NAME),
-      ],
-      {
-        ...process.env,
-        CI_POSTGRES_DB: database,
-        CI_POSTGRES_PASSWORD: password,
-        CI_POSTGRES_USER: user,
-        CODEBUILD_BUILD_ID: 'codebuild-test',
-        GITHUB_ENV: environmentPath,
-        PATH: [join(fixture, 'bin'), process.env.PATH ?? ''].join(':'),
-      },
-    );
+      const environmentPath = join(fixture, 'github-env');
+      const marker = join(fixture, 'command-substitution-ran');
+      const user = 'app;printf unsafe';
+      const password = ['p@ss:w%rd$(touch ', marker, ')'].join('');
+      const database = 'app$(printf unsafe)';
+      const result = runExecutable(
+        'bash',
+        fixture,
+        [
+          '-euo',
+          'pipefail',
+          '-c',
+          yamlRunScript(STANDARDS_WORKFLOW, DATABASE_RESOLVER_STEP_NAME),
+        ],
+        {
+          ...process.env,
+          CI_POSTGRES_DB: database,
+          CI_POSTGRES_PASSWORD: password,
+          CI_POSTGRES_USER: user,
+          CODEBUILD_BUILD_ID: 'codebuild-test',
+          GITHUB_ENV: environmentPath,
+          PATH: [join(fixture, 'bin'), process.env.PATH ?? ''].join(':'),
+        },
+      );
 
-    expect(result.status).toBe(0);
-    expect(result.stdout).toBe('Database endpoint: 127.0.0.2:5432\n');
-    const assignment = readFileSync(environmentPath, 'utf8');
-    expect(assignment).toStartWith('DATABASE_URL=postgresql://');
-    expect(assignment).toEndWith(`@127.0.0.2:5432/${database}\n`);
-    const url = new URL(assignment.trimEnd().slice('DATABASE_URL='.length));
-    expect(url.host).toBe('127.0.0.2:5432');
-    expect(decodeURIComponent(url.username)).toBe(user);
-    expect(decodeURIComponent(url.password)).toBe(password);
-    expect(existsSync(marker)).toBe(false);
-  });
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe(`Database endpoint: ${endpoint}:5432\n`);
+      const assignment = readFileSync(environmentPath, 'utf8');
+      expect(assignment).toStartWith('DATABASE_URL=postgresql://');
+      expect(assignment).toEndWith(`@${endpoint}:5432/${database}\n`);
+      const url = new URL(assignment.trimEnd().slice('DATABASE_URL='.length));
+      expect(url.host).toBe(`${endpoint}:5432`);
+      expect(decodeURIComponent(url.username)).toBe(user);
+      expect(decodeURIComponent(url.password)).toBe(password);
+      expect(existsSync(marker)).toBe(false);
+    },
+  );
 });
 
 it.each([

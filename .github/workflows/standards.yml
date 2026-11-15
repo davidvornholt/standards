@@ -322,11 +322,15 @@ jobs:
       # A fixed 127.0.0.1 database URL only works where the job shares the
       # service's published loopback — true on GitHub-hosted runners, false on
       # CodeBuild, whose runner is itself an unprivileged container beside the
-      # service, so the published port lands on the build host instead. The
-      # service stays reachable there on its container address or the docker
-      # network gateway. Resolving the endpoint at runtime keeps one uniform
-      # file for both topologies and fails closed with a named error here
-      # instead of letting the first database consumer time out mid-gate.
+      # service, so the published port lands on the build host instead, on
+      # every host address. The default bridge gateway comes first because it
+      # is the same on every run, while the network the runner creates for
+      # each job gets a different subnet, and Turbo hashes DATABASE_URL into
+      # test tasks. The URL keeps an address rather than a host name because
+      # consumer test guards accept only loopback or a private IPv4 address.
+      # Resolving the endpoint at runtime keeps one uniform file for both
+      # topologies and fails closed with a named error here instead of
+      # letting the first database consumer time out mid-gate.
       - name: Resolve the database endpoint
         env:
           CI_POSTGRES_USER: ${{ vars.CI_POSTGRES_USER || 'app' }}
@@ -339,6 +343,8 @@ jobs:
           }
           candidates=()
           if [ -n "${CODEBUILD_BUILD_ID:-}" ]; then
+            candidates+=("$(docker network inspect bridge \
+              --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}' 2>/dev/null || true)")
             service_container=$(docker ps --filter ancestor=public.ecr.aws/docker/library/postgres:18-alpine --format '{{.ID}}' | head -n 1)
             if [ -n "$service_container" ]; then
               service_networks=$(docker inspect "$service_container" \
@@ -346,8 +352,6 @@ jobs:
               read -r -a service_addresses <<<"$service_networks"
               candidates+=("${service_addresses[@]}")
             fi
-            candidates+=("$(docker network inspect bridge \
-              --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}' 2>/dev/null || true)")
             candidates+=("$(ip route show default 2>/dev/null \
               | awk '{ for (i = 1; i < NF; i++) if ($i == "via") print $(i + 1) }' | head -n 1)")
           else
