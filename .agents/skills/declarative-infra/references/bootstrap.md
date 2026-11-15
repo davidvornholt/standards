@@ -86,7 +86,7 @@ in {
 
 ## Host secrets
 
-[Secrets bootstrap](secrets.md) covers identities, `.sops.yaml`, and CI. A host decrypts its `secrets.yaml` with its SSH host key, so add `ssh-to-age < /etc/ssh/ssh_host_ed25519_key.pub` as a recipient of that file's creation rule and set `sops.age.sshKeyPaths = [ "/etc/ssh/ssh_host_ed25519_key" ]`.
+[Secrets bootstrap](secrets.md) covers identities, `.sops.yaml`, and CI. A host decrypts its `secrets.yaml` with its SSH host key, so add `ssh-to-age < /etc/ssh/ssh_host_ed25519_key.pub` as a recipient of that file's creation rule, re-encrypt the file for it with `updatekeys` as [Commands](secrets.md#commands) shows, and set `sops.age.sshKeyPaths = [ "/etc/ssh/ssh_host_ed25519_key" ]`.
 
 ## OpenTofu root stacks
 
