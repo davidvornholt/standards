@@ -323,14 +323,11 @@ jobs:
       # service's published loopback — true on GitHub-hosted runners, false on
       # CodeBuild, whose runner is itself an unprivileged container beside the
       # service, so the published port lands on the build host instead, on
-      # every host address. The default bridge gateway comes first because it
-      # is the same on every run, while the network the runner creates for
-      # each job gets a different subnet, and Turbo hashes DATABASE_URL into
-      # test tasks. The URL keeps an address rather than a host name because
+      # every host address. The default bridge gateway comes first because,
+      # when it answers, it avoids the changing subnet of the network the
+      # runner creates for each job, and Turbo hashes DATABASE_URL into test
+      # tasks. The URL keeps an address rather than a host name because
       # consumer test guards accept only loopback or a private IPv4 address.
-      # Resolving the endpoint at runtime keeps one uniform file for both
-      # topologies and fails closed with a named error here instead of
-      # letting the first database consumer time out mid-gate.
       - name: Resolve the database endpoint
         env:
           CI_POSTGRES_USER: ${{ vars.CI_POSTGRES_USER || 'app' }}
