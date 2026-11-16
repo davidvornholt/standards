@@ -214,7 +214,6 @@ const graphql = (call: Call): FakeGhResult => {
   return workflowTree(call);
 };
 
-// Asked for the commits the head lacks, the compare API answers a count.
 const compare = ({ args, env, github, saveGithub }: Call): FakeGhResult => {
   if (args.includes('.behind_by')) {
     if (env.GH_BEHIND_FAIL) {

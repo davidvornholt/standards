@@ -30,8 +30,6 @@ const openPr = (fields: Record<string, unknown> = {}): void => {
 
 describe('standards land on a clean pull request behind its base branch', () => {
   it('updates a clean pull request that lacks its base branch, then waits for the new head', () => {
-    // Private repositories on the free plan can't require up-to-date
-    // branches, so GitHub reports a branch that is behind as CLEAN.
     fixture.github.behindBy = [2, 0];
     openPr({
       polls: [
