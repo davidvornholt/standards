@@ -3306,7 +3306,7 @@ describe('canonical standards workflow Nix steps', () => {
     );
   });
 
-  it('checks the package source in a repository that packages a CLI', () => {
+  it('builds the packages and their source check in a repository that packages a CLI', () => {
     const steps = yamlJobs(STANDARDS_WORKFLOW).quality.steps as ReadonlyArray<
       Readonly<Record<string, unknown>>
     >;
@@ -3315,17 +3315,14 @@ describe('canonical standards workflow Nix steps', () => {
       .map((step) => step.name);
 
     expect(nixStepNames).toEqual([
-      'Install Nix for the package source check',
-      'Check the Nix package source',
+      'Install Nix for the package checks',
+      'Build the Nix packages and their source check',
     ]);
     for (const name of nixStepNames) {
       expect(steps.find((step) => step.name === name)?.if).toBe(
         "hashFiles('nix/package.nix') != ''",
       );
     }
-    expect(
-      steps.find((step) => step.name === 'Check the Nix package source')?.run,
-    ).toContain('nix build ".#checks.$system.package-source"');
   });
 
   it('runs the app-release VM test only where the runner provides KVM', () => {

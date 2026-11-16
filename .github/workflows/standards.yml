@@ -665,18 +665,29 @@ jobs:
           TURBO_RUN_SUMMARY: "true"
         run: bun run check
 
-      # The package source check runs here rather than in a job of its own,
+      # A repository that packages a CLI in nix/package.nix builds every
+      # package its flake exposes, because a dependency update that leaves a
+      # fixed-output hash stale otherwise passes here and fails only where the
+      # package is installed. This runs here rather than in a job of its own,
       # which would bill a runner minute in every repository without a CLI.
-      - name: Install Nix for the package source check
+      - name: Install Nix for the package checks
         if: hashFiles('nix/package.nix') != ''
         uses: cachix/install-nix-action@v31
 
-      - name: Check the Nix package source
+      - name: Build the Nix packages and their source check
         if: hashFiles('nix/package.nix') != ''
         run: |
           set -euo pipefail
           system=$(nix eval --impure --raw --expr builtins.currentSystem)
-          nix build ".#checks.$system.package-source" --no-link -L
+          packages=$(nix eval ".#packages.$system" --apply builtins.attrNames --json | jq -r '.[]')
+          installables=(".#checks.$system.package-source")
+          while IFS= read -r package; do
+            if [ -n "$package" ]; then
+              installables+=(".#packages.$system.$package")
+            fi
+          done <<<"$packages"
+          echo "Building ${installables[*]}"
+          nix build "${installables[@]}" --no-link -L
 
       # Consumers run Turbo with --output-logs=errors-only, so this table is
       # the only per-task record of where the gate spends its time and what

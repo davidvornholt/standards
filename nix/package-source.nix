@@ -15,7 +15,8 @@
 # `import ./package-source.nix { inherit lib; } ../.` and exposes
 # package-source-check.nix, which compares the result with git, as
 # `checks.<system>.package-source` with the package's src. The Standards
-# workflow builds that check whenever nix/package.nix exists.
+# workflow builds that check, and every package the flake exposes, whenever
+# nix/package.nix exists.
 { lib }:
 let
   parentOf =
