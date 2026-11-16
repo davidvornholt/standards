@@ -2,12 +2,7 @@
 // pass, squash-merging exactly that head, then delete its local branch. The
 // prs skill describes the behavior.
 
-import {
-  type Checkout,
-  deleteBranch,
-  finishMerge,
-  updateBase,
-} from './land-cleanup';
+import { type Checkout, deleteBranch, updateBase } from './land-cleanup';
 import {
   currentBranch,
   ghJson,
@@ -20,6 +15,7 @@ import {
   runVisibly,
   viewPr,
 } from './land-context';
+import { finishMerge } from './land-finish';
 import { waitForChecks } from './land-wait';
 import { ciDetector } from './land-workflows';
 
@@ -71,7 +67,7 @@ export const land = async (
     hasCi: ciDetector(waiting, repo, pr),
   });
   // gh reports progress itself, so its output stays on the terminal.
-  const merged = runVisibly(context, 'gh', [
+  const accepted = runVisibly(context, 'gh', [
     'pr',
     'merge',
     String(pr.number),
@@ -81,8 +77,5 @@ export const land = async (
     '--match-head-commit',
     head,
   ]);
-  if (!merged) {
-    throw new LandError(`PR #${pr.number} was not merged.`);
-  }
-  await finishMerge(context, pr.number, repo, checkout);
+  await finishMerge(context, { prNumber: pr.number, repo, accepted }, checkout);
 };

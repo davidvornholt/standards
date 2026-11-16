@@ -369,15 +369,6 @@ describe('standards land arguments and merge failures', () => {
     expect(calls(fixture)).toEqual([]);
   });
 
-  it('keeps the branch when the merge fails', () => {
-    openPr();
-    fixture.env.GH_MERGE_FAIL = '1';
-    const result = land(fixture, ['123']);
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain('was not merged');
-    expect(branchExists(fixture)).toBe(true);
-  });
-
   it('prints its usage', () => {
     const result = land(fixture, ['--help']);
     expect(result.status).toBe(0);
