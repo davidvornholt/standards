@@ -6,7 +6,6 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import {
   currentBranch,
-  errorMessage,
   git,
   type LandContext,
   LandError,
@@ -17,8 +16,6 @@ import {
   run,
   runVisibly,
   shortSha,
-  sleep,
-  viewPr,
 } from './land-context';
 
 export type Checkout = {
@@ -319,67 +316,6 @@ export const updateBase = (context: LandContext, base: string): void => {
   ) {
     throw new LandError(
       `Could not fast-forward ${quoted(base)}; update it manually.`,
-    );
-  }
-};
-
-const READ_BACK_ATTEMPTS = 3;
-
-// A successful `gh pr merge` doesn't mean the pull request is merged: where a
-// merge queue is required, gh only adds it to the queue. So the state has to
-// be read back, and a failed read-back is retried a few times, because it is
-// usually a transient API error.
-const readBack = async (
-  context: LandContext,
-  prNumber: number,
-  repo: Repository,
-  attempt = 1,
-): Promise<PullRequest> => {
-  try {
-    return viewPr(context, String(prNumber), repo);
-  } catch (error) {
-    if (attempt >= READ_BACK_ATTEMPTS) {
-      throw new LandError(
-        `Cannot confirm that PR #${prNumber} is merged: reading it back failed: ${errorMessage(error)}. GitHub accepted the merge, but the PR may only be queued. Run \`standards land ${prNumber}\` again to check, and to clean up once it is merged.`,
-        { cause: error },
-      );
-    }
-  }
-  await sleep(context.pollDelayMs);
-  return readBack(context, prNumber, repo, attempt + 1);
-};
-
-// Finishes a merge land just made. Only once the pull request is seen as
-// merged is a problem from here on a warning. land doesn't wait for the runs
-// the merge starts: an agent that has to act on a deploy watches that run
-// itself.
-export const finishMerge = async (
-  context: LandContext,
-  prNumber: number,
-  repo: Repository,
-  checkout: Checkout,
-): Promise<void> => {
-  const pr = await readBack(context, prNumber, repo);
-  if (pr.state !== 'MERGED') {
-    throw new LandError(
-      `GitHub accepted PR #${prNumber} but hasn't merged it yet. Run \`standards land ${prNumber}\` again once it has.`,
-    );
-  }
-  const sha = pr.mergeCommit?.oid;
-  if (sha) {
-    context.print(`PR #${prNumber} is merged as ${shortSha(sha)}.`);
-  }
-  if (!repo.deleteBranchOnMerge) {
-    context.warn(
-      'GitHub keeps merged branches in this repository. Enable "Automatically delete head branches" in its settings.',
-    );
-  }
-  try {
-    deleteBranch(context, pr, repo, checkout);
-    updateBase(context, pr.baseRefName);
-  } catch (error) {
-    context.warn(
-      `PR #${prNumber} is merged, but local cleanup stopped: ${errorMessage(error)}`,
     );
   }
 };
