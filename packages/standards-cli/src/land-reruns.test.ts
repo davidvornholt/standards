@@ -40,10 +40,6 @@ const runLookups = (): number =>
   calls(fixture, 'api').filter((call) => call[1]?.includes('/actions/runs?'))
     .length;
 
-// Rerunning a workflow run's failed jobs drops their failed checks from the
-// pull request at once, and the new attempt shows its checks only seconds
-// later. The pull request's update time doesn't change, so it already looks
-// quiet in between.
 describe('standards land while a workflow run on the head is unfinished', () => {
   it('waits for a rerun that shows no checks yet, then refuses its failure', () => {
     Object.assign(fixture.pr, {
@@ -75,7 +71,29 @@ describe('standards land while a workflow run on the head is unfinished', () => 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain('Waiting for Standards on');
     expect(mergeCalls(fixture)).toEqual([mergeCall(fixture)]);
-    expect(runLookups()).toBe(2);
+    expect(runLookups()).toBe(3);
+  });
+
+  it('reads the checks again after the run completes, then refuses its failure', () => {
+    Object.assign(fixture.pr, {
+      statusCheckRollup: [sync],
+      polls: [
+        {},
+        {},
+        {
+          mergeStateStatus: 'UNSTABLE',
+          statusCheckRollup: [sync, quality('COMPLETED', 'FAILURE')],
+        },
+      ],
+    });
+    fixture.github.workflowRuns = [
+      [standards()],
+      [standards({ status: 'completed' })],
+    ];
+    const result = land(fixture, ['123']);
+    expect(result.status, result.stdout).toBe(1);
+    expect(result.stderr).toContain('Not merging PR #123: quality failed');
+    expect(mergeCalls(fixture)).toEqual([]);
   });
 
   it('ignores runs that no pull request event of its branch started', () => {

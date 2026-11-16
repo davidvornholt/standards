@@ -49,3 +49,30 @@ export const unfinishedRuns = (
     .map((workflowRun) => workflowRun.name || 'unnamed workflow');
   return [...new Set(names)];
 };
+
+// The runs the last lookup found unfinished on a head.
+export type SeenRuns = {
+  readonly head: string;
+  readonly names: ReadonlyArray<string>;
+} | null;
+
+// The runs to wait for, and what to remember for the next lookup. The checks
+// were read before the runs, so a run that finished in between may have
+// reported checks they lack. A run counts as pending for one more poll after
+// it finishes, which reads the checks again.
+export const pendingRuns = (
+  context: LandContext,
+  repo: Repository,
+  head: { readonly sha: string; readonly branch: string },
+  seen: SeenRuns,
+): { readonly pending: ReadonlyArray<string>; readonly seen: SeenRuns } => {
+  const running = unfinishedRuns(context, repo, head);
+  const finished =
+    seen?.head === head.sha
+      ? seen.names.filter((name) => !running.includes(name))
+      : [];
+  return {
+    pending: [...running, ...finished],
+    seen: running.length > 0 ? { head: head.sha, names: running } : null,
+  };
+};
