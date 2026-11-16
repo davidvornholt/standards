@@ -73,9 +73,6 @@ describe('draft pull requests', () => {
     }
   });
 
-  // The merge box shows only the newest run on a head, which can be a draft
-  // run that GitHub created after the ready run. Only draft runs read the
-  // pull request again, and only with read access.
   it('decide in draft runs only whether the run gates its head', () => {
     const state = workflow().jobs['draft-state'];
     expect(state?.if).toBe('github.event.pull_request.draft');

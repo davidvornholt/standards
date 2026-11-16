@@ -278,7 +278,7 @@ jobs:
   # gates its head, and a main push skips it only when the reuse job proved
   # that a pull-request run already validated the exact tree. A dispatched run
   # has no reuse job, so it always runs the full gate. `!cancelled()` keeps the
-  # gate running when `reuse` or `draft-state` is skipped or fails.
+  # gate running when `reuse` is skipped or fails, or `draft-state` is skipped.
   quality:
     needs:
       - reuse
