@@ -2537,24 +2537,33 @@ describe('canonical standards workflow settings security', () => {
     // The job holds no durable credential, so it needs no executable file from
     // the repository at all: declarative settings inputs and nothing else.
     expect(settingsJobSource).not.toContain('GITHUB_ENV');
-    // Only the reuse job binds a GitHub CLI token: the workflow token, in a
-    // job that runs no repository code.
+    // Only the reuse and draft-state jobs bind a GitHub CLI token: the
+    // workflow token, in jobs that run no repository code.
     expect(workflowSource.match(/GH_TOKEN:.*/gu)).toEqual([
       `GH_TOKEN: ${githubExpression('github.token')}`,
       `GH_TOKEN: ${githubExpression('github.token')}`,
+      `GH_TOKEN: ${githubExpression('github.token')}`,
     ]);
-    for (const name of [
-      'Prove a validated pull request result',
-      'Request stale cache publication',
-    ]) {
+    for (const [job, name] of [
+      ['reuse', 'Prove a validated pull request result'],
+      ['reuse', 'Request stale cache publication'],
+      ['draft-state', 'Decide whether this draft run gates its head'],
+    ] as const) {
       expect(
-        workflowSteps(workflow.jobs.reuse, 'reuse').find(
+        workflowSteps(workflow.jobs[job], job).find(
           (step) => step.name === name,
         )?.env,
       ).toEqual(
         expect.objectContaining({ GH_TOKEN: githubExpression('github.token') }),
       );
     }
+    // draft-state checks out nothing and runs no action, so it never runs a
+    // file from the repository.
+    expect(
+      workflowSteps(workflow.jobs['draft-state'], 'draft-state').map(
+        (step) => step.uses,
+      ),
+    ).toEqual([undefined]);
     expect(settingsRun).not.toContain('GITHUB_OUTPUT');
     expect(settingsRun).toContain('GH_TOKEN="$SETTINGS_TOKEN"');
     // An empty or multi-line token must stop the job rather than reach the CLI,
