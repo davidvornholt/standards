@@ -1,20 +1,15 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { chmodSync, existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
 import process from 'node:process';
 import { parse } from 'yaml';
+import { cleanupTmpDirs } from './cli-test-support';
 import {
-  ACTUAL_UPSTREAM,
-  cleanupTmpDirs,
-  mkTmp,
-  runProcess,
-  write,
-  yamlRunScript,
-} from './cli-test-support';
+  type Json,
+  runStepWithApi,
+  WORKFLOW,
+} from './standards-workflow-test-support';
 
-const WORKFLOW = join(ACTUAL_UPSTREAM, '.github/workflows/standards.yml');
 const PROOF_STEP = 'Prove a validated pull request result';
-const EXECUTABLE_MODE = 0o755;
 const SHA_LENGTH = 40;
 const RUN_ID = 12;
 const OTHER_RUN_ID = 13;
@@ -27,32 +22,6 @@ const HEAD = 'b'.repeat(SHA_LENGTH);
 const TREE = 'c'.repeat(SHA_LENGTH);
 const MERGED_AT = '2026-10-10T12:00:00Z';
 const TREE_TITLE = 'Standards validated tree';
-const SNAKE_BOUNDARY = /[A-Z]/gu;
-const ENDPOINT_SEPARATOR = /[^A-Za-z0-9]/gu;
-
-type Json =
-  | boolean
-  | number
-  | string
-  | null
-  | Array<Json>
-  | { [key: string]: Json };
-
-// Fixtures are written in camelCase and served in GitHub's snake_case.
-const snakeCase = (value: Json): Json => {
-  if (Array.isArray(value)) {
-    return value.map(snakeCase);
-  }
-  if (typeof value === 'object' && value !== null) {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, entry]) => [
-        key.replace(SNAKE_BOUNDARY, (letter) => `_${letter.toLowerCase()}`),
-        snakeCase(entry),
-      ]),
-    );
-  }
-  return value;
-};
 
 const proofEnvironment = (): Record<string, string> => {
   const workflow = parse(readFileSync(WORKFLOW, 'utf8')) as {
@@ -131,57 +100,17 @@ const provenApi = (): Record<string, Json> => ({
   [endpoints.annotations(CHECK_RUN_ID)]: treeAnnotation(),
 });
 
-const GH_STUB = `#!/usr/bin/env bash
-set -euo pipefail
-[ "$1" = api ] || exit 2
-shift
-endpoint=
-for argument in "$@"; do
-  case "$argument" in
-    -*) echo "unexpected gh flag $argument" >&2; exit 2 ;;
-    *) endpoint=$argument ;;
-  esac
-done
-file="$FIXTURE/api/$(printf '%s' "$endpoint" | tr -c 'A-Za-z0-9' '_').json"
-[ -f "$file" ] || { echo "HTTP 404: $endpoint" >&2; exit 1; }
-cat "$file"
-`;
-
 const prove = (api: Record<string, Json>, runAttempt = '1') => {
-  const fixture = mkTmp('standards-reuse-proof-');
-  for (const [endpoint, body] of Object.entries(api)) {
-    write(
-      fixture,
-      `api/${endpoint.replace(ENDPOINT_SEPARATOR, '_')}.json`,
-      JSON.stringify(snakeCase(body)),
-    );
-  }
-  write(fixture, 'bin/gh', GH_STUB);
-  chmodSync(join(fixture, 'bin/gh'), EXECUTABLE_MODE);
-  const outputPath = join(fixture, 'output');
-  const result = runProcess(
-    'bash',
-    fixture,
-    ['-euo', 'pipefail', '-c', yamlRunScript(WORKFLOW, PROOF_STEP)],
-    {
-      ...process.env,
-      ...proofEnvironment(),
-      ...Object.fromEntries([
-        ['FIXTURE', fixture],
-        ['GITHUB_OUTPUT', outputPath],
-        ['GITHUB_RUN_ATTEMPT', runAttempt],
-        ['PATH', `${join(fixture, 'bin')}:${process.env.PATH ?? ''}`],
-        ['REPOSITORY', REPOSITORY],
-        ['SHA', SHA],
-      ]),
-    },
-  );
-  return {
-    proven: existsSync(outputPath)
-      ? readFileSync(outputPath, 'utf8') === 'proven=true\n'
-      : false,
-    status: result.status,
-  };
+  const { output, status } = runStepWithApi(PROOF_STEP, api, {
+    ...process.env,
+    ...proofEnvironment(),
+    ...Object.fromEntries([
+      ['GITHUB_RUN_ATTEMPT', runAttempt],
+      ['REPOSITORY', REPOSITORY],
+      ['SHA', SHA],
+    ]),
+  });
+  return { proven: output === 'proven=true\n', status };
 };
 
 const without = (

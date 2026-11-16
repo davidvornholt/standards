@@ -80,7 +80,7 @@ const WRITE_PERMISSION_INPUT = /permission-\S+: write/u;
 const SOURCE_REPOSITORY_CONDITION =
   "github.repository == 'davidvornholt/standards'";
 const GATE_RUN_CONDITION =
-  "!cancelled() && !github.event.pull_request.draft && needs.reuse.outputs.proven != 'true'";
+  "!cancelled() && (!github.event.pull_request.draft || needs.draft-state.outputs.gate == 'true') && needs.reuse.outputs.proven != 'true'";
 const TURBO_CACHE_SAVE_CONDITION =
   "success() && github.ref == 'refs/heads/main' && steps.turbo-cache.outputs.cache-hit != 'true'";
 const TURBO_CACHE_PRUNE_RUN = `set -euo pipefail
@@ -869,10 +869,10 @@ const canonicalWorkflowPaths = (
 // This merge-time ratchet keeps configurable routing on the exact compatible
 // canonical jobs. It catches accidental workflow drift after review; it does
 // not authorize a request before CodeBuild starts a runner for the queued job.
-const CONFIGURABLE_RUNNER_VARIABLE_OCCURRENCES = 23;
+const CONFIGURABLE_RUNNER_VARIABLE_OCCURRENCES = 25;
 const QUALITY_JOB_NAME = 'quality';
 const CODEBUILD_JOB_TIMEOUT_MINUTES = 30;
-const REUSE_JOB_TIMEOUT_MINUTES = 5;
+const LOOKUP_JOB_TIMEOUT_MINUTES = 5;
 const AUTO_MERGE_JOB_TIMEOUT_MINUTES = 10;
 const WORKFLOW_JOB_HEADER_PATTERN = /^ {2}[a-z0-9-]+:\s*$/mu;
 const CODEBUILD_RUNNER = githubExpression(
@@ -915,6 +915,10 @@ const CONFIGURABLE_RUNNER_CONTRACTS = {
     runner: CODEBUILD_RUNNER,
     timeoutMinutes: CODEBUILD_JOB_TIMEOUT_MINUTES,
   },
+  '.github/workflows/standards.yml:draft-state': {
+    runner: CODEBUILD_RUNNER,
+    timeoutMinutes: LOOKUP_JOB_TIMEOUT_MINUTES,
+  },
   '.github/workflows/standards.yml:required-check': {
     runner: CODEBUILD_RUNNER,
     timeoutMinutes: CODEBUILD_JOB_TIMEOUT_MINUTES,
@@ -929,7 +933,7 @@ const CONFIGURABLE_RUNNER_CONTRACTS = {
   },
   '.github/workflows/standards.yml:reuse': {
     runner: CODEBUILD_RUNNER,
-    timeoutMinutes: REUSE_JOB_TIMEOUT_MINUTES,
+    timeoutMinutes: LOOKUP_JOB_TIMEOUT_MINUTES,
   },
 } as const;
 const GITHUB_DEFAULT_JOB_TIMEOUT_MINUTES = 360;
@@ -3170,7 +3174,7 @@ describe('canonical standards workflow Nix gate', () => {
     expect(discoveryJob.if).toBe(
       `${SOURCE_REPOSITORY_CONDITION} && ${GATE_RUN_CONDITION}`,
     );
-    expect(discoveryJob.needs).toBe('reuse');
+    expect(discoveryJob.needs).toEqual(['reuse', 'draft-state']);
     expect(nixJob.if).toBe(
       `${SOURCE_REPOSITORY_CONDITION} && !cancelled() && needs.nix-discovery.result == 'success'`,
     );
@@ -3359,10 +3363,11 @@ describe('canonical standards workflow Nix aggregation', () => {
     );
 
     expect(jobs['required-check'].if).toBe(
-      'always() && !github.event.pull_request.draft',
+      "always() && (!github.event.pull_request.draft || needs.draft-state.outputs.gate == 'true')",
     );
     expect(jobs['required-check'].needs).toEqual([
       'reuse',
+      'draft-state',
       'quality',
       'nix-discovery',
       'nix',

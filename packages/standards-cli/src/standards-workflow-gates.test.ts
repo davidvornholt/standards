@@ -9,8 +9,8 @@ const WORKFLOW = join(ACTUAL_UPSTREAM, '.github/workflows/standards.yml');
 const AGGREGATE_STEP = 'Require all standards gates';
 const PROOF_STEP = 'Prove a validated pull request result';
 const REQUEST_STEP = 'Request stale cache publication';
-const GATE_RUN_CONDITION =
-  "!cancelled() && !github.event.pull_request.draft && needs.reuse.outputs.proven != 'true'";
+const GATES_HEAD = `(!github.event.pull_request.draft || needs.draft-state.outputs.gate == 'true')`;
+const GATE_RUN_CONDITION = `!cancelled() && ${GATES_HEAD} && needs.reuse.outputs.proven != 'true'`;
 const STATUS_FUNCTION = /(?:^|\W)(?:!cancelled|always)\(\)/u;
 const CACHE_PREFIX_ENVIRONMENT = [
   'BUN_CACHE_PREFIX',
@@ -60,23 +60,43 @@ describe('draft pull requests', () => {
     ]);
   });
 
-  it('skip every gate', () => {
+  it('skip every gate unless the draft run gates its head', () => {
     const { jobs } = workflow();
     expect(jobs.quality?.if).toBe(GATE_RUN_CONDITION);
     expect(jobs['nix-discovery']?.if).toEndWith(GATE_RUN_CONDITION);
+    for (const id of ['quality', 'nix-discovery', 'required-check']) {
+      expect(jobs[id]?.needs).toContain('draft-state');
+    }
   });
 
-  // GitHub reports a skipped job as a passing required check. A draft run must
-  // therefore never report `check` itself, or it would satisfy the ruleset.
+  // The merge box shows only the newest run on a head, which can be a draft
+  // run that GitHub created after the ready run. Only draft runs read the
+  // pull request again, and only with read access.
+  it('decide in draft runs only whether the run gates its head', () => {
+    const state = workflow().jobs['draft-state'];
+    expect(state?.if).toBe('github.event.pull_request.draft');
+    expect(state?.needs).toBeUndefined();
+    expect(state?.permissions).toEqual({
+      actions: 'read',
+      'pull-requests': 'read',
+    });
+    expect(state?.outputs).toEqual({
+      gate: expression('steps.state.outputs.gate'),
+    });
+  });
+
+  // GitHub reports a skipped job as a passing required check. A draft run that
+  // skips its gates must therefore never report `check` itself, or it would
+  // satisfy the ruleset.
   it('report the aggregator under a name that cannot satisfy the required check', () => {
     const { jobs } = workflow();
     const check = jobs['required-check'];
     // Whatever name GitHub gives a skipped job, it is never the job id `check`.
     expect(Object.keys(jobs)).not.toContain('check');
-    expect(check?.if).toBe('always() && !github.event.pull_request.draft');
+    expect(check?.if).toBe(`always() && ${GATES_HEAD}`);
     expect(check?.name).toBe(
       expression(
-        "github.event.pull_request.draft && 'check (runs when ready for review)' || 'check'",
+        "github.event.pull_request.draft && needs.draft-state.outputs.gate != 'true' && 'check (runs when ready for review)' || 'check'",
       ),
     );
   });
@@ -117,8 +137,8 @@ describe('main-push reuse wiring', () => {
 
   it('gates every source-repository and consumer gate on the proof', () => {
     const { jobs } = workflow();
-    expect(jobs.quality?.needs).toBe('reuse');
-    expect(jobs['nix-discovery']?.needs).toBe('reuse');
+    expect(jobs.quality?.needs).toContain('reuse');
+    expect(jobs['nix-discovery']?.needs).toContain('reuse');
     expect(jobs['required-check']?.needs).toContain('reuse');
   });
 
