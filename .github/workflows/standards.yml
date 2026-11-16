@@ -4,8 +4,9 @@ on:
   # Every pull request runs the gate regardless of its base branch: stacked
   # pull requests need check runs on each layer's own commits, both as review
   # signal before an atomic stack merge and because required-check rulesets
-  # refuse commits that carry no runs. Draft revisions skip every gate, so
-  # marking a pull request ready for review runs them on its current head.
+  # refuse commits that carry no runs. Draft revisions skip every gate, except
+  # as `draft-state` describes, so marking a pull request ready for review runs
+  # them on its current head.
   pull_request:
     types:
       - opened
@@ -29,12 +30,10 @@ concurrency:
   # Preserve every push SHA needed by publication; only PR runs supersede one
   # another when a newer commit updates the same PR. Dispatched runs share one
   # group, so at most one runs and the newest request waits behind it.
-  # Draft and ready runs of a PR use separate groups. When a push to a draft is
-  # followed at once by ready for review, GitHub can start the push's run
-  # second; in a shared group that draft run, which runs no gate, cancels the
-  # ready run and leaves the head without its required check. With separate
-  # groups, a ready run keeps running after its PR returns to draft, until the
-  # next ready run replaces it.
+  # Draft and ready runs of a PR use separate groups, so a draft run never
+  # cancels a ready run, even one that GitHub started first (see
+  # `draft-state`). A ready run therefore keeps running after its PR returns
+  # to draft, until the next ready run replaces it.
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('{0}-{1}', github.ref, github.event.pull_request.draft && 'draft' || 'ready') || github.event_name == 'workflow_dispatch' && 'dispatch' || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
@@ -50,8 +49,16 @@ jobs:
   # leaves `proven` unset and any error fails only this step, so the full gate
   # runs. Cache freshness never decides reuse; a reused push instead requests
   # a separate cache publication run when the snapshots are missing or stale.
+  #
+  # It waits for `draft-state` so that a draft run skips no job before
+  # `draft-state` has read the pull request. `land` waits for the ready run
+  # to replace any check that a draft skipped before it was marked ready, and a
+  # draft run that gates its head may have no ready run to replace it.
   reuse:
-    if: github.event_name == 'push'
+    needs: draft-state
+    if: >-
+      !cancelled() &&
+      github.event_name == 'push'
     runs-on: ${{ vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-small', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || 'ubuntu-latest' }}
     timeout-minutes: 5
     permissions:
@@ -184,6 +191,54 @@ jobs:
             || publish "the newest main Turbo snapshot is $turbo_age seconds old"
           echo "Trusted cache snapshots are current"
 
+  # GitHub's merge box and required checks look only at the newest
+  # pull-request run of this workflow on a head. When a push to a draft is
+  # followed at once by ready for review, that newest run can be the push's
+  # draft run: GitHub may create it after the ready run, or start the ready
+  # run on the previous head. A draft run that skipped its gates would then
+  # hide or replace the head's `check`, and merge would stay blocked although
+  # the gate passed. So once a draft run starts, this job reads the pull
+  # request as it is now. When it is ready, still at this run's head, and no
+  # newer run of this workflow exists on that head, this run gates the head as
+  # a ready run would and reports `check` itself. In that race the gate can
+  # run twice. If a lookup fails, this job fails and the gates skip, so a
+  # blocked merge shows the failure.
+  draft-state:
+    if: github.event.pull_request.draft
+    runs-on: ${{ vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-small', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      pull-requests: read
+    outputs:
+      gate: ${{ steps.state.outputs.gate }}
+    steps:
+      - name: Decide whether this draft run gates its head
+        id: state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          skip() {
+            echo "::notice::Skipping the gates: $1"
+            echo "gate=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+
+          pull=$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER")
+          [ "$(jq -r .draft <<<"$pull")" = false ] || skip "the pull request is still a draft"
+          [ "$(jq -r .head.sha <<<"$pull")" = "$HEAD_SHA" ] || skip "the pull request has a newer head"
+          newer=$(gh api "repos/$REPOSITORY/actions/workflows/standards.yml/runs?head_sha=$HEAD_SHA&event=pull_request&per_page=100" \
+            | jq --argjson run "$RUN_ID" '[.workflow_runs[] | select(.id > $run)] | length')
+          [ "$newer" = 0 ] || skip "a newer run reports this head's checks"
+
+          echo "::notice::Running the gates: the pull request is ready, and this is the newest run on its head"
+          echo "gate=true" >> "$GITHUB_OUTPUT"
+
   # Canonical quality gate synced from davidvornholt/standards. `bun run check`
   # runs the sync drift-check first, then lint, types, tests, build, and the
   # browser a11y suite. This is meant to be a consumer's WHOLE quality gate; a
@@ -219,15 +274,18 @@ jobs:
   # an `if:` whereas a service cannot. So gating it keeps one uniform file while
   # skipping a pointless download in repos with nothing to render.
   #
-  # Draft revisions skip the gate, and a main push skips it only when the reuse
-  # job proved that a pull-request run already validated the exact tree. A
-  # dispatched run has no reuse job, so it always runs the full gate.
-  # `!cancelled()` keeps the gate running when the reuse job is skipped or fails.
+  # Draft revisions skip the gate unless `draft-state` decided that the run
+  # gates its head, and a main push skips it only when the reuse job proved
+  # that a pull-request run already validated the exact tree. A dispatched run
+  # has no reuse job, so it always runs the full gate. `!cancelled()` keeps the
+  # gate running when `reuse` is skipped or fails, or `draft-state` is skipped.
   quality:
-    needs: reuse
+    needs:
+      - reuse
+      - draft-state
     if: >-
       !cancelled() &&
-      !github.event.pull_request.draft &&
+      (!github.event.pull_request.draft || needs.draft-state.outputs.gate == 'true') &&
       needs.reuse.outputs.proven != 'true'
     runs-on: ${{ vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-{3}', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt, vars.CI_CODEBUILD_QUALITY_SIZE || 'medium') || 'ubuntu-latest' }}
     timeout-minutes: 30
@@ -729,11 +787,13 @@ jobs:
           key: turbo-trusted-v2-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
 
   nix-discovery:
-    needs: reuse
+    needs:
+      - reuse
+      - draft-state
     if: >-
       github.repository == 'davidvornholt/standards' &&
       !cancelled() &&
-      !github.event.pull_request.draft &&
+      (!github.event.pull_request.draft || needs.draft-state.outputs.gate == 'true') &&
       needs.reuse.outputs.proven != 'true'
     runs-on: ${{ vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-small', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || 'ubuntu-latest' }}
     timeout-minutes: 30
@@ -837,18 +897,19 @@ jobs:
   # executable code, and a per-run job below sixty seconds of work still bills
   # a full runner minute in every consumer.
   #
-  # Draft runs skip every gate, and GitHub reports a skipped job as a passing
-  # required check. The draft run therefore reports this job under another
-  # name: the required `check` stays missing, and merge stays blocked, until
-  # the ready-for-review run reports it. GitHub does not evaluate the name of a
-  # skipped job, so drafts show this expression's text. The job id differs
-  # from `check` as well, so no naming of a skipped job can report the
-  # required check.
+  # A draft run skips every gate unless `draft-state` decided that it gates its
+  # head, and GitHub reports a skipped job as a passing required check. A draft
+  # run that skips therefore reports this job under another name: the required
+  # `check` stays missing, and merge stays blocked, until a run that gates
+  # reports it. GitHub does not evaluate the name of a skipped job, so drafts
+  # show this expression's text. The job id differs from `check` as well, so no
+  # naming of a skipped job can report the required check.
   required-check:
-    name: ${{ github.event.pull_request.draft && 'check (runs when ready for review)' || 'check' }}
-    if: always() && !github.event.pull_request.draft
+    name: ${{ github.event.pull_request.draft && needs.draft-state.outputs.gate != 'true' && 'check (runs when ready for review)' || 'check' }}
+    if: always() && (!github.event.pull_request.draft || needs.draft-state.outputs.gate == 'true')
     needs:
       - reuse
+      - draft-state
       - quality
       - nix-discovery
       - nix

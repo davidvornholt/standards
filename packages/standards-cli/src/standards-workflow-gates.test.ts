@@ -9,8 +9,8 @@ const WORKFLOW = join(ACTUAL_UPSTREAM, '.github/workflows/standards.yml');
 const AGGREGATE_STEP = 'Require all standards gates';
 const PROOF_STEP = 'Prove a validated pull request result';
 const REQUEST_STEP = 'Request stale cache publication';
-const GATE_RUN_CONDITION =
-  "!cancelled() && !github.event.pull_request.draft && needs.reuse.outputs.proven != 'true'";
+const GATES_HEAD = `(!github.event.pull_request.draft || needs.draft-state.outputs.gate == 'true')`;
+const GATE_RUN_CONDITION = `!cancelled() && ${GATES_HEAD} && needs.reuse.outputs.proven != 'true'`;
 const STATUS_FUNCTION = /(?:^|\W)(?:!cancelled|always)\(\)/u;
 const CACHE_PREFIX_ENVIRONMENT = [
   'BUN_CACHE_PREFIX',
@@ -49,6 +49,10 @@ type Workflow = {
 const workflow = (): Workflow =>
   parse(readFileSync(WORKFLOW, 'utf8')) as Workflow;
 const expression = (body: string): string => `${'$'}{{ ${body} }}`;
+const needsOf = (jobs: Workflow['jobs'], id: string): ReadonlyArray<string> => {
+  const needs = jobs[id]?.needs ?? [];
+  return typeof needs === 'string' ? [needs] : needs;
+};
 
 describe('draft pull requests', () => {
   it('run the gate when the pull request becomes ready for review', () => {
@@ -60,23 +64,66 @@ describe('draft pull requests', () => {
     ]);
   });
 
-  it('skip every gate', () => {
+  it('skip every gate unless the draft run gates its head', () => {
     const { jobs } = workflow();
     expect(jobs.quality?.if).toBe(GATE_RUN_CONDITION);
     expect(jobs['nix-discovery']?.if).toEndWith(GATE_RUN_CONDITION);
+    for (const id of ['quality', 'nix-discovery', 'required-check']) {
+      expect(jobs[id]?.needs).toContain('draft-state');
+    }
   });
 
-  // GitHub reports a skipped job as a passing required check. A draft run must
-  // therefore never report `check` itself, or it would satisfy the ruleset.
+  it('decide in draft runs only whether the run gates its head', () => {
+    const state = workflow().jobs['draft-state'];
+    expect(state?.if).toBe('github.event.pull_request.draft');
+    expect(state?.needs).toBeUndefined();
+    expect(state?.permissions).toEqual({
+      actions: 'read',
+      'pull-requests': 'read',
+    });
+    expect(state?.outputs).toEqual({
+      gate: expression('steps.state.outputs.gate'),
+    });
+    // `github.sha` is the merge commit on pull requests, never the head.
+    expect(state?.steps[0]?.env).toEqual(
+      Object.fromEntries([
+        ['GH_TOKEN', expression('github.token')],
+        ['HEAD_SHA', expression('github.event.pull_request.head.sha')],
+        ['PR_NUMBER', expression('github.event.pull_request.number')],
+        ['REPOSITORY', expression('github.repository')],
+        ['RUN_ID', expression('github.run_id')],
+      ]),
+    );
+  });
+
+  // `land` waits for the ready run to replace a check that a draft skipped
+  // before it was marked ready. A draft run that gates its head may have no
+  // ready run, so none of its jobs may be decided before `draft-state`.
+  it('decide every other job after the draft run read its pull request', () => {
+    const { jobs } = workflow();
+    const dependsOnState = (id: string): boolean =>
+      needsOf(jobs, id).some(
+        (need) => need === 'draft-state' || dependsOnState(need),
+      );
+    expect(
+      Object.keys(jobs).filter(
+        (id) => id !== 'draft-state' && !dependsOnState(id),
+      ),
+    ).toEqual([]);
+  });
+
+  // GitHub reports a skipped job as a passing required check. A draft run that
+  // skips its gates must therefore never report `check` itself, or it would
+  // satisfy the ruleset.
   it('report the aggregator under a name that cannot satisfy the required check', () => {
     const { jobs } = workflow();
     const check = jobs['required-check'];
     // Whatever name GitHub gives a skipped job, it is never the job id `check`.
     expect(Object.keys(jobs)).not.toContain('check');
-    expect(check?.if).toBe('always() && !github.event.pull_request.draft');
+    expect(check?.if).toBe(`always() && ${GATES_HEAD}`);
     expect(check?.name).toBe(
       expression(
-        "github.event.pull_request.draft && 'check (runs when ready for review)' || 'check'",
+        "github.event.pull_request.draft && needs.draft-state.outputs.gate != 'true' && 'check (runs when ready for review)' || 'check'",
       ),
     );
   });
@@ -85,7 +132,8 @@ describe('draft pull requests', () => {
 describe('main-push reuse wiring', () => {
   it('proves reuse in a push-only preflight that runs no repository code', () => {
     const { reuse } = workflow().jobs;
-    expect(reuse?.if).toBe("github.event_name == 'push'");
+    expect(reuse?.if).toBe("!cancelled() && github.event_name == 'push'");
+    expect(reuse?.needs).toBe('draft-state');
     // Write access only creates the cache publication dispatch.
     expect(reuse?.permissions).toEqual({
       actions: 'write',
@@ -117,27 +165,27 @@ describe('main-push reuse wiring', () => {
 
   it('gates every source-repository and consumer gate on the proof', () => {
     const { jobs } = workflow();
-    expect(jobs.quality?.needs).toBe('reuse');
-    expect(jobs['nix-discovery']?.needs).toBe('reuse');
+    expect(jobs.quality?.needs).toContain('reuse');
+    expect(jobs['nix-discovery']?.needs).toContain('reuse');
     expect(jobs['required-check']?.needs).toContain('reuse');
   });
 
-  // `reuse` is skipped on every pull request, and GitHub's implicit `success()`
-  // skips any job with a skipped ancestor. Every job downstream of `reuse`
-  // must therefore state its own status condition.
+  // `reuse` is skipped on every pull request and `draft-state` on every other
+  // run, and GitHub's implicit `success()` skips any job with a skipped
+  // ancestor. Every job downstream of either must therefore state its own
+  // status condition.
   it('keeps every job downstream of the proof on an explicit status condition', () => {
     const { jobs } = workflow();
-    const needsOf = (id: string): ReadonlyArray<string> => {
-      const needs = jobs[id]?.needs ?? [];
-      return typeof needs === 'string' ? [needs] : needs;
-    };
-    const dependsOnReuse = (id: string): boolean =>
-      needsOf(id).some((need) => need === 'reuse' || dependsOnReuse(need));
-    const downstream = Object.keys(jobs).filter(dependsOnReuse);
+    const dependsOnSkipped = (id: string): boolean =>
+      needsOf(jobs, id).some(
+        (need) =>
+          need === 'reuse' || need === 'draft-state' || dependsOnSkipped(need),
+      );
+    const downstream = Object.keys(jobs).filter(dependsOnSkipped);
 
     expect(
       downstream.toSorted((left, right) => left.localeCompare(right)),
-    ).toEqual(['nix', 'nix-discovery', 'quality', 'required-check']);
+    ).toEqual(['nix', 'nix-discovery', 'quality', 'required-check', 'reuse']);
     for (const id of downstream) {
       expect(jobs[id]?.if ?? '').toMatch(STATUS_FUNCTION);
     }
