@@ -62,7 +62,7 @@ export const renderIssue = (
     'bunx @davidvornholt/standards@latest creds apply',
     '```',
     '',
-    'It renews each token above for at least a year and writes the replacement into its SOPS file, or revokes a token whose SOPS key is gone. Commit the changed SOPS files, open a pull request, merge it, and deploy. `creds apply` revokes each old token as soon as its replacement is stored, so a running app that uses one has no working token until the deploy restarts it (davidvornholt/standards#565). Merge and deploy right after applying.',
+    'It renews each token above for at least a year and writes the replacement into its SOPS file, or revokes a token whose SOPS key is gone. Commit the changed SOPS files, open a pull request, merge it, and deploy. `creds apply` revokes each old token as soon as its replacement is stored, so a running app that uses one has no working token until the deploy restarts it (davidvornholt/standards#565). Merge and deploy right after applying. If `creds apply` stops on same-name duplicate tokens, which an interrupted renewal leaves behind, follow the `standards creds revoke` command it prints for the leftover token, then run `creds apply` again.',
     '',
   ].join('\n');
   return { title, body };
@@ -218,8 +218,9 @@ const close = async (
   };
 };
 
-// `complete` is false when some account could not be listed: a repository
-// missing from `byRepo` may then just be unseen, so nothing is closed.
+// `complete` is false when some account could not be listed or some token's
+// expiry could not be read: a repository missing from `byRepo` may then just
+// be unseen, so nothing is closed.
 export const syncExpiryIssues = async (input: {
   readonly token: string;
   readonly home: string;

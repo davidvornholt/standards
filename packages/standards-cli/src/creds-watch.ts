@@ -144,7 +144,9 @@ export const runCredsWatch = async (issues: boolean): Promise<boolean> => {
       token: target.token,
       home: target.home,
       byRepo: report.byRepo,
-      complete: listed.complete,
+      // A token whose expiry can't be read drops out of `byRepo` unresolved,
+      // so its repository's issue must stay open too.
+      complete: listed.complete && report.problems.length === 0,
     });
     for (const line of synced.lines) {
       console.log(`standards creds: ${line}`);

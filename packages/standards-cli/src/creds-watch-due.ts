@@ -63,21 +63,11 @@ export const findDueTokens = (
     }
   }
   const horizon = now.getTime() + RENEW_WITHIN_DAYS * DAY_MS;
-  // A same-name token that is active past the horizon has already replaced
-  // the due one, whose leftover `creds revoke` or its own expiry retires.
-  const renewed = new Set(
-    parsed
-      .filter(
-        (entry) => entry.token.status === 'active' && entry.expiry > horizon,
-      )
-      .map((entry) => `${entry.accountId}/${entry.token.name.toLowerCase()}`),
-  );
+  // A same-name token active past the horizon doesn't make the due one safe
+  // to ignore: an interrupted renewal leaves both active, and the due one may
+  // still be the one in use. Each due token stays reported until it is retired.
   const due = parsed
-    .filter(
-      (entry) =>
-        entry.expiry <= horizon &&
-        !renewed.has(`${entry.accountId}/${entry.token.name.toLowerCase()}`),
-    )
+    .filter((entry) => entry.expiry <= horizon)
     .sort(
       (a, b) =>
         a.repo.localeCompare(b.repo) ||

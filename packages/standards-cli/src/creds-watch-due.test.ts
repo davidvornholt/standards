@@ -65,19 +65,44 @@ describe('creds watch due tokens', () => {
     ]);
   });
 
-  it('skips a due token that a same-name token in the same account already replaced', () => {
+  it('keeps reporting a due token while a same-name token in the same account is active past the window', () => {
+    // An interrupted renewal leaves both tokens active, and the expiring one
+    // may still be the one in use, so it stays due until it is retired.
     const report = findDueTokens(
       [
         at('a', minted('owner/r', 'ci.k', '2026-11-20T00:00:00Z')),
         at('a', minted('owner/r', 'ci.k', '2027-11-20T00:00:00Z')),
-        at('b', minted('owner/r', 'ci.other', '2026-11-20T00:00:00Z')),
-        at('c', minted('owner/r', 'ci.other', '2027-11-20T00:00:00Z')),
       ],
       NOW,
     );
     expect(
-      report.byRepo.get('owner/r')?.map(({ accountId }) => accountId),
-    ).toEqual(['b']);
+      report.byRepo.get('owner/r')?.map(({ accountId, name, expiresOn }) => ({
+        accountId,
+        name,
+        expiresOn,
+      })),
+    ).toEqual([
+      {
+        accountId: 'a',
+        name: 'standards/owner/r/ci/ci.k',
+        expiresOn: '2026-11-20T00:00:00.000Z',
+      },
+    ]);
+  });
+
+  it('reports case-distinct keys independently', () => {
+    const report = findDueTokens(
+      [
+        at('a', minted('owner/r', 'ci.TOKEN', '2026-11-20T00:00:00Z')),
+        at('a', minted('owner/r', 'ci.token', '2026-11-25T00:00:00Z')),
+        at('a', minted('owner/r', 'ci.token', '2027-11-20T00:00:00Z')),
+      ],
+      NOW,
+    );
+    expect(report.byRepo.get('owner/r')?.map(({ name }) => name)).toEqual([
+      'standards/owner/r/ci/ci.TOKEN',
+      'standards/owner/r/ci/ci.token',
+    ]);
   });
 
   it('ignores disabled and non-expiring tokens and reports an expired token without a valid expiry', () => {

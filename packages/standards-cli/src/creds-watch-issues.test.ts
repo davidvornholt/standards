@@ -81,6 +81,9 @@ describe('creds watch issue text', () => {
     expect(rendered.body).toContain(
       '```sh\nbunx @davidvornholt/standards@latest creds apply\n```',
     );
+    expect(rendered.body).toContain(
+      'If `creds apply` stops on same-name duplicate tokens, which an interrupted renewal leaves behind, follow the `standards creds revoke` command it prints for the leftover token, then run `creds apply` again.',
+    );
     expect(
       renderIssue('owner/app', [due('owner/app', '2026-11-01T00:00:00Z', true)])
         .title,

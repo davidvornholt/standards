@@ -23,10 +23,23 @@ const originalFetch = globalThis.fetch;
 let root = '';
 let output: Array<string> = [];
 
-// Cloudflare lists one token per account that expires in ten days; GitHub
-// accepts every issue write. Each request is recorded with its bearer token.
+// By default one token per account that expires in ten days.
+const dueSoon = (account: string): ReadonlyArray<unknown> => [
+  {
+    id: `id-${account}`,
+    name: `standards/owner/app-${account.slice(0, 1)}/ci/ci.token`,
+    status: 'active',
+    // biome-ignore lint/style/useNamingConvention: Cloudflare's token field is snake_case.
+    expires_on: new Date(Date.now() + 10 * DAY_MS).toISOString(),
+    policies: [],
+  },
+];
+
+// Cloudflare lists `listing(account)` for each account; GitHub accepts every
+// issue write. Each request is recorded with its bearer token.
 const fakeApis = (
   failing: ReadonlySet<string> = new Set(),
+  listing: (account: string) => ReadonlyArray<unknown> = dueSoon,
 ): Array<{ readonly url: string; readonly bearer: string }> => {
   const requests: Array<{ readonly url: string; readonly bearer: string }> = [];
   globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
@@ -57,16 +70,7 @@ const fakeApis = (
         ),
       );
     }
-    const result = [
-      {
-        id: `id-${account}`,
-        name: `standards/owner/app-${account.slice(0, 1)}/ci/ci.token`,
-        status: 'active',
-        // biome-ignore lint/style/useNamingConvention: Cloudflare's token field is snake_case.
-        expires_on: new Date(Date.now() + 10 * DAY_MS).toISOString(),
-        policies: [],
-      },
-    ];
+    const result = listing(account);
     return Promise.resolve(
       Response.json({
         success: true,
@@ -77,9 +81,9 @@ const fakeApis = (
           page: 1,
           // biome-ignore lint/style/useNamingConvention: Cloudflare's pagination field is snake_case.
           per_page: 50,
-          count: 1,
+          count: result.length,
           // biome-ignore lint/style/useNamingConvention: Cloudflare's pagination field is snake_case.
-          total_count: 1,
+          total_count: result.length,
         },
       }),
     );
@@ -169,5 +173,30 @@ describe('creds watch command', () => {
       '/repos/davidvornholt/personal-infra/issues',
     ]);
     expect(output.join('\n')).toContain(`account ${OTHER}`);
+  });
+
+  it('fails, and closes no issue, when a token has an unreadable expiry', async () => {
+    process.env[`${WATCH_TOKEN_PREFIX}${ACCOUNT}`] = 'watch-b';
+    process.env.GITHUB_REPOSITORY = 'davidvornholt/personal-infra';
+    process.env.GH_TOKEN = 'gh';
+    // owner/stale has the open issue, and its only token is expired with no
+    // expires_on, so it drops out of the due list without being resolved.
+    const requests = fakeApis(new Set(), () => [
+      {
+        id: 'id-broken',
+        name: 'standards/owner/stale/ci/ci.token',
+        status: 'expired',
+        policies: [],
+      },
+    ]);
+    expect(await runCredsWatch(true)).toBe(false);
+    const github = requests.filter(({ url }) =>
+      url.startsWith('https://api.github.com/'),
+    );
+    expect(github.map(({ url }) => new URL(url).pathname)).toEqual([
+      '/repos/davidvornholt/personal-infra/labels',
+      '/repos/davidvornholt/personal-infra/issues',
+    ]);
+    expect(output.join('\n')).toContain('no valid expires_on value');
   });
 });
