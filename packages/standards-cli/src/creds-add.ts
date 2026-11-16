@@ -7,7 +7,11 @@ import {
 } from './creds-add-preflight';
 import { createAccountToken } from './creds-cloudflare';
 import type { TokenPolicy } from './creds-cloudflare-api';
-import { cloudflareExpiresOn } from './creds-cloudflare-expiry';
+import {
+  BROKERED_TOKEN_LIFETIME_DAYS,
+  cloudflareExpiresOn,
+  DAY_MS,
+} from './creds-cloudflare-expiry';
 import { resolveContext, selectAccount } from './creds-dest';
 import { tokenNameOf } from './creds-naming';
 import {
@@ -22,9 +26,6 @@ import { readEncryptedKeys, setSopsValues } from './creds-sops';
 import { resolveBrokerPath } from './creds-store';
 import { withBrokerLock } from './creds-store-lock';
 import { refreshDevEnvForSopsWrites } from './dev-env-brokered-refresh';
-
-const DEFAULT_TTL_DAYS = 90;
-const DAY_MS = 86_400_000;
 
 const addRefreshEvidence = (
   format: DestinationFormat,
@@ -147,7 +148,7 @@ const addCloudflareWhileLocked = async (
     return false;
   }
   warnOccupiedDestinations(context.dest.target, destinations.occupied);
-  const ttlDays = options.ttlDays ?? DEFAULT_TTL_DAYS;
+  const ttlDays = options.ttlDays ?? BROKERED_TOKEN_LIFETIME_DAYS;
   const expiresOn = cloudflareExpiresOn(Date.now() + ttlDays * DAY_MS);
   const created = await createAccountToken(account.accountId, account.token, {
     name,

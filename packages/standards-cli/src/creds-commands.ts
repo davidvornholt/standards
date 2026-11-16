@@ -13,6 +13,7 @@ import {
   readBrokerStore,
   resolveBrokerPath,
 } from './creds-store';
+import { runCredsWatch, WATCH_TOKEN_PREFIX } from './creds-watch';
 
 const CREDS_USAGE = `Usage: standards creds <command> [options]
 
@@ -23,6 +24,7 @@ Commands:
   add github        Select the repository owner's App, verify its installation, and write it into SOPS
   plan              Reconcile SOPS keys against brokered tokens: show revocations, rotations, and the live account tokens nothing reconciles here
   apply             Execute the plan: revoke brokered tokens whose SOPS key is gone, roll expiring or expired ones into SOPS
+  watch             List brokered tokens of every repository that expire within 30 days, with read-only tokens from ${WATCH_TOKEN_PREFIX}<account-id> or else the broker store
   revoke            Delete one Cloudflare token named by --token-id; bootstrap credentials and brokered tokens are refused
   permissions       List Cloudflare permission group names for --permissions
   status            Show the broker store location and configured providers
@@ -31,14 +33,15 @@ Options:
   --dir <path>          Repository to operate on (default: current directory)
   --dest <target>:<key> SOPS destination, e.g. ci:ci.cloudflare_dns_token
   --permissions <list>  Comma-separated Cloudflare permission group names
-  --account <id>        Cloudflare account for login, add, revoke, or permissions; plan/apply always cover all accounts
-  --ttl-days <n>        Token lifetime in days (default: 90)
+  --account <id>        Cloudflare account for login, add, revoke, or permissions; plan, apply, and watch always cover all accounts
+  --ttl-days <n>        Token lifetime in days (default: 365; renewal keeps a longer one)
   --bucket <name>       Scope a Cloudflare token to one R2 bucket
   --zone <zone-id>      Add a zone resource for zone-scoped groups (comma-separated IDs)
   --jurisdiction <name> R2 jurisdiction: default or eu (default: default)
   --s3                  Store the derived R2 S3 credential pair (<key>.access_key_id, <key>.secret_access_key) instead of the raw token
   --token-id <id>       Cloudflare token to revoke (32-character hexadecimal ID)
   --force               Let revoke delete a token brokered to a repository that is not this checkout's. It verifies nothing about that repository, so use it only when nothing reconciles the token any more: that repository was renamed, transferred, or deleted, so no checkout resolves to its name and no \`standards creds apply\` will ever revoke the token. It never permits revoking a broker bootstrap credential, a token brokered to this repository, a token whose brokered repository differs from this checkout's only in capitalisation, or any brokered token when this checkout's origin remote resolves to no GitHub repository, because ownership is then the very thing that could not be checked
+  --issues              Let watch keep one issue per affected repository in $GITHUB_REPOSITORY, opened, updated, and closed with GH_TOKEN
   --org <org>           Create the GitHub App under an organization
   --name <name>         GitHub App name (default: ${BROKER_IDENTITY_NAME}, suffixed by --org)
 
@@ -112,7 +115,10 @@ export const runCredsCommand = (
     console.log(CREDS_USAGE);
     return Promise.resolve(route === 'help');
   }
-  if (flags.account !== undefined && (route === 'plan' || route === 'apply')) {
+  if (
+    flags.account !== undefined &&
+    (route === 'plan' || route === 'apply' || route === 'watch')
+  ) {
     console.error(
       `standards creds: ${route} always covers every configured account; --account is not supported for this command`,
     );
@@ -127,6 +133,7 @@ export const runCredsCommand = (
     'add github': () => runCredsAddGithub(flags.dir, flags),
     plan: () => runCredsPlan(flags.dir, false),
     apply: () => runCredsPlan(flags.dir, true),
+    watch: () => runCredsWatch(flags.issues),
     revoke: () =>
       runCredsRevoke({
         account: flags.account,

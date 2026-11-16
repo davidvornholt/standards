@@ -1,7 +1,12 @@
 // Live policy is preserved, not compared with a separate desired-policy manifest.
 // Adding policy-drift enforcement would require a new source of truth.
 
-import { cloudflareExpiresOn } from './creds-cloudflare-expiry';
+import {
+  BROKERED_TOKEN_LIFETIME_DAYS,
+  cloudflareExpiresOn,
+  DAY_MS,
+  RENEW_WITHIN_DAYS,
+} from './creds-cloudflare-expiry';
 import { groupByIntersectingFootprint } from './creds-plan-groups';
 import type {
   AccountToken,
@@ -13,9 +18,6 @@ import {
   partitionAccountTokens,
 } from './creds-plan-unmanaged';
 import { destinationFormatOf, inferredDestinationFootprint } from './creds-r2';
-
-const DEFAULT_RENEW_WITHIN_DAYS = 30;
-const DAY_MS = 86_400_000;
 
 type ManagedToken = ManagedTokenRef & {
   readonly footprint: ReadonlyArray<string>;
@@ -113,8 +115,11 @@ const dispositionOf = (
       format,
       policies: token.policies,
       condition: token.condition.value,
+      // Keep a longer lifetime chosen with --ttl-days, but never renew for
+      // less than the default.
       replacementExpiresOn: cloudflareExpiresOn(
-        input.now.getTime() + expiry - issued,
+        input.now.getTime() +
+          Math.max(expiry - issued, BROKERED_TOKEN_LIFETIME_DAYS * DAY_MS),
       ),
       reason: `${expired ? 'expired' : 'expires'} ${token.expiresOn}`,
     },
@@ -147,10 +152,8 @@ export const computeCredsPlan = (input: {
   readonly keysByTarget: ReadonlyMap<string, ReadonlySet<string>>;
   readonly tokens: ReadonlyArray<AccountToken>;
   readonly now: Date;
-  readonly renewWithinDays?: number;
 }): CredsPlan => {
-  const renewWithin =
-    (input.renewWithinDays ?? DEFAULT_RENEW_WITHIN_DAYS) * DAY_MS;
+  const renewWithin = RENEW_WITHIN_DAYS * DAY_MS;
   const actions: Array<PlannedAction> = [];
   const partition = partitionAccountTokens(input.tokens, input.repo);
   const findings: Array<string> = [...partition.findings];
