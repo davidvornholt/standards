@@ -33,8 +33,15 @@ const standards = (fields: Partial<FakeRun> = {}): FakeRun => ({
   status: 'queued',
   // biome-ignore lint/style/useNamingConvention: GitHub's REST field.
   head_branch: 'feature/topic',
+  // biome-ignore lint/style/useNamingConvention: GitHub's REST field.
+  updated_at: '2020-01-01T00:00:00Z',
   ...fields,
 });
+
+// A run that completed a moment ago.
+const justCompleted = (): FakeRun =>
+  // biome-ignore lint/style/useNamingConvention: GitHub's REST field.
+  standards({ status: 'completed', updated_at: new Date().toISOString() });
 
 const runLookups = (): number =>
   calls(fixture, 'api').filter((call) => call[1]?.includes('/actions/runs?'))
@@ -71,7 +78,7 @@ describe('standards land while a workflow run on the head is unfinished', () => 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain('Waiting for Standards on');
     expect(mergeCalls(fixture)).toEqual([mergeCall(fixture)]);
-    expect(runLookups()).toBe(3);
+    expect(runLookups()).toBe(2);
   });
 
   it('reads the checks again after the run completes, then refuses its failure', () => {
@@ -86,10 +93,25 @@ describe('standards land while a workflow run on the head is unfinished', () => 
         },
       ],
     });
-    fixture.github.workflowRuns = [
-      [standards()],
-      [standards({ status: 'completed' })],
-    ];
+    fixture.github.workflowRuns = [[standards()], [justCompleted()]];
+    const result = land(fixture, ['123']);
+    expect(result.status, result.stdout).toBe(1);
+    expect(result.stderr).toContain('Not merging PR #123: quality failed');
+    expect(mergeCalls(fixture)).toEqual([]);
+  });
+
+  it('reads the checks again after a run it never saw unfinished completes', () => {
+    Object.assign(fixture.pr, {
+      statusCheckRollup: [sync],
+      polls: [
+        {},
+        {
+          mergeStateStatus: 'UNSTABLE',
+          statusCheckRollup: [sync, quality('COMPLETED', 'FAILURE')],
+        },
+      ],
+    });
+    fixture.github.workflowRuns = [[justCompleted()]];
     const result = land(fixture, ['123']);
     expect(result.status, result.stdout).toBe(1);
     expect(result.stderr).toContain('Not merging PR #123: quality failed');

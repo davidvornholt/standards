@@ -71,6 +71,8 @@ export type FakeRun = {
   readonly status: string;
   // biome-ignore lint/style/useNamingConvention: GitHub's REST field.
   readonly head_branch: string;
+  // biome-ignore lint/style/useNamingConvention: GitHub's REST field.
+  readonly updated_at: string;
 };
 
 type Env = Readonly<Record<string, string | undefined>>;

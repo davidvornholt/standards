@@ -22,7 +22,7 @@ import {
   viewPr,
 } from './land-context';
 import { requiredChecks } from './land-required-checks';
-import { pendingRuns, type SeenRuns } from './land-runs';
+import { unsettledRuns } from './land-runs';
 
 const POLL_FIELDS =
   'state,isDraft,headRefOid,headRefName,baseRefName,mergeStateStatus,statusCheckRollup,updatedAt';
@@ -49,7 +49,6 @@ type WaitState = {
   shown: { readonly head: string; readonly waiting: string } | null;
   last: Poll | null;
   readonly again: Map<number, boolean>;
-  runs: SeenRuns;
   readonly deadline: number;
 };
 
@@ -89,22 +88,13 @@ const readPoll = (
   );
   const rolledUp = checkStates(rollup, quiet, stale);
   // Only checks that look settled need the runs, so most polls skip them.
-  let running: ReadonlyArray<string> = [];
-  if (
+  const running =
     !request.noWait &&
     quiet &&
     rolledUp.pending.length === 0 &&
     rolledUp.failed.length === 0
-  ) {
-    const runs = pendingRuns(
-      context,
-      repo,
-      { sha: head, branch: pr.headRefName },
-      state.runs,
-    );
-    running = runs.pending;
-    state.runs = runs.seen;
-  }
+      ? unsettledRuns(context, repo, { sha: head, branch: pr.headRefName })
+      : [];
   const checks = { ...rolledUp, pending: [...rolledUp.pending, ...running] };
   const settledBlocked =
     pr.mergeStateStatus === 'BLOCKED' &&
@@ -328,6 +318,5 @@ export const waitForChecks = (
     shown: null,
     last: null,
     again: new Map(),
-    runs: null,
     deadline: context.deadline ?? Date.now() + context.waitMs,
   });
