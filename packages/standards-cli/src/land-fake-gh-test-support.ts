@@ -133,6 +133,12 @@ const merge = ({ env, pr, savePr }: Call): FakeGhResult => {
     return failure('');
   }
   pr.mergeRequested = true;
+  // Like gh when GitHub merges but its response is cut off.
+  if (env.GH_MERGE_EOF) {
+    Object.assign(pr, { state: 'MERGED', mergeCommit: { oid: MERGE_COMMIT } });
+    savePr();
+    return failure('EOF\n');
+  }
   // A pull request that only joins a merge queue stays open.
   if (pr.queued === true) {
     savePr();
