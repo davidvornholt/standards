@@ -145,6 +145,35 @@ const checkBlocked = (request: WaitRequest, poll: Poll): void => {
   }
 };
 
+// Whether the head lacks commits of its base branch. GitHub reports that as
+// BEHIND only where the base branch requires up-to-date branches, which
+// private repositories on the free plan can't set, so a stale head shows as
+// CLEAN there. A failed lookup throws rather than merging unchecked.
+const lacksBase = (
+  context: LandContext,
+  { repo }: WaitRequest,
+  poll: Poll,
+): boolean => {
+  const { stdout } = run(context, 'gh', [
+    'api',
+    `repos/${repo.nameWithOwner}/compare/${poll.base}...${poll.head}`,
+    '--jq',
+    '.behind_by',
+  ]);
+  return Number(stdout.trim()) > 0;
+};
+
+const updateBranch = (context: LandContext, request: WaitRequest): void => {
+  // A merge commit keeps the old head in the new one's history.
+  run(context, 'gh', [
+    'pr',
+    'update-branch',
+    String(request.prNumber),
+    '--repo',
+    request.repo.url,
+  ]);
+};
+
 // Acts on one poll and returns whether the head may merge now.
 const advance = (
   context: LandContext,
@@ -164,16 +193,15 @@ const advance = (
   if (poll.isDraft) {
     run(context, 'gh', ['pr', 'ready', String(prNumber), '--repo', repo.url]);
   } else if (status === 'BEHIND') {
-    // A merge commit keeps the old head in the new one's history.
-    run(context, 'gh', [
-      'pr',
-      'update-branch',
-      String(prNumber),
-      '--repo',
-      repo.url,
-    ]);
+    updateBranch(context, request);
   } else if (status === 'CLEAN' || status === 'UNSTABLE') {
-    return mayMerge(request, poll);
+    if (!mayMerge(request, poll)) {
+      return false;
+    }
+    if (!lacksBase(context, request, poll)) {
+      return true;
+    }
+    updateBranch(context, request);
   } else if (status === 'BLOCKED' && noWait) {
     throw new LandError(
       `GitHub requires checks or reviews that PR #${prNumber} still lacks, so --no-wait can't skip them.`,

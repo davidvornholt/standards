@@ -41,6 +41,9 @@ export type FakeGithub = {
   // Makes reading the workflow files fail.
   workflowsFail: boolean;
   compare: string | null;
+  // Each lookup of how many commits the pull request's head lacks from its
+  // base applies the next entry; the last one stays.
+  behindBy: Array<number>;
   // The time of the last ready-for-review event, which `gh pr ready` sets.
   ready: string | null;
   // Maps a check's run to its workflow file.
@@ -211,8 +214,17 @@ const graphql = (call: Call): FakeGhResult => {
   return workflowTree(call);
 };
 
-const compare = ({ github }: Call): FakeGhResult =>
-  github.compare === null ? notFound() : ok(`${github.compare}\n`);
+const compare = ({ args, env, github, saveGithub }: Call): FakeGhResult => {
+  if (args.includes('.behind_by')) {
+    if (env.GH_BEHIND_FAIL) {
+      return failure('GitHub unavailable\n');
+    }
+    const behind = nextOf(github.behindBy) ?? 0;
+    saveGithub();
+    return ok(`${behind}\n`);
+  }
+  return github.compare === null ? notFound() : ok(`${github.compare}\n`);
+};
 
 // land asks gh's --jq for one JSON array of names per file.
 const prFiles = ({ pr }: Call): FakeGhResult =>

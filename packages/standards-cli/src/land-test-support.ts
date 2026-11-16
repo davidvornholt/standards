@@ -102,6 +102,7 @@ const initialGithub = (): FakeGithub => ({
   workflows: true,
   workflowsFail: false,
   compare: null,
+  behindBy: [0],
   ready: null,
   runFiles: { '1': CI, '2': CI },
   workflowFiles: {
