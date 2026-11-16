@@ -53,7 +53,10 @@ An R2 S3 pair (`--s3`) is used against `https://<account_id>.r2.cloudflarestorag
 
 ### Reconciliation
 
-- `creds apply` renews expiring and expired tokens and retires each brokered token whose SOPS key you deleted (both derived keys for an S3 pair).
+- `creds apply` renews tokens that expire within 30 days, and expired ones, and retires each brokered token whose SOPS key you deleted (both derived keys for an S3 pair).
+- Brokered tokens last a year (`creds add` defaults to 365 days). Renewal keeps a longer `--ttl-days` lifetime and never renews for less than a year, so tokens minted for 90 days before standards#545 get a year at their next renewal.
+- Nothing renews on its own. `creds watch` lists every repository's brokered tokens that expire within 30 days, reading Cloudflare's own expiry with one read-only token (Account API Tokens Read) per account in `STANDARDS_CREDS_WATCH_<account-id>`, or else the broker store. With `--issues` it keeps one issue per affected repository in `$GITHUB_REPOSITORY` and closes it once none of the repository's tokens is due. It is meant to run on a schedule with `--issues` in a private repository, because the issues name private repositories and their secret keys.
+- `creds apply` revokes the old token as soon as its replacement is stored, so a running app that uses it has no working token until its deploy (standards#565). Merge and deploy right after applying.
 - The unmanaged-token and other-repository reports never block. The unmanaged report is an account-wide inventory, so unrelated tokens repeat in every repository and run, and a nonempty report is not a failure. Still assess unfamiliar entries. A hand-made credential you replaced stays live until you run the `revoke` command its row prints.
 - `creds revoke` is only for tokens that reconciliation does not retire, such as same-name duplicates left by an interrupted renewal, or a token brokered to a repository that was renamed, transferred, or deleted. Its refusals print the remedy.
 

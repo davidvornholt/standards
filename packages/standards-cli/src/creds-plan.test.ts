@@ -71,7 +71,7 @@ describe('creds plan computation', () => {
     expect(plan.actions[0]?.kind).toBe('revoke');
   });
 
-  it('renews with copied policies and a fresh lifetime', () => {
+  it('renews a 90-day token with copied policies for a year', () => {
     const plan = computeCredsPlan({
       repo: REPO,
       keysByTarget: keys({ ci: ['ci.dns_token'] }),
@@ -93,7 +93,7 @@ describe('creds plan computation', () => {
         key: 'ci.dns_token',
         format: 'bearer',
         policies: POLICIES,
-        replacementExpiresOn: '2026-10-20T00:00:00Z',
+        replacementExpiresOn: '2027-07-22T00:00:00Z',
       }),
     ]);
   });
@@ -132,7 +132,7 @@ describe('creds plan safeguards', () => {
     expect(plan.findings).toEqual([expect.stringContaining('status disabled')]);
   });
 
-  it('renews an expired token with copied policies and its original lifetime', () => {
+  it('renews an expired token with copied policies for a year', () => {
     const expired = {
       ...token(`standards/${REPO}/ci/ci.dns_token`, '2026-07-01T00:00:00Z'),
       status: 'expired',
@@ -151,7 +151,7 @@ describe('creds plan safeguards', () => {
         target: 'ci',
         key: 'ci.dns_token',
         policies: POLICIES,
-        replacementExpiresOn: '2026-10-20T00:00:00Z',
+        replacementExpiresOn: '2027-07-22T00:00:00Z',
         reason: 'expired 2026-07-01T00:00:00Z',
       }),
     ]);
@@ -226,6 +226,28 @@ describe('creds plan safeguards', () => {
     expect(plan.actions).toEqual([]);
     expect(plan.findings).toEqual([
       expect.stringContaining('cannot be renewed safely'),
+    ]);
+  });
+});
+
+describe('creds plan renewal lifetime', () => {
+  it('keeps a lifetime longer than a year when it renews', () => {
+    const expiresOn = '2026-08-01T00:00:00Z';
+    const twoYears = {
+      ...token(`standards/${REPO}/ci/ci.dns_token`, expiresOn),
+      issuedOn: '2024-08-01T00:00:00Z',
+    };
+    const plan = computeCredsPlan({
+      repo: REPO,
+      keysByTarget: keys({ ci: ['ci.dns_token'] }),
+      tokens: [{ accountId: 'a', token: twoYears }],
+      now: NOW,
+    });
+    expect(plan.actions).toEqual([
+      expect.objectContaining({
+        kind: 'renew',
+        replacementExpiresOn: '2028-07-21T00:00:00Z',
+      }),
     ]);
   });
 });

@@ -21,6 +21,7 @@ export type CredsFlags = {
   jurisdiction: R2Jurisdiction;
   s3: boolean;
   force: boolean;
+  issues: boolean;
   org: string | undefined;
   name: string | undefined;
   tokenId: string | undefined;
@@ -58,6 +59,7 @@ export const parseCredsArgs = (argv: ReadonlyArray<string>): CredsFlags => {
     jurisdiction: DEFAULT_R2_JURISDICTION,
     s3: false,
     force: false,
+    issues: false,
     org: undefined,
     name: undefined,
     tokenId: undefined,
@@ -108,6 +110,8 @@ export const parseCredsArgs = (argv: ReadonlyArray<string>): CredsFlags => {
       flags.s3 = true;
     } else if (arg === '--force') {
       flags.force = true;
+    } else if (arg === '--issues') {
+      flags.issues = true;
     } else if (setter !== undefined) {
       setter(flagValue(argv, index));
       index += 1;
