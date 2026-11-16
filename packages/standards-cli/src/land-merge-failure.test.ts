@@ -26,8 +26,6 @@ const openPr = (fields: Record<string, unknown> = {}): void => {
   Object.assign(fixture.pr, { state: 'OPEN', ...fields });
 };
 
-// gh can exit with an error although GitHub merged, as when GitHub's response
-// is cut off, so land reads the pull request back before it reports either.
 describe('standards land when gh pr merge fails', () => {
   it('keeps the branch when the merge fails', () => {
     openPr();
