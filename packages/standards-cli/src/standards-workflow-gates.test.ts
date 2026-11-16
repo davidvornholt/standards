@@ -49,6 +49,10 @@ type Workflow = {
 const workflow = (): Workflow =>
   parse(readFileSync(WORKFLOW, 'utf8')) as Workflow;
 const expression = (body: string): string => `${'$'}{{ ${body} }}`;
+const needsOf = (jobs: Workflow['jobs'], id: string): ReadonlyArray<string> => {
+  const needs = jobs[id]?.needs ?? [];
+  return typeof needs === 'string' ? [needs] : needs;
+};
 
 describe('draft pull requests', () => {
   it('run the gate when the pull request becomes ready for review', () => {
@@ -83,6 +87,32 @@ describe('draft pull requests', () => {
     expect(state?.outputs).toEqual({
       gate: expression('steps.state.outputs.gate'),
     });
+    // `github.sha` is the merge commit on pull requests, never the head.
+    expect(state?.steps[0]?.env).toEqual(
+      Object.fromEntries([
+        ['GH_TOKEN', expression('github.token')],
+        ['HEAD_SHA', expression('github.event.pull_request.head.sha')],
+        ['PR_NUMBER', expression('github.event.pull_request.number')],
+        ['REPOSITORY', expression('github.repository')],
+        ['RUN_ID', expression('github.run_id')],
+      ]),
+    );
+  });
+
+  // `land` waits for the ready run to replace a check that a draft skipped
+  // before it was marked ready. A draft run that gates its head may have no
+  // ready run, so none of its jobs may be decided before `draft-state`.
+  it('decide every other job after the draft run read its pull request', () => {
+    const { jobs } = workflow();
+    const dependsOnState = (id: string): boolean =>
+      needsOf(jobs, id).some(
+        (need) => need === 'draft-state' || dependsOnState(need),
+      );
+    expect(
+      Object.keys(jobs).filter(
+        (id) => id !== 'draft-state' && !dependsOnState(id),
+      ),
+    ).toEqual([]);
   });
 
   // GitHub reports a skipped job as a passing required check. A draft run that
@@ -105,7 +135,8 @@ describe('draft pull requests', () => {
 describe('main-push reuse wiring', () => {
   it('proves reuse in a push-only preflight that runs no repository code', () => {
     const { reuse } = workflow().jobs;
-    expect(reuse?.if).toBe("github.event_name == 'push'");
+    expect(reuse?.if).toBe("!cancelled() && github.event_name == 'push'");
+    expect(reuse?.needs).toBe('draft-state');
     // Write access only creates the cache publication dispatch.
     expect(reuse?.permissions).toEqual({
       actions: 'write',
@@ -142,22 +173,22 @@ describe('main-push reuse wiring', () => {
     expect(jobs['required-check']?.needs).toContain('reuse');
   });
 
-  // `reuse` is skipped on every pull request, and GitHub's implicit `success()`
-  // skips any job with a skipped ancestor. Every job downstream of `reuse`
-  // must therefore state its own status condition.
+  // `reuse` is skipped on every pull request and `draft-state` on every other
+  // run, and GitHub's implicit `success()` skips any job with a skipped
+  // ancestor. Every job downstream of either must therefore state its own
+  // status condition.
   it('keeps every job downstream of the proof on an explicit status condition', () => {
     const { jobs } = workflow();
-    const needsOf = (id: string): ReadonlyArray<string> => {
-      const needs = jobs[id]?.needs ?? [];
-      return typeof needs === 'string' ? [needs] : needs;
-    };
-    const dependsOnReuse = (id: string): boolean =>
-      needsOf(id).some((need) => need === 'reuse' || dependsOnReuse(need));
-    const downstream = Object.keys(jobs).filter(dependsOnReuse);
+    const dependsOnSkipped = (id: string): boolean =>
+      needsOf(jobs, id).some(
+        (need) =>
+          need === 'reuse' || need === 'draft-state' || dependsOnSkipped(need),
+      );
+    const downstream = Object.keys(jobs).filter(dependsOnSkipped);
 
     expect(
       downstream.toSorted((left, right) => left.localeCompare(right)),
-    ).toEqual(['nix', 'nix-discovery', 'quality', 'required-check']);
+    ).toEqual(['nix', 'nix-discovery', 'quality', 'required-check', 'reuse']);
     for (const id of downstream) {
       expect(jobs[id]?.if ?? '').toMatch(STATUS_FUNCTION);
     }

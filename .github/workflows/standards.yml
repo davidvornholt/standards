@@ -49,8 +49,16 @@ jobs:
   # leaves `proven` unset and any error fails only this step, so the full gate
   # runs. Cache freshness never decides reuse; a reused push instead requests
   # a separate cache publication run when the snapshots are missing or stale.
+  #
+  # It waits for `draft-state` so that a draft run skips no job before
+  # `draft-state` has read the pull request. `land` waits for the ready run
+  # to replace any check that a draft skipped before it was marked ready, and a
+  # draft run that gates its head may have no ready run to replace it.
   reuse:
-    if: github.event_name == 'push'
+    needs: draft-state
+    if: >-
+      !cancelled() &&
+      github.event_name == 'push'
     runs-on: ${{ vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-small', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt) || 'ubuntu-latest' }}
     timeout-minutes: 5
     permissions:
