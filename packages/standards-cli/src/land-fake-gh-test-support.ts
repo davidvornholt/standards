@@ -60,6 +60,17 @@ export type FakeGithub = {
   // branch.
   rulesetChecks: Array<string>;
   protectionChecks: Array<string>;
+  // Each lookup of the workflow runs on the pull request's head applies the
+  // next entry; the last one stays.
+  workflowRuns: Array<Array<FakeRun>>;
+};
+
+export type FakeRun = {
+  readonly name: string;
+  readonly event: string;
+  readonly status: string;
+  // biome-ignore lint/style/useNamingConvention: GitHub's REST field.
+  readonly head_branch: string;
 };
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -275,6 +286,13 @@ const branch = ({ github }: Call): FakeGhResult => {
   });
 };
 
+// land asks gh's --jq for one JSON object per run.
+const workflowRuns = ({ github, saveGithub }: Call): FakeGhResult => {
+  const runs = nextOf(github.workflowRuns) ?? [];
+  saveGithub();
+  return ok(runs.map((run) => `${JSON.stringify(run)}\n`).join(''));
+};
+
 const REST_ROUTES: ReadonlyArray<
   readonly [RegExp, (call: Call) => FakeGhResult]
 > = [
@@ -282,6 +300,7 @@ const REST_ROUTES: ReadonlyArray<
   [/^repos\/[^/]+\/[^/]+\/rules\/branches\//u, branchRules],
   [/^repos\/[^/]+\/[^/]+\/branches\//u, branch],
   [/^repos\/[^/]+\/[^/]+\/pulls\/\d+\/files/u, prFiles],
+  [/^repos\/[^/]+\/[^/]+\/actions\/runs\?/u, workflowRuns],
 ];
 
 const repoView = ({ env }: Call): FakeGhResult =>

@@ -112,6 +112,7 @@ const initialGithub = (): FakeGithub => ({
   baseTips: [BASE_TIP],
   rulesetChecks: [],
   protectionChecks: [],
+  workflowRuns: [[]],
 });
 
 // Git configuration outside the fixture, such as signing, and a GIT_DIR from

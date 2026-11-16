@@ -22,14 +22,16 @@ import {
   viewPr,
 } from './land-context';
 import { requiredChecks } from './land-required-checks';
+import { unfinishedRuns } from './land-runs';
 
 const POLL_FIELDS =
-  'state,isDraft,headRefOid,baseRefName,mergeStateStatus,statusCheckRollup,updatedAt';
+  'state,isDraft,headRefOid,headRefName,baseRefName,mergeStateStatus,statusCheckRollup,updatedAt';
 
 type PolledPr = {
   readonly state: string;
   readonly isDraft: boolean;
   readonly headRefOid: string;
+  readonly headRefName: string;
   readonly baseRefName: string;
   readonly mergeStateStatus: string;
   readonly statusCheckRollup: ReadonlyArray<Check> | null;
@@ -84,7 +86,16 @@ const readPoll = (
     rollup,
     state.again,
   );
-  const checks = checkStates(rollup, quiet, stale);
+  const rolledUp = checkStates(rollup, quiet, stale);
+  // Only checks that look settled need the runs, so most polls skip them.
+  const running =
+    !request.noWait &&
+    quiet &&
+    rolledUp.pending.length === 0 &&
+    rolledUp.failed.length === 0
+      ? unfinishedRuns(context, repo, { sha: head, branch: pr.headRefName })
+      : [];
+  const checks = { ...rolledUp, pending: [...rolledUp.pending, ...running] };
   const settledBlocked =
     pr.mergeStateStatus === 'BLOCKED' &&
     !request.noWait &&
