@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { rmSync } from 'node:fs';
+import { chmodSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import process from 'node:process';
 import { collectCiSecretsProblems } from './structure-secrets';
 import {
   CI_EXAMPLE_YAML,
@@ -21,6 +22,12 @@ const buildSecrets = (): string => {
 };
 const ENC = 'ENC[AES256_GCM,data:eA==,iv:aWl2,tag:dGFn,type:str]';
 const APP_ID_ENC_LINE = /app_id: ENC\[[^\]]+\]/u;
+const MISSING_SECRETS =
+  'secrets/ci.yaml: must exist as a SOPS-encrypted file, because the synced Standards sync and Standards auto-merge workflows read ci.broker_app from it; a repository with "autoSync": false in sync-standards.local.json may go without it';
+const MISSING_EXAMPLE =
+  'secrets/ci.example.yaml: must exist and mirror the key shape of secrets/ci.yaml with plaintext placeholders';
+const BROKER_REASON =
+  'the synced Standards sync and Standards auto-merge workflows mint a branch token with Contents write and Workflows write, a pull request token with Contents read and Pull requests write, and a merge token with Contents write, Pull requests write, and Workflows write from ci.broker_app; provision it with "bun standards creds add github --dest ci:ci.broker_app"';
 
 describe('collectCiSecretsProblems', () => {
   it('accepts a mirrored SOPS-encrypted pair with the required keys', async () => {
@@ -30,8 +37,8 @@ describe('collectCiSecretsProblems', () => {
   it('requires both files to exist', async () => {
     const dir = newStructureTmp('structure-secrets-');
     expect(await collectCiSecretsProblems(dir)).toEqual([
-      'secrets/ci.yaml: must exist as a SOPS-encrypted file; the synced Standards sync and Standards auto-merge workflows read ci.broker_app from it',
-      'secrets/ci.example.yaml: must exist and mirror the key shape of secrets/ci.yaml with plaintext placeholders',
+      MISSING_SECRETS,
+      MISSING_EXAMPLE,
     ]);
   });
 
@@ -106,7 +113,7 @@ describe('collectCiSecretsProblems', () => {
     rmSync(join(dir, 'secrets/ci.example.yaml'));
     expect(await collectCiSecretsProblems(dir)).toEqual([
       'secrets/ci.yaml must contain valid YAML with unique mapping keys',
-      'secrets/ci.example.yaml: must exist and mirror the key shape of secrets/ci.yaml with plaintext placeholders',
+      MISSING_EXAMPLE,
     ]);
   });
 
@@ -115,6 +122,63 @@ describe('collectCiSecretsProblems', () => {
     write(dir, 'secrets/ci.example.yaml', 'just a string\n');
     expect(await collectCiSecretsProblems(dir)).toEqual([
       'secrets/ci.example.yaml: must be a YAML mapping',
+    ]);
+  });
+});
+
+describe('collectCiSecretsProblems and automatic sync', () => {
+  it('still requires them when the policy keeps automatic sync on', async () => {
+    const dir = newStructureTmp('structure-secrets-');
+    write(dir, 'sync-standards.local.json', '{ "autoSync": true }\n');
+    expect(await collectCiSecretsProblems(dir)).toEqual([
+      MISSING_SECRETS,
+      MISSING_EXAMPLE,
+    ]);
+  });
+
+  it('requires neither file with automatic sync off and no CI secrets', async () => {
+    const dir = newStructureTmp('structure-secrets-');
+    write(dir, 'sync-standards.local.json', '{ "autoSync": false }\n');
+    expect(await collectCiSecretsProblems(dir)).toEqual([]);
+  });
+
+  it('still requires the broker App with automatic sync off once CI secrets exist', async () => {
+    const dir = newStructureTmp('structure-secrets-');
+    write(dir, 'sync-standards.local.json', '{ "autoSync": false }\n');
+    write(
+      dir,
+      'secrets/ci.yaml',
+      `ci:\n    other: ${ENC}\n${CI_SOPS_METADATA_YAML}`,
+    );
+    expect(await collectCiSecretsProblems(dir)).toEqual([
+      MISSING_EXAMPLE,
+      `secrets/ci.yaml: missing required key "ci.broker_app.client_id" — ${BROKER_REASON}`,
+      `secrets/ci.yaml: missing required key "ci.broker_app.private_key" — ${BROKER_REASON}`,
+    ]);
+  });
+
+  it('does not count unreadable CI secrets as missing', async () => {
+    // Root ignores directory permissions, so only another user can test this.
+    if (process.getuid?.() === 0) {
+      return;
+    }
+    const dir = buildSecrets();
+    write(dir, 'sync-standards.local.json', '{ "autoSync": false }\n');
+    chmodSync(join(dir, 'secrets'), 0o000);
+    try {
+      expect(await collectCiSecretsProblems(dir)).not.toEqual([]);
+    } finally {
+      chmodSync(join(dir, 'secrets'), 0o755);
+    }
+  });
+
+  it('reports an invalid policy and then treats automatic sync as on', async () => {
+    const dir = newStructureTmp('structure-secrets-');
+    write(dir, 'sync-standards.local.json', '{ "autoSync": "false" }\n');
+    expect(await collectCiSecretsProblems(dir)).toEqual([
+      'sync-standards.local.json "autoSync" must be a boolean',
+      MISSING_SECRETS,
+      MISSING_EXAMPLE,
     ]);
   });
 });

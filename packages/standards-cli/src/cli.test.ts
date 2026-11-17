@@ -3829,6 +3829,38 @@ describe('github workflow skip seam', () => {
     );
   });
 
+  it('skips the live check without an origin only when automatic sync is off', () => {
+    const { consumer } = initConsumer(buildUpstream());
+    write(consumer, '.github/settings.json', Canonical);
+    write(consumer, '.github/settings.local.json', EmptySeam);
+    const automated = run(consumer, ['check', '--dir', consumer]);
+    write(consumer, 'sync-standards.local.json', '{ "autoSync": false }\n');
+    const manual = run(consumer, ['check', '--dir', consumer]);
+    const explicit = run(consumer, ['github', '--check', '--dir', consumer]);
+    // An origin the GitHub check can't parse must not count as no origin.
+    runExecutable('git', consumer, [
+      'remote',
+      'add',
+      'origin',
+      'ssh://git@github.com:22/davidvornholt/standards.git',
+    ]);
+    const unparsed = run(consumer, ['check', '--dir', consumer]);
+    expect(unparsed.status).toBe(1);
+    expect(unparsed.stdout).not.toContain('live settings check skipped');
+    expect(automated.status).toBe(1);
+    expect(automated.stderr).toContain(
+      'cannot determine the GitHub repository from the origin remote',
+    );
+    expect(manual.status).toBe(0);
+    expect(manual.stdout).toContain(
+      'live settings check skipped because automatic sync is off and the repository has no origin remote',
+    );
+    expect(explicit.status).toBe(1);
+    expect(explicit.stderr).toContain(
+      'cannot determine the GitHub repository from the origin remote',
+    );
+  });
+
   it('applies the workflow skip seam to explicit github checks but not apply', () => {
     const { consumer } = initConsumer(buildUpstream());
     write(consumer, '.github/settings.json', Canonical);

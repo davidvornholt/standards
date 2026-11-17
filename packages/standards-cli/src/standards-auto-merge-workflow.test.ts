@@ -52,6 +52,7 @@ const TRUSTED_CHECKOUT = {
     'sparse-checkout-cone-mode': false,
   },
 };
+const WITH_CI_SECRETS = "hashFiles('secrets/ci.yaml') != ''";
 const resolved = (name: string, id: string, key: string): Step => ({
   name,
   id,
@@ -133,25 +134,33 @@ describe('Standards auto-merge workflow contract', () => {
       contents: 'read',
       'pull-requests': 'read',
     });
-    expect(dependabot.steps.slice(0, 4)).toEqual(
-      brokerSteps(
-        minted('Mint current-repository merge token', 'merge-token', {
-          'permission-contents': 'write',
-          'permission-pull-requests': 'write',
-          'permission-workflows': 'write',
-        }),
-      ),
+    // Without secrets/ci.yaml, every step after the checkout is skipped, and
+    // the decision step with them because no merge token exists.
+    const [checkout, ...brokerOnly] = brokerSteps(
+      minted('Mint current-repository merge token', 'merge-token', {
+        'permission-contents': 'write',
+        'permission-pull-requests': 'write',
+        'permission-workflows': 'write',
+      }),
     );
+    expect(dependabot.steps.slice(0, 4)).toEqual([
+      checkout,
+      ...brokerOnly.map((broker) => ({ ...broker, if: WITH_CI_SECRETS })),
+    ]);
     // The metadata action reads the pull request with the job token only.
     expect(step('dependabot', 'Read Dependabot update metadata')).toEqual({
       name: 'Read Dependabot update metadata',
       id: 'metadata',
       uses: 'dependabot/fetch-metadata@v3',
+      if: WITH_CI_SECRETS,
     });
     expect(dependabot.steps).toHaveLength(6);
     expect(readersOf('dependabot', 'merge-token')).toEqual([
       'Apply the auto-merge decision',
     ]);
+    expect(step('dependabot', 'Apply the auto-merge decision').if).toBe(
+      expression("!cancelled() && steps.merge-token.outcome == 'success'"),
+    );
   });
 
   it('passes App credentials only to mint steps and event data only through env', () => {

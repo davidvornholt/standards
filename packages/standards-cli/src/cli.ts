@@ -1142,9 +1142,10 @@ const runCheckCommand = async (consumer: string): Promise<boolean> => {
   const sourceTextIsValid = runSourceTextCheck(consumer);
   // The GitHub gate activates with the synced declaration and then fails
   // closed: once .github/settings.json exists, an unreachable API or an
-  // unreadable origin is a failure, not a skip.
+  // unreadable origin is a failure, not a skip. Only a repository with
+  // automatic sync off may have no origin yet.
   const githubIsConverged = existsSync(join(consumer, CANONICAL_SETTINGS_FILE))
-    ? await runGithubCheckGate(consumer)
+    ? await runGithubGateUnlessUnpublished(consumer)
     : true;
   return (
     driftIsClean &&
@@ -1153,6 +1154,33 @@ const runCheckCommand = async (consumer: string): Promise<boolean> => {
     sourceTextIsValid &&
     githubIsConverged
   );
+};
+
+// Only a confirmed missing origin counts: any origin, even one whose URL the
+// GitHub check can't parse, still goes through the fail-closed check.
+const hasNoOrigin = (consumer: string): boolean => {
+  try {
+    const remotes = execFileSync('git', ['-C', consumer, 'remote'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    return !remotes.split('\n').includes('origin');
+  } catch {
+    return false;
+  }
+};
+
+const runGithubGateUnlessUnpublished = async (
+  consumer: string,
+): Promise<boolean> => {
+  const policy = await readSyncPolicy(consumer).catch(() => null);
+  if (policy?.autoSync === false && hasNoOrigin(consumer)) {
+    console.log(
+      'standards github: live settings check skipped because automatic sync is off and the repository has no origin remote',
+    );
+    return true;
+  }
+  return runGithubCheckGate(consumer);
 };
 
 // The canonical workflow sets this only for its unprivileged quality job,
