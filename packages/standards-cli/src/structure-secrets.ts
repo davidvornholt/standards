@@ -8,7 +8,11 @@ import {
   type RequiredSecretLeaf,
   secretShapeProblems,
 } from './structure-secret-document';
-import { inspectSyncPolicy } from './sync-policy';
+import {
+  inspectSyncPolicy,
+  readSyncPolicy,
+  type SyncPolicy,
+} from './sync-policy';
 import { parseYaml } from './yaml-parse';
 
 const CI_SECRETS = 'secrets/ci.yaml';
@@ -60,15 +64,27 @@ const parseMapping = async (
 export const collectCiSecretsProblems = async (
   consumer: string,
 ): Promise<ReadonlyArray<string>> => {
-  // Standards auto-merge runs whatever the sync policy says, so every
-  // repository needs the broker App. The policy is still validated here
-  // because this is the structure gate's only reader of it.
-  const [policyProblems, secretsFile, exampleFile] = await Promise.all([
+  // The policy is validated here because this is the structure gate's only
+  // reader of it. An invalid policy counts as automatic sync on.
+  const [policyProblems, policy, secretsMayExist] = await Promise.all([
     inspectSyncPolicy(consumer),
+    readSyncPolicy(consumer).catch((): SyncPolicy => ({})),
+    lstat(join(consumer, CI_SECRETS)).then(
+      () => true,
+      (error: unknown) => !(isRecord(error) && error.code === 'ENOENT'),
+    ),
+  ]);
+  // Without automatic sync and without CI secrets, the repository doesn't use
+  // the broker App: the synced Standards auto-merge workflow then skips its
+  // broker steps and leaves Dependabot pull requests manual.
+  if (policy.autoSync === false && !secretsMayExist) {
+    return policyProblems;
+  }
+  const [secretsFile, exampleFile] = await Promise.all([
     parseMapping(
       consumer,
       CI_SECRETS,
-      `${CI_SECRETS}: must exist as a SOPS-encrypted file; the synced Standards sync and Standards auto-merge workflows read ci.broker_app from it`,
+      `${CI_SECRETS}: must exist as a SOPS-encrypted file, because the synced Standards sync and Standards auto-merge workflows read ci.broker_app from it; a repository with "autoSync": false in sync-standards.local.json may go without it`,
     ),
     parseMapping(
       consumer,

@@ -49,7 +49,7 @@ describe('root and CI secret validation aggregation', () => {
     rmSync(join(consumer, 'secrets'), { recursive: true });
     expect(await collectStructureProblems(consumer, 'consumer')).toEqual([
       'package.json must exist and contain a JSON object',
-      'secrets/ci.yaml: must exist as a SOPS-encrypted file; the synced Standards sync and Standards auto-merge workflows read ci.broker_app from it',
+      'secrets/ci.yaml: must exist as a SOPS-encrypted file, because the synced Standards sync and Standards auto-merge workflows read ci.broker_app from it; a repository with "autoSync": false in sync-standards.local.json may go without it',
       'secrets/ci.example.yaml: must exist and mirror the key shape of secrets/ci.yaml with plaintext placeholders',
     ]);
   });
