@@ -157,20 +157,20 @@ describe('collectCiSecretsProblems and automatic sync', () => {
     ]);
   });
 
-  // Root ignores directory permissions, so only another user can test this.
-  it.skipIf(process.getuid?.() === 0)(
-    'does not count unreadable CI secrets as missing',
-    async () => {
-      const dir = buildSecrets();
-      write(dir, 'sync-standards.local.json', '{ "autoSync": false }\n');
-      chmodSync(join(dir, 'secrets'), 0o000);
-      try {
-        expect(await collectCiSecretsProblems(dir)).not.toEqual([]);
-      } finally {
-        chmodSync(join(dir, 'secrets'), 0o755);
-      }
-    },
-  );
+  it('does not count unreadable CI secrets as missing', async () => {
+    // Root ignores directory permissions, so only another user can test this.
+    if (process.getuid?.() === 0) {
+      return;
+    }
+    const dir = buildSecrets();
+    write(dir, 'sync-standards.local.json', '{ "autoSync": false }\n');
+    chmodSync(join(dir, 'secrets'), 0o000);
+    try {
+      expect(await collectCiSecretsProblems(dir)).not.toEqual([]);
+    } finally {
+      chmodSync(join(dir, 'secrets'), 0o755);
+    }
+  });
 
   it('reports an invalid policy and then treats automatic sync as on', async () => {
     const dir = newStructureTmp('structure-secrets-');
