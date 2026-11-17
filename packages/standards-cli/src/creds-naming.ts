@@ -84,8 +84,8 @@ export const parseTokenName = (
   return ref;
 };
 
-// Renewal renames the token it replaced by appending this suffix and lets it
-// expire within SUPERSEDED_GRACE_DAYS. The name is the only marker `plan` and
+// Renewal renames the token it replaced by appending this suffix and leaves its
+// expiry as it was. The name is the only marker `plan` and
 // `watch` can read without decrypting SOPS, and `watch` runs in CI with a
 // read-only token that can't. A minted name never contains a space, so a
 // superseded name never parses as a minted one and never collides with one.

@@ -16,6 +16,7 @@ import {
   initialize,
   installSops,
   planRunRoot,
+  RENEWAL_WINDOW_DAYS,
   stubCloudflare,
   updateBodies,
 } from './creds-plan-run-test-support';
@@ -175,7 +176,7 @@ describe('creds plan/apply mutation safety', () => {
       'delete-replacement',
     ]);
   });
-  it('writes and verifies the replacement before superseding the old token for a week', async () => {
+  it('writes and verifies the replacement before superseding the old token without shortening it', async () => {
     const { consumer, events } = initialize(ENCRYPTED_SECRETS);
     installSops(
       'if [ "$1" = "decrypt" ]; then printf \'new-value\'; exit 0; fi\neval "$SOPS_EDITOR \\"$2\\"" && printf "write\\n" >> "$PLAN_EVENT_FILE"',
@@ -189,8 +190,8 @@ describe('creds plan/apply mutation safety', () => {
       'supersede-old',
     ]);
     // The old token keeps its value, policies, and condition, so the running
-    // host keeps working, but it now dies within a week under a name plan and
-    // watch recognise.
+    // host keeps working until its old expiry, under a name plan and watch
+    // recognise.
     const [body] = updateBodies as ReadonlyArray<{
       readonly name: string;
       readonly policies: unknown;
@@ -209,8 +210,9 @@ describe('creds plan/apply mutation safety', () => {
       },
     ]);
     const expires = Date.parse(body?.expires_on ?? '');
-    expect(expires).toBeGreaterThanOrEqual(before + 7 * 86_400_000 - 1000);
-    expect(expires).toBeLessThanOrEqual(Date.now() + 7 * 86_400_000);
+    const window = RENEWAL_WINDOW_DAYS * 86_400_000;
+    expect(expires).toBeGreaterThanOrEqual(before + window - 1000);
+    expect(expires).toBeLessThanOrEqual(Date.now() + window);
   });
 
   it('deletes an already expired old token after storing its replacement', async () => {

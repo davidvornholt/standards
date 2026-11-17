@@ -1,8 +1,3 @@
-// A renewal renames the token it replaced `<name> (superseded)` and lets it
-// expire within a week, so the running host keeps working until its deploy
-// (standards#565). These pin how plan and watch read that name: never as an
-// ambiguous duplicate of the stored token, never as due for renewal.
-
 import { describe, expect, it } from 'bun:test';
 import type { CloudflareToken } from './creds-cloudflare-api';
 import {
@@ -16,7 +11,6 @@ import { findDueTokens } from './creds-watch-due';
 
 const NAME = `standards/${REPO}/ci/ci.dns_token`;
 const SUPERSEDED = supersededNameOf(NAME);
-const DAY_MS = 86_400_000;
 
 const at = (entry: CloudflareToken) => ({ accountId: 'a', token: entry });
 
@@ -86,13 +80,10 @@ describe('creds plan with a superseded token', () => {
 });
 
 describe('creds plan superseded expiry', () => {
-  it('shortens the old token to a week from now', () => {
+  it('keeps the expiry the old token already had', () => {
     expect(renewAction('2026-08-15T00:00:00Z')?.supersededExpiresOn).toBe(
-      new Date(NOW.getTime() + 7 * DAY_MS).toISOString().replace('.000Z', 'Z'),
+      '2026-08-15T00:00:00Z',
     );
-  });
-
-  it('never lengthens an old token that expires sooner', () => {
     expect(renewAction('2026-07-25T00:00:00Z')?.supersededExpiresOn).toBe(
       '2026-07-25T00:00:00Z',
     );

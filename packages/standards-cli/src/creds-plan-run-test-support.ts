@@ -22,7 +22,7 @@ export const ACCOUNT = 'a'.repeat(ACCOUNT_ID_LENGTH);
 const EXECUTABLE_MODE = 0o755;
 const DAY_MS = 86_400_000;
 const TOKEN_TTL_DAYS = 90;
-const RENEWAL_WINDOW_DAYS = 10;
+export const RENEWAL_WINDOW_DAYS = 10;
 export const ENCRYPTED_SECRETS =
   'ci:\n  token: ENC[AES256_GCM,data:x]\nsops:\n  mac: ENC[AES256_GCM,data:y]\n';
 

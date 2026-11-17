@@ -6,7 +6,6 @@ import {
   cloudflareExpiresOn,
   DAY_MS,
   RENEW_WITHIN_DAYS,
-  SUPERSEDED_GRACE_DAYS,
 } from './creds-cloudflare-expiry';
 import { groupByIntersectingFootprint } from './creds-plan-groups';
 import type {
@@ -29,18 +28,16 @@ type Disposition =
   | { readonly kind: 'finding'; readonly finding: string }
   | { readonly kind: 'healthy' };
 
-// An expired token grants nothing, so renewal deletes it rather than keeping
-// it for a running host.
+// The old token keeps the expiry it had: `apply` can't see when the
+// replacement deploys, so any earlier deadline it set could cut off a running
+// host whose deploy waits (standards#565). An expired token grants nothing, so
+// renewal deletes it instead.
 const supersededExpiresOn = (
   expired: boolean,
   expiry: number,
   now: Date,
 ): string | null =>
-  expired || expiry <= now.getTime()
-    ? null
-    : cloudflareExpiresOn(
-        Math.min(expiry, now.getTime() + SUPERSEDED_GRACE_DAYS * DAY_MS),
-      );
+  expired || expiry <= now.getTime() ? null : cloudflareExpiresOn(expiry);
 
 const dispositionOf = (
   entry: ManagedToken,
@@ -153,7 +150,7 @@ const dispositionForGroup = (
     const [first] = group;
     return {
       kind: 'finding',
-      finding: `ambiguous Cloudflare tokens have destination footprints intersecting in ${first?.ref.target}: ${group.map((candidate) => `${candidate.ref.key} (${candidate.accountId}/${candidate.token.id})`).join(', ')}; for same-name duplicates, keep the encrypted key intact and use \`standards creds revoke --account <account-id> --token-id <duplicate-id>\` to retire only a token proven not to be stored; resolve other intersecting destinations before plan/apply`,
+      finding: `ambiguous Cloudflare tokens have destination footprints intersecting in ${first?.ref.target}: ${group.map((candidate) => `${candidate.ref.key} (${candidate.accountId}/${candidate.token.id})`).join(', ')}; for same-name duplicates, keep the encrypted key intact, deploy the stored token and confirm the app works with it, and only then use \`standards creds revoke --account <account-id> --token-id <duplicate-id>\` to retire only a token proven not to be stored; resolve other intersecting destinations before plan/apply`,
     };
   }
   const [entry] = group;
