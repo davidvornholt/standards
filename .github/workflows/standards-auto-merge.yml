@@ -83,8 +83,11 @@ jobs:
             secrets/ci.yaml
           sparse-checkout-cone-mode: false
 
+      # A repository with automatic sync off may keep no CI secrets and no
+      # broker App. Its Dependabot pull requests then stay manual.
       - name: Resolve broker App client ID
         id: broker-app-client-id
+        if: hashFiles('secrets/ci.yaml') != ''
         uses: ./.github/actions/sops-secret
         with:
           age-key: ${{ secrets.SOPS_AGE_KEY }}
@@ -93,6 +96,7 @@ jobs:
 
       - name: Resolve broker App private key
         id: broker-app-private-key
+        if: hashFiles('secrets/ci.yaml') != ''
         uses: ./.github/actions/sops-secret
         with:
           age-key: ${{ secrets.SOPS_AGE_KEY }}
@@ -106,6 +110,7 @@ jobs:
       # failed check can still turn auto-merge off below.
       - name: Mint current-repository merge token
         id: merge-token
+        if: hashFiles('secrets/ci.yaml') != ''
         uses: actions/create-github-app-token@v3
         with:
           client-id: ${{ steps.broker-app-client-id.outputs.value }}
@@ -120,6 +125,7 @@ jobs:
       # its first commit. The decision below checks the other commits.
       - name: Read Dependabot update metadata
         id: metadata
+        if: hashFiles('secrets/ci.yaml') != ''
         uses: dependabot/fetch-metadata@v3
 
       # Runs after a failed metadata check too, and then turns auto-merge off.

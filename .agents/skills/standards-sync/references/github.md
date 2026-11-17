@@ -29,7 +29,7 @@ The workflow pushes the branch, manages the sync pull request, and turns on its 
 bun standards creds add github --dest ci:ci.broker_app
 ```
 
-Standards auto-merge uses the same App, so a repository with `"autoSync": false` still needs it.
+Standards auto-merge uses the same App. A repository with `"autoSync": false` may go without the App by having no `secrets/ci.yaml`: `check` then requires neither, and Standards auto-merge leaves Dependabot pull requests manual. Once `secrets/ci.yaml` exists, it must hold the App.
 
 ## Auto-merge
 
