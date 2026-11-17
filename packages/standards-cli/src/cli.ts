@@ -20,11 +20,7 @@ import process from 'node:process';
 import { runCredsCommand } from './creds-commands';
 import { dependabotProblems } from './dependabot';
 import { runDevEnv } from './dev-env';
-import {
-  CANONICAL_SETTINGS_FILE,
-  LOCAL_SETTINGS_FILE,
-  resolveGithubRepo,
-} from './github-api';
+import { CANONICAL_SETTINGS_FILE, LOCAL_SETTINGS_FILE } from './github-api';
 import { runGithubApply, runGithubCheck } from './github-commands';
 import { loadGithubSettings } from './github-settings';
 import { isRecord } from './github-settings-parse';
@@ -1147,7 +1143,7 @@ const runCheckCommand = async (consumer: string): Promise<boolean> => {
   // The GitHub gate activates with the synced declaration and then fails
   // closed: once .github/settings.json exists, an unreachable API or an
   // unreadable origin is a failure, not a skip. Only a repository with
-  // automatic sync off may have no GitHub repository yet.
+  // automatic sync off may have no origin yet.
   const githubIsConverged = existsSync(join(consumer, CANONICAL_SETTINGS_FILE))
     ? await runGithubGateUnlessUnpublished(consumer)
     : true;
@@ -1160,13 +1156,27 @@ const runCheckCommand = async (consumer: string): Promise<boolean> => {
   );
 };
 
+// Only a confirmed missing origin counts: any origin, even one whose URL the
+// GitHub check can't parse, still goes through the fail-closed check.
+const hasNoOrigin = (consumer: string): boolean => {
+  try {
+    const remotes = execFileSync('git', ['-C', consumer, 'remote'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    return !remotes.split('\n').includes('origin');
+  } catch {
+    return false;
+  }
+};
+
 const runGithubGateUnlessUnpublished = async (
   consumer: string,
 ): Promise<boolean> => {
   const policy = await readSyncPolicy(consumer).catch(() => null);
-  if (policy?.autoSync === false && resolveGithubRepo(consumer) === null) {
+  if (policy?.autoSync === false && hasNoOrigin(consumer)) {
     console.log(
-      'standards github: live settings check skipped because automatic sync is off and the origin remote is not a GitHub repository',
+      'standards github: live settings check skipped because automatic sync is off and the repository has no origin remote',
     );
     return true;
   }

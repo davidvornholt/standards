@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { rmSync } from 'node:fs';
+import { chmodSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import process from 'node:process';
 import { collectCiSecretsProblems } from './structure-secrets';
 import {
   CI_EXAMPLE_YAML,
@@ -155,6 +156,21 @@ describe('collectCiSecretsProblems and automatic sync', () => {
       `secrets/ci.yaml: missing required key "ci.broker_app.private_key" — ${BROKER_REASON}`,
     ]);
   });
+
+  // Root ignores directory permissions, so only another user can test this.
+  it.skipIf(process.getuid?.() === 0)(
+    'does not count unreadable CI secrets as missing',
+    async () => {
+      const dir = buildSecrets();
+      write(dir, 'sync-standards.local.json', '{ "autoSync": false }\n');
+      chmodSync(join(dir, 'secrets'), 0o000);
+      try {
+        expect(await collectCiSecretsProblems(dir)).not.toEqual([]);
+      } finally {
+        chmodSync(join(dir, 'secrets'), 0o755);
+      }
+    },
+  );
 
   it('reports an invalid policy and then treats automatic sync as on', async () => {
     const dir = newStructureTmp('structure-secrets-');

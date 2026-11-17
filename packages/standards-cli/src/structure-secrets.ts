@@ -66,15 +66,18 @@ export const collectCiSecretsProblems = async (
 ): Promise<ReadonlyArray<string>> => {
   // The policy is validated here because this is the structure gate's only
   // reader of it. An invalid policy counts as automatic sync on.
-  const [policyProblems, policy, secretsInfo] = await Promise.all([
+  const [policyProblems, policy, secretsMayExist] = await Promise.all([
     inspectSyncPolicy(consumer),
     readSyncPolicy(consumer).catch((): SyncPolicy => ({})),
-    lstat(join(consumer, CI_SECRETS)).catch(() => null),
+    lstat(join(consumer, CI_SECRETS)).then(
+      () => true,
+      (error: unknown) => !(isRecord(error) && error.code === 'ENOENT'),
+    ),
   ]);
   // Without automatic sync and without CI secrets, the repository doesn't use
   // the broker App: the synced Standards auto-merge workflow then skips its
   // broker steps and leaves Dependabot pull requests manual.
-  if (policy.autoSync === false && secretsInfo === null) {
+  if (policy.autoSync === false && !secretsMayExist) {
     return policyProblems;
   }
   const [secretsFile, exampleFile] = await Promise.all([
