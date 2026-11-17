@@ -34,9 +34,9 @@ describe('creds apply refresh after partial failure', () => {
     );
   });
 
-  it('refreshes a verified replacement when old-token revocation fails', async () => {
+  it('refreshes a verified replacement when old-token retirement fails', async () => {
     const setup = refreshFailureFixture(['ci']);
-    stubRefreshFailureCloudflare(['ci'], { revoke: 'ci' });
+    stubRefreshFailureCloudflare(['ci'], { retire: 'ci' });
     const error = spyOn(console, 'error').mockImplementation(() => undefined);
     spyOn(console, 'log').mockImplementation(() => undefined);
 
@@ -47,7 +47,7 @@ describe('creds apply refresh after partial failure', () => {
     expect(generated).not.toContain('STALE=true');
     expect(error).toHaveBeenCalledWith(
       expect.stringContaining(
-        'replacement newci is stored, but old token oldci could not be revoked',
+        'replacement newci is stored, but old token oldci could not be retired',
       ),
     );
   });
@@ -68,9 +68,9 @@ describe('creds apply refresh after partial failure', () => {
     );
   });
 
-  it('refreshes a verified replacement when old-token revocation rejects at transport', async () => {
+  it('refreshes a verified replacement when old-token retirement rejects at transport', async () => {
     const setup = refreshFailureFixture(['ci']);
-    stubRefreshFailureCloudflare(['ci'], { rejectRevoke: 'ci' });
+    stubRefreshFailureCloudflare(['ci'], { rejectRetire: 'ci' });
     const error = spyOn(console, 'error').mockImplementation(() => undefined);
     spyOn(console, 'log').mockImplementation(() => undefined);
 
@@ -79,7 +79,7 @@ describe('creds apply refresh after partial failure', () => {
     expect(generated).toContain('newci');
     expect(generated).not.toContain('STALE=true');
     expect(error).toHaveBeenCalledWith(
-      expect.stringContaining('revocation transport failed: ci'),
+      expect.stringContaining('retirement transport failed: ci'),
     );
   });
 

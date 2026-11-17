@@ -84,6 +84,22 @@ export const parseTokenName = (
   return ref;
 };
 
+// Renewal renames the token it replaced by appending this suffix and lets it
+// expire within SUPERSEDED_GRACE_DAYS. The name is the only marker `plan` and
+// `watch` can read without decrypting SOPS, and `watch` runs in CI with a
+// read-only token that can't. A minted name never contains a space, so a
+// superseded name never parses as a minted one and never collides with one.
+const SUPERSEDED_SUFFIX = ' (superseded)';
+
+export const supersededNameOf = (name: string): string =>
+  `${name}${SUPERSEDED_SUFFIX}`;
+
+// The minted name a superseded token carried before renewal, or null.
+export const supersededOriginalName = (name: string): string | null =>
+  name.endsWith(SUPERSEDED_SUFFIX)
+    ? name.slice(0, -SUPERSEDED_SUFFIX.length)
+    : null;
+
 // The repository a minted name belongs to is carried by the name itself, so a
 // command holding no repository — `creds revoke` is account-scoped — can still
 // tell a token reconciliation owns from one nothing manages.

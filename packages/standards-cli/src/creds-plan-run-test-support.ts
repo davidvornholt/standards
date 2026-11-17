@@ -34,6 +34,9 @@ let root = '';
 
 export const planRunRoot = (): string => root;
 
+// The bodies of the PUT requests that retired an old token, in order.
+export const updateBodies: Array<unknown> = [];
+
 export const initialize = (
   secrets: string,
 ): { consumer: string; events: string; broker: string } => {
@@ -66,7 +69,7 @@ export const installSops = (body: string): void => {
   process.env.PATH = `${bin}:${originalPath ?? ''}`;
 };
 
-const expiringToken = (target: string): unknown => {
+export const expiringToken = (target: string): Record<string, unknown> => {
   const expires = Date.now() + RENEWAL_WINDOW_DAYS * DAY_MS;
   return {
     id: 'old',
@@ -132,6 +135,14 @@ export const stubCloudflare = (
         envelope({ id: 'replacement', value: 'new-value' }),
       );
     }
+    if (method === 'PUT') {
+      appendFileSync(
+        process.env.PLAN_EVENT_FILE ?? '',
+        `supersede-${url.endsWith('/old') ? 'old' : 'replacement'}\n`,
+      );
+      updateBodies.push(JSON.parse(String(init?.body)));
+      return Promise.resolve(envelope({ id: 'old' }));
+    }
     if (method === 'DELETE') {
       appendFileSync(
         process.env.PLAN_EVENT_FILE ?? '',
@@ -146,6 +157,7 @@ export const stubCloudflare = (
 export const cleanupPlanRun = (): void => {
   mock.restore();
   globalThis.fetch = originalFetch;
+  updateBodies.length = 0;
   process.env.PATH = originalPath;
   for (const [key, value] of [
     ['STANDARDS_BROKER_FILE', originalBroker],

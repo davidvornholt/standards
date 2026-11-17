@@ -23,7 +23,7 @@ describe('creds apply destination-granular dev env refresh', () => {
     expect(await runCredsPlan(setup.consumer, true)).toBe(false);
     expect(readFileSync(setup.destination, 'utf8')).toBe(before);
     expect(refreshMixedCloudflareCalls()).toContain('delete-new-bad');
-    expect(refreshMixedCloudflareCalls()).toContain('delete-old-api');
+    expect(refreshMixedCloudflareCalls()).toContain('supersede-old-api');
     expect(log.mock.calls.join(' ')).not.toContain(
       'regenerating dev env files',
     );
@@ -41,8 +41,10 @@ describe('creds apply destination-granular dev env refresh', () => {
     expect(generated).toContain('GOOD_ACCESS_KEY_ID=new-good');
     expect(generated).not.toContain('concurrent-bad');
     expect(refreshMixedCloudflareCalls()).toContain('delete-new-bad');
-    expect(refreshMixedCloudflareCalls()).toContain('delete-old-good');
-    expect(refreshMixedCloudflareCalls()).not.toContain('delete-old-bad');
+    expect(refreshMixedCloudflareCalls()).toContain('supersede-old-good');
+    expect(
+      refreshMixedCloudflareCalls().filter((call) => call.endsWith('old-bad')),
+    ).toEqual([]);
   });
 
   it('preserves a previously unsafe pair when its sibling later commits', async () => {
@@ -56,6 +58,6 @@ describe('creds apply destination-granular dev env refresh', () => {
     expect(generated).toContain('BAD_ACCESS_KEY_ID=old-bad');
     expect(generated).toContain('GOOD_ACCESS_KEY_ID=new-good');
     expect(refreshMixedCloudflareCalls()).not.toContain('create-bad');
-    expect(refreshMixedCloudflareCalls()).toContain('delete-old-good');
+    expect(refreshMixedCloudflareCalls()).toContain('supersede-old-good');
   });
 });

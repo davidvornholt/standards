@@ -1,14 +1,15 @@
 // The operator-facing rendering of a computed plan. Every block is labelled and
-// printed only when it has entries, because the three lists say different
-// things: what reconciliation will do, what it will never touch, and what no
-// repository reconciles at all. The summary counts them apart for the same
-// reason.
+// printed only when it has entries, because the lists say different
+// things: what reconciliation will do, what it will never touch, what no
+// repository reconciles at all, and what retires itself. The summary counts
+// them apart for the same reason.
 
 import { BROKER_IDENTITY_NAME } from './creds-naming';
 import type {
   BrokeredElsewhereToken,
   CredsPlan,
   PlannedAction,
+  SupersededToken,
   UnmanagedToken,
 } from './creds-plan-types';
 
@@ -74,14 +75,29 @@ const reportBrokeredElsewhere = (
   }
 };
 
+const reportSuperseded = (tokens: ReadonlyArray<SupersededToken>): void => {
+  if (tokens.length === 0) {
+    return;
+  }
+  console.log(
+    'standards creds: superseded tokens — renewal replaced these; each keeps working until it expires so a running app lasts until its replacement deploys, then Cloudflare expires it',
+  );
+  for (const token of tokens) {
+    console.log(
+      `  ${token.name} (${token.status}, expires ${token.expiresOn ?? 'never'}) — deploy the replacement before then`,
+    );
+  }
+};
+
 export const reportCredsPlan = (plan: CredsPlan, apply: boolean): void => {
   reportActions(plan.actions, apply);
   reportUnmanaged(plan.unmanaged);
   reportBrokeredElsewhere(plan.brokeredElsewhere);
+  reportSuperseded(plan.superseded);
   for (const finding of plan.findings) {
     console.error(`standards creds: ${finding}`);
   }
   console.log(
-    `standards creds: ${plan.actions.length} action(s), ${plan.findings.length} finding(s), ${plan.healthy} brokered token(s) healthy, ${plan.unmanaged.length} unmanaged token(s), ${plan.brokeredElsewhere.length} token(s) brokered to another repository`,
+    `standards creds: ${plan.actions.length} action(s), ${plan.findings.length} finding(s), ${plan.healthy} brokered token(s) healthy, ${plan.unmanaged.length} unmanaged token(s), ${plan.brokeredElsewhere.length} token(s) brokered to another repository, ${plan.superseded.length} superseded token(s)`,
   );
 };

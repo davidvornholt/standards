@@ -6,6 +6,7 @@ import {
   cloudflareExpiresOn,
   DAY_MS,
   RENEW_WITHIN_DAYS,
+  SUPERSEDED_GRACE_DAYS,
 } from './creds-cloudflare-expiry';
 import { groupByIntersectingFootprint } from './creds-plan-groups';
 import type {
@@ -27,6 +28,19 @@ type Disposition =
   | { readonly kind: 'action'; readonly action: PlannedAction }
   | { readonly kind: 'finding'; readonly finding: string }
   | { readonly kind: 'healthy' };
+
+// An expired token grants nothing, so renewal deletes it rather than keeping
+// it for a running host.
+const supersededExpiresOn = (
+  expired: boolean,
+  expiry: number,
+  now: Date,
+): string | null =>
+  expired || expiry <= now.getTime()
+    ? null
+    : cloudflareExpiresOn(
+        Math.min(expiry, now.getTime() + SUPERSEDED_GRACE_DAYS * DAY_MS),
+      );
 
 const dispositionOf = (
   entry: ManagedToken,
@@ -121,6 +135,7 @@ const dispositionOf = (
         input.now.getTime() +
           Math.max(expiry - issued, BROKERED_TOKEN_LIFETIME_DAYS * DAY_MS),
       ),
+      supersededExpiresOn: supersededExpiresOn(expired, expiry, input.now),
       reason: `${expired ? 'expired' : 'expires'} ${token.expiresOn}`,
     },
   };
@@ -183,5 +198,6 @@ export const computeCredsPlan = (input: {
     healthy,
     unmanaged: partition.unmanaged,
     brokeredElsewhere: partition.brokeredElsewhere,
+    superseded: partition.superseded,
   };
 };

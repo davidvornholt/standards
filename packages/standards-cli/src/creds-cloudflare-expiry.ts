@@ -18,3 +18,10 @@ const FRACTIONAL_SECONDS = /\.\d{3}Z$/u;
 
 export const cloudflareExpiresOn = (epochMs: number): string =>
   new Date(epochMs).toISOString().replace(FRACTIONAL_SECONDS, 'Z');
+
+// Renewal leaves the token it replaced working this long, never longer than it
+// had left, because a running host keeps using it until the new SOPS value
+// deploys and `apply` can't see when that happens (standards#565). A week
+// covers a pull request that waits a few days for review; the old token had up
+// to RENEW_WITHIN_DAYS left anyway, so this only shortens its life.
+export const SUPERSEDED_GRACE_DAYS = 7;

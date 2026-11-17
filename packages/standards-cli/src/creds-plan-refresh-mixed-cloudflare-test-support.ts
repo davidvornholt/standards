@@ -67,10 +67,10 @@ export const stubRefreshMixedCloudflare = (kind: RefreshMixedKind): void => {
         envelope({ id: `new-${name}`, value: `value-${name}` }),
       );
     }
-    if (method === 'DELETE') {
+    if (method === 'PUT' || method === 'DELETE') {
       const id = url.slice(url.lastIndexOf('/') + 1);
-      calls.push(`delete-${id}`);
-      return Promise.resolve(envelope({ id: 'deleted' }));
+      calls.push(`${method === 'PUT' ? 'supersede' : 'delete'}-${id}`);
+      return Promise.resolve(envelope({ id }));
     }
     const listed = [
       { id: 'bootstrap', name: 'standards-broker', status: 'active' },

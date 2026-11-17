@@ -12,10 +12,12 @@ import {
   ACCOUNT,
   cleanupPlanRun,
   ENCRYPTED_SECRETS,
+  expiringToken,
   initialize,
   installSops,
   planRunRoot,
   stubCloudflare,
+  updateBodies,
 } from './creds-plan-run-test-support';
 
 afterEach(cleanupPlanRun);
@@ -173,12 +175,58 @@ describe('creds plan/apply mutation safety', () => {
       'delete-replacement',
     ]);
   });
-  it('writes and verifies the replacement before revoking the old token', async () => {
+  it('writes and verifies the replacement before superseding the old token for a week', async () => {
     const { consumer, events } = initialize(ENCRYPTED_SECRETS);
     installSops(
       'if [ "$1" = "decrypt" ]; then printf \'new-value\'; exit 0; fi\neval "$SOPS_EDITOR \\"$2\\"" && printf "write\\n" >> "$PLAN_EVENT_FILE"',
     );
     stubCloudflare();
+    const before = Date.now();
+    expect(await runCredsPlan(consumer, true)).toBe(true);
+    expect(readFileSync(events, 'utf8').trim().split('\n')).toEqual([
+      'create',
+      'write',
+      'supersede-old',
+    ]);
+    // The old token keeps its value, policies, and condition, so the running
+    // host keeps working, but it now dies within a week under a name plan and
+    // watch recognise.
+    const [body] = updateBodies as ReadonlyArray<{
+      readonly name: string;
+      readonly policies: unknown;
+      // biome-ignore lint/style/useNamingConvention: Cloudflare's token field is snake_case.
+      readonly expires_on: string;
+    }>;
+    expect(body?.name).toBe(
+      'standards/davidvornholt/example/ci/ci.token (superseded)',
+    );
+    expect(body?.policies).toEqual([
+      {
+        effect: 'allow',
+        resources: { [`com.cloudflare.api.account.${ACCOUNT}`]: '*' },
+        // biome-ignore lint/style/useNamingConvention: Cloudflare's policy field is snake_case.
+        permission_groups: [{ id: 'pg' }],
+      },
+    ]);
+    const expires = Date.parse(body?.expires_on ?? '');
+    expect(expires).toBeGreaterThanOrEqual(before + 7 * 86_400_000 - 1000);
+    expect(expires).toBeLessThanOrEqual(Date.now() + 7 * 86_400_000);
+  });
+
+  it('deletes an already expired old token after storing its replacement', async () => {
+    const { consumer, events } = initialize(ENCRYPTED_SECRETS);
+    installSops(
+      'if [ "$1" = "decrypt" ]; then printf \'new-value\'; exit 0; fi\neval "$SOPS_EDITOR \\"$2\\"" && printf "write\\n" >> "$PLAN_EVENT_FILE"',
+    );
+    stubCloudflare('ci', 'bootstrap', [
+      { id: 'bootstrap', name: 'standards-broker', status: 'active' },
+      {
+        ...expiringToken('ci'),
+        status: 'expired',
+        // biome-ignore lint/style/useNamingConvention: Cloudflare's token field is snake_case.
+        expires_on: new Date(Date.now() - 86_400_000).toISOString(),
+      },
+    ]);
     expect(await runCredsPlan(consumer, true)).toBe(true);
     expect(readFileSync(events, 'utf8').trim().split('\n')).toEqual([
       'create',

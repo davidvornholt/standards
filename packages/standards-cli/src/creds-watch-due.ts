@@ -26,7 +26,9 @@ type Parsed = AccountToken & { readonly repo: string; readonly expiry: number };
 
 // A disabled token may be deliberate, and `creds apply` reports it as a
 // finding, so only active and expired tokens are the watcher's concern.
-// Active tokens without an expiry never need renewal.
+// Active tokens without an expiry never need renewal. A token renewal
+// superseded carries a name parseAnyTokenName rejects, so it is never reported:
+// it expires on its own and needs no renewal.
 const parse = (
   entry: AccountToken,
 ): Parsed | { readonly problem: string } | null => {
