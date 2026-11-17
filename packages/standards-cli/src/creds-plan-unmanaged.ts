@@ -11,10 +11,12 @@ import {
   parseAnyTokenName,
   parseTokenName,
   repoTokenPrefix,
+  supersededOriginalName,
 } from './creds-naming';
 import type {
   AccountToken,
   BrokeredElsewhereToken,
+  SupersededToken,
   UnmanagedToken,
 } from './creds-plan-types';
 
@@ -23,6 +25,7 @@ type Classification =
   | { readonly kind: 'malformed' }
   | { readonly kind: 'unmanaged' }
   | { readonly kind: 'brokered-elsewhere'; readonly repo: string }
+  | { readonly kind: 'superseded' }
   | { readonly kind: 'ignored' };
 
 const classifyAccountToken = (
@@ -37,6 +40,14 @@ const classifyAccountToken = (
   // live ones. Brokered tokens keep their own expiry handling in creds-plan.
   if (token.status === 'expired') {
     return { kind: 'ignored' };
+  }
+  // A token renewal superseded expires on its own. Another repository's is
+  // that repository's to report.
+  const original = supersededOriginalName(token.name);
+  if (original !== null && parseAnyTokenName(original) !== null) {
+    return parseTokenName(original, repo) === null
+      ? { kind: 'ignored' }
+      : { kind: 'superseded' };
   }
   if (
     token.name.toLowerCase().startsWith(repoTokenPrefix(repo).toLowerCase())
@@ -65,6 +76,7 @@ export type TokenPartition = {
   readonly managed: ReadonlyArray<ManagedTokenRef>;
   readonly unmanaged: ReadonlyArray<UnmanagedToken>;
   readonly brokeredElsewhere: ReadonlyArray<BrokeredElsewhereToken>;
+  readonly superseded: ReadonlyArray<SupersededToken>;
   readonly findings: ReadonlyArray<string>;
 };
 
@@ -82,6 +94,7 @@ export const partitionAccountTokens = (
   const managed: Array<ManagedTokenRef> = [];
   const unmanaged: Array<UnmanagedToken> = [];
   const brokeredElsewhere: Array<BrokeredElsewhereToken> = [];
+  const superseded: Array<SupersededToken> = [];
   const findings: Array<string> = [];
   for (const entry of tokens) {
     const classification = classifyAccountToken(entry.token, repo);
@@ -95,7 +108,9 @@ export const partitionAccountTokens = (
       unmanaged.push(reported(entry));
     } else if (classification.kind === 'brokered-elsewhere') {
       brokeredElsewhere.push({ ...reported(entry), repo: classification.repo });
+    } else if (classification.kind === 'superseded') {
+      superseded.push({ ...reported(entry), expiresOn: entry.token.expiresOn });
     }
   }
-  return { managed, unmanaged, brokeredElsewhere, findings };
+  return { managed, unmanaged, brokeredElsewhere, superseded, findings };
 };

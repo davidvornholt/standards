@@ -86,7 +86,9 @@ it('keeps a concurrently renewed credential active when duplicate retirement obs
     policies: [],
     condition: null,
     replacementExpiresOn: '2027-01-01T00:00:00Z',
-    reason: 'expiring',
+    // An expired old token is deleted, which is the mutation this race checks.
+    supersededExpiresOn: null,
+    reason: 'expired',
   });
   await minted.promise;
   const retirement = revokeStoredDuplicate({

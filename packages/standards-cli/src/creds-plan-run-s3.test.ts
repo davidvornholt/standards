@@ -94,7 +94,7 @@ describe('creds apply S3 pair renewal', () => {
     });
   }
 
-  it('renews an expiring S3 destination by rewriting the derived pair before revoking', async () => {
+  it('renews an expiring S3 destination by rewriting the derived pair before superseding the old token', async () => {
     const { consumer, events } = initialize(S3_SECRETS);
     installSops(
       `if [ "$1" = "decrypt" ]; then\n  case "$3" in\n    *access_key_id*) if [ -s "$PLAN_EVENT_FILE" ]; then printf 'replacement'; else printf 'old'; fi ;;\n    *) printf '${NEW_VALUE_SHA}' ;;\n  esac\n  exit 0\nfi\neval "$SOPS_EDITOR \\"$2\\"" && printf "write\\n" >> "$PLAN_EVENT_FILE"`,
@@ -105,7 +105,7 @@ describe('creds apply S3 pair renewal', () => {
     expect(readFileSync(events, 'utf8').trim().split('\n')).toEqual([
       'create',
       'write',
-      'delete-old',
+      'supersede-old',
     ]);
     const secrets = readFileSync(join(consumer, 'secrets', 'ci.yaml'), 'utf8');
     expect(secrets).toContain('access_key_id: replacement');

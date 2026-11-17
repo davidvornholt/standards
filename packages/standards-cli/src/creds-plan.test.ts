@@ -210,6 +210,11 @@ describe('creds plan safeguards', () => {
     expect(plan.findings).toEqual([
       expect.stringContaining('ambiguous Cloudflare tokens'),
     ]);
+    // Revoking the leftover before the stored token deploys would cut off the
+    // running app the way standards#565 did.
+    expect(plan.findings[0]).toContain(
+      'deploy the stored token and confirm the app works with it, and only then use',
+    );
   });
 
   it('refuses renewal when live policy data is unavailable', () => {

@@ -21,7 +21,7 @@ const originalBroker = process.env.STANDARDS_BROKER_FILE;
 const originalFetch = globalThis.fetch;
 const originalPath = process.env.PATH;
 let root = '';
-let deletes: Array<string> = [];
+let mutations: Array<string> = [];
 
 const initialize = (sopsBody: string): string => {
   root = mkdtempSync(join(tmpdir(), 'creds-plan-ambiguous-'));
@@ -52,7 +52,7 @@ const initialize = (sopsBody: string): string => {
   writeFileSync(sops, `#!/bin/sh\n${sopsBody}\n`);
   chmodSync(sops, EXECUTABLE_MODE);
   process.env.PATH = `${bin}:${originalPath ?? ''}`;
-  deletes = [];
+  mutations = [];
   const expires = Date.now() + 10 * DAY_MS;
   globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
@@ -75,8 +75,10 @@ const initialize = (sopsBody: string): string => {
         }),
       );
     }
-    if (method === 'DELETE') {
-      deletes.push(url.endsWith('/old') ? 'old' : 'replacement');
+    if (method === 'DELETE' || method === 'PUT') {
+      mutations.push(
+        `${method === 'PUT' ? 'supersede' : 'delete'}-${url.endsWith('/old') ? 'old' : 'replacement'}`,
+      );
       return Promise.resolve(
         Response.json({ success: true, errors: [], result: {} }),
       );
@@ -132,12 +134,12 @@ afterEach(() => {
 });
 
 describe('creds renewal ambiguous SOPS outcomes', () => {
-  it('revokes only the old token after proving a late write committed', async () => {
+  it('supersedes only the old token after proving a late write committed', async () => {
     const consumer = initialize(
       'if [ "$1" = "edit" ]; then eval "$SOPS_EDITOR \\"$2\\""; exit 1; fi\nprintf \'new-value\'',
     );
     expect(await runCredsPlan(consumer, true)).toBe(true);
-    expect(deletes).toEqual(['old']);
+    expect(mutations).toEqual(['supersede-old']);
   });
 
   it('keeps both tokens when post-write verification fails', async () => {
@@ -146,7 +148,7 @@ describe('creds renewal ambiguous SOPS outcomes', () => {
     );
     const error = spyOn(console, 'error').mockImplementation(() => undefined);
     expect(await runCredsPlan(consumer, true)).toBe(false);
-    expect(deletes).toEqual([]);
+    expect(mutations).toEqual([]);
     expect(error).toHaveBeenCalledWith(
       expect.stringContaining(
         `account ${ACCOUNT} replacement replacement remains active and old token old was not revoked`,

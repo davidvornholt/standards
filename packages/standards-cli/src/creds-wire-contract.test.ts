@@ -14,6 +14,7 @@ import {
   deleteAccountToken,
   listAccountTokens,
   listPermissionGroups,
+  updateAccountToken,
   verifyAccountToken,
 } from './creds-cloudflare';
 import { cloudflareExpiresOn } from './creds-cloudflare-expiry';
@@ -66,7 +67,7 @@ afterEach(() => {
   requests.length = 0;
 });
 
-describe('provider wire contract', () => {
+describe('GitHub wire contract', () => {
   // https://docs.github.com/en/rest/apps/apps#create-a-github-app-from-a-manifest
   it('GitHub manifest conversion: POST /app-manifests/{code}/conversions', async () => {
     stubFetch(HTTP_CREATED, {
@@ -127,7 +128,9 @@ describe('provider wire contract', () => {
       'GET https://api.github.com/repos/example/repository/installation',
     ]);
   });
+});
 
+describe('Cloudflare wire contract', () => {
   // https://developers.cloudflare.com/api/resources/accounts/subresources/tokens/methods/verify/
   it('Cloudflare token verify: GET /accounts/{id}/tokens/verify', async () => {
     stubFetch(HTTP_OK, cfEnvelope({ id: 't', status: 'active' }));
@@ -171,6 +174,19 @@ describe('provider wire contract', () => {
   it('Cloudflare expires_on: whole-second RFC3339, no fractional part', () => {
     const withMillis = Date.parse('2026-10-21T20:03:23.989Z');
     expect(cloudflareExpiresOn(withMillis)).toBe('2026-10-21T20:03:23Z');
+  });
+
+  // https://developers.cloudflare.com/api/resources/accounts/subresources/tokens/methods/update/
+  it('Cloudflare token update: PUT /accounts/{id}/tokens/{token_id}', async () => {
+    stubFetch(HTTP_OK, cfEnvelope({ id: 'tok1' }));
+    const updated = await updateAccountToken(ACCOUNT, 'cfat', 'tok1', {
+      name: 'standards/o/r/ci/ci.key (superseded)',
+      policies: [],
+      expiresOn: '2026-11-24T00:00:00Z',
+      condition: null,
+    });
+    expect(updated.ok).toBe(true);
+    expect(requests).toEqual([`PUT ${CF}/tokens/tok1`]);
   });
 
   // https://developers.cloudflare.com/api/resources/accounts/subresources/tokens/methods/delete/

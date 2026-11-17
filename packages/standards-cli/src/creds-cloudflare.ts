@@ -1,7 +1,7 @@
 // Cloudflare account-owned API token operations for `standards creds`: the
 // broker bootstrap token (permission "Account API Tokens Write") verifies
-// itself, lists and mints scoped tokens, and revokes them. Token values
-// returned by create flow only into SOPS writers,
+// itself, lists and mints scoped tokens, renames the ones renewal replaced, and
+// revokes them. Token values returned by create flow only into SOPS writers,
 // never stdout.
 // User-owned tokens are intentionally outside this API and the bootstrap
 // credential's authority; they must be managed separately in Cloudflare.
@@ -146,28 +146,32 @@ export const listPermissionGroups = async (
 
 export type CreatedToken = { readonly id: string; readonly value: string };
 
+export type TokenRequest = {
+  readonly name: string;
+  readonly policies: ReadonlyArray<TokenPolicy>;
+  readonly expiresOn: string | null;
+  readonly condition: TokenCondition | null;
+};
+
+const tokenBody = (request: TokenRequest) => ({
+  name: request.name,
+  policies: request.policies,
+  ...(request.expiresOn === null ? {} : { expires_on: request.expiresOn }),
+  ...(request.condition === null
+    ? {}
+    : { condition: encodeTokenCondition(request.condition) }),
+});
+
 export const createAccountToken = async (
   accountId: string,
   token: string,
-  request: {
-    readonly name: string;
-    readonly policies: ReadonlyArray<TokenPolicy>;
-    readonly expiresOn: string | null;
-    readonly condition: TokenCondition | null;
-  },
+  request: TokenRequest,
 ): Promise<CfResult<CreatedToken>> => {
   const response = await cfRequest(
     token,
     'POST',
     `/accounts/${accountId}/tokens`,
-    {
-      name: request.name,
-      policies: request.policies,
-      ...(request.expiresOn === null ? {} : { expires_on: request.expiresOn }),
-      ...(request.condition === null
-        ? {}
-        : { condition: encodeTokenCondition(request.condition) }),
-    },
+    tokenBody(request),
   );
   if (!response.ok) {
     return response;
@@ -183,6 +187,23 @@ export const createAccountToken = async (
     return { ok: false, problem: 'token creation returned no id and value' };
   }
   return { ok: true, value: { id: result.id, value: result.value } };
+};
+
+// Cloudflare's update replaces name, policies, condition, and expiry together
+// and keeps the token's value, so a stored copy of it keeps working.
+export const updateAccountToken = async (
+  accountId: string,
+  token: string,
+  tokenId: string,
+  request: TokenRequest,
+): Promise<CfResult<null>> => {
+  const response = await cfRequest(
+    token,
+    'PUT',
+    `/accounts/${accountId}/tokens/${tokenId}`,
+    tokenBody(request),
+  );
+  return response.ok ? { ok: true, value: null } : response;
 };
 
 export const deleteAccountToken = async (

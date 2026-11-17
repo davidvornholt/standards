@@ -1,9 +1,16 @@
 // Renewal execution for `standards creds apply`: create the replacement
-// first, durably write and verify the SOPS destination, and only then revoke
-// the old token. An unverifiable destination keeps both tokens; a verified
+// first, durably write and verify the SOPS destination, and only then retire
+// the old token. Retiring renames it superseded and keeps its expiry rather
+// than deleting it, because a running host keeps using it until the new SOPS
+// value deploys. An unverifiable destination keeps both tokens; a verified
 // mismatch deletes the replacement and preserves the old token.
 
-import { createAccountToken, deleteAccountToken } from './creds-cloudflare';
+import {
+  createAccountToken,
+  deleteAccountToken,
+  updateAccountToken,
+} from './creds-cloudflare';
+import { supersededNameOf } from './creds-naming';
 import type { PlannedAction } from './creds-plan-types';
 import { destinationWrites, s3AccessKeyPath, s3PairPaths } from './creds-r2';
 import { inspectSopsScalarDestination, setSopsValues } from './creds-sops';
@@ -63,6 +70,20 @@ const inspectRenewDestinations = async (
     ? `${action.name}: secret ${action.target}:${action.key} disappeared before renewal`
     : null;
 };
+
+// An expired old token grants nothing, so nothing waits on it.
+const retireOldToken = (
+  account: CloudflareBrokerAccount,
+  action: RenewAction,
+): ReturnType<typeof deleteAccountToken> =>
+  action.supersededExpiresOn === null
+    ? deleteAccountToken(account.accountId, account.token, action.tokenId)
+    : updateAccountToken(account.accountId, account.token, action.tokenId, {
+        name: supersededNameOf(action.name),
+        policies: action.policies,
+        expiresOn: action.supersededExpiresOn,
+        condition: action.condition,
+      });
 
 const renewWhileLocked = async (
   consumer: string,
@@ -140,21 +161,17 @@ const renewWhileLocked = async (
       refreshEvidence(action, 'unsafe'),
     );
   }
-  const deleted = await deleteAccountToken(
-    accountId,
-    bootstrapToken,
-    action.tokenId,
-  );
+  const retired = await retireOldToken(account, action);
   return renewalResult(
-    deleted.ok
+    retired.ok
       ? null
-      : `${action.name}: replacement ${replacementId} is stored, but old token ${action.tokenId} could not be revoked: ${deleted.problem}`,
+      : `${action.name}: replacement ${replacementId} is stored, but old token ${action.tokenId} could not be retired: ${retired.problem}; once the replacement has deployed, retire it with \`standards creds revoke --account ${accountId} --token-id ${action.tokenId}\``,
     refreshEvidence(action, 'verified'),
   );
 };
 
 // Duplicate retirement uses this same lock. Hold it before minting until the
-// replacement is durably verified and the old token's deletion has finished.
+// replacement is durably verified and the old token's retirement has finished.
 export const renewPlannedToken = (
   consumer: string,
   account: CloudflareBrokerAccount,

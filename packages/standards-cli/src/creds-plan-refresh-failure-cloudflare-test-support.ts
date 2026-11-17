@@ -39,8 +39,8 @@ const token = (target: string): unknown => {
 type StubFailure = {
   readonly create?: string;
   readonly rejectCreate?: string;
-  readonly rejectRevoke?: string;
-  readonly revoke?: string;
+  readonly rejectRetire?: string;
+  readonly retire?: string;
 };
 
 const createResponse = (
@@ -61,25 +61,27 @@ const createResponse = (
     );
   }
   // Renewals hold the shared broker lock, so provider failures must not wait
-  // for a sibling renewal to acquire that same lock and finish its deletion.
+  // for a sibling renewal to acquire that same lock and finish retiring.
   return Promise.reject(new Error(`creation transport failed: ${target}`));
 };
 
-const deleteResponse = (
+// Renewal retires an old token with PUT; DELETE only cleans up a replacement.
+const mutationResponse = (
   targets: ReadonlyArray<string>,
   failure: StubFailure,
   url: string,
+  method: string,
 ): Promise<Response> => {
   const target = targets.find((candidate) => url.endsWith(`/old${candidate}`));
   const tokenId = url.slice(url.lastIndexOf('/') + 1);
-  calls.push(`delete-${tokenId}`);
-  if (failure.rejectRevoke !== undefined && target === failure.rejectRevoke) {
-    return Promise.reject(new Error(`revocation transport failed: ${target}`));
+  calls.push(`${method === 'PUT' ? 'supersede' : 'delete'}-${tokenId}`);
+  if (failure.rejectRetire !== undefined && target === failure.rejectRetire) {
+    return Promise.reject(new Error(`retirement transport failed: ${target}`));
   }
   return Promise.resolve(
-    target === failure.revoke
-      ? envelope('revocation failed', undefined, false)
-      : envelope({ id: 'deleted' }),
+    target === failure.retire
+      ? envelope('retirement failed', undefined, false)
+      : envelope({ id: tokenId }),
   );
 };
 
@@ -96,8 +98,8 @@ export const stubRefreshFailureCloudflare = (
     if (method === 'POST') {
       return createResponse(targets, failure, init);
     }
-    if (method === 'DELETE') {
-      return deleteResponse(targets, failure, url);
+    if (method === 'PUT' || method === 'DELETE') {
+      return mutationResponse(targets, failure, url, method);
     }
     const listed = [
       { id: 'bootstrap', name: 'standards-broker', status: 'active' },
