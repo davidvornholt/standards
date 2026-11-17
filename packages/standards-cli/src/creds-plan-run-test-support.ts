@@ -113,6 +113,21 @@ const defaultListing = (target: string): ReadonlyArray<unknown> => [
   expiringToken(target),
 ];
 
+// Journals each old-token retirement (PUT) and deletion to the event file.
+const mutationResponse = (
+  url: string,
+  method: string,
+  init: RequestInit | undefined,
+): Response => {
+  const which = url.endsWith('/old') ? 'old' : 'replacement';
+  const kind = method === 'PUT' ? 'supersede' : 'delete';
+  appendFileSync(process.env.PLAN_EVENT_FILE ?? '', `${kind}-${which}\n`);
+  if (method === 'PUT') {
+    updateBodies.push(JSON.parse(String(init?.body)));
+  }
+  return envelope({ id: which });
+};
+
 export const stubCloudflare = (
   target = 'ci',
   verifiedId: string | null = 'bootstrap',
@@ -135,20 +150,8 @@ export const stubCloudflare = (
         envelope({ id: 'replacement', value: 'new-value' }),
       );
     }
-    if (method === 'PUT') {
-      appendFileSync(
-        process.env.PLAN_EVENT_FILE ?? '',
-        `supersede-${url.endsWith('/old') ? 'old' : 'replacement'}\n`,
-      );
-      updateBodies.push(JSON.parse(String(init?.body)));
-      return Promise.resolve(envelope({ id: 'old' }));
-    }
-    if (method === 'DELETE') {
-      appendFileSync(
-        process.env.PLAN_EVENT_FILE ?? '',
-        `delete-${url.endsWith('/old') ? 'old' : 'replacement'}\n`,
-      );
-      return Promise.resolve(envelope({ id: 'deleted' }));
+    if (method === 'PUT' || method === 'DELETE') {
+      return Promise.resolve(mutationResponse(url, method, init));
     }
     return Promise.resolve(envelope(listing, pageInfo(listing.length)));
   }) as typeof fetch;

@@ -67,7 +67,7 @@ afterEach(() => {
   requests.length = 0;
 });
 
-describe('provider wire contract', () => {
+describe('GitHub wire contract', () => {
   // https://docs.github.com/en/rest/apps/apps#create-a-github-app-from-a-manifest
   it('GitHub manifest conversion: POST /app-manifests/{code}/conversions', async () => {
     stubFetch(HTTP_CREATED, {
@@ -128,7 +128,9 @@ describe('provider wire contract', () => {
       'GET https://api.github.com/repos/example/repository/installation',
     ]);
   });
+});
 
+describe('Cloudflare wire contract', () => {
   // https://developers.cloudflare.com/api/resources/accounts/subresources/tokens/methods/verify/
   it('Cloudflare token verify: GET /accounts/{id}/tokens/verify', async () => {
     stubFetch(HTTP_OK, cfEnvelope({ id: 't', status: 'active' }));
