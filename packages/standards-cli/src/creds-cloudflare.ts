@@ -1,8 +1,7 @@
 // Cloudflare account-owned API token operations for `standards creds`: the
 // broker bootstrap token (permission "Account API Tokens Write") verifies
-// itself, lists and mints scoped tokens, renames and shortens the ones renewal
-// replaced, and revokes them. Token values
-// returned by create flow only into SOPS writers,
+// itself, lists and mints scoped tokens, renames the ones renewal replaced, and
+// revokes them. Token values returned by create flow only into SOPS writers,
 // never stdout.
 // User-owned tokens are intentionally outside this API and the bootstrap
 // credential's authority; they must be managed separately in Cloudflare.

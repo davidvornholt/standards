@@ -1,6 +1,6 @@
 // Renewal execution for `standards creds apply`: create the replacement
 // first, durably write and verify the SOPS destination, and only then retire
-// the old token. Retiring renames it superseded and shortens its expiry rather
+// the old token. Retiring renames it superseded and keeps its expiry rather
 // than deleting it, because a running host keeps using it until the new SOPS
 // value deploys. An unverifiable destination keeps both tokens; a verified
 // mismatch deletes the replacement and preserves the old token.
