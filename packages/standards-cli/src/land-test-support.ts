@@ -27,13 +27,20 @@ type CheckOptions = {
   readonly status?: string;
   readonly conclusion?: string;
   readonly run?: number;
+  // When the check started. By default, a later run's checks start later.
+  readonly started?: string;
 };
+
+const MS_PER_MINUTE = 60_000;
 
 export const check = ({
   name = 'check',
   status = 'COMPLETED',
   conclusion = 'SUCCESS',
   run = 1,
+  started = new Date(
+    Date.parse(OLD_UPDATE) + run * MS_PER_MINUTE,
+  ).toISOString(),
 }: CheckOptions = {}): Record<string, string> => ({
   __typename: 'CheckRun',
   name,
@@ -41,6 +48,7 @@ export const check = ({
   conclusion,
   workflowName: 'CI',
   detailsUrl: `https://github.com/test/repo/actions/runs/${run}/job/9`,
+  startedAt: started,
   completedAt: OLD_UPDATE,
 });
 
@@ -105,6 +113,7 @@ const initialGithub = (): FakeGithub => ({
   behindBy: [0],
   ready: null,
   runFiles: { '1': CI, '2': CI },
+  runEvents: {},
   workflowFiles: {
     [CI]: 'on:\n  pull_request:\n    types: [opened, ready_for_review]\n',
   },

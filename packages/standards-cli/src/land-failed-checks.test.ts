@@ -129,6 +129,44 @@ describe('standards land with a failed check and a newer run', () => {
     expect(mergeCalls(fixture)).toEqual([]);
   });
 
+  it('keeps a failure from a rerun that started after the pass', () => {
+    // Rerunning an older run keeps its run id, so only the start times tell
+    // which result is newer.
+    openPr({
+      statusCheckRollup: [
+        check({ conclusion: 'FAILURE', started: '2026-01-01T00:31:00Z' }),
+        check({ run: 2, started: '2026-01-01T00:28:00Z' }),
+      ],
+    });
+    const result = land(fixture, ['123']);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('check failed on');
+    expect(mergeCalls(fixture)).toEqual([]);
+  });
+
+  it("keeps a pull_request failure that a push run's pass follows", () => {
+    // A push run tests the head, not its merge with the base.
+    fixture.github.runEvents['2'] = 'push';
+    openPr({
+      statusCheckRollup: [check({ conclusion: 'FAILURE' }), check({ run: 2 })],
+    });
+    const result = land(fixture, ['123']);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('check failed on');
+    expect(mergeCalls(fixture)).toEqual([]);
+  });
+
+  it("keeps a failure whose runs' workflows can't be read", () => {
+    fixture.github.runFiles = {};
+    openPr({
+      statusCheckRollup: [check({ conclusion: 'FAILURE' }), check({ run: 2 })],
+    });
+    const result = land(fixture, ['123']);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('check failed on');
+    expect(mergeCalls(fixture)).toEqual([]);
+  });
+
   it('waits for a newer run before it reports the check', () => {
     // A cancelled run's aggregate fails before the run that cancelled it
     // reports its own aggregate.

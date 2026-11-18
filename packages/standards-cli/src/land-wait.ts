@@ -1,12 +1,12 @@
 // Waiting until GitHub may merge a pull request's current head and its checks
 // have passed. Marks a draft ready and updates a branch that is behind.
 
+import { checkStates } from './land-check-states';
 import {
   type Check,
   type CheckStates,
-  checkStates,
   staleRuns,
-  workflowFiles,
+  workflowRuns,
 } from './land-checks';
 import {
   durationText,
@@ -50,7 +50,7 @@ type WaitState = {
   shown: { readonly head: string; readonly waiting: string } | null;
   last: Poll | null;
   readonly again: Map<number, boolean>;
-  readonly files: Map<number, string>;
+  readonly workflows: Map<number, string>;
   readonly deadline: number;
 };
 
@@ -86,7 +86,7 @@ const readPoll = (
   const rolledUp = checkStates(rollup, {
     quiet,
     staleIds: staleRuns(context, polled, rollup, state.again),
-    files: workflowFiles(context, polled, rollup, state.files),
+    workflows: workflowRuns(context, polled, rollup, state.workflows),
   });
   // Only checks that look settled need the runs, so most polls skip them.
   const running =
@@ -321,6 +321,6 @@ export const waitForChecks = (
     shown: null,
     last: null,
     again: new Map(),
-    files: new Map(),
+    workflows: new Map(),
     deadline: context.deadline ?? Date.now() + context.waitMs,
   });

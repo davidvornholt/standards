@@ -48,6 +48,8 @@ export type FakeGithub = {
   ready: string | null;
   // Maps a check's run to its workflow file.
   runFiles: Record<string, string>;
+  // Maps a check's run to the event that started it, pull_request if absent.
+  runEvents: Record<string, string>;
   // Workflow file texts by path, at every commit.
   workflowFiles: Record<string, string>;
   // Workflow file texts by path at the commits listed here, in place of
@@ -171,7 +173,11 @@ const runsLookup = ({ github }: Call): FakeGhResult =>
             nodes: [
               { workflowRun: null },
               ...Object.entries(github.runFiles).map(([run, path]) => ({
-                workflowRun: { databaseId: Number(run), file: { path } },
+                workflowRun: {
+                  databaseId: Number(run),
+                  event: github.runEvents[run] ?? 'pull_request',
+                  file: { path },
+                },
               })),
             ],
           },
