@@ -173,14 +173,48 @@ export const staleRuns = (
 
 type CheckRunState = 'passed' | 'pending' | 'stale' | 'failed' | 'superseded';
 
+type NewestRuns = {
+  // The newest run of each workflow.
+  readonly workflow: ReadonlyMap<string, number>;
+  // The newest run of each workflow that reports a check of a name and
+  // didn't skip it, keyed by checkKey.
+  readonly ran: ReadonlyMap<string, number>;
+};
+
+const checkKey = (check: Check): string =>
+  `${check.workflowName ?? ''}\n${check.name ?? ''}`;
+
+const raiseTo = (map: Map<string, number>, key: string, id: number): void => {
+  map.set(key, Math.max(map.get(key) ?? 0, id));
+};
+
+const newestRuns = (rollup: ReadonlyArray<Check>): NewestRuns => {
+  const workflow = new Map<string, number>();
+  const ran = new Map<string, number>();
+  for (const check of rollup) {
+    if (check.workflowName) {
+      const id = runIdOf(check.detailsUrl);
+      raiseTo(workflow, check.workflowName, id);
+      if (check.conclusion !== 'SKIPPED') {
+        raiseTo(ran, checkKey(check), id);
+      }
+    }
+  }
+  return { workflow, ran };
+};
+
 const checkRunState = (
   check: Check,
-  newest: ReadonlyMap<string, number>,
+  newest: NewestRuns,
   quiet: boolean,
   staleIds: ReadonlySet<number>,
 ): CheckRunState => {
   const id = runIdOf(check.detailsUrl);
-  const superseded = id < (newest.get(check.workflowName ?? '') ?? 0);
+  const superseded = id < (newest.workflow.get(check.workflowName ?? '') ?? 0);
+  // A newer run's own result for the check counts instead, such as the
+  // passing replacement of a check that failed because its run was
+  // cancelled. A newer skip replaces nothing, because nothing ran.
+  const replaced = id < (newest.ran.get(checkKey(check)) ?? 0);
   // CI that skips its jobs on drafts leaves skipped checks that GitHub
   // counts as passed, although nothing ran. The ready event starts the run
   // that replaces them.
@@ -189,7 +223,7 @@ const checkRunState = (
   if (check.status !== 'COMPLETED') {
     return 'pending';
   }
-  if (superseded && (stale || check.conclusion === 'CANCELLED')) {
+  if (replaced || (superseded && (stale || check.conclusion === 'CANCELLED'))) {
     return 'superseded';
   }
   if (stale) {
@@ -216,20 +250,10 @@ export const checkStates = (
   staleIds: ReadonlySet<number>,
 ): CheckStates => {
   // Several workflow runs can report checks for one head. A run that a newer
-  // run of its workflow cancelled is superseded, so its checks don't count.
-  // Until the pull request is quiet, that newer run may not show yet.
-  const newest = new Map<string, number>();
-  for (const check of rollup) {
-    if (check.workflowName) {
-      newest.set(
-        check.workflowName,
-        Math.max(
-          newest.get(check.workflowName) ?? 0,
-          runIdOf(check.detailsUrl),
-        ),
-      );
-    }
-  }
+  // run of its workflow cancelled is superseded, so its checks don't count,
+  // and neither does a check that a newer run reports again. Until the pull
+  // request is quiet, that newer run may not show yet.
+  const newest = newestRuns(rollup);
   const states: CheckStates = {
     passed: [],
     pending: [],
