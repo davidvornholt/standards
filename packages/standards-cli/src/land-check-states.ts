@@ -1,7 +1,12 @@
 // Sorting a pull request's checks into passed, pending, and failed ones. A
 // check that a later run of its workflow replaced doesn't count.
 
-import { type Check, type CheckStates, hasResult } from './land-checks';
+import {
+  type Check,
+  type CheckStates,
+  hasResult,
+  isFailure,
+} from './land-checks';
 import { GREEN, runIdOf } from './land-context';
 
 type CheckRunState =
@@ -19,10 +24,10 @@ type Rules = {
   // The runs of each workflow that have a check still running, keyed by
   // workflowKey.
   readonly active: ReadonlyMap<string, ReadonlySet<number>>;
-  // When the latest check of each workflow and name that finished with a
-  // result started, keyed by resultKey. A skipped or cancelled check has
-  // none.
-  readonly finished: ReadonlyMap<string, number>;
+  // When each run's latest check of a workflow and name that finished with a
+  // result started, by run, keyed by resultKey. A skipped or cancelled check
+  // has none.
+  readonly finished: ReadonlyMap<string, ReadonlyMap<number, number>>;
   readonly quiet: boolean;
   readonly staleIds: ReadonlySet<number>;
 };
@@ -65,7 +70,7 @@ const rulesFor = (
 ): Rules => {
   const newest = new Map<string, number>();
   const active = new Map<string, Set<number>>();
-  const finished = new Map<string, number>();
+  const finished = new Map<string, Map<number, number>>();
   for (const check of rollup) {
     const workflow = workflowKey(check, workflows);
     const result = resultKey(check, workflows);
@@ -76,7 +81,12 @@ const rulesFor = (
     if (workflow && check.status !== 'COMPLETED') {
       active.set(workflow, (active.get(workflow) ?? new Set()).add(id));
     } else if (result && hasResult(check) && !Number.isNaN(startTime(check))) {
-      raiseTo(finished, result, startTime(check));
+      const starts = finished.get(result) ?? new Map<number, number>();
+      starts.set(
+        id,
+        Math.max(starts.get(id) ?? Number.NEGATIVE_INFINITY, startTime(check)),
+      );
+      finished.set(result, starts);
     }
   }
   return { workflows, newest, active, finished, quiet, staleIds };
@@ -94,14 +104,22 @@ const unpassedState = (check: Check, rules: Rules): CheckRunState => {
   return [...running].some((other) => other !== id) ? 'unresolved' : 'failed';
 };
 
-// Whether a check of the same workflow file, event, and name that started
-// later finished with a result. That result counts instead, as GitHub counts
-// the latest check of a name, such as the passing replacement of a check that
-// failed because its run was cancelled.
+// Whether a failed check has a later result: another run's check of the same
+// workflow file, event, and name that started later and finished with a
+// result. That result counts instead, as GitHub counts the latest check of a
+// name, such as the passing replacement of a check that failed because its
+// run was cancelled. A job of the failure's own run replaces nothing, and
+// other checks keep the rules of checkRunState.
 const isReplaced = (check: Check, rules: Rules): boolean => {
   const key = resultKey(check, rules.workflows);
-  const latest = key === null ? undefined : rules.finished.get(key);
-  return latest !== undefined && latest > startTime(check);
+  const starts = key === null ? undefined : rules.finished.get(key);
+  const id = runIdOf(check.detailsUrl);
+  return (
+    isFailure(check) &&
+    [...(starts ?? [])].some(
+      ([other, started]) => other !== id && started > startTime(check),
+    )
+  );
 };
 
 const checkRunState = (check: Check, rules: Rules): CheckRunState => {

@@ -225,6 +225,45 @@ describe('standards land with a failed check and a newer run', () => {
   });
 });
 
+describe('standards land with a replaced failure and other checks', () => {
+  it("keeps a failure that a later job of its own run doesn't replace", () => {
+    // Run 2's check of another name makes the failure look contested.
+    openPr({
+      statusCheckRollup: [
+        check({ name: 'test', conclusion: 'FAILURE' }),
+        {
+          ...check({ name: 'test', started: '2026-01-01T00:05:00Z' }),
+          detailsUrl: 'https://github.com/test/repo/actions/runs/1/job/10',
+        },
+        check({ name: 'setup', run: 2 }),
+      ],
+    });
+    const result = land(fixture, ['123']);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('test failed on');
+    expect(mergeCalls(fixture)).toEqual([]);
+  });
+
+  it('keeps a cancelled check of the newest run when a failure is replaced', () => {
+    // A later attempt of run 1 passed lint, which the newest run cancelled.
+    const lint = [
+      check({ name: 'lint', conclusion: 'CANCELLED', run: 2 }),
+      check({ name: 'lint', started: '2026-01-01T00:05:00Z' }),
+    ];
+    const aggregate = [
+      check({ conclusion: 'FAILURE', run: 2 }),
+      check({ started: '2026-01-01T00:05:00Z' }),
+    ];
+    for (const statusCheckRollup of [lint, [...lint, ...aggregate]]) {
+      openPr({ statusCheckRollup });
+      const result = land(fixture, ['123']);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('lint failed on');
+      expect(mergeCalls(fixture)).toEqual([]);
+    }
+  });
+});
+
 describe('standards land with cancelled checks', () => {
   it('ignores a check that a newer run cancelled', () => {
     openPr({
