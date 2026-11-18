@@ -6,6 +6,7 @@ import {
   type CheckStates,
   checkStates,
   staleRuns,
+  workflowFiles,
 } from './land-checks';
 import {
   durationText,
@@ -49,6 +50,7 @@ type WaitState = {
   shown: { readonly head: string; readonly waiting: string } | null;
   last: Poll | null;
   readonly again: Map<number, boolean>;
+  readonly files: Map<number, string>;
   readonly deadline: number;
 };
 
@@ -80,13 +82,12 @@ const readPoll = (
   const quiet =
     Date.now() - timestamp(pr.updatedAt) >= secondsToMs(QUIET_SECONDS);
   const rollup = pr.statusCheckRollup ?? [];
-  const stale = staleRuns(
-    context,
-    { prNumber, repo, head },
-    rollup,
-    state.again,
-  );
-  const rolledUp = checkStates(rollup, quiet, stale);
+  const polled = { prNumber, repo, head };
+  const rolledUp = checkStates(rollup, {
+    quiet,
+    staleIds: staleRuns(context, polled, rollup, state.again),
+    files: workflowFiles(context, polled, rollup, state.files),
+  });
   // Only checks that look settled need the runs, so most polls skip them.
   const running =
     !request.noWait &&
@@ -120,12 +121,12 @@ const readPoll = (
 
 // Whether a mergeable pull request may merge now.
 const mayMerge = (request: WaitRequest, poll: Poll): boolean => {
-  const { passed, pending, stale } = poll.checks;
+  const { passed, pending, stale, unresolved } = poll.checks;
   const settled = poll.quiet && pending.length === 0;
   // Not even --no-wait merges on a stale skipped check, because no CI ran
-  // for it.
+  // for it, or on a failure that a newer run hasn't replaced yet.
   return (
-    (request.noWait && stale.length === 0) ||
+    (request.noWait && stale.length === 0 && unresolved.length === 0) ||
     (settled && passed.length > 0) ||
     // A pull request without CI has no checks to wait for.
     (pending.length === 0 && !request.hasCi(poll.head, poll.base))
@@ -225,7 +226,9 @@ const advance = (
 
 const waitingFor = (poll: Poll): string => {
   if (poll.checks.pending.length > 0) {
-    return poll.checks.pending.join(', ');
+    // A failure that a newer run may replace shares its name with the
+    // replacement.
+    return [...new Set(poll.checks.pending)].join(', ');
   }
   if (!poll.quiet) {
     return 'checks that a recent update may start';
@@ -318,5 +321,6 @@ export const waitForChecks = (
     shown: null,
     last: null,
     again: new Map(),
+    files: new Map(),
     deadline: context.deadline ?? Date.now() + context.waitMs,
   });

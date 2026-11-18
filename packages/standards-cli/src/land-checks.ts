@@ -27,6 +27,9 @@ export type CheckStates = {
   readonly passed: Array<string>;
   readonly pending: Array<string>;
   readonly stale: Array<string>;
+  // Failed checks that a newer, still running run of their workflow may
+  // replace. They count as pending, but --no-wait can't skip them.
+  readonly unresolved: Array<string>;
   readonly failed: Array<string>;
 };
 
@@ -92,13 +95,15 @@ type RunsResponse = {
   };
 };
 
-// Maps each workflow run on a head to whether its workflow runs again when a
-// draft is marked ready.
-const runsAgainWhenReady = (
+type HeadRun = { readonly file: string; readonly runsAgain: boolean };
+
+// Maps each workflow run on a head to its workflow file and whether that
+// workflow runs again when a draft is marked ready.
+const readHeadRuns = (
   context: LandContext,
   repo: Repository,
   head: string,
-): Map<number, boolean> => {
+): Map<number, HeadRun> => {
   const { owner, name } = ownerAndName(repo);
   const response = JSON.parse(
     run(context, 'gh', [
@@ -123,14 +128,17 @@ const runsAgainWhenReady = (
       entry.object?.text ?? '',
     ]),
   );
-  const again = new Map<number, boolean>();
+  const runs = new Map<number, HeadRun>();
   for (const { workflowRun } of commit.checkSuites.nodes) {
     if (workflowRun) {
-      const text = texts.get(workflowRun.file?.path ?? '') ?? '';
-      again.set(workflowRun.databaseId, READY_EVENT_PATTERN.test(text));
+      const file = workflowRun.file?.path ?? '';
+      runs.set(workflowRun.databaseId, {
+        file,
+        runsAgain: READY_EVENT_PATTERN.test(texts.get(file) ?? ''),
+      });
     }
   }
-  return again;
+  return runs;
 };
 
 export type PolledHead = {
@@ -162,7 +170,7 @@ export const staleRuns = (
     for (const id of early) {
       again.set(id, false);
     }
-    for (const [id, runsAgain] of runsAgainWhenReady(context, repo, head)) {
+    for (const [id, { runsAgain }] of readHeadRuns(context, repo, head)) {
       again.set(id, runsAgain);
     }
   }
@@ -171,54 +179,136 @@ export const staleRuns = (
   return new Set([...early].filter((id) => again.get(id) === true));
 };
 
-type CheckRunState = 'passed' | 'pending' | 'stale' | 'failed' | 'superseded';
+const isFailure = (check: Check): boolean =>
+  check.status === 'COMPLETED' &&
+  check.conclusion !== 'CANCELLED' &&
+  !GREEN.has(check.conclusion ?? '');
 
-type NewestRuns = {
-  // The newest run of each workflow.
-  readonly workflow: ReadonlyMap<string, number>;
-  // The newest run of each workflow that reports a check of a name and
-  // didn't skip it, keyed by checkKey.
-  readonly ran: ReadonlyMap<string, number>;
+// Whether a completed check ran to a result. A skipped or cancelled one
+// didn't.
+const hasResult = (check: Check): boolean =>
+  check.conclusion !== 'SKIPPED' && check.conclusion !== 'CANCELLED';
+
+// The workflow file of each run on the head, when a failed check has a newer
+// run of a workflow with the same name. Two workflow files can share a name,
+// and a run of one never replaces the other's checks. The map covers every
+// workflow run in the rollup or is empty, in which case names identify
+// workflows. `cache` keeps the files across polls.
+export const workflowFiles = (
+  context: LandContext,
+  { repo, head }: PolledHead,
+  rollup: ReadonlyArray<Check>,
+  cache: Map<number, string>,
+): ReadonlyMap<number, string> => {
+  const runs = rollup.filter((check) => check.workflowName);
+  const newest = new Map<string, number>();
+  for (const check of runs) {
+    raiseTo(newest, check.workflowName ?? '', runIdOf(check.detailsUrl));
+  }
+  const contested = runs.some(
+    (check) =>
+      isFailure(check) &&
+      runIdOf(check.detailsUrl) < (newest.get(check.workflowName ?? '') ?? 0),
+  );
+  if (!contested) {
+    return new Map();
+  }
+  const ids = runs.map((check) => runIdOf(check.detailsUrl));
+  if (ids.some((id) => !cache.has(id))) {
+    for (const [id, { file }] of readHeadRuns(context, repo, head)) {
+      cache.set(id, file);
+    }
+  }
+  return ids.every((id) => cache.has(id)) ? cache : new Map();
 };
 
-const checkKey = (check: Check): string =>
-  `${check.workflowName ?? ''}\n${check.name ?? ''}`;
+type CheckRunState =
+  | 'passed'
+  | 'pending'
+  | 'stale'
+  | 'unresolved'
+  | 'failed'
+  | 'superseded';
+
+type Rules = {
+  readonly files: ReadonlyMap<number, string>;
+  // The newest run of each workflow.
+  readonly newest: ReadonlyMap<string, number>;
+  // The newest run of each workflow that has a check still running.
+  readonly active: ReadonlyMap<string, number>;
+  // The newest run of each workflow whose check of a name finished with a
+  // result, keyed by checkKey. A skipped or cancelled check has none.
+  readonly finished: ReadonlyMap<string, number>;
+  readonly quiet: boolean;
+  readonly staleIds: ReadonlySet<number>;
+};
+
+// A workflow file, or the workflow's name when the files aren't known. Empty
+// for a check that no workflow reports.
+const workflowKey = (
+  check: Check,
+  files: ReadonlyMap<number, string>,
+): string => {
+  if (!check.workflowName) {
+    return '';
+  }
+  const file = files.get(runIdOf(check.detailsUrl));
+  return file ? `file:${file}` : `name:${check.workflowName}`;
+};
+
+const checkKey = (check: Check, files: ReadonlyMap<number, string>): string =>
+  `${workflowKey(check, files)}\n${check.name ?? ''}`;
 
 const raiseTo = (map: Map<string, number>, key: string, id: number): void => {
   map.set(key, Math.max(map.get(key) ?? 0, id));
 };
 
-const newestRuns = (rollup: ReadonlyArray<Check>): NewestRuns => {
-  const workflow = new Map<string, number>();
-  const ran = new Map<string, number>();
+const rulesFor = (
+  rollup: ReadonlyArray<Check>,
+  { files, quiet, staleIds }: CheckOptions,
+): Rules => {
+  const newest = new Map<string, number>();
+  const active = new Map<string, number>();
+  const finished = new Map<string, number>();
   for (const check of rollup) {
-    if (check.workflowName) {
+    const workflow = workflowKey(check, files);
+    if (workflow) {
       const id = runIdOf(check.detailsUrl);
-      raiseTo(workflow, check.workflowName, id);
-      if (check.conclusion !== 'SKIPPED') {
-        raiseTo(ran, checkKey(check), id);
+      raiseTo(newest, workflow, id);
+      if (check.status !== 'COMPLETED') {
+        raiseTo(active, workflow, id);
+      } else if (hasResult(check)) {
+        raiseTo(finished, checkKey(check, files), id);
       }
     }
   }
-  return { workflow, ran };
+  return { files, newest, active, finished, quiet, staleIds };
 };
 
-const checkRunState = (
-  check: Check,
-  newest: NewestRuns,
-  quiet: boolean,
-  staleIds: ReadonlySet<number>,
-): CheckRunState => {
+// The state of a completed check that neither passed nor was superseded.
+const unpassedState = (check: Check, rules: Rules): CheckRunState => {
+  if (check.conclusion === 'CANCELLED') {
+    return rules.quiet ? 'failed' : 'pending';
+  }
+  // A newer run of the workflow that is still running may replace the
+  // failure, even before it reports the check.
+  const workflow = workflowKey(check, rules.files);
+  return runIdOf(check.detailsUrl) < (rules.active.get(workflow) ?? 0)
+    ? 'unresolved'
+    : 'failed';
+};
+
+const checkRunState = (check: Check, rules: Rules): CheckRunState => {
   const id = runIdOf(check.detailsUrl);
-  const superseded = id < (newest.workflow.get(check.workflowName ?? '') ?? 0);
-  // A newer run's own result for the check counts instead, such as the
-  // passing replacement of a check that failed because its run was
-  // cancelled. A newer skip replaces nothing, because nothing ran.
-  const replaced = id < (newest.ran.get(checkKey(check)) ?? 0);
+  const workflow = workflowKey(check, rules.files);
+  const superseded = id < (rules.newest.get(workflow) ?? 0);
+  // A newer run's result for the check counts instead, such as the passing
+  // replacement of a check that failed because its run was cancelled.
+  const replaced = id < (rules.finished.get(checkKey(check, rules.files)) ?? 0);
   // CI that skips its jobs on drafts leaves skipped checks that GitHub
   // counts as passed, although nothing ran. The ready event starts the run
   // that replaces them.
-  const stale = check.conclusion === 'SKIPPED' && staleIds.has(id);
+  const stale = check.conclusion === 'SKIPPED' && rules.staleIds.has(id);
   // A running check's conclusion is empty, so its status decides first.
   if (check.status !== 'COMPLETED') {
     return 'pending';
@@ -229,10 +319,9 @@ const checkRunState = (
   if (stale) {
     return 'stale';
   }
-  if (GREEN.has(check.conclusion ?? '')) {
-    return 'passed';
-  }
-  return check.conclusion === 'CANCELLED' && !quiet ? 'pending' : 'failed';
+  return GREEN.has(check.conclusion ?? '')
+    ? 'passed'
+    : unpassedState(check, rules);
 };
 
 const STATUS_CONTEXT_STATES: ReadonlyMap<string, 'passed' | 'pending'> =
@@ -242,32 +331,38 @@ const STATUS_CONTEXT_STATES: ReadonlyMap<string, 'passed' | 'pending'> =
     ['EXPECTED', 'pending'],
   ]);
 
+export type CheckOptions = {
+  readonly quiet: boolean;
+  readonly staleIds: ReadonlySet<number>;
+  readonly files: ReadonlyMap<number, string>;
+};
+
 // Sorts a pull request's checks into passed, pending, and failed names, and
-// lists the stale ones among the pending.
+// lists the stale and unresolved ones among the pending.
 export const checkStates = (
   rollup: ReadonlyArray<Check>,
-  quiet: boolean,
-  staleIds: ReadonlySet<number>,
+  options: CheckOptions,
 ): CheckStates => {
   // Several workflow runs can report checks for one head. A run that a newer
   // run of its workflow cancelled is superseded, so its checks don't count,
-  // and neither does a check that a newer run reports again. Until the pull
+  // and neither does a check that a newer run finished again. Until the pull
   // request is quiet, that newer run may not show yet.
-  const newest = newestRuns(rollup);
+  const rules = rulesFor(rollup, options);
   const states: CheckStates = {
     passed: [],
     pending: [],
     stale: [],
+    unresolved: [],
     failed: [],
   };
   for (const check of rollup) {
     const name = check.name || check.context || 'unnamed check';
     const state =
       check.__typename === 'CheckRun'
-        ? checkRunState(check, newest, quiet, staleIds)
+        ? checkRunState(check, rules)
         : (STATUS_CONTEXT_STATES.get(check.state ?? '') ?? 'failed');
-    if (state === 'stale') {
-      states.stale.push(name);
+    if (state === 'stale' || state === 'unresolved') {
+      states[state].push(name);
       states.pending.push(name);
     } else if (state !== 'superseded') {
       states[state].push(name);

@@ -3,6 +3,7 @@ import process from 'node:process';
 import { cleanupTmpDirs } from './cli-test-support';
 import {
   branchExists,
+  CI,
   check,
   createLand,
   type Land,
@@ -55,7 +56,17 @@ describe('standards land with failed checks', () => {
         ],
         [],
       ],
+      [
+        // Nor does a cancelled one, even when a third run skips it.
+        [
+          check({ name: 'lint', conclusion: 'FAILURE', run: 1 }),
+          check({ name: 'lint', conclusion: 'CANCELLED', run: 2 }),
+          check({ name: 'lint', conclusion: 'SKIPPED', run: 3 }),
+        ],
+        [],
+      ],
     ];
+    fixture.github.runFiles['3'] = CI;
     for (const [rollup, options] of cases) {
       openPr({ statusCheckRollup: rollup });
       const result = land(fixture, ['123', ...options]);
@@ -99,6 +110,80 @@ describe('standards land with failed checks', () => {
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain('Waiting for check on');
     expect(mergeCalls(fixture)).toEqual([mergeCall(fixture)]);
+  });
+});
+
+describe('standards land with a failed check and a newer run', () => {
+  it("keeps a failure that another workflow file's run reports again", () => {
+    // Two workflow files can share a name.
+    fixture.github.runFiles['2'] = '.github/workflows/frontend.yml';
+    openPr({
+      statusCheckRollup: [
+        check({ name: 'lint', conclusion: 'FAILURE', run: 1 }),
+        check({ name: 'lint', run: 2 }),
+      ],
+    });
+    const result = land(fixture, ['123']);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('lint failed on');
+    expect(mergeCalls(fixture)).toEqual([]);
+  });
+
+  it('waits for a newer run before it reports the check', () => {
+    // A cancelled run's aggregate fails before the run that cancelled it
+    // reports its own aggregate.
+    const cancelled = [
+      check({ name: 'quality', conclusion: 'CANCELLED', run: 1 }),
+      check({ conclusion: 'FAILURE', run: 1 }),
+    ];
+    openPr({
+      polls: [
+        {
+          statusCheckRollup: [
+            ...cancelled,
+            check({
+              name: 'quality',
+              status: 'IN_PROGRESS',
+              conclusion: '',
+              run: 2,
+            }),
+          ],
+        },
+        {
+          statusCheckRollup: [
+            ...cancelled,
+            check({ name: 'quality', run: 2 }),
+            check({ run: 2 }),
+          ],
+        },
+      ],
+    });
+    const result = land(fixture, ['123']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain('Waiting for check, quality on');
+    expect(mergeCalls(fixture)).toEqual([mergeCall(fixture)]);
+  });
+
+  it("doesn't skip a failure's pending replacement with --no-wait", () => {
+    const failed = check({ conclusion: 'FAILURE' });
+    openPr({
+      mergeStateStatus: 'UNSTABLE',
+      polls: [
+        {
+          statusCheckRollup: [
+            failed,
+            check({ status: 'QUEUED', conclusion: '', run: 2 }),
+          ],
+        },
+        {
+          statusCheckRollup: [failed, check({ conclusion: 'SKIPPED', run: 2 })],
+        },
+      ],
+    });
+    const result = land(fixture, ['123', '--no-wait']);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('check failed on');
+    expect(mergeCalls(fixture)).toEqual([]);
   });
 });
 
