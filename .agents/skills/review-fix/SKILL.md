@@ -11,7 +11,7 @@ Work in a dedicated worktree on a draft pull request. Add commits rather than am
 
 ## Reviewers
 
-Reviewers use GPT-6.2 Astra at high effort unless the user names another model. Use `delegate_task` if your harness can't run it. If nothing can, stop and say why. Never substitute a model.
+Reviewers use GPT-6.2 Astra at medium effort unless the user names another model. Use `delegate_task` if your harness can't run it. If nothing can, stop and say why. Never substitute a model.
 
 Each reviewer is a separate read-only agent that follows the [review skill](../review/SKILL.md) and looks for one kind of failure:
 
