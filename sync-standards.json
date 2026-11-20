@@ -4,7 +4,7 @@
   "payloads": {
     "core": {
       "agents": "agents-md/core.md",
-      "seeds": [],
+      "seeds": [".github/settings.local.json"],
       "paths": [
         "sync-standards.json",
         ".agents/skills/ci-pipelines",
@@ -17,6 +17,9 @@
         ".agents/skills/standards-sync",
         ".claude/skills",
         ".github/actions/sops-secret",
+        ".github/settings.json",
+        ".github/workflows/standards.yml",
+        ".github/workflows/standards-auto-merge.yml",
         ".github/workflows/standards-sync.yml"
       ]
     },
@@ -37,13 +40,10 @@
         "nix/bun-archives.json",
         "nix/package-source.nix",
         "nix/package-source-check.nix",
-        ".github/settings.json",
         ".github/dependabot.yml",
         ".github/actions/app-release",
         "packages/typescript-config",
-        "packages/a11y-testing",
-        ".github/workflows/standards.yml",
-        ".github/workflows/standards-auto-merge.yml"
+        "packages/a11y-testing"
       ]
     }
   }

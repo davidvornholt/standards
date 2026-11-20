@@ -81,8 +81,14 @@ const SOURCE_REPOSITORY_CONDITION =
   "github.repository == 'davidvornholt/standards'";
 const GATE_RUN_CONDITION =
   "!cancelled() && (!github.event.pull_request.draft || needs.draft-state.outputs.gate == 'true') && needs.reuse.outputs.proven != 'true'";
-const TURBO_CACHE_SAVE_CONDITION =
-  "success() && github.ref == 'refs/heads/main' && steps.turbo-cache.outputs.cache-hit != 'true'";
+// The quality job runs the steps that need a Bun workspace only on the bun
+// payload.
+const BUN_PAYLOAD_CONDITION = "steps.payload.outputs.payload == 'bun'";
+const onBunPayload = (condition: string): string =>
+  `${BUN_PAYLOAD_CONDITION} && ${condition}`;
+const TURBO_CACHE_SAVE_CONDITION = onBunPayload(
+  "success() && github.ref == 'refs/heads/main' && steps.turbo-cache.outputs.cache-hit != 'true'",
+);
 const TURBO_CACHE_PRUNE_RUN = `set -euo pipefail
 cache_dir=.turbo/cache
 [ -d "$cache_dir" ] || exit 0
@@ -282,24 +288,29 @@ const BUN_CACHE_RESTORE_KEYS = githubExpression(
   "github.ref != 'refs/heads/main' && format('bun-packages-v2-{0}-{1}-', runner.os, runner.arch) || ''",
 );
 const BUN_CACHE_PATH = '~/.bun/install/cache';
-const BUN_CACHE_SAVE_CONDITION =
-  "success() && github.ref == 'refs/heads/main' && steps.bun-cache.outputs.cache-hit != 'true'";
+const BUN_CACHE_SAVE_CONDITION = onBunPayload(
+  "success() && github.ref == 'refs/heads/main' && steps.bun-cache.outputs.cache-hit != 'true'",
+);
 const PLAYWRIGHT_CACHE_KEY = `playwright-v2-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-${githubExpression("hashFiles('bun.lock')")}`;
 const PLAYWRIGHT_CACHE_RESTORE_PREFIX = `playwright-v2-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-`;
 const PLAYWRIGHT_CACHE_RESTORE_KEYS = githubExpression(
   "github.ref != 'refs/heads/main' && format('playwright-v2-{0}-{1}-', runner.os, runner.arch) || ''",
 );
 const PLAYWRIGHT_CACHE_PATH = '~/.cache/ms-playwright';
-const PLAYWRIGHT_CACHE_SAVE_CONDITION =
-  "success() && github.ref == 'refs/heads/main' && steps.a11y.outputs.present == 'true' && steps.playwright-cache.outputs.cache-hit != 'true'";
+const PLAYWRIGHT_CACHE_SAVE_CONDITION = onBunPayload(
+  "success() && github.ref == 'refs/heads/main' && steps.a11y.outputs.present == 'true' && steps.playwright-cache.outputs.cache-hit != 'true'",
+);
 const NEXT_CACHE_KEY = `next-trusted-v1-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-${githubExpression('github.sha')}`;
 const NEXT_CACHE_RESTORE_PREFIX = `next-trusted-v1-${githubExpression('runner.os')}-${githubExpression('runner.arch')}-`;
 const NEXT_CACHE_PATH = 'apps/*/.next/cache/turbopack';
 // Main never restores the Next.js compiler cache, so each snapshot it
 // publishes comes from a cold build of its own commit.
-const NEXT_CACHE_RESTORE_CONDITION = "github.ref != 'refs/heads/main'";
-const NEXT_CACHE_DETECT_CONDITION =
-  "success() && github.ref == 'refs/heads/main'";
+const NEXT_CACHE_RESTORE_CONDITION = onBunPayload(
+  "github.ref != 'refs/heads/main'",
+);
+const NEXT_CACHE_DETECT_CONDITION = onBunPayload(
+  "success() && github.ref == 'refs/heads/main'",
+);
 const NEXT_CACHE_SAVE_CONDITION = `${NEXT_CACHE_DETECT_CONDITION} && steps.next-cache.outputs.present == 'true'`;
 const NEXT_CACHE_DETECT_STEP = 'Detect a Next.js build cache';
 const NEXT_CACHE_DETECT_RUN = `set -euo pipefail
@@ -469,11 +480,12 @@ const assertQualityCacheConsumers = (
   const expectedConsumerSteps = [
     {
       name: 'Install dependencies',
+      if: BUN_PAYLOAD_CONDITION,
       run: 'bun install --frozen-lockfile',
     },
     {
       name: 'Install Playwright Chromium',
-      if: "steps.a11y.outputs.present == 'true'",
+      if: onBunPayload("steps.a11y.outputs.present == 'true'"),
       run: `set -euo pipefail
 playwright=$(find . -path '*/node_modules/.bin/playwright' -print -quit)
 if [ -z "$playwright" ]; then
@@ -501,8 +513,19 @@ exit 1
     },
     {
       name: 'Check',
-      env: { STANDARDS_SKIP_GITHUB_CHECK: 'true', TURBO_RUN_SUMMARY: 'true' },
-      run: 'bun run check',
+      env: {
+        PAYLOAD: githubExpression('steps.payload.outputs.payload'),
+        STANDARDS_SKIP_GITHUB_CHECK: 'true',
+        TURBO_RUN_SUMMARY: 'true',
+      },
+      run: `set -euo pipefail
+if [ "$PAYLOAD" = core ]; then
+  cd "$STANDARDS_SOURCE"
+  bun --no-env-file packages/standards-cli/src/cli.ts check --dir "$GITHUB_WORKSPACE"
+else
+  bun run check
+fi
+`,
     },
   ];
   const consumerSteps = expectedConsumerSteps.map(({ name }) =>
@@ -537,14 +560,18 @@ const assertExactMainCacheCleanup = (workflow: ParsedWorkflow): void => {
       'Bun',
       'Restore the Bun package cache',
       'Install dependencies',
-      "github.ref == 'refs/heads/main' && steps.bun-cache.outputs.cache-hit != 'true'",
+      onBunPayload(
+        "github.ref == 'refs/heads/main' && steps.bun-cache.outputs.cache-hit != 'true'",
+      ),
       '$HOME/.bun/install/cache',
     ],
     [
       'Playwright',
       'Restore the Playwright browser cache',
       'Install Playwright Chromium',
-      "github.ref == 'refs/heads/main' && steps.a11y.outputs.present == 'true' && steps.playwright-cache.outputs.cache-hit != 'true'",
+      onBunPayload(
+        "github.ref == 'refs/heads/main' && steps.a11y.outputs.present == 'true' && steps.playwright-cache.outputs.cache-hit != 'true'",
+      ),
       '$HOME/.cache/ms-playwright',
     ],
   ]) {
@@ -601,6 +628,7 @@ const assertQualityCacheContract = (workflow: ParsedWorkflow): void => {
     {
       name: 'Restore the Turbo cache',
       id: 'turbo-cache',
+      if: BUN_PAYLOAD_CONDITION,
       uses: 'actions/cache/restore@v6',
       with: {
         path: '.turbo/cache',
@@ -621,6 +649,7 @@ const assertQualityCacheContract = (workflow: ParsedWorkflow): void => {
     {
       name: 'Restore the Bun package cache',
       id: 'bun-cache',
+      if: BUN_PAYLOAD_CONDITION,
       uses: 'actions/cache/restore@v6',
       with: {
         path: BUN_CACHE_PATH,
@@ -630,7 +659,7 @@ const assertQualityCacheContract = (workflow: ParsedWorkflow): void => {
     },
     {
       name: 'Restore the Playwright browser cache',
-      if: "steps.a11y.outputs.present == 'true'",
+      if: onBunPayload("steps.a11y.outputs.present == 'true'"),
       id: 'playwright-cache',
       uses: 'actions/cache/restore@v6',
       with: {
@@ -758,6 +787,11 @@ const rejectedQualityCacheMutations = (
     }
   });
 
+// The bun payload declares its Bun in package.json. The core payload runs the
+// standards CLI under the Bun that the standards source declares.
+const QUALITY_BUN_VERSION =
+  'steps.bun.outputs.version || steps.standards-source.outputs.bun-version';
+
 const assertQualityWorkflowContract = (workflow: ParsedWorkflow): void => {
   const steps = workflowSteps(workflow.jobs.quality, 'quality');
   const bunSteps = [
@@ -769,6 +803,7 @@ const assertQualityWorkflowContract = (workflow: ParsedWorkflow): void => {
     {
       name: 'Read Bun version',
       id: 'bun',
+      if: BUN_PAYLOAD_CONDITION,
       run: `set -euo pipefail
 if ! package_manager="$(jq -er '.packageManager | select(type == "string" and test("^bun@(0|[1-9][0-9]*)\\\\.(0|[1-9][0-9]*)\\\\.(0|[1-9][0-9]*)$"))' package.json)"; then
   echo '::error::package.json packageManager must pin an exact bun@x.y.z version'
@@ -780,17 +815,17 @@ echo "version=\${package_manager#bun@}" >> "$GITHUB_OUTPUT"
     {
       name: 'Setup Bun',
       uses: 'oven-sh/setup-bun@v2',
-      with: { 'bun-version': githubExpression('steps.bun.outputs.version') },
+      with: { 'bun-version': githubExpression(QUALITY_BUN_VERSION) },
     },
     {
       name: 'Verify Bun version',
       env: {
-        EXPECTED_BUN_VERSION: githubExpression('steps.bun.outputs.version'),
+        EXPECTED_BUN_VERSION: githubExpression(QUALITY_BUN_VERSION),
       },
       run: `set -euo pipefail
 actual="$(bun --version)"
 if [[ "$actual" != "$EXPECTED_BUN_VERSION" ]]; then
-  echo "::error::Expected Bun $EXPECTED_BUN_VERSION from package.json, received $actual"
+  echo "::error::Expected Bun $EXPECTED_BUN_VERSION, received $actual"
   exit 1
 fi
 `,
@@ -2715,6 +2750,7 @@ it('pins Node for quality tools that intentionally require it', () => {
   const workflow = parseWorkflow(STANDARDS_WORKFLOW);
   expect(qualityStep(workflow, 'Setup Node')).toEqual({
     name: 'Setup Node',
+    if: BUN_PAYLOAD_CONDITION,
     uses: 'actions/setup-node@v7',
     with: { 'node-version': '26' },
   });
@@ -3320,7 +3356,7 @@ describe('canonical standards workflow Nix steps', () => {
     ]);
     for (const name of nixStepNames) {
       expect(steps.find((step) => step.name === name)?.if).toBe(
-        "hashFiles('nix/package.nix') != ''",
+        onBunPayload("hashFiles('nix/package.nix') != ''"),
       );
     }
   });

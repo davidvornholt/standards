@@ -7,7 +7,7 @@ description: Use when changing a file the standards sync manages (listed in `syn
 
 The canonical files live in davidvornholt/standards and are mirrored into every consumer repository. A consumer's copy of a synced file is read-only: the next sync overwrites any local edit, and `standards check` reports it as drift against `sync-standards.lock`. So before editing, find which class the path belongs to.
 
-A consumer receives one of two payloads, chosen by `"payload"` in `sync-standards.local.json`. `core` holds `AGENTS.md`, the language-neutral skills, and the weekly sync, for a repository of any language. `bun`, the default, adds the Bun workspace tooling. A Bun consumer runs the CLI as `bun standards <command>`, any other as `bunx @davidvornholt/standards <command>`, which needs Bun installed but not a Bun workspace.
+A consumer receives one of two payloads, chosen by `"payload"` in `sync-standards.local.json`. `core` holds `AGENTS.md`, the language-neutral skills, the weekly sync, the standards CI workflow, and the GitHub settings, for a repository of any language. `bun`, the default, adds the Bun workspace tooling. A Bun consumer runs the CLI as `bun standards <command>`, any other as `bunx @davidvornholt/standards <command>`, which needs Bun installed but not a Bun workspace.
 
 | Class | How to recognize it | Where a change goes |
 | --- | --- | --- |
@@ -32,7 +32,7 @@ A change every consumer should get belongs upstream. A change for one consumer b
 | `nix/standards-bun.nix` and `nix/bun-archives.json` | `flake.nix` and `dev-shell.local.nix` |
 | `nix/package-source.nix` and `nix/package-source-check.nix` | `flake.nix` and `nix/package.nix` |
 
-A core consumer has only the `AGENTS.md`, skills, and sync workflow rows. An extension adds to its canonical file and doesn't replace it. GitHub settings can only add stricter settings, rulesets, and labels. A repository's own Dependabot blocks can't repeat a shared block's ecosystem, directory, and target branch, so a hold on a shared block goes upstream. Blocks that share an ecosystem and target branch list their directories without globs, because `check` can't tell whether two globs overlap.
+A core consumer has only the `AGENTS.md`, GitHub settings, skills, and sync workflow rows. An extension adds to its canonical file and doesn't replace it. GitHub settings can only add stricter settings, rulesets, and labels. A repository's own Dependabot blocks can't repeat a shared block's ecosystem, directory, and target branch, so a hold on a shared block goes upstream. Blocks that share an ecosystem and target branch list their directories without globs, because `check` can't tell whether two globs overlap.
 
 `standards help` lists the commands and options.
 

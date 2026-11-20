@@ -100,7 +100,9 @@ describe('Turbo task table', () => {
   it('runs after the check, also when it failed', () => {
     const steps = qualitySteps();
     const summaryIndex = steps.findIndex((step) => step.name === SUMMARY_STEP);
-    expect(steps[summaryIndex]?.if).toBe('!cancelled()');
+    expect(steps[summaryIndex]?.if).toBe(
+      "steps.payload.outputs.payload == 'bun' && !cancelled()",
+    );
     expect(summaryIndex).toBeGreaterThan(
       steps.findIndex((step) => step.name === 'Check'),
     );

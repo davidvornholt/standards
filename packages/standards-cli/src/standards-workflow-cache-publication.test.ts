@@ -97,9 +97,20 @@ const requestEnvironment = (): Record<string, string> => {
 
 const request = (
   api: Record<string, unknown>,
-  { lockHash = LOCK_HASH, refuseDispatch = false } = {},
+  {
+    lockHash = LOCK_HASH,
+    policy,
+    refuseDispatch = false,
+  }: {
+    readonly lockHash?: string;
+    readonly policy?: string;
+    readonly refuseDispatch?: boolean;
+  } = {},
 ) => {
   const fixture = mkTmp('standards-cache-publication-');
+  if (policy !== undefined) {
+    write(fixture, 'sync-standards.local.json', policy);
+  }
   for (const [endpoint, body] of Object.entries(api)) {
     write(
       fixture,
@@ -196,6 +207,30 @@ describe('stale cache publication request', () => {
       dispatches: DISPATCH,
       status: 0,
     });
+  });
+});
+
+describe('stale cache publication by payload', () => {
+  it('requests nothing for a repository on the core payload', () => {
+    expect(
+      request({}, { lockHash: '', policy: '{ "payload": "core" }\n' }),
+    ).toEqual({ dispatches: '', status: 0 });
+  });
+
+  it.each([
+    ['the Bun payload', '{ "payload": "bun" }\n'],
+    ['a policy without a payload', '{ "autoSync": false }\n'],
+    ['an unreadable policy', 'not json\n'],
+  ])('checks the Bun caches for %s', (_label, policy) => {
+    expect(
+      request(
+        {
+          ...currentCaches(),
+          [cachesEndpoint('turbo-trusted-v2-')]: cacheList([]),
+        },
+        { policy },
+      ),
+    ).toEqual({ dispatches: DISPATCH, status: 0 });
   });
 });
 
