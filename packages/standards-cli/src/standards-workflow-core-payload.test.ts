@@ -177,13 +177,15 @@ const git = (cwd: string, ...args: Array<string>): string =>
     stdio: ['ignore', 'pipe', 'pipe'],
   }).trim();
 
-// The fixture CLI records its working directory and arguments. It imports a
-// workspace package, so it runs only after the workflow installs the CLI's
-// dependencies into the fetched source.
-const CLI_SOURCE = `import { writeFileSync } from 'node:fs';
+// The fixture CLI records which commit's CLI ran, its working directory, and
+// its arguments. It imports a workspace package, so it runs only after the
+// workflow installs the CLI's dependencies into the fetched source.
+const cliSource = (
+  commit: string,
+): string => `import { writeFileSync } from 'node:fs';
 import '${RUNTIME_DEPENDENCY}';
 const args = process.argv.slice(2);
-writeFileSync(args[args.indexOf('--dir') + 1] + '/check-run.json', JSON.stringify({ cwd: process.cwd(), args }));
+writeFileSync(args[args.indexOf('--dir') + 1] + '/check-run.json', JSON.stringify({ commit: '${commit}', cwd: process.cwd(), args }));
 `;
 
 const seedUpstream = (root: string, packageManager: string): string => {
@@ -222,7 +224,7 @@ const seedUpstream = (root: string, packageManager: string): string => {
     }),
   );
   write(upstream, 'packages/runtime-dependency/index.js', 'export {};\n');
-  write(upstream, 'packages/standards-cli/src/cli.ts', CLI_SOURCE);
+  write(upstream, 'packages/standards-cli/src/cli.ts', cliSource('locked'));
   execFileSync('bun', ['install'], { cwd: upstream, stdio: 'ignore' });
   write(upstream, '.gitignore', 'node_modules/\n');
   git(upstream, 'add', '-A');
@@ -247,6 +249,10 @@ const coreFixture = (
     'sync-standards.lock',
     JSON.stringify(lock(git(upstream, 'rev-parse', 'HEAD'))),
   );
+  // The default branch moves past the locked commit, so a fetch of its tip
+  // would run a CLI that reports another commit.
+  write(upstream, 'packages/standards-cli/src/cli.ts', cliSource('later'));
+  git(upstream, 'commit', '--all', '-m', 'later standards');
   const environment = Object.fromEntries([
     ['GIT_CONFIG_COUNT', '1'],
     ['GIT_CONFIG_KEY_0', `url.file://${upstream}.insteadOf`],
@@ -291,7 +297,11 @@ describe('standards workflow core check', () => {
     expect(check.status).toBe(0);
     expect(
       JSON.parse(readFileSync(join(consumer, 'check-run.json'), 'utf8')),
-    ).toEqual({ cwd: source, args: ['check', '--dir', consumer] });
+    ).toEqual({
+      commit: 'locked',
+      cwd: source,
+      args: ['check', '--dir', consumer],
+    });
     expect(existsSync(join(consumer, 'preload-ran'))).toBe(false);
   });
 
