@@ -15,7 +15,7 @@ SOPS identities, recipients, CI secrets, and brokered provider credentials are c
 
 ## Development environments
 
-`just dev-env-generate` (`bun standards dev-env`) generates each workspace's `.env.local` from three layers, keyed by workspace (`apps.<name>`, `packages.<name>`). `just dev-refresh` edits the dev secrets and then regenerates.
+In a repository on the `bun` payload, `just dev-env-generate` (`bun standards dev-env`) generates each workspace's `.env.local` from three layers, keyed by workspace (`apps.<name>`, `packages.<name>`). `just dev-refresh` edits the dev secrets and then regenerates.
 
 | Layer | File | Notes |
 | --- | --- | --- |
