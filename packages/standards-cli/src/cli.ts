@@ -56,6 +56,7 @@ import {
   assertSafeRelativePath,
   loadManifest,
   type Manifest,
+  ownedByPayload,
   readManifestUpstream,
   readSourceAgents,
   withPayloadPlan,
@@ -73,9 +74,8 @@ const DEFAULT_UPSTREAM = 'github:davidvornholt/standards';
 // Characters of a sha256 hex digest shown in drift reports; enough to identify.
 const HASH_PREVIEW_LENGTH = 12;
 
-// Unmanaged paths named as examples in a collision refusal, which also reports
-// the full count.
-const COLLISION_SAMPLE = 3;
+// Paths named as examples in a report that also gives the full count.
+const PATH_SAMPLE = 3;
 
 const GITHUB_PREFIX = 'github:';
 const SKIP_GITHUB_CHECK_ENV = 'STANDARDS_SKIP_GITHUB_CHECK';
@@ -354,7 +354,7 @@ const directoryCollision = (
   unlocked: ReadonlyArray<string>,
   command: MirrorCommand,
 ): string => {
-  const holding = `${unlocked.length} path(s) this repository does not manage (${unlocked.slice(0, COLLISION_SAMPLE).join(', ')})`;
+  const holding = `${unlocked.length} path(s) this repository does not manage (${unlocked.slice(0, PATH_SAMPLE).join(', ')})`;
   if (entry.kind !== 'symlink') {
     return `${rel} is a directory holding ${holding}; move or delete them, then re-run`;
   }
@@ -716,6 +716,37 @@ const runSync = async (
     },
   );
 
+// An unreadable policy falls back to the Bun payload, the stricter check, and
+// doctor reports the policy problem itself.
+const consumerPayload = async (consumer: string): Promise<SyncPayload> =>
+  selectedPayload(await readSyncPolicy(consumer).catch(() => ({})));
+
+// The standards workflow skips the Bun quality steps for the core payload, so
+// a policy switched to core must not pass while the lock still holds Bun
+// payload files. A manifest that can't attribute them fails the same way: only
+// a sync fixes either.
+const unsyncedPayloadProblem = async (
+  consumer: string,
+  locked: ReadonlyArray<string>,
+): Promise<string | null> => {
+  if ((await consumerPayload(consumer)) !== 'core') {
+    return null;
+  }
+  const selects =
+    'standards: sync-standards.local.json selects the core payload, but';
+  let manifest: Manifest;
+  try {
+    manifest = await loadManifest(join(consumer, 'sync-standards.json'));
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return `${selects} sync-standards.json can't show which locked files belong to the Bun payload (${reason}); run \`standards sync\``;
+  }
+  const bunFiles = ownedByPayload(manifest, 'bun', locked);
+  return bunFiles.length === 0
+    ? null
+    : `${selects} sync-standards.lock still holds ${bunFiles.length} Bun payload file(s): ${bunFiles.slice(0, PATH_SAMPLE).join(', ')}; run \`standards sync\` to remove them`;
+};
+
 // Offline drift detection: every locked file must still match its hash. Catches
 // local edits or deletions of canonical files. Does NOT detect upstream moving
 // on. Mirror preconditions reject those ancestor conflicts before any writes.
@@ -730,6 +761,10 @@ const runCheck = async (consumer: string): Promise<boolean> => {
   for (const rel of Object.keys(lock.files)) {
     assertSafeRelativePath(rel, 'sync-standards.lock file');
   }
+  const payloadProblem = await unsyncedPayloadProblem(
+    consumer,
+    Object.keys(lock.files),
+  );
   const lockedFiles = await listManagedFiles(consumer, Object.keys(lock.files));
   const results = await Promise.all(
     Object.entries(lock.files).map(async ([rel, hash]) => {
@@ -773,12 +808,19 @@ const runCheck = async (consumer: string): Promise<boolean> => {
       'Canonical synced files must remain compatible with consumer lint configurations.',
     );
   }
+  if (payloadProblem !== null) {
+    console.error(payloadProblem);
+  }
   if (problems.length === 0) {
     console.log(
       `standards: ${Object.keys(lock.files).length} canonical path(s) match the last synced state`,
     );
   }
-  return problems.length === 0 && directiveFiles.length === 0;
+  return (
+    problems.length === 0 &&
+    directiveFiles.length === 0 &&
+    payloadProblem === null
+  );
 };
 
 const readTextIfPresent = async (path: string): Promise<string | null> =>
@@ -875,11 +917,6 @@ const bunSeamProblems = async (
   }
   return problems;
 };
-
-// An unreadable policy falls back to the Bun payload, the stricter check, and
-// doctor reports the policy problem itself.
-const consumerPayload = async (consumer: string): Promise<SyncPayload> =>
-  selectedPayload(await readSyncPolicy(consumer).catch(() => ({})));
 
 const runDoctor = async (consumer: string): Promise<boolean> => {
   const problems: Array<string> = [];

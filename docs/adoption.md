@@ -4,9 +4,8 @@ Run `init` once per repository. Later updates use `bun standards sync` or the we
 
 ## What each part needs
 
-- The core payload with `"autoSync": false` needs only Bun: `init`, `sync`, and `check` run locally without secrets or a GitHub repository.
-- The Bun payload with `"autoSync": false` and no `secrets/ci.yaml` also runs `init`, `sync`, and `bun run check` locally without secrets, a broker GitHub App, or a GitHub repository. Its Dependabot pull requests stay manual. Once the repository has an `origin` remote, `check` compares its live GitHub settings, and once it has `secrets/ci.yaml`, that file must hold the broker App.
-- With automatic sync on, the Bun payload's `bun run check` passes only in a GitHub repository whose encrypted `secrets/ci.yaml` holds a broker GitHub App.
+- With `"autoSync": false`, either payload runs `init`, `sync`, and `check` locally without secrets, a broker GitHub App, or a GitHub repository. Once the repository has an `origin` remote, `check` compares its live GitHub settings.
+- The Bun payload with `"autoSync": false` needs no `secrets/ci.yaml`, and its Dependabot pull requests stay manual. Once it has `secrets/ci.yaml`, that file must hold the broker App. With automatic sync on, its `bun run check` passes only in a GitHub repository whose encrypted `secrets/ci.yaml` holds a broker GitHub App.
 - The weekly sync pull request and auto-merge need a GitHub repository, a CI age key in the `SOPS_AGE_KEY` Actions secret, and a private broker GitHub App owned by the repository's owner. A private App can be installed only on the account that owns it, so outside David's accounts, create your own with `bunx @davidvornholt/standards creds login github --name <name>` (add `--org <org>` for an organization). GitHub App names are unique across GitHub and the default, `standards-broker`, is taken, so pass a name of your own.
 - Everything else that refers to infrastructure, such as CodeBuild runners, Cloudflare credentials, and the screenshot bucket, is used only after you configure it. Without `CI_CODEBUILD_PROJECT`, the workflows run on `ubuntu-latest`.
 
@@ -23,14 +22,14 @@ Then [connect CI and GitHub](#connect-ci-and-github).
 
 ## Repository outside Bun
 
-A repository that isn't a Bun workspace, such as a Rust, Nix, or Python project, takes the core payload: `AGENTS.md`, the language-neutral skills, and the weekly sync. First move the project-specific content of `AGENTS.md` and `CLAUDE.md` below a `## Project-specific rules` heading at the end of `AGENTS.md`, and delete `CLAUDE.md`. Then run the CLI with `bunx`, which needs Bun installed but not a Bun workspace:
+A repository that isn't a Bun workspace, such as a Rust, Nix, or Python project, takes the core payload: `AGENTS.md`, the language-neutral skills, the weekly sync, and the CI workflow and GitHub settings that gate its pull requests. First move the project-specific content of `AGENTS.md` and `CLAUDE.md` below a `## Project-specific rules` heading at the end of `AGENTS.md`, and delete `CLAUDE.md`. Then run the CLI with `bunx`, which needs Bun installed but not a Bun workspace:
 
 ```sh
 echo '{ "payload": "core" }' > sync-standards.local.json
 bunx @davidvornholt/standards init
 ```
 
-Commit `sync-standards.lock` and `sync-standards.local.json`, and check for drift with `bunx @davidvornholt/standards check`.
+Commit `sync-standards.lock`, `sync-standards.local.json`, and the seeded `.github/settings.local.json`. Require the repository's own CI checks in `.github/settings.local.json` rulesets, then, with admin-authenticated `gh`, run `bunx @davidvornholt/standards github --apply` and `bunx @davidvornholt/standards check`. The canonical settings protect the default branch, so every change lands through a pull request that passes `check`.
 
 For the weekly sync pull request, the repository needs a CI age key and an encrypted `secrets/ci.yaml`. The core payload ships no `justfile` or secrets recipes, so create them with `age`, `sops`, and `gh` signed in with admin access to the repository, which `gh secret set` needs:
 

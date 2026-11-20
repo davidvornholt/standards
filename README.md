@@ -4,8 +4,8 @@ The rules, agent skills, and quality configuration that David Vornholt uses in h
 
 A repository can take one of two sets of files:
 
-- `core`, for a repository in any language: an `AGENTS.md` with rules for agents, the skills `ci-pipelines`, `declarative-infra`, `issues`, `prs`, `review`, `review-fix`, `secrets-and-config`, and `standards-sync` in `.agents/skills` (linked from `.claude/skills`), and a weekly GitHub Actions workflow that opens a pull request when the standards change.
-- `bun`, the default, for a TypeScript monorepo that uses Bun: everything in `core`, plus more skills, a strict Biome and TypeScript configuration, a CI workflow that runs the quality gate, declared GitHub repository settings, a Dependabot configuration, and a `justfile`.
+- `core`, for a repository in any language: an `AGENTS.md` with rules for agents, the skills `ci-pipelines`, `declarative-infra`, `issues`, `prs`, `review`, `review-fix`, `secrets-and-config`, and `standards-sync` in `.agents/skills` (linked from `.claude/skills`), a weekly GitHub Actions workflow that opens a pull request when the standards change, a CI workflow that runs `check`, declared GitHub repository settings, and a workflow that auto-merges the weekly pull request.
+- `bun`, the default, for a TypeScript monorepo that uses Bun: everything in `core`, plus more skills, a strict Biome and TypeScript configuration, a CI workflow that runs the whole quality gate in place of `check` alone, a Dependabot configuration, and a `justfile`.
 
 The CLI, [`@davidvornholt/standards`](packages/standards-cli), records what it copied in `sync-standards.lock`, so `check` reports any synced file that was edited by hand. A repository adds its own agent rules below the `## Project-specific rules` heading at the end of `AGENTS.md`, which sync never changes.
 

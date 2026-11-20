@@ -71,11 +71,13 @@ jobs:
     outputs:
       proven: ${{ steps.proof.outputs.proven }}
     steps:
-      - name: Checkout the lockfile
+      - name: Checkout the lockfile and sync policy
         uses: actions/checkout@v7
         with:
           persist-credentials: false
-          sparse-checkout: bun.lock
+          sparse-checkout: |
+            bun.lock
+            sync-standards.local.json
           sparse-checkout-cone-mode: false
 
       - name: Prove a validated pull request result
@@ -143,7 +145,8 @@ jobs:
       # than a day, dispatch a full gate run on main, which publishes exactly
       # as a full push run does. Repositories with no Playwright snapshot have
       # no browser suite to publish for. A failed request only leaves the
-      # caches stale, so it warns instead of failing the gate.
+      # caches stale, so it warns instead of failing the gate. A repository on
+      # the core payload has no workspace caches, so it requests nothing.
       - name: Request stale cache publication
         if: steps.proof.outputs.proven == 'true'
         continue-on-error: true
@@ -165,6 +168,11 @@ jobs:
             exit 0
           }
 
+          if [ -f sync-standards.local.json ] &&
+            [ "$(jq -r 'if type == "object" then .payload // "" else "" end' sync-standards.local.json)" = core ]; then
+            echo "The core payload publishes no caches"
+            exit 0
+          fi
           if [ -z "$LOCK_HASH" ]; then
             echo "::warning::Cannot check cache freshness: bun.lock is missing"
             exit 1
@@ -289,6 +297,8 @@ jobs:
       needs.reuse.outputs.proven != 'true'
     runs-on: ${{ vars.CI_CODEBUILD_PROJECT != '' && format('codebuild-{0}-{1}-{2}-{3}', vars.CI_CODEBUILD_PROJECT, github.run_id, github.run_attempt, vars.CI_CODEBUILD_QUALITY_SIZE || 'medium') || 'ubuntu-latest' }}
     timeout-minutes: 30
+    # A job's services can't depend on repository files, so the service also
+    # starts for a repository on the core payload, which doesn't use it.
     services:
       postgres:
         # Both registries serve the same Docker Library image. Docker Hub
@@ -377,6 +387,23 @@ jobs:
             -ignore '^input "client-id" is not defined in action "actions/create-github-app-token@v3"\. ' \
             -ignore '^missing input "app-id" which is required by action "actions/create-github-app-token@v3"\. '
 
+      # A repository on the core payload has no Bun workspace. Its gate is the
+      # standards check, which runs the CLI from the standards commit that its
+      # lock records, so the CLI always matches the content it checks, and
+      # every step that needs the workspace skips. Any other value fails here,
+      # so a payload this workflow doesn't know can't skip every check.
+      - name: Read the standards payload
+        id: payload
+        run: |
+          set -euo pipefail
+          payload=bun
+          if [ -f sync-standards.local.json ] &&
+            ! payload=$(jq -er 'if has("payload") then .payload else "bun" end | select(. == "core" or . == "bun")' sync-standards.local.json); then
+            echo '::error::sync-standards.local.json must be an object whose "payload", if set, is "core" or "bun"'
+            exit 1
+          fi
+          echo "payload=$payload" >> "$GITHUB_OUTPUT"
+
       # A fixed 127.0.0.1 database URL only works where the job shares the
       # service's published loopback — true on GitHub-hosted runners, false on
       # CodeBuild, whose runner is itself an unprivileged container beside the
@@ -387,6 +414,7 @@ jobs:
       # tasks. The URL keeps an address rather than a host name because
       # consumer test guards accept only loopback or a private IPv4 address.
       - name: Resolve the database endpoint
+        if: steps.payload.outputs.payload == 'bun'
         env:
           CI_POSTGRES_USER: ${{ vars.CI_POSTGRES_USER || 'app' }}
           CI_POSTGRES_PASSWORD: ${{ vars.CI_POSTGRES_PASSWORD || 'app' }}
@@ -433,6 +461,7 @@ jobs:
       # repository's CLI suite spawns `just` against them, and one uniform file
       # serves every repo (see the Postgres note above).
       - name: Install just
+        if: steps.payload.outputs.payload == 'bun'
         env:
           RELEASE_API_TOKEN: ${{ github.token }}
         run: |
@@ -460,6 +489,7 @@ jobs:
 
       - name: Detect browser a11y suite
         id: a11y
+        if: steps.payload.outputs.payload == 'bun'
         run: |
           if find . -path ./node_modules -prune -o \
             \( -name 'playwright.config.*' -o -name '*.a11y.ts' \) -print | grep -q .; then
@@ -500,6 +530,7 @@ jobs:
 
       - name: Read Bun version
         id: bun
+        if: steps.payload.outputs.payload == 'bun'
         run: |
           set -euo pipefail
           if ! package_manager="$(jq -er '.packageManager | select(type == "string" and test("^bun@(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"))' package.json)"; then
@@ -508,19 +539,46 @@ jobs:
           fi
           echo "version=${package_manager#bun@}" >> "$GITHUB_OUTPUT"
 
+      - name: Fetch the standards CLI source
+        id: standards-source
+        if: steps.payload.outputs.payload == 'core'
+        run: |
+          set -euo pipefail
+          upstream="$(jq -er '.upstream | strings' sync-standards.lock)" || upstream=
+          repository="${upstream#github:}"
+          if [[ ! "$upstream" =~ ^github:[A-Za-z0-9-]+/[A-Za-z0-9_.-]+$ ]] || [[ "$repository" == */. || "$repository" == */.. ]]; then
+            echo "::error::sync-standards.lock must name a github:owner/repo upstream to fetch the standards CLI from"
+            exit 1
+          fi
+          if ! rev="$(jq -er '.sha | strings | select(test("^[0-9a-f]{40}$"))' sync-standards.lock)"; then
+            echo "::error::sync-standards.lock must record the full commit its files were synced from"
+            exit 1
+          fi
+          git() { command git -c core.hooksPath=/dev/null -c core.fsmonitor=false "$@"; }
+          source=$(mktemp -d "$RUNNER_TEMP/standards-source.XXXXXX")
+          git init --quiet "$source"
+          git -C "$source" fetch --quiet --depth=1 --no-tags -- "https://github.com/$repository.git" "$rev"
+          git -C "$source" checkout --quiet --detach "$rev"
+          if ! package_manager="$(jq -er '.packageManager | select(type == "string" and test("^bun@(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"))' "$source/package.json")"; then
+            echo "::error::The standards package.json at $rev must pin an exact bun@x.y.z packageManager"
+            exit 1
+          fi
+          echo "bun-version=${package_manager#bun@}" >> "$GITHUB_OUTPUT"
+          echo "STANDARDS_SOURCE=$source" >> "$GITHUB_ENV"
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: ${{ steps.bun.outputs.version }}
+          bun-version: ${{ steps.bun.outputs.version || steps.standards-source.outputs.bun-version }}
 
       - name: Verify Bun version
         env:
-          EXPECTED_BUN_VERSION: ${{ steps.bun.outputs.version }}
+          EXPECTED_BUN_VERSION: ${{ steps.bun.outputs.version || steps.standards-source.outputs.bun-version }}
         run: |
           set -euo pipefail
           actual="$(bun --version)"
           if [[ "$actual" != "$EXPECTED_BUN_VERSION" ]]; then
-            echo "::error::Expected Bun $EXPECTED_BUN_VERSION from package.json, received $actual"
+            echo "::error::Expected Bun $EXPECTED_BUN_VERSION, received $actual"
             exit 1
           fi
 
@@ -528,6 +586,7 @@ jobs:
       # cross-runtime tests intentionally invoke Node, so honor the version the
       # canonical package manifest declares instead of the runner's ambient one.
       - name: Setup Node
+        if: steps.payload.outputs.payload == 'bun'
         uses: actions/setup-node@v7
         with:
           node-version: "26"
@@ -542,6 +601,7 @@ jobs:
       # quota.
       - name: Restore the Turbo cache
         id: turbo-cache
+        if: steps.payload.outputs.payload == 'bun'
         uses: actions/cache/restore@v6
         with:
           path: .turbo/cache
@@ -557,7 +617,7 @@ jobs:
       # it, so every published snapshot comes from a cold build of its own
       # commit and cannot accumulate entries or state from earlier builds.
       - name: Restore the Next.js build cache
-        if: github.ref != 'refs/heads/main'
+        if: steps.payload.outputs.payload == 'bun' && github.ref != 'refs/heads/main'
         uses: actions/cache/restore@v6
         with:
           path: apps/*/.next/cache/turbopack
@@ -593,6 +653,7 @@ jobs:
       # fallbacks because they consume trusted snapshots but never publish.
       - name: Restore the Bun package cache
         id: bun-cache
+        if: steps.payload.outputs.payload == 'bun'
         uses: actions/cache/restore@v6
         with:
           path: ~/.bun/install/cache
@@ -600,11 +661,18 @@ jobs:
           restore-keys: ${{ github.ref != 'refs/heads/main' && format('bun-packages-v2-{0}-{1}-', runner.os, runner.arch) || '' }}
 
       - name: Discard non-exact main Bun restore
-        if: github.ref == 'refs/heads/main' && steps.bun-cache.outputs.cache-hit != 'true'
+        if: steps.payload.outputs.payload == 'bun' && github.ref == 'refs/heads/main' && steps.bun-cache.outputs.cache-hit != 'true'
         run: rm -rf -- "$HOME/.bun/install/cache"
 
       - name: Install dependencies
+        if: steps.payload.outputs.payload == 'bun'
         run: bun install --frozen-lockfile
+
+      - name: Install the standards CLI dependencies
+        if: steps.payload.outputs.payload == 'core'
+        run: |
+          cd "$STANDARDS_SOURCE"
+          bun install --frozen-lockfile --filter @davidvornholt/standards --production --ignore-scripts
 
       # Run the *installed* binary, never `bunx playwright`: a11y suites live in
       # a workspace, Bun keeps that workspace's binaries under it rather than at
@@ -613,7 +681,7 @@ jobs:
       # itself, not the one the pinned @playwright/test launches, and every spec
       # then fails on a missing executable the moment upstream ships a release.
       - name: Restore the Playwright browser cache
-        if: steps.a11y.outputs.present == 'true'
+        if: steps.payload.outputs.payload == 'bun' && steps.a11y.outputs.present == 'true'
         id: playwright-cache
         uses: actions/cache/restore@v6
         with:
@@ -622,11 +690,11 @@ jobs:
           restore-keys: ${{ github.ref != 'refs/heads/main' && format('playwright-v2-{0}-{1}-', runner.os, runner.arch) || '' }}
 
       - name: Discard non-exact main Playwright restore
-        if: github.ref == 'refs/heads/main' && steps.a11y.outputs.present == 'true' && steps.playwright-cache.outputs.cache-hit != 'true'
+        if: steps.payload.outputs.payload == 'bun' && github.ref == 'refs/heads/main' && steps.a11y.outputs.present == 'true' && steps.playwright-cache.outputs.cache-hit != 'true'
         run: rm -rf -- "$HOME/.cache/ms-playwright"
 
       - name: Install Playwright Chromium
-        if: steps.a11y.outputs.present == 'true'
+        if: steps.payload.outputs.payload == 'bun' && steps.a11y.outputs.present == 'true'
         run: |
           set -euo pipefail
           playwright=$(find . -path '*/node_modules/.bin/playwright' -print -quit)
@@ -654,6 +722,7 @@ jobs:
 
       - name: Check
         env:
+          PAYLOAD: ${{ steps.payload.outputs.payload }}
           # The isolated `check` aggregator job owns this live check
           # in CI. This workflow-only seam keeps local `bun run check`
           # fail-closed.
@@ -663,7 +732,14 @@ jobs:
           # task table below and the Turbo prune read these files. Turbo
           # excludes this variable from task hashes.
           TURBO_RUN_SUMMARY: "true"
-        run: bun run check
+        run: |
+          set -euo pipefail
+          if [ "$PAYLOAD" = core ]; then
+            cd "$STANDARDS_SOURCE"
+            bun --no-env-file packages/standards-cli/src/cli.ts check --dir "$GITHUB_WORKSPACE"
+          else
+            bun run check
+          fi
 
       # A repository that packages a CLI in nix/package.nix builds every
       # package its flake exposes, because a dependency update that leaves a
@@ -671,11 +747,11 @@ jobs:
       # package is installed. This runs here rather than in a job of its own,
       # which would bill a runner minute in every repository without a CLI.
       - name: Install Nix for the package checks
-        if: hashFiles('nix/package.nix') != ''
+        if: steps.payload.outputs.payload == 'bun' && hashFiles('nix/package.nix') != ''
         uses: cachix/install-nix-action@v31
 
       - name: Build the Nix packages and their source check
-        if: hashFiles('nix/package.nix') != ''
+        if: steps.payload.outputs.payload == 'bun' && hashFiles('nix/package.nix') != ''
         run: |
           set -euo pipefail
           system=$(nix eval --impure --raw --expr builtins.currentSystem)
@@ -694,7 +770,7 @@ jobs:
       # missed the cache. It also goes to the log, where `gh run view --log`
       # can read it.
       - name: Summarize Turbo tasks
-        if: "!cancelled()"
+        if: "steps.payload.outputs.payload == 'bun' && !cancelled()"
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -716,14 +792,14 @@ jobs:
           ' "${summaries[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Save the Bun package cache
-        if: success() && github.ref == 'refs/heads/main' && steps.bun-cache.outputs.cache-hit != 'true'
+        if: steps.payload.outputs.payload == 'bun' && success() && github.ref == 'refs/heads/main' && steps.bun-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
           path: ~/.bun/install/cache
           key: bun-packages-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
 
       - name: Save the Playwright browser cache
-        if: success() && github.ref == 'refs/heads/main' && steps.a11y.outputs.present == 'true' && steps.playwright-cache.outputs.cache-hit != 'true'
+        if: steps.payload.outputs.payload == 'bun' && success() && github.ref == 'refs/heads/main' && steps.a11y.outputs.present == 'true' && steps.playwright-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
           path: ~/.cache/ms-playwright
@@ -737,7 +813,7 @@ jobs:
       # A nullglob array replaces `compgen`, which non-interactive bash omits.
       - name: Detect a Next.js build cache
         id: next-cache
-        if: success() && github.ref == 'refs/heads/main'
+        if: steps.payload.outputs.payload == 'bun' && success() && github.ref == 'refs/heads/main'
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -754,7 +830,7 @@ jobs:
           echo "present=$present" >> "$GITHUB_OUTPUT"
 
       - name: Save the Next.js build cache
-        if: success() && github.ref == 'refs/heads/main' && steps.next-cache.outputs.present == 'true'
+        if: steps.payload.outputs.payload == 'bun' && success() && github.ref == 'refs/heads/main' && steps.next-cache.outputs.present == 'true'
         uses: actions/cache/save@v6
         with:
           path: apps/*/.next/cache/turbopack
@@ -769,7 +845,7 @@ jobs:
       # applies. Failed, cancelled, PR, and exact-key rerun jobs do not prune
       # because none of them publishes a snapshot.
       - name: Prune the Turbo cache before save
-        if: success() && github.ref == 'refs/heads/main' && steps.turbo-cache.outputs.cache-hit != 'true'
+        if: steps.payload.outputs.payload == 'bun' && success() && github.ref == 'refs/heads/main' && steps.turbo-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           cache_dir=.turbo/cache
@@ -791,7 +867,7 @@ jobs:
             xargs -r rm -f --
 
       - name: Save the Turbo cache
-        if: success() && github.ref == 'refs/heads/main' && steps.turbo-cache.outputs.cache-hit != 'true'
+        if: steps.payload.outputs.payload == 'bun' && success() && github.ref == 'refs/heads/main' && steps.turbo-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
           path: .turbo/cache

@@ -145,13 +145,13 @@ describe('main-push reuse wiring', () => {
       proven: expression('steps.proof.outputs.proven'),
     });
     expect(reuse?.steps.map((step) => step.name)).toEqual([
-      'Checkout the lockfile',
+      'Checkout the lockfile and sync policy',
       PROOF_STEP,
       REQUEST_STEP,
     ]);
     expect(reuse?.steps[0]?.with).toEqual({
       'persist-credentials': false,
-      'sparse-checkout': 'bun.lock',
+      'sparse-checkout': 'bun.lock\nsync-standards.local.json\n',
       'sparse-checkout-cone-mode': false,
     });
     // A proof error must select the full gate, never fail the run, and cache

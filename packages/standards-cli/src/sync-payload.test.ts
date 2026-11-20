@@ -146,8 +146,8 @@ describe('AGENTS.md composition', () => {
 
 describe('canonical core payload', () => {
   // A repository on the core payload has no Bun workspace, so everything the
-  // weekly sync runs must arrive with core.
-  it('carries what the weekly sync needs', async () => {
+  // weekly sync and the standards gate run must arrive with core.
+  it('carries what the weekly sync and the standards gate need', async () => {
     const { payloads } = await loadManifest(
       join(ACTUAL_UPSTREAM, 'sync-standards.json'),
     );
@@ -155,10 +155,13 @@ describe('canonical core payload', () => {
       expect.arrayContaining([
         'sync-standards.json',
         '.github/workflows/standards-sync.yml',
+        '.github/workflows/standards.yml',
+        '.github/workflows/standards-auto-merge.yml',
+        '.github/settings.json',
         '.github/actions/sops-secret',
         '.agents/skills/standards-sync',
       ]),
     );
-    expect(payloads.core.seeds).toEqual([]);
+    expect(payloads.core.seeds).toEqual(['.github/settings.local.json']);
   });
 });
