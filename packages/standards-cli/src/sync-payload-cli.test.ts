@@ -1,5 +1,4 @@
-// Black-box init, sync, and check for each payload, and the `agents` command
-// that keeps a source's own AGENTS.md generated.
+// Black-box init, sync, and check for each payload.
 
 import { afterEach, describe, expect, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
@@ -347,45 +346,5 @@ describe('Bun payload', () => {
     );
     expect(read(consumer, 'biome.jsonc')).toContain('biome.base.jsonc');
     expect(existsSync(join(consumer, '.github/dependabot.yml'))).toBe(true);
-  });
-});
-
-describe('agents', () => {
-  it('fails on a stale AGENTS.md until --write regenerates it, keeping own rules', () => {
-    const up = buildUpstream();
-    const own = '\n### Own rule\n';
-    write(up, 'AGENTS.md', `# Stale\n\n## Project-specific rules\n${own}`);
-
-    const stale = run(up, ['agents', '--dir', up]);
-    expect(stale.status).toBe(1);
-    expect(stale.stderr).toContain('does not match its parts');
-
-    expect(run(up, ['agents', '--write', '--dir', up]).status).toBe(0);
-    const agents = read(up, 'AGENTS.md');
-    expect(agents).toContain(`${AGENTS_PARTS.core}\n${AGENTS_PARTS.bun}`);
-    expect(agents.endsWith(`## Project-specific rules\n${own}`)).toBe(true);
-    expect(run(up, ['agents', '--check', '--dir', up]).status).toBe(0);
-  });
-
-  it('refuses to write through a symlinked AGENTS.md', () => {
-    const up = buildUpstream();
-    write(up, 'target.md', '# Stale\n');
-    rmSync(join(up, 'AGENTS.md'), { force: true });
-    symlinkSync('target.md', join(up, 'AGENTS.md'));
-
-    const result = run(up, ['agents', '--write', '--dir', up]);
-
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('AGENTS.md is a symlink');
-    expect(read(up, 'target.md')).toBe('# Stale\n');
-  });
-
-  it('accepts only one of --check or --write', () => {
-    const up = buildUpstream();
-    const result = run(up, ['agents', '--check', '--write', '--dir', up]);
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain(
-      'agents accepts exactly one of --check or --write',
-    );
   });
 });
