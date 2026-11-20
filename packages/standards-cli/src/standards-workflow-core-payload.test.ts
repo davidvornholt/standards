@@ -70,7 +70,6 @@ const readAssignments = (path: string): Record<string, string> =>
       ]),
   );
 
-// Which payloads a step condition lets the step run for.
 const runsFor = (condition: string | undefined): string => {
   if (condition === undefined || !condition.includes(PAYLOAD)) {
     return 'every payload';

@@ -539,7 +539,6 @@ jobs:
           fi
           echo "version=${package_manager#bun@}" >> "$GITHUB_OUTPUT"
 
-      # The core payload runs the CLI under the Bun that its source declares.
       - name: Fetch the standards CLI source
         id: standards-source
         if: steps.payload.outputs.payload == 'core'

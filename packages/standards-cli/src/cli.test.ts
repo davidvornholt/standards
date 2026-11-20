@@ -81,8 +81,6 @@ const SOURCE_REPOSITORY_CONDITION =
   "github.repository == 'davidvornholt/standards'";
 const GATE_RUN_CONDITION =
   "!cancelled() && (!github.event.pull_request.draft || needs.draft-state.outputs.gate == 'true') && needs.reuse.outputs.proven != 'true'";
-// The quality job runs the steps that need a Bun workspace only on the bun
-// payload.
 const BUN_PAYLOAD_CONDITION = "steps.payload.outputs.payload == 'bun'";
 const onBunPayload = (condition: string): string =>
   `${BUN_PAYLOAD_CONDITION} && ${condition}`;
