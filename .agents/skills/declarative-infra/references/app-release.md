@@ -27,7 +27,7 @@ A first-party app releases from its own repository straight onto its host. The h
 
 ## Release workflow
 
-The synced [action](../../../../.github/actions/app-release/action.yml) describes its inputs and outputs. Its header states the job permissions, the per-unit concurrency group, and the actionlint exception the `queue` key needs.
+The app repo calls the synced [action](https://github.com/davidvornholt/standards/blob/main/.github/actions/app-release/action.yml) as `./.github/actions/app-release`. The action describes its inputs and outputs. Its header states the job permissions, the per-unit concurrency group, and the actionlint exception the `queue` key needs.
 
 - The host accepts a release only from the unit's repository and ref, on `push` or `workflow_dispatch`, and only when each image's `org.opencontainers.image.revision` label equals the OIDC token's commit.
 - A push to main runs three jobs in the publish workflow:

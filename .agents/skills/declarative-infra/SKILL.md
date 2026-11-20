@@ -1,6 +1,6 @@
 ---
 name: declarative-infra
-description: Use when changing NixOS, OpenTofu, cloud resources, infrastructure secrets, deployments, or provider credentials, even when another repository owns them.
+description: Use when changing hosted infrastructure, such as server NixOS configurations, OpenTofu, cloud resources, infrastructure secrets, deployments, or provider credentials, even when another repository owns them.
 ---
 
 # Declarative infrastructure
