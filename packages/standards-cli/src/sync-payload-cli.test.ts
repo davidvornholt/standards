@@ -152,6 +152,40 @@ describe('core payload', () => {
       'sync-standards.json',
     ]);
   });
+
+  // The workflow skips the Bun quality steps for core, so a policy change
+  // alone must not pass while the lock still holds the Bun payload.
+  it('fails check after a switch to core until sync removes the Bun paths', () => {
+    const up = buildUpstream();
+    const consumer = newConsumer();
+    expect(init(up, consumer).status).toBe(0);
+
+    write(consumer, 'sync-standards.local.json', CORE_POLICY);
+    const unsynced = run(consumer, ['check', '--dir', consumer]);
+
+    expect(unsynced.status).toBe(1);
+    expect(unsynced.stderr).toContain(
+      'sync-standards.local.json selects the core payload, but sync-standards.lock still holds 2 Bun payload file(s): .github/dependabot.yml, bun-managed/b.txt; run `standards sync`',
+    );
+
+    expect(
+      run(consumer, ['sync', '--from', up, '--dir', consumer]).status,
+    ).toBe(0);
+    expect(run(consumer, ['check', '--dir', consumer]).status).toBe(0);
+  });
+
+  it('fails check for core when the synced manifest cannot attribute the locked files', () => {
+    const consumer = newConsumer(CORE_POLICY);
+    expect(init(buildUpstream(), consumer).status).toBe(0);
+    write(consumer, 'sync-standards.json', '{}\n');
+
+    const result = run(consumer, ['check', '--dir', consumer]);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      "sync-standards.local.json selects the core payload, but sync-standards.json can't show which locked files belong to the Bun payload",
+    );
+  });
 });
 
 describe("a split file leaving the payload with the repository's own part", () => {

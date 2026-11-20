@@ -171,6 +171,17 @@ const selectedParts = (
     ? [manifest.payloads.core]
     : [manifest.payloads.core, manifest.payloads.bun];
 
+// The given files that one payload's own part manages, the way sync lists them:
+// a file at or under one of the part's managed paths.
+export const ownedByPayload = (
+  manifest: Manifest,
+  payload: SyncPayload,
+  files: ReadonlyArray<string>,
+): ReadonlyArray<string> =>
+  files.filter((file) =>
+    manifest.payloads[payload].paths.some((path) => isUnder(file, path)),
+  );
+
 // One self-contained file rather than `@` imports: Codex doesn't expand them,
 // and an import of a part that doesn't apply would dangle.
 export const composeAgents = async (
