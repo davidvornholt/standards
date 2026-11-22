@@ -4,7 +4,7 @@
 
 import { afterEach, expect, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
 import {
@@ -71,11 +71,16 @@ const consumerAt = (sha: string, upstream = `github:${REPOSITORY}`): string => {
   return consumer;
 };
 
+type Source = {
+  readonly up: string;
+  readonly cache: string;
+  readonly env?: ReadonlyArray<readonly [string, string]>;
+};
+
 const runScript = (
   cwd: string,
-  up: string,
-  cache: string,
   args: ReadonlyArray<string>,
+  { up, cache, env = [] }: Source,
 ): RunResult =>
   runProcess('bash', cwd, [SCRIPT, ...args], {
     ...process.env,
@@ -84,6 +89,7 @@ const runScript = (
       ['GIT_CONFIG_COUNT', '1'],
       ['GIT_CONFIG_KEY_0', `url.file://${up}.insteadOf`],
       ['GIT_CONFIG_VALUE_0', `https://github.com/${REPOSITORY}.git`],
+      ...env,
     ]),
   });
 
@@ -106,13 +112,13 @@ it('runs the CLI of the locked commit, not the newest one', () => {
   const cache = mkTmp('locked-cli-cache-');
 
   const output = ranVersion(
-    runScript(consumer, up, cache, ['check', '--dir', '.']),
+    runScript(consumer, ['check', '--dir', '.'], { up, cache }),
   );
 
   expect(output).toEqual({
     version: 'locked',
     args: ['check', '--dir', '.'],
-    cwd: consumer,
+    cwd: realpathSync(consumer),
     env: null,
   });
 });
@@ -122,13 +128,13 @@ it('reuses an installed commit without fetching it again', () => {
   const locked = commitUpstream(up, 'locked');
   const consumer = consumerAt(locked);
   const cache = mkTmp('locked-cli-cache-');
-  ranVersion(runScript(consumer, up, cache, ['check']));
+  ranVersion(runScript(consumer, ['check'], { up, cache }));
 
   rmSync(up, { recursive: true, force: true });
 
-  expect(ranVersion(runScript(consumer, up, cache, ['check'])).version).toBe(
-    'locked',
-  );
+  expect(
+    ranVersion(runScript(consumer, ['check'], { up, cache })).version,
+  ).toBe('locked');
   expect(
     existsSync(
       join(cache, 'davidvornholt-standards/cli', `owner-standards-${locked}`),
@@ -136,10 +142,34 @@ it('reuses an installed commit without fetching it again', () => {
   ).toBe(true);
 });
 
+it('leaves the index of a Git hook that runs it untouched', () => {
+  const up = buildUpstream();
+  const locked = commitUpstream(up, 'locked');
+  const consumer = consumerAt(locked);
+  git(consumer, ['init', '--quiet']);
+  git(consumer, ['add', 'sync-standards.lock']);
+  const index = join(consumer, '.git/index');
+  const before = readFileSync(index);
+
+  ranVersion(
+    runScript(consumer, ['check'], {
+      up,
+      cache: mkTmp('locked-cli-cache-'),
+      env: [
+        ['GIT_INDEX_FILE', index],
+        ['GIT_DIR', join(consumer, '.git')],
+      ],
+    }),
+  );
+
+  expect(readFileSync(index).equals(before)).toBe(true);
+});
+
 it('stops outside the repository root', () => {
-  const result = runScript(mkTmp('locked-cli-empty-'), '/nowhere', '/nowhere', [
-    'check',
-  ]);
+  const result = runScript(mkTmp('locked-cli-empty-'), ['check'], {
+    up: '/nowhere',
+    cache: '/nowhere',
+  });
   expect(result.status).toBe(1);
   expect(result.stderr).toContain('run it from the repository root');
 });
@@ -149,12 +179,10 @@ it.each([
   ['an upstream path that leaves its owner', 'a'.repeat(40), 'github:owner/..'],
   ['an abbreviated commit', 'abc1234', `github:${REPOSITORY}`],
 ])('refuses a lock with %s', (_name, sha, upstream) => {
-  const result = runScript(
-    consumerAt(sha, upstream),
-    '/nowhere',
-    mkTmp('locked-cli-cache-'),
-    ['check'],
-  );
+  const result = runScript(consumerAt(sha, upstream), ['check'], {
+    up: '/nowhere',
+    cache: mkTmp('locked-cli-cache-'),
+  });
   expect(result.status).toBe(1);
   expect(result.stderr).toContain('standards.sh: sync-standards.lock must');
 });

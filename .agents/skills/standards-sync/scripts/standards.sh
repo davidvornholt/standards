@@ -33,20 +33,30 @@ fi
 cache="${XDG_CACHE_HOME:-$HOME/.cache}/davidvornholt-standards/cli"
 source="$cache/${repository//\//-}-$rev"
 if [ ! -f "$source/.installed" ]; then
-  mkdir -p "$cache"
-  staging=$(mktemp -d "$cache/.staging.XXXXXX")
-  trap 'rm -rf -- "$staging"' EXIT
-  git() { command git -c core.hooksPath=/dev/null -c core.fsmonitor=false "$@"; }
-  git init --quiet "$staging"
-  git -C "$staging" fetch --quiet --depth=1 --no-tags -- "https://github.com/$repository.git" "$rev"
-  git -C "$staging" checkout --quiet --detach "$rev"
-  (cd "$staging" && bun install --frozen-lockfile --filter @davidvornholt/standards --production --ignore-scripts >&2)
-  touch "$staging/.installed"
-  # A rename onto an installed copy fails, so a concurrent run that installed
-  # the same commit first keeps its copy, and this one is removed.
-  bun --no-env-file -e 'try { require("node:fs").renameSync(process.argv[1], process.argv[2]) } catch {}' "$staging" "$source"
-  rm -rf -- "$staging"
-  trap - EXIT
+  # A Git hook that runs this script passes its repository's GIT_DIR,
+  # GIT_INDEX_FILE and the like, which would point the bootstrap's Git at the
+  # consumer's repository. Configuration variables stay, so the user's Git
+  # configuration still applies.
+  (
+    for variable in $(git rev-parse --local-env-vars); do
+      case "$variable" in
+        GIT_CONFIG*) ;;
+        *) unset "$variable" ;;
+      esac
+    done
+    mkdir -p "$cache"
+    staging=$(mktemp -d "$cache/.staging.XXXXXX")
+    trap 'rm -rf -- "$staging"' EXIT
+    git() { command git -c core.hooksPath=/dev/null -c core.fsmonitor=false "$@"; }
+    git init --quiet "$staging"
+    git -C "$staging" fetch --quiet --depth=1 --no-tags -- "https://github.com/$repository.git" "$rev"
+    git -C "$staging" checkout --quiet --detach "$rev"
+    (cd "$staging" && bun install --frozen-lockfile --filter @davidvornholt/standards --production --ignore-scripts >&2)
+    touch "$staging/.installed"
+    # A rename onto an installed copy fails, so a concurrent run that installed
+    # the same commit first keeps its copy, and the trap removes this one.
+    bun --no-env-file -e 'try { require("node:fs").renameSync(process.argv[1], process.argv[2]) } catch {}' "$staging" "$source"
+  )
   if [ ! -f "$source/.installed" ]; then
     echo "standards.sh: could not install the standards CLI into $source" >&2
     exit 1
