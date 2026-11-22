@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 import process from 'node:process';
-import { createA11yPlaywrightConfig } from './playwright-config';
+import {
+  createA11yPlaywrightConfig,
+  mobileDeviceTag,
+} from './playwright-config';
 
 const expectedA11ySpecPattern = /.*\.a11y\.ts/u;
 const originalCiValue = process.env.CI;
@@ -56,6 +59,26 @@ describe('createA11yPlaywrightConfig', () => {
       'desktop-chromium',
       'mobile-chromium',
     ]);
+  });
+
+  it('runs only tests tagged as device-dependent on the emulated phone', () => {
+    const config = withCi(undefined, () =>
+      createA11yPlaywrightConfig({
+        baseUrl: 'http://127.0.0.1:3000',
+        webServerCommand: 'bun run start',
+      }),
+    );
+    const [desktop, mobile] = config.projects ?? [];
+
+    expect(desktop?.grep).toBeUndefined();
+    expect(desktop?.use).toMatchObject({ isMobile: false, hasTouch: false });
+    expect(mobile?.use).toMatchObject({ isMobile: true, hasTouch: true });
+    const grep = mobile?.grep;
+    if (!(grep instanceof RegExp)) {
+      throw new Error('The phone project needs a single grep pattern');
+    }
+    expect(grep.test(`login works ${mobileDeviceTag}`)).toBe(true);
+    expect(grep.test('login works')).toBe(false);
   });
 
   it('uses stricter retry and reporting defaults in CI', () => {

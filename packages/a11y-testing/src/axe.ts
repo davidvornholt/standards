@@ -2,6 +2,8 @@ import process from 'node:process';
 import AxeBuilder from '@axe-core/playwright';
 import type * as playwright from '@playwright/test';
 import { animationsSettled } from './animation-settle';
+import { scanAtPhoneWidthToo } from './phone-width-scan';
+import { mobileDevice } from './playwright-config';
 
 export const wcag22AaTags: ReadonlyArray<string> = [
   'wcag2a',
@@ -14,6 +16,8 @@ export const wcag22AaTags: ReadonlyArray<string> = [
 const explicitlyEnabledWcag22AaRules: ReadonlyArray<string> = ['target-size'];
 
 export type AccessibilityViolation = {
+  // The viewport the scan saw it at, as `<width>x<height>`.
+  readonly viewport: string;
   readonly id: string;
   readonly impact: string | null | undefined;
   readonly help: string;
@@ -97,8 +101,9 @@ const waitForAnimations = async (page: playwright.Page): Promise<void> => {
   }
 };
 
-export const scanWcag22AaViolations = async (
+const scanCurrentViewport = async (
   page: playwright.Page,
+  viewport: playwright.ViewportSize,
 ): Promise<ReadonlyArray<AccessibilityViolation>> => {
   await waitForStreamedDom(page);
   await waitForAnimations(page);
@@ -118,9 +123,28 @@ export const scanWcag22AaViolations = async (
     .analyze();
 
   return results.violations.map((violation) => ({
+    viewport: `${viewport.width}x${viewport.height}`,
     id: violation.id,
     impact: violation.impact,
     help: violation.help,
     nodes: violation.nodes.map((node) => node.target.join(' ')),
   }));
 };
+
+// Every scan covers the page's own viewport and the phone's, because layout,
+// contrast, and target sizes change with the width, so a test that scans
+// needs no second run on a phone. The narrowed page keeps the desktop
+// browser's pointer, hover, user agent, and pixel density, so styles that
+// depend on those, such as larger touch targets under `pointer: coarse`, are
+// scanned as a desktop browser renders them at the phone's width.
+export const scanWcag22AaViolations = (
+  page: playwright.Page,
+): Promise<ReadonlyArray<AccessibilityViolation>> =>
+  scanAtPhoneWidthToo(
+    page,
+    mobileDevice.viewport,
+    (viewport) => scanCurrentViewport(page, viewport),
+    // Layout-driven re-renders, such as a navigation rail replacing a drawer,
+    // finish before the test continues at its own viewport.
+    () => waitForStreamedDom(page),
+  );
