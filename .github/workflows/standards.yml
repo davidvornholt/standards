@@ -1028,10 +1028,10 @@ jobs:
           case "$release_api_token" in
             ''|*$'\r'*|*$'\n'*) echo "::error::A single-line GitHub workflow token is required" >&2; exit 1 ;;
           esac
-          bun_version=1.4.3
+          bun_version=1.4.5
           case "$(uname -m)" in
-            x86_64) bun_platform=x64-baseline; bun_asset=626789490; bun_sha=1fc2edac843102909e3a1be1d8d9802cc6071cf074e67e88231f4ffe0f8b397b ;;
-            aarch64) bun_platform=aarch64; bun_asset=626788529; bun_sha=efa9813da5ed72423bf847f916e8d2c47c0d776add972354026a75e10da9aa21 ;;
+            x86_64) bun_platform=x64-baseline; bun_asset=766783535; bun_sha=dcb23a18a1c2fff12d57bcef696dbbb42eb67fde29f43816ecb595459a24c463 ;;
+            aarch64) bun_platform=aarch64; bun_asset=766782468; bun_sha=18656a3bf0ea5641f5796ae4213b75255579a70a0fded2f337933785568cdf84 ;;
             *)
               echo "::error::No pinned Bun binary for runner architecture $(uname -m)"
               exit 1
