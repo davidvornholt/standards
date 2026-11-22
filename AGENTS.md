@@ -81,6 +81,10 @@ Declare template-wide holds as `ignore` entries in the shared blocks of `.github
 
 `biome.base.jsonc` enables every applicable rule domain, the recommended set, and applicable opt-in nursery and security rules at `error`. On Biome upgrades, adopt new rules at `error` and opt out deliberately.
 
+### Bun upgrades
+
+Let the `Bun upgrade` workflow raise Bun. For a manual run, use `bun standards bun upgrade --write` so the archive hashes and settings checker stay in sync.
+
 ### Skill descriptions
 
 A skill's `description` is loaded into every session, so it says only when to use the skill, such as `Use when opening an issue or changing its title or description.` What the skill does belongs in its body.

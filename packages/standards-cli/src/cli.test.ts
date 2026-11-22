@@ -2335,6 +2335,7 @@ describe('canonical standards workflow security boundaries', () => {
         .toSorted((left, right) => left.localeCompare(right)),
       'The production workflow inventory no longer matches this list. If you added a workflow, add its path to the expected list below. If a path went missing, the shared workflow-file predicate stopped matching it and the workflow has fallen out of these security checks — restore the predicate instead of editing the list.',
     ).toEqual([
+      '.github/workflows/bun-upgrade.yml',
       '.github/workflows/publish-standards-cli.yml',
       '.github/workflows/standards-auto-merge.yml',
       '.github/workflows/standards-sync.yml',
