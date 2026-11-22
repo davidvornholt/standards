@@ -140,24 +140,43 @@ const scanCurrentViewport = async (
 // that scans such a page with `mobileDeviceTag`, so it also scans on the
 // emulated phone. Narrowing can hide the focused element, and the browser then
 // moves focus to the body, so the scan gives focus back afterwards.
-// Focus moves only if narrowing took it away, so focus handlers such as a
-// tooltip that opens on focus don't run again for an element that kept it.
+// Focus moves only if narrowing dropped it to the body, so an element that kept
+// focus, or one the page focused on purpose, doesn't run its focus handlers
+// again. The focused element is found through open shadow roots, and a
+// responsive component that rendered a fresh copy of it gets focus on the copy
+// with the same `id`.
 const keepFocus = async (
   page: playwright.Page,
 ): Promise<() => Promise<void>> => {
-  const focused = await page.evaluateHandle(() => document.activeElement);
+  const focused = await page.evaluateHandle(() => {
+    let element = document.activeElement;
+    while (element?.shadowRoot?.activeElement) {
+      element = element.shadowRoot.activeElement;
+    }
+    return { element, id: element?.id ?? '' };
+  });
   return async () => {
-    await focused.evaluate((element) => {
-      if (
-        (element instanceof HTMLElement || element instanceof SVGElement) &&
-        element !== document.body &&
-        element.isConnected &&
-        document.activeElement !== element
-      ) {
-        element.focus({ preventScroll: true });
-      }
-    });
-    await focused.dispose();
+    try {
+      await focused.evaluate(({ element, id }) => {
+        const focusDropped =
+          document.activeElement === null ||
+          document.activeElement === document.body;
+        const replacement =
+          id === '' ? null : document.querySelector(`#${CSS.escape(id)}`);
+        const target = element?.isConnected ? element : replacement;
+        if (
+          focusDropped &&
+          (target instanceof HTMLElement || target instanceof SVGElement) &&
+          target !== document.body
+        ) {
+          target.focus({ preventScroll: true });
+        }
+      });
+      await focused.dispose();
+    } catch {
+      // The page navigated or closed during the scan and took the remembered
+      // element with it, so there is nothing to give focus back to.
+    }
   };
 };
 
