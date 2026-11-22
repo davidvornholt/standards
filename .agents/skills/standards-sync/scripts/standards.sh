@@ -38,7 +38,9 @@ if [ ! -f "$source/.installed" ]; then
   # consumer's repository. Configuration variables stay, so the user's Git
   # configuration still applies.
   (
-    for variable in $(git rev-parse --local-env-vars); do
+    # A plain assignment, so set -e stops the bootstrap when Git can't list them.
+    local_env_vars=$(git rev-parse --local-env-vars)
+    for variable in $local_env_vars; do
       case "$variable" in
         GIT_CONFIG*) ;;
         *) unset "$variable" ;;

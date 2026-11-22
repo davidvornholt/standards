@@ -4,7 +4,13 @@
 
 import { afterEach, expect, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
 import {
@@ -162,6 +168,36 @@ it('leaves the index of a Git hook that runs it untouched', () => {
     }),
   );
 
+  expect(readFileSync(index).equals(before)).toBe(true);
+});
+
+it('stops when Git cannot list its repository variables', () => {
+  const up = buildUpstream();
+  const locked = commitUpstream(up, 'locked');
+  const consumer = consumerAt(locked);
+  git(consumer, ['init', '--quiet']);
+  git(consumer, ['add', 'sync-standards.lock']);
+  const index = join(consumer, '.git/index');
+  const before = readFileSync(index);
+  const bin = mkTmp('locked-cli-bin-');
+  write(
+    bin,
+    'git',
+    `#!/usr/bin/env bash\nif [ "$1 $2" = "rev-parse --local-env-vars" ]; then exit 75; fi\nexec ${execFileSync('bash', ['-c', 'command -v git'], { encoding: 'utf8' }).trim()} "$@"\n`,
+  );
+  chmodSync(join(bin, 'git'), 0o755);
+
+  const result = runScript(consumer, ['check'], {
+    up,
+    cache: mkTmp('locked-cli-cache-'),
+    env: [
+      ['GIT_INDEX_FILE', index],
+      ['GIT_DIR', join(consumer, '.git')],
+      ['PATH', `${bin}:${process.env.PATH ?? ''}`],
+    ],
+  });
+
+  expect(result.status).toBe(75);
   expect(readFileSync(index).equals(before)).toBe(true);
 });
 
