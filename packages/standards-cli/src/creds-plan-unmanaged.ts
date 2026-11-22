@@ -16,7 +16,6 @@ import {
 import type {
   AccountToken,
   BrokeredElsewhereToken,
-  SupersededToken,
   UnmanagedToken,
 } from './creds-plan-types';
 
@@ -25,7 +24,7 @@ type Classification =
   | { readonly kind: 'malformed' }
   | { readonly kind: 'unmanaged' }
   | { readonly kind: 'brokered-elsewhere'; readonly repo: string }
-  | { readonly kind: 'superseded' }
+  | { readonly kind: 'superseded'; readonly ref: BrokeredTokenRef }
   | { readonly kind: 'ignored' };
 
 const classifyAccountToken = (
@@ -41,13 +40,15 @@ const classifyAccountToken = (
   if (token.status === 'expired') {
     return { kind: 'ignored' };
   }
-  // A token renewal superseded expires on its own. Another repository's is
-  // that repository's to report.
+  // A token renewal superseded expires on its own unless its destination is
+  // deleted first, which creds-plan handles. Another repository's is that
+  // repository's to report.
   const original = supersededOriginalName(token.name);
   if (original !== null && parseAnyTokenName(original) !== null) {
-    return parseTokenName(original, repo) === null
+    const supersededRef = parseTokenName(original, repo);
+    return supersededRef === null
       ? { kind: 'ignored' }
-      : { kind: 'superseded' };
+      : { kind: 'superseded', ref: supersededRef };
   }
   if (
     token.name.toLowerCase().startsWith(repoTokenPrefix(repo).toLowerCase())
@@ -76,11 +77,13 @@ export type TokenPartition = {
   readonly managed: ReadonlyArray<ManagedTokenRef>;
   readonly unmanaged: ReadonlyArray<UnmanagedToken>;
   readonly brokeredElsewhere: ReadonlyArray<BrokeredElsewhereToken>;
-  readonly superseded: ReadonlyArray<SupersededToken>;
+  // Carries the destination of the name renewal replaced, so the plan can
+  // revoke the token once that destination is deleted.
+  readonly superseded: ReadonlyArray<ManagedTokenRef>;
   readonly findings: ReadonlyArray<string>;
 };
 
-const reported = (entry: AccountToken): UnmanagedToken => ({
+export const reported = (entry: AccountToken): UnmanagedToken => ({
   accountId: entry.accountId,
   tokenId: entry.token.id,
   name: entry.token.name,
@@ -94,7 +97,7 @@ export const partitionAccountTokens = (
   const managed: Array<ManagedTokenRef> = [];
   const unmanaged: Array<UnmanagedToken> = [];
   const brokeredElsewhere: Array<BrokeredElsewhereToken> = [];
-  const superseded: Array<SupersededToken> = [];
+  const superseded: Array<ManagedTokenRef> = [];
   const findings: Array<string> = [];
   for (const entry of tokens) {
     const classification = classifyAccountToken(entry.token, repo);
@@ -109,7 +112,7 @@ export const partitionAccountTokens = (
     } else if (classification.kind === 'brokered-elsewhere') {
       brokeredElsewhere.push({ ...reported(entry), repo: classification.repo });
     } else if (classification.kind === 'superseded') {
-      superseded.push({ ...reported(entry), expiresOn: entry.token.expiresOn });
+      superseded.push({ ...entry, ref: classification.ref });
     }
   }
   return { managed, unmanaged, brokeredElsewhere, superseded, findings };

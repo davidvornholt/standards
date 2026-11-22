@@ -110,3 +110,74 @@ describe('creds watch with a superseded token', () => {
     expect([...report.byRepo.keys()]).toEqual([]);
   });
 });
+
+describe('creds plan with a superseded token whose destination is gone', () => {
+  const withdrawn = (tokens: ReadonlyArray<CloudflareToken>) =>
+    computeCredsPlan({
+      repo: REPO,
+      keysByTarget: keys({ ci: [] }),
+      tokens: tokens.map(at),
+      now: NOW,
+    });
+
+  it('revokes the superseded token together with the current one', () => {
+    const result = withdrawn([
+      token(NAME, '2027-07-22T00:00:00Z'),
+      token(SUPERSEDED, '2026-08-12T00:00:00Z'),
+    ]);
+    expect(result.actions).toEqual([
+      {
+        kind: 'revoke',
+        accountId: 'a',
+        tokenId: `id-${NAME}`,
+        name: NAME,
+        reason: 'secret ci:ci.dns_token no longer exists',
+      },
+      {
+        kind: 'revoke',
+        accountId: 'a',
+        tokenId: `id-${SUPERSEDED}`,
+        name: SUPERSEDED,
+        reason: 'secret ci:ci.dns_token no longer exists',
+      },
+    ]);
+    expect(result.superseded).toEqual([]);
+    expect(result.findings).toEqual([]);
+  });
+
+  it('revokes a superseded token left without a current one', () => {
+    const result = withdrawn([token(SUPERSEDED, '2026-08-12T00:00:00Z')]);
+    expect(result.actions.map((action) => action.tokenId)).toEqual([
+      `id-${SUPERSEDED}`,
+    ]);
+    expect(result.superseded).toEqual([]);
+  });
+
+  it('keeps a superseded S3 pair bridging while both keys exist and revokes it once both are gone', () => {
+    const s3Name = `standards/${REPO}/ci/ci.bucket`;
+    const old = token(supersededNameOf(s3Name), '2026-08-12T00:00:00Z');
+    const bridged = computeCredsPlan({
+      repo: REPO,
+      keysByTarget: keys({
+        ci: ['ci.bucket.access_key_id', 'ci.bucket.secret_access_key'],
+      }),
+      tokens: [at(old)],
+      now: NOW,
+    });
+    expect(bridged.actions).toEqual([]);
+    expect(bridged.superseded.map((entry) => entry.tokenId)).toEqual([old.id]);
+    expect(
+      withdrawn([old]).actions.map((action) => [action.kind, action.tokenId]),
+    ).toEqual([['revoke', old.id]]);
+  });
+
+  it('leaves a superseded token that is not active to the report', () => {
+    const result = withdrawn([
+      { ...token(SUPERSEDED, '2026-08-12T00:00:00Z'), status: 'disabled' },
+    ]);
+    expect(result.actions).toEqual([]);
+    expect(result.superseded.map((entry) => entry.status)).toEqual([
+      'disabled',
+    ]);
+  });
+});

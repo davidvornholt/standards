@@ -23,7 +23,8 @@ export type BrokeredElsewhereToken = UnmanagedToken & {
 };
 
 // A token renewal replaced and renamed. It keeps working until its expiry so a
-// running host lasts until its deploy, and Cloudflare then expires it.
+// running host lasts until its deploy, and Cloudflare then expires it. Deleting
+// its destination revokes it instead.
 export type SupersededToken = UnmanagedToken & {
   readonly expiresOn: string | null;
 };
@@ -61,7 +62,7 @@ export type CredsPlan = {
   readonly unmanaged: ReadonlyArray<UnmanagedToken>;
   // Tokens the broker minted for another repository. Reported, never mutated.
   readonly brokeredElsewhere: ReadonlyArray<BrokeredElsewhereToken>;
-  // Unexpired tokens renewal superseded for this repository. Reported, never
-  // mutated, because they retire themselves.
+  // Unexpired tokens renewal superseded for this repository whose destination
+  // still exists. Reported, never mutated, because they retire themselves.
   readonly superseded: ReadonlyArray<SupersededToken>;
 };
