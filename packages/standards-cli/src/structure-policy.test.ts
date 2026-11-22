@@ -15,7 +15,7 @@ const removeBrokerCredentials = (consumer: string): void => {
 };
 
 const BROKER_REASON =
-  'the synced Standards sync and Standards auto-merge workflows mint a branch token with Contents write and Workflows write, a pull request token with Contents read and Pull requests write, and a merge token with Contents write, Pull requests write, and Workflows write from ci.broker_app; provision it with "bun standards creds add github --dest ci:ci.broker_app"';
+  'the synced Standards sync and Standards auto-merge workflows mint a branch token with Contents write and Workflows write, a pull request token with Contents read and Pull requests write, and a merge token with Contents write, Pull requests write, and Workflows write from ci.broker_app; provision it with "bun standards creds add github --dest ci:ci.broker_app", or in a core consumer "bash .agents/skills/standards-sync/scripts/standards.sh creds add github --dest ci:ci.broker_app"';
 const BROKER_PROBLEMS = [
   `secrets/ci.yaml: missing required key "ci.broker_app.client_id" — ${BROKER_REASON}`,
   `secrets/ci.yaml: missing required key "ci.broker_app.private_key" — ${BROKER_REASON}`,

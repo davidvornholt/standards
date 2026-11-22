@@ -1,0 +1,224 @@
+// The synced script that runs a core consumer's standards CLI from the commit
+// its lock records, against a local upstream that Git reaches in place of
+// GitHub.
+
+import { afterEach, expect, it } from 'bun:test';
+import { execFileSync } from 'node:child_process';
+import {
+  chmodSync,
+  existsSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+} from 'node:fs';
+import { join } from 'node:path';
+import process from 'node:process';
+import {
+  ACTUAL_UPSTREAM,
+  cleanupTmpDirs,
+  mkTmp,
+  type RunResult,
+  runProcess,
+  write,
+} from './cli-test-support';
+
+afterEach(cleanupTmpDirs);
+
+const SCRIPT = join(
+  ACTUAL_UPSTREAM,
+  '.agents/skills/standards-sync/scripts/standards.sh',
+);
+const REPOSITORY = 'owner/standards';
+
+const git = (cwd: string, args: ReadonlyArray<string>): string =>
+  execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8' }).trim();
+
+// An upstream whose CLI prints the version it was committed with, so a test
+// can tell which commit ran.
+const commitUpstream = (up: string, version: string): string => {
+  write(
+    up,
+    'packages/standards-cli/src/cli.ts',
+    `console.log(JSON.stringify({ version: '${version}', args: process.argv.slice(2), cwd: process.cwd(), env: process.env.FROM_DOTENV ?? null }));\n`,
+  );
+  git(up, ['add', '-A']);
+  git(up, ['commit', '--quiet', '-m', version]);
+  return git(up, ['rev-parse', 'HEAD']);
+};
+
+const buildUpstream = (): string => {
+  const up = mkTmp('locked-cli-up-');
+  git(up, ['init', '--quiet']);
+  git(up, ['config', 'user.email', 'test@example.com']);
+  git(up, ['config', 'user.name', 'test']);
+  git(up, ['config', 'commit.gpgsign', 'false']);
+  write(
+    up,
+    'package.json',
+    '{ "name": "root", "private": true, "packageManager": "bun@1.4.5", "workspaces": ["packages/*"] }\n',
+  );
+  write(
+    up,
+    'packages/standards-cli/package.json',
+    '{ "name": "@davidvornholt/standards", "version": "0.0.0" }\n',
+  );
+  execFileSync('bun', ['install', '--silent'], { cwd: up });
+  return up;
+};
+
+const consumerAt = (sha: string, upstream = `github:${REPOSITORY}`): string => {
+  const consumer = mkTmp('locked-cli-cons-');
+  write(
+    consumer,
+    'sync-standards.lock',
+    JSON.stringify({ upstream, sha, files: {} }),
+  );
+  write(consumer, '.env', 'FROM_DOTENV=leaked\n');
+  return consumer;
+};
+
+type Source = {
+  readonly up: string;
+  readonly cache: string;
+  readonly env?: ReadonlyArray<readonly [string, string]>;
+};
+
+const runScript = (
+  cwd: string,
+  args: ReadonlyArray<string>,
+  { up, cache, env = [] }: Source,
+): RunResult =>
+  runProcess('bash', cwd, [SCRIPT, ...args], {
+    ...process.env,
+    ...Object.fromEntries([
+      ['XDG_CACHE_HOME', cache],
+      ['GIT_CONFIG_COUNT', '1'],
+      ['GIT_CONFIG_KEY_0', `url.file://${up}.insteadOf`],
+      ['GIT_CONFIG_VALUE_0', `https://github.com/${REPOSITORY}.git`],
+      ...env,
+    ]),
+  });
+
+// The JSON line the fake CLI printed, or a throw with the script's stderr.
+const ranVersion = (result: RunResult): Record<string, unknown> => {
+  if (result.status !== 0) {
+    throw new Error(`standards.sh exited ${result.status}: ${result.stderr}`);
+  }
+  return JSON.parse(result.stdout.trim().split('\n').at(-1) ?? '') as Record<
+    string,
+    unknown
+  >;
+};
+
+it('runs the CLI of the locked commit, not the newest one', () => {
+  const up = buildUpstream();
+  const locked = commitUpstream(up, 'locked');
+  commitUpstream(up, 'newer');
+  const consumer = consumerAt(locked);
+  const cache = mkTmp('locked-cli-cache-');
+
+  const output = ranVersion(
+    runScript(consumer, ['check', '--dir', '.'], { up, cache }),
+  );
+
+  expect(output).toEqual({
+    version: 'locked',
+    args: ['check', '--dir', '.'],
+    cwd: realpathSync(consumer),
+    env: null,
+  });
+});
+
+it('reuses an installed commit without fetching it again', () => {
+  const up = buildUpstream();
+  const locked = commitUpstream(up, 'locked');
+  const consumer = consumerAt(locked);
+  const cache = mkTmp('locked-cli-cache-');
+  ranVersion(runScript(consumer, ['check'], { up, cache }));
+
+  rmSync(up, { recursive: true, force: true });
+
+  expect(
+    ranVersion(runScript(consumer, ['check'], { up, cache })).version,
+  ).toBe('locked');
+  expect(
+    existsSync(
+      join(cache, 'davidvornholt-standards/cli', `owner-standards-${locked}`),
+    ),
+  ).toBe(true);
+});
+
+it('leaves the index of a Git hook that runs it untouched', () => {
+  const up = buildUpstream();
+  const locked = commitUpstream(up, 'locked');
+  const consumer = consumerAt(locked);
+  git(consumer, ['init', '--quiet']);
+  git(consumer, ['add', 'sync-standards.lock']);
+  const index = join(consumer, '.git/index');
+  const before = readFileSync(index);
+
+  ranVersion(
+    runScript(consumer, ['check'], {
+      up,
+      cache: mkTmp('locked-cli-cache-'),
+      env: [
+        ['GIT_INDEX_FILE', index],
+        ['GIT_DIR', join(consumer, '.git')],
+      ],
+    }),
+  );
+
+  expect(readFileSync(index).equals(before)).toBe(true);
+});
+
+it('stops when Git cannot list its repository variables', () => {
+  const up = buildUpstream();
+  const locked = commitUpstream(up, 'locked');
+  const consumer = consumerAt(locked);
+  git(consumer, ['init', '--quiet']);
+  git(consumer, ['add', 'sync-standards.lock']);
+  const index = join(consumer, '.git/index');
+  const before = readFileSync(index);
+  const bin = mkTmp('locked-cli-bin-');
+  write(
+    bin,
+    'git',
+    `#!/usr/bin/env bash\nif [ "$1 $2" = "rev-parse --local-env-vars" ]; then exit 75; fi\nexec ${execFileSync('bash', ['-c', 'command -v git'], { encoding: 'utf8' }).trim()} "$@"\n`,
+  );
+  chmodSync(join(bin, 'git'), 0o755);
+
+  const result = runScript(consumer, ['check'], {
+    up,
+    cache: mkTmp('locked-cli-cache-'),
+    env: [
+      ['GIT_INDEX_FILE', index],
+      ['GIT_DIR', join(consumer, '.git')],
+      ['PATH', `${bin}:${process.env.PATH ?? ''}`],
+    ],
+  });
+
+  expect(result.status).toBe(75);
+  expect(readFileSync(index).equals(before)).toBe(true);
+});
+
+it('stops outside the repository root', () => {
+  const result = runScript(mkTmp('locked-cli-empty-'), ['check'], {
+    up: '/nowhere',
+    cache: '/nowhere',
+  });
+  expect(result.status).toBe(1);
+  expect(result.stderr).toContain('run it from the repository root');
+});
+
+it.each([
+  ['an upstream outside GitHub', 'a'.repeat(40), 'https://example.com/x.git'],
+  ['an upstream path that leaves its owner', 'a'.repeat(40), 'github:owner/..'],
+  ['an abbreviated commit', 'abc1234', `github:${REPOSITORY}`],
+])('refuses a lock with %s', (_name, sha, upstream) => {
+  const result = runScript(consumerAt(sha, upstream), ['check'], {
+    up: '/nowhere',
+    cache: mkTmp('locked-cli-cache-'),
+  });
+  expect(result.status).toBe(1);
+  expect(result.stderr).toContain('standards.sh: sync-standards.lock must');
+});

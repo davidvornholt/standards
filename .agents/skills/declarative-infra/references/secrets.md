@@ -12,7 +12,7 @@ A repository on the `bun` payload runs the steps on this page through its `just 
 | Print an age key's recipient | `just secrets age-recipient [<file>]` | `age-keygen -y <file>` |
 | Create or edit a target | `just secrets edit <target>` | `sops <path>` |
 | Re-encrypt a target for the recipients `.sops.yaml` now lists | `just secrets updatekeys <target>` | `sops updatekeys <path>` |
-| Run the standards CLI | `bun standards <command>` | `bunx @davidvornholt/standards <command>` |
+| Run the standards CLI | `bun standards <command>` | `bash .agents/skills/standards-sync/scripts/standards.sh <command>` |
 
 `<file>` defaults to `~/.config/sops/age/keys.txt` for the recipes.
 

@@ -5,10 +5,10 @@ Copies the agent rules, skills, and quality configuration of [davidvornholt/stan
 ```sh
 echo '{ "payload": "core", "autoSync": false }' > sync-standards.local.json
 bunx @davidvornholt/standards init
-bunx @davidvornholt/standards check
+bash .agents/skills/standards-sync/scripts/standards.sh check
 ```
 
-To adopt the Bun payload or the automatic sync, follow the [adoption guide](https://github.com/davidvornholt/standards/blob/main/docs/adoption.md). For commands and options, run `bunx @davidvornholt/standards help`, or, in a Bun workspace that depends on the package, `bun standards help`, `bun standards creds help`, `bun standards screenshots help`, or `bun standards land --help`.
+To adopt the Bun payload or the automatic sync, follow the [adoption guide](https://github.com/davidvornholt/standards/blob/main/docs/adoption.md). After `init`, run the CLI as `bash .agents/skills/standards-sync/scripts/standards.sh`, which runs the standards commit that `sync-standards.lock` records, the one CI runs. For commands and options, run `bash .agents/skills/standards-sync/scripts/standards.sh help`, or, in a Bun workspace that depends on the package, `bun standards help`, `bun standards creds help`, `bun standards screenshots help`, or `bun standards land --help`.
 
 ## Brokered S3 pairs from another repository
 
