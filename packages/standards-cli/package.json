@@ -19,6 +19,10 @@
   "files": [
     "LICENSE",
     "README.md",
+    "src/bun-command.ts",
+    "src/bun-docker-hub.ts",
+    "src/bun-pins.ts",
+    "src/bun-upgrade.ts",
     "src/cli.ts",
     "src/contained-path.ts",
     "src/creds-add.ts",

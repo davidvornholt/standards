@@ -17,6 +17,7 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, posix, resolve } from 'node:path';
 import process from 'node:process';
+import { raiseSyncedBunPins, runBunCommand } from './bun-command';
 import { runCredsCommand } from './creds-commands';
 import { dependabotProblems } from './dependabot';
 import { runDevEnv } from './dev-env';
@@ -701,7 +702,14 @@ const runSync = async (
         command: 'sync',
       });
       reportMirror(result, dryRun);
+      const bunPins = {
+        consumer,
+        sourceDir: src.dir,
+        managed: Object.keys(result.files),
+        dryRun,
+      };
       if (dryRun) {
+        await raiseSyncedBunPins(bunPins);
         reportDryRunSummary(result);
         return;
       }
@@ -710,6 +718,7 @@ const runSync = async (
         sha: src.sha,
         files: result.files,
       });
+      await raiseSyncedBunPins(bunPins);
       console.log(
         `sync complete: ${Object.keys(result.files).length} managed path(s) at ${src.sha}`,
       );
@@ -955,11 +964,12 @@ const USAGE = `Usage: standards <command> [options]
 
 Commands:
   init        Bootstrap a consumer repo: seed repo-owned files, mirror canonical files, write the lock
-  sync        Mirror canonical files from upstream and rewrite the lock
+  sync        Mirror canonical files from upstream, rewrite the lock, and raise Bun pins below the synced standards' Bun
   check       Verify canonical files, extension seams, monorepo structure (Bun payload), and GitHub settings
   doctor      Validate extension seams only
   source-text Reject raw control characters in tracked source text
   structure   Validate monorepo structure rules only
+  bun         In the standards source repository, upgrade to the newest Bun release past the cooldown (see \`standards bun --help\`)
   agents      In the standards source repository, verify (--check) or regenerate (--write) AGENTS.md from its parts
   dev-env     Compose each workspace's generated .env.local from its three dev layers and authorized broker-owned S3 pair references
   github      Compare (--check) or converge (--apply) live GitHub settings
@@ -1323,6 +1333,7 @@ const runGateCommand = (
 const commandFamilies: Readonly<
   Record<string, (argv: ReadonlyArray<string>) => Promise<boolean>>
 > = {
+  bun: runBunCommand,
   creds: runCredsCommand,
   land: (argv) =>
     runLandCommand(argv, {

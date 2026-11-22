@@ -17,6 +17,8 @@ A consumer receives one of two payloads, chosen by `"payload"` in `sync-standard
 
 A change every consumer should get belongs upstream. A change for one consumer belongs in that consumer's extension point. Don't copy canonical logic into a project-owned file to change it locally.
 
+Sync also raises every Bun pin in a consumer's own files that is below the Bun the standards repository runs: `packageManager`, an exact or `>=` `engines.bun`, `BUN_VERSION` and `bun-version` in YAML and container files, `oven/bun` image tags with their Docker Hub digests, `.bun-version`, and `.tool-versions`. It never lowers a pin, so a consumer can run a newer Bun but not hold an older one.
+
 ## Extension points
 
 | Canonical path | Consumer extension |

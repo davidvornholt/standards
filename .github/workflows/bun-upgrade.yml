@@ -1,0 +1,166 @@
+name: Bun upgrade
+
+# Opens a pull request that upgrades this repository to the newest stable Bun
+# release once it has been out for the cooldown Dependabot gives every other
+# dependency. `standards bun upgrade` verifies each pinned archive and writes
+# every pin. Consumers follow when a sync takes the merged upgrade, because
+# sync raises their Bun pins to the Bun this repository runs. The pull request
+# stays manual: a new runtime under the shared gate deserves a look.
+on:
+  schedule:
+    - cron: "23 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bun-upgrade
+  cancel-in-progress: false
+
+jobs:
+  upgrade:
+    # Repository/organization variable; empty keeps repository-scoped secrets.
+    environment: ${{ vars.CI_SECRETS_ENVIRONMENT }}
+    # The job token only reads the release list and the open pull requests.
+    # The broker App tokens push and open the pull request, so its checks run.
+    permissions:
+      contents: read
+      pull-requests: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Upgrade Bun
+        id: upgrade
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version() { jq -er '.packageManager | strings | ltrimstr("bun@")' package.json; }
+          from=$(version)
+          bun --no-env-file packages/standards-cli/src/cli.ts bun upgrade --write
+          to=$(version)
+          {
+            echo "from=$from"
+            echo "to=$to"
+          } >> "$GITHUB_OUTPUT"
+
+      # A pull request for this version that is open, merged, or closed by
+      # hand means there is nothing to open: a closed one was declined.
+      - name: Find an earlier pull request for this version
+        id: earlier
+        if: steps.upgrade.outputs.from != steps.upgrade.outputs.to
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: bun-upgrade/${{ steps.upgrade.outputs.to }}
+        run: |
+          set -euo pipefail
+          count=$(gh pr list --state all --head "$BRANCH" --json number --jq length)
+          if [ "$count" -gt 0 ]; then
+            echo "A pull request from $BRANCH already exists; nothing to open."
+            echo "open=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "open=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The App credentials are step outputs passed only to the mint steps.
+      - name: Resolve broker App client ID
+        id: broker-app-client-id
+        if: steps.earlier.outputs.open == 'true'
+        uses: ./.github/actions/sops-secret
+        with:
+          age-key: ${{ secrets.SOPS_AGE_KEY }}
+          secret-file: secrets/ci.yaml
+          secret-key: broker_app.client_id
+
+      - name: Resolve broker App private key
+        id: broker-app-private-key
+        if: steps.earlier.outputs.open == 'true'
+        uses: ./.github/actions/sops-secret
+        with:
+          age-key: ${{ secrets.SOPS_AGE_KEY }}
+          secret-file: secrets/ci.yaml
+          secret-key: broker_app.private_key
+
+      # The upgrade edits .github/workflows/**, which Contents write alone
+      # can't push.
+      - name: Mint current-repository branch writer token
+        id: branch-writer-token
+        if: steps.earlier.outputs.open == 'true'
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ steps.broker-app-client-id.outputs.value }}
+          private-key: ${{ steps.broker-app-private-key.outputs.value }}
+          # Omitting owner and repositories is the action's exact
+          # current-repository scope; never derive either from event payload.
+          permission-contents: write
+          permission-workflows: write
+
+      - name: Mint current-repository PR token
+        id: pr-token
+        if: steps.earlier.outputs.open == 'true'
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ steps.broker-app-client-id.outputs.value }}
+          private-key: ${{ steps.broker-app-private-key.outputs.value }}
+          # Omitting owner and repositories is the action's exact
+          # current-repository scope; never derive either from event payload.
+          permission-contents: read
+          permission-pull-requests: write
+
+      # The workflow owns the `bun-upgrade/` branch namespace, so a branch an
+      # earlier failed run left behind is overwritten.
+      - name: Push the upgrade branch
+        if: steps.earlier.outputs.open == 'true'
+        env:
+          BRANCH_WRITER_TOKEN: ${{ steps.branch-writer-token.outputs.token }}
+          BRANCH: bun-upgrade/${{ steps.upgrade.outputs.to }}
+          TO: ${{ steps.upgrade.outputs.to }}
+        run: |
+          set -euo pipefail
+          git() { command git -c core.hooksPath=/dev/null -c core.fsmonitor=false -c commit.gpgsign=false "$@"; }
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local credential.helper "!f() { echo username=x-access-token; echo \"password=\$BRANCH_WRITER_TOKEN\"; }; f"
+          trap 'git config --unset credential.helper' EXIT
+          git switch -c "$BRANCH"
+          git add -A
+          git commit -m "fix(runtime): upgrade Bun to $TO"
+          git push --force origin "HEAD:refs/heads/$BRANCH"
+
+      # `gh pr create` defaults `--base` to the default branch, because the
+      # `schedule` event carries no payload to name it.
+      - name: Open the pull request
+        if: steps.earlier.outputs.open == 'true'
+        env:
+          GH_TOKEN: ${{ steps.pr-token.outputs.token }}
+          BRANCH: bun-upgrade/${{ steps.upgrade.outputs.to }}
+          FROM: ${{ steps.upgrade.outputs.from }}
+          TO: ${{ steps.upgrade.outputs.to }}
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2016 # Markdown backticks in printf formats are literal on purpose.
+          {
+            printf '**Before.** This repository runs Bun `%s`. [Bun `%s`](https://github.com/oven-sh/bun/releases/tag/bun-v%s) has been out for the three-day cooldown Dependabot gives every other dependency.\n\n' "$FROM" "$TO" "$TO"
+            printf '**Now.** This repository runs Bun `%s`: `packageManager`, `nix/bun-archives.json`, the settings checker'"'"'s inline archive pins and their fixture, and every other Bun pin. Once this merges, each consumer'"'"'s next sync raises its Bun pins to `%s` too.\n\n' "$TO" "$TO"
+            printf '## Verification\n\n### Completed checks\n\n- The [`Bun upgrade` run](%s) checked that the GitHub asset digest, `SHASUMS256.txt`, and the downloaded archive agree for each pinned archive. The required checks on this pull request are the first to run the gate on Bun `%s`.\n\nOpened by the Bun upgrade workflow.\n' "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" "$TO"
+          } > "$RUNNER_TEMP/bun-upgrade-pr-body.md"
+          url=$(gh pr create --head "$BRANCH" --title "fix(runtime): upgrade Bun to $TO" --body-file "$RUNNER_TEMP/bun-upgrade-pr-body.md")
+          number=${url##*/}
+          superseded=$(gh pr list --state open --limit 1000 --json number,headRefName,isCrossRepository | jq -r --arg current "$number" '.[] | select((.isCrossRepository | not) and (.headRefName | startswith("bun-upgrade/")) and ((.number | tostring) != $current)) | .number')
+          for earlier in $superseded; do
+            gh pr close "$earlier" --comment "Superseded by #$number, which upgrades to a newer Bun."
+          done

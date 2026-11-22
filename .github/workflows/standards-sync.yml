@@ -527,9 +527,19 @@ jobs:
           if [[ "$pin_before" =~ $stable && "$pin_after" =~ $stable && "$pin_before" != "$pin_after" ]]; then
             raised=true
           fi
+          bun_pin() { git show "$1:package.json" 2>/dev/null | jq -r '.packageManager // empty | strings | ltrimstr("bun@")' 2>/dev/null || true; }
+          bun_before=$(bun_pin "origin/$SYNC_BASE_REF")
+          bun_after=$(bun_pin HEAD)
+          bun_raised=
+          managed='[]'
+          if [[ "$bun_before" =~ $stable && "$bun_after" =~ $stable && "$bun_before" != "$bun_after" ]]; then
+            bun_raised=true
+            managed=$({ git show "origin/$SYNC_BASE_REF:sync-standards.lock" 2>/dev/null || true; cat sync-standards.lock; } | jq -cs '[.[] | .files // {} | keys[]] | unique')
+          fi
           # The root manifest and bun.lock are never mirrored, so a raised pin
-          # alone changes no mirrored file.
-          mirrored=$(jq --arg raised "$raised" '[.[] | select(. != "sync-standards.lock" and ($raised == "" or (. != "package.json" and . != "bun.lock")))] | length' <<<"$paths")
+          # alone changes no mirrored file. A Bun raise edits files the lock
+          # doesn't list, so then only locked files count as mirrored.
+          mirrored=$(jq --arg raised "$raised" --arg bun "$bun_raised" --argjson managed "$managed" '[.[] | select(. != "sync-standards.lock" and ($raised == "" or (. != "package.json" and . != "bun.lock")) and (. as $path | $bun == "" or ($managed | index($path))))] | length' <<<"$paths")
           compare_url=
           commits=
           if [ -n "$previous" ] && [ "$previous" != "$current" ] && [ -n "$repo" ]; then
@@ -572,6 +582,9 @@ jobs:
             fi
             if [ -n "$raised" ]; then
               printf '\n**CLI.** This sync also raises `@davidvornholt/standards` in `package.json` from `%s` to `%s` and updates `bun.lock` to match. The sync run itself used `%s`, so the required checks on this pull request are the first to run `%s`. If they fail, the new release may be the cause. This pull request does not merge until they pass.\n' "$pin_before" "$pin_after" "$pin_before" "$pin_after"
+            fi
+            if [ -n "$bun_raised" ]; then
+              printf '\n**Bun.** This sync also raises the Bun pins here, such as `packageManager`, `BUN_VERSION`, `bun-version`, and `oven/bun` image tags and digests, from `%s` to `%s`, the Bun that `%s` at `%s` runs. The required checks on this pull request are the first to run Bun `%s` here. This pull request does not merge until they pass.\n' "$bun_before" "$bun_after" "$source" "${current:0:7}" "$bun_after"
             fi
             if [ -n "$compare_url" ]; then
               printf '\n## Upstream changes\n\n[Compare `%s...%s`](%s)\n' "${previous:0:7}" "${current:0:7}" "$compare_url"
