@@ -83,7 +83,7 @@ Declare template-wide holds as `ignore` entries in the shared blocks of `.github
 
 ### Bun upgrades
 
-The `Bun upgrade` workflow runs `bun standards bun upgrade --write` daily and opens a pull request once a stable Bun release has been out for three days, the Dependabot cooldown. That command verifies each archive in `nix/bun-archives.json` against its GitHub digest, `SHASUMS256.txt`, and the download, and writes every pin, including the settings checker's inline copy and its fixture, so don't raise Bun by hand. Consumers follow on their next sync.
+Let the `Bun upgrade` workflow raise Bun. For a manual run, use `bun standards bun upgrade --write` so the archive hashes and settings checker stay in sync.
 
 ### Skill descriptions
 
