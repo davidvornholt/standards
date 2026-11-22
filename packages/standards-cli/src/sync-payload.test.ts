@@ -162,6 +162,9 @@ describe('canonical core payload', () => {
         '.agents/skills/standards-sync',
       ]),
     );
-    expect(payloads.core.seeds).toEqual(['.github/settings.local.json']);
+    expect(payloads.core.seeds).toEqual([
+      '.github/settings.local.json',
+      'secrets/ci.example.yaml',
+    ]);
   });
 });

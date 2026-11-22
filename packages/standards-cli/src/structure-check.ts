@@ -152,23 +152,33 @@ const inspectRootScripts = (
   });
   return [...gateProblems, ...aliasProblems];
 };
+// The core payload also ships the sops-secret action and the workflows that
+// read secrets/ci.yaml, so `check` runs these for every payload, and the
+// structure gate runs them for a Bun workspace.
+export const collectCiSecretsGateProblems = async (
+  consumer: string,
+): Promise<ReadonlyArray<string>> =>
+  (
+    await Promise.all([
+      collectCiSecretsProblems(consumer),
+      collectSopsActionCallerProblems(consumer),
+    ])
+  ).flat();
+
 export const collectStructureProblems = async (
   consumer: string,
   profile: StructureProfile,
 ): Promise<ReadonlyArray<string>> => {
-  const [root, turboProblems, secretsProblems, callerProblems] =
-    await Promise.all([
-      readJsonFile(join(consumer, 'package.json')),
-      collectTurboLintProblems(consumer),
-      collectCiSecretsProblems(consumer),
-      collectSopsActionCallerProblems(consumer),
-    ]);
+  const [root, turboProblems, secretsProblems] = await Promise.all([
+    readJsonFile(join(consumer, 'package.json')),
+    collectTurboLintProblems(consumer),
+    collectCiSecretsGateProblems(consumer),
+  ]);
   if (root === null) {
     return [
       'package.json must exist and contain a JSON object',
       ...turboProblems,
       ...secretsProblems,
-      ...callerProblems,
     ];
   }
   const declaration = workspacePatternsOf(root);
@@ -201,6 +211,5 @@ export const collectStructureProblems = async (
     ...turboProblems,
     ...inspections.flatMap((i) => [...i.problems]),
     ...secretsProblems,
-    ...callerProblems,
   ];
 };
