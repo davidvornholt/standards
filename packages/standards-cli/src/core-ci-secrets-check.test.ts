@@ -1,11 +1,14 @@
-// A core consumer's check holds its CI secrets declaration and sops-secret
-// action callers to the rules the Bun payload's structure gate applies,
-// because the core payload ships the workflows that read secrets/ci.yaml and
-// the sops-secret action.
-
 import { afterEach, expect, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, rmSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import process from 'node:process';
 import {
@@ -87,4 +90,33 @@ it('fails check on a sops-secret caller that passes a retired input', () => {
   expect(result.stderr).toContain(
     '.github/workflows/deploy.yml still passes env-name',
   );
+});
+
+it('refuses to seed through a symlinked secrets directory', () => {
+  const up = mkTmp('core-secrets-up-');
+  writeSyncManifest(up, up, [], ['sync-standards.json']);
+  const manifest = JSON.parse(
+    readFileSync(join(up, 'sync-standards.json'), 'utf8'),
+  ) as { payloads: { core: { seeds: Array<string> } } };
+  manifest.payloads.core.seeds = [
+    '.github/settings.local.json',
+    'secrets/ci.example.yaml',
+  ];
+  write(up, 'sync-standards.json', JSON.stringify(manifest));
+  write(up, 'template/.github/settings.local.json', '{}\n');
+  write(up, 'template/secrets/ci.example.yaml', 'ci: {}\n');
+  const consumer = mkTmp('core-secrets-cons-');
+  execFileSync('git', ['init', '--quiet', consumer]);
+  write(consumer, 'sync-standards.local.json', '{ "payload": "core" }\n');
+  const shared = mkTmp('core-secrets-shared-');
+  symlinkSync(shared, join(consumer, 'secrets'));
+
+  const result = run(consumer, ['init', '--from', up, '--dir', consumer]);
+
+  expect(result.status).toBe(1);
+  expect(result.stderr).toContain(
+    'secrets/ci.example.yaml is below the symlink secrets',
+  );
+  expect(readdirSync(shared)).toEqual([]);
+  expect(existsSync(join(consumer, '.github/settings.local.json'))).toBe(false);
 });

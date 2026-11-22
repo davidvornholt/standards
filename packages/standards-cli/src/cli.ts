@@ -630,6 +630,25 @@ const reportDryRunSummary = (result: MirrorResult): void => {
   );
 };
 
+// A seed below a file or symlink would land in someone else's tree, such as
+// the shared directory a linked `secrets` points to.
+const seedAncestorProblems = async (
+  consumer: string,
+  seeds: ReadonlyMap<string, ManagedEntry>,
+): Promise<ReadonlyArray<string>> =>
+  (
+    await Promise.all(
+      [...seeds.keys()].map(async (rel) => {
+        const ancestor = await interposedAncestor(consumer, rel, new Map());
+        return ancestor === null
+          ? []
+          : [
+              `${rel} is below the ${ancestor.kind} ${ancestor.rel}; refusing to seed through an existing file or symlink ancestor; move it aside before initializing`,
+            ];
+      }),
+    )
+  ).flat();
+
 const runInit = async (
   manifest: Manifest,
   src: Source,
@@ -644,6 +663,7 @@ const runInit = async (
       assertNoProblems(
         [
           ...symlinkTargetProblems(seeds),
+          ...(await seedAncestorProblems(consumer, seeds)),
           ...(await mirrorPreconditionProblems(consumer, upstream, {}, 'init')),
         ],
         'cannot initialize from this source',

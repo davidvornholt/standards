@@ -5,7 +5,7 @@ Run `init` once per repository. Later updates use `bun standards sync` or the we
 ## What each part needs
 
 - With `"autoSync": false`, either payload runs `init`, `sync`, and `check` locally without secrets, a broker GitHub App, or a GitHub repository. Once the repository has an `origin` remote, `check` compares its live GitHub settings.
-- With `"autoSync": false`, a repository needs no `secrets/ci.yaml`, and its Dependabot pull requests stay manual. Otherwise, and whenever `secrets/ci.yaml` exists, `check` on either payload requires that encrypted file to hold a broker GitHub App and `secrets/ci.example.yaml` to mirror its keys with placeholders.
+- With `"autoSync": false`, a repository may go without `secrets/ci.yaml`, and its Dependabot pull requests then stay manual. Otherwise, and whenever `secrets/ci.yaml` exists, `check` on either payload requires that encrypted file to hold a broker GitHub App and `secrets/ci.example.yaml` to mirror its keys with placeholders.
 - The weekly sync pull request and auto-merge need a GitHub repository, a CI age key in the `SOPS_AGE_KEY` Actions secret, and a private broker GitHub App owned by the repository's owner. A private App can be installed only on the account that owns it, so outside David's accounts, create your own with `bunx @davidvornholt/standards creds login github --name <name>` (add `--org <org>` for an organization). GitHub App names are unique across GitHub and the default, `standards-broker`, is taken, so pass a name of your own.
 - Everything else that refers to infrastructure, such as CodeBuild runners, Cloudflare credentials, and the screenshot bucket, is used only after you configure it. Without `CI_CODEBUILD_PROJECT`, the workflows run on `ubuntu-latest`.
 
