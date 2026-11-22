@@ -49,7 +49,10 @@ import {
 import { runScreenshotsCommand } from './screenshots-commands';
 import { collectSopsActionCallerProblems } from './sops-action-callers';
 import { collectSourceTextProblems } from './source-text';
-import { collectStructureProblems } from './structure-check';
+import {
+  collectCiSecretsGateProblems,
+  collectStructureProblems,
+} from './structure-check';
 import type { StructureProfile } from './structure-profile';
 import { hasSafeCommand } from './structure-script';
 import {
@@ -956,7 +959,7 @@ const USAGE = `Usage: standards <command> [options]
 Commands:
   init        Bootstrap a consumer repo: seed repo-owned files, mirror canonical files, write the lock
   sync        Mirror canonical files from upstream and rewrite the lock
-  check       Verify canonical files, extension seams, monorepo structure (Bun payload), and GitHub settings
+  check       Verify canonical files, extension seams, CI secrets, monorepo structure (Bun payload), and GitHub settings
   doctor      Validate extension seams only
   source-text Reject raw control characters in tracked source text
   structure   Validate monorepo structure rules only
@@ -1155,6 +1158,21 @@ const runStructure = async (
   return true;
 };
 
+const runCiSecretsCheck = async (consumer: string): Promise<boolean> => {
+  const problems = await collectCiSecretsGateProblems(consumer);
+  if (problems.length > 0) {
+    console.error(
+      `standards secrets: ${problems.length} CI secrets problem(s):`,
+    );
+    console.error(problems.map((problem) => `  - ${problem}`).join('\n'));
+    return false;
+  }
+  console.log(
+    'standards secrets: the CI secrets declaration and sops-secret callers match the standards',
+  );
+  return true;
+};
+
 const runSourceTextCheck = (consumer: string): boolean => {
   const problems = collectSourceTextProblems(consumer);
   if (problems.length > 0) {
@@ -1171,11 +1189,12 @@ const runSourceTextCheck = (consumer: string): boolean => {
 const runCheckCommand = async (consumer: string): Promise<boolean> => {
   const driftIsClean = await runCheck(consumer);
   const integrationIsValid = await runDoctor(consumer);
-  // The structure rules describe a Bun monorepo.
+  // The structure rules describe a Bun monorepo and include the CI secrets
+  // rules, which a core consumer gets on their own.
   const structureIsValid =
     (await consumerPayload(consumer)) === 'bun'
       ? await runStructure(consumer, 'consumer')
-      : true;
+      : await runCiSecretsCheck(consumer);
   const sourceTextIsValid = runSourceTextCheck(consumer);
   // The GitHub gate activates with the synced declaration and then fails
   // closed: once .github/settings.json exists, an unreachable API or an

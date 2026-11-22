@@ -4,7 +4,7 @@
   "payloads": {
     "core": {
       "agents": "agents-md/core.md",
-      "seeds": [".github/settings.local.json"],
+      "seeds": [".github/settings.local.json", "secrets/ci.example.yaml"],
       "paths": [
         "sync-standards.json",
         ".agents/skills/ci-pipelines",
