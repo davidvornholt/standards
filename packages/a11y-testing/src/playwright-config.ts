@@ -4,6 +4,19 @@ const playwright = await import('@playwright/test');
 
 const a11ySpecPattern = /.*\.a11y\.ts/u;
 
+const desktopDevice = playwright.devices['Desktop Chrome'];
+
+// The phone every scan also covers. `scanWcag22AaViolations` narrows the page
+// to this viewport for its second pass, and tests tagged `mobileDeviceTag` run
+// on the full emulated device.
+export const mobileDevice = playwright.devices['Pixel 7'];
+
+// Tag a test whose result depends on the device or screen size, such as touch
+// input, hover feedback, a responsive layout, or a branch on `isMobile`, so it
+// also runs on the emulated phone. Untagged tests run on desktop only, because
+// their scans already cover the phone's viewport.
+export const mobileDeviceTag = '@mobile-device';
+
 export const createA11yPlaywrightConfig = (options: {
   readonly baseUrl: string;
   readonly webServerCommand: string;
@@ -37,11 +50,12 @@ export const createA11yPlaywrightConfig = (options: {
     projects: [
       {
         name: 'desktop-chromium',
-        use: { ...playwright.devices['Desktop Chrome'] },
+        use: { ...desktopDevice },
       },
       {
         name: 'mobile-chromium',
-        use: { ...playwright.devices['Pixel 7'] },
+        grep: new RegExp(mobileDeviceTag, 'u'),
+        use: { ...mobileDevice },
       },
     ],
   });
