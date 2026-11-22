@@ -1,5 +1,7 @@
 # GitHub settings, automatic sync, and auto-merge
 
+This page writes the CLI as `bun standards`. In a core consumer, run `bash .agents/skills/standards-sync/scripts/standards.sh` in its place.
+
 ## Repository settings
 
 Repository settings, rulesets, and labels are declared in `.github/settings.json` and the project's `.github/settings.local.json`. Change the declarations, never the GitHub UI: the required `check` job compares the live repository with them and fails on drift.

@@ -1,12 +1,12 @@
 # Adopt the standards
 
-Run `init` once per repository. Later updates use `bun standards sync` or the weekly sync pull request.
+Run `init` once per repository. Later updates use `bun standards sync`, or `bash .agents/skills/standards-sync/scripts/standards.sh sync` in a core repository, or the weekly sync pull request.
 
 ## What each part needs
 
 - With `"autoSync": false`, either payload runs `init`, `sync`, and `check` locally without secrets, a broker GitHub App, or a GitHub repository. Once the repository has an `origin` remote, `check` compares its live GitHub settings.
 - With `"autoSync": false`, a repository may go without `secrets/ci.yaml`, and its Dependabot pull requests then stay manual. Otherwise, and whenever `secrets/ci.yaml` exists, `check` on either payload requires that encrypted file to hold a broker GitHub App and `secrets/ci.example.yaml` to mirror its keys with placeholders.
-- The weekly sync pull request and auto-merge need a GitHub repository, a CI age key in the `SOPS_AGE_KEY` Actions secret, and a private broker GitHub App owned by the repository's owner. A private App can be installed only on the account that owns it, so outside David's accounts, create your own with `bunx @davidvornholt/standards creds login github --name <name>` (add `--org <org>` for an organization). GitHub App names are unique across GitHub and the default, `standards-broker`, is taken, so pass a name of your own.
+- The weekly sync pull request and auto-merge need a GitHub repository, a CI age key in the `SOPS_AGE_KEY` Actions secret, and a private broker GitHub App owned by the repository's owner. A private App can be installed only on the account that owns it, so outside David's accounts, create your own after `init` with `bun standards creds login github --name <name>`, or `bash .agents/skills/standards-sync/scripts/standards.sh creds login github --name <name>` in a core repository (add `--org <org>` for an organization). GitHub App names are unique across GitHub and the default, `standards-broker`, is taken, so pass a name of your own.
 - Everything else that refers to infrastructure, such as CodeBuild runners, Cloudflare credentials, and the screenshot bucket, is used only after you configure it. Without `CI_CODEBUILD_PROJECT`, the workflows run on `ubuntu-latest`.
 
 Synced files follow `main` of davidvornholt/standards, which changes often. To pin them, set `"ref"` in `sync-standards.local.json` to a tag, branch, or commit, such as the release tag `"v0.39.1"`, and raise it when you want an update.
@@ -29,7 +29,7 @@ echo '{ "payload": "core" }' > sync-standards.local.json
 bunx @davidvornholt/standards init
 ```
 
-Commit `sync-standards.lock`, `sync-standards.local.json`, and the seeded `.github/settings.local.json` and `secrets/ci.example.yaml`. Require the repository's own CI checks in `.github/settings.local.json` rulesets, then, with admin-authenticated `gh`, run `bunx @davidvornholt/standards github --apply`. The canonical settings protect the default branch, so every change lands through a pull request that passes `check`.
+Commit `sync-standards.lock`, `sync-standards.local.json`, and the seeded `.github/settings.local.json` and `secrets/ci.example.yaml`. From then on, run the CLI as `bash .agents/skills/standards-sync/scripts/standards.sh`, which runs the commit `sync-standards.lock` records, as the Standards workflow does. Require the repository's own CI checks in `.github/settings.local.json` rulesets, then, with admin-authenticated `gh`, run `bash .agents/skills/standards-sync/scripts/standards.sh github --apply`. The canonical settings protect the default branch, so every change lands through a pull request that passes `check`.
 
 For the weekly sync pull request, the repository needs a CI age key and an encrypted `secrets/ci.yaml`. The core payload ships no `justfile` or secrets recipes, so create them with `age`, `sops`, and `gh` signed in with admin access to the repository, which `gh secret set` needs:
 
@@ -60,7 +60,7 @@ printf 'ci: {}\n' | sops encrypt --filename-override secrets/ci.yaml --output se
 
 `SOPS_AGE_KEY_FILE` tells `sops` where the personal key is, because on macOS it looks elsewhere by default. Export it again in each later shell that runs `sops` or `creds`. The block stops without changing anything when `.sops.yaml` or `secrets/ci.yaml` already exists. In that case, create a key as the block does, add its public key to the existing `secrets/ci.yaml` rule, run `sops updatekeys secrets/ci.yaml`, and pipe the new private key into `gh secret set SOPS_AGE_KEY`.
 
-Rename `&personal` to identify the person and machine, as [Secrets bootstrap](../.agents/skills/declarative-infra/references/secrets.md#identities-and-recipients) describes, and commit `.sops.yaml` and `secrets/ci.yaml`. Then do step 2 of [Connect CI and GitHub](#connect-ci-and-github), running `bunx @davidvornholt/standards` in place of `bun standards`, and run `bunx @davidvornholt/standards check`.
+Rename `&personal` to identify the person and machine, as [Secrets bootstrap](../.agents/skills/declarative-infra/references/secrets.md#identities-and-recipients) describes, and commit `.sops.yaml` and `secrets/ci.yaml`. Then do step 2 of [Connect CI and GitHub](#connect-ci-and-github), running `bash .agents/skills/standards-sync/scripts/standards.sh` in place of `bun standards`, and run `bash .agents/skills/standards-sync/scripts/standards.sh check`.
 
 ## Existing repository
 

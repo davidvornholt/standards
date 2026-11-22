@@ -27,7 +27,7 @@ const MISSING_SECRETS =
 const MISSING_EXAMPLE =
   'secrets/ci.example.yaml: must exist and mirror the key shape of secrets/ci.yaml with plaintext placeholders';
 const BROKER_REASON =
-  'the synced Standards sync and Standards auto-merge workflows mint a branch token with Contents write and Workflows write, a pull request token with Contents read and Pull requests write, and a merge token with Contents write, Pull requests write, and Workflows write from ci.broker_app; provision it with "bun standards creds add github --dest ci:ci.broker_app"';
+  'the synced Standards sync and Standards auto-merge workflows mint a branch token with Contents write and Workflows write, a pull request token with Contents read and Pull requests write, and a merge token with Contents write, Pull requests write, and Workflows write from ci.broker_app; provision it with "bun standards creds add github --dest ci:ci.broker_app", or in a core consumer "bash .agents/skills/standards-sync/scripts/standards.sh creds add github --dest ci:ci.broker_app"';
 
 describe('collectCiSecretsProblems', () => {
   it('accepts a mirrored SOPS-encrypted pair with the required keys', async () => {
@@ -51,8 +51,8 @@ describe('collectCiSecretsProblems', () => {
     );
     const problems = await collectCiSecretsProblems(dir);
     expect(problems).toEqual([
-      'secrets/ci.yaml: missing required key "ci.broker_app.client_id" — the synced Standards sync and Standards auto-merge workflows mint a branch token with Contents write and Workflows write, a pull request token with Contents read and Pull requests write, and a merge token with Contents write, Pull requests write, and Workflows write from ci.broker_app; provision it with "bun standards creds add github --dest ci:ci.broker_app"',
-      'secrets/ci.yaml: missing required key "ci.broker_app.private_key" — the synced Standards sync and Standards auto-merge workflows mint a branch token with Contents write and Workflows write, a pull request token with Contents read and Pull requests write, and a merge token with Contents write, Pull requests write, and Workflows write from ci.broker_app; provision it with "bun standards creds add github --dest ci:ci.broker_app"',
+      'secrets/ci.yaml: missing required key "ci.broker_app.client_id" — the synced Standards sync and Standards auto-merge workflows mint a branch token with Contents write and Workflows write, a pull request token with Contents read and Pull requests write, and a merge token with Contents write, Pull requests write, and Workflows write from ci.broker_app; provision it with "bun standards creds add github --dest ci:ci.broker_app", or in a core consumer "bash .agents/skills/standards-sync/scripts/standards.sh creds add github --dest ci:ci.broker_app"',
+      'secrets/ci.yaml: missing required key "ci.broker_app.private_key" — the synced Standards sync and Standards auto-merge workflows mint a branch token with Contents write and Workflows write, a pull request token with Contents read and Pull requests write, and a merge token with Contents write, Pull requests write, and Workflows write from ci.broker_app; provision it with "bun standards creds add github --dest ci:ci.broker_app", or in a core consumer "bash .agents/skills/standards-sync/scripts/standards.sh creds add github --dest ci:ci.broker_app"',
       'secrets/ci.example.yaml: missing key "ci.other" with the same mapping shape; mirror every secrets/ci.yaml key with a placeholder',
       'secrets/ci.yaml: missing key "ci.broker_app.app_id" with the same mapping shape; add the secret or delete the stale key from secrets/ci.example.yaml',
     ]);

@@ -7,7 +7,7 @@ description: Use when changing a file the standards sync manages (listed in `syn
 
 The canonical files live in davidvornholt/standards and are mirrored into every consumer repository. A consumer's copy of a synced file is read-only: the next sync overwrites any local edit, and `standards check` reports it as drift against `sync-standards.lock`. So before editing, find which class the path belongs to.
 
-A consumer receives one of two payloads, chosen by `"payload"` in `sync-standards.local.json`. `core` holds `AGENTS.md`, the language-neutral skills, the weekly sync, the standards CI workflow, and the GitHub settings, for a repository of any language. `bun`, the default, adds the Bun workspace tooling. A Bun consumer runs the CLI as `bun standards <command>`, any other as `bunx @davidvornholt/standards <command>`, which needs Bun installed but not a Bun workspace.
+A consumer receives one of two payloads, chosen by `"payload"` in `sync-standards.local.json`. `core` holds `AGENTS.md`, the language-neutral skills, the weekly sync, the standards CI workflow, and the GitHub settings, for a repository of any language. `bun`, the default, adds the Bun workspace tooling. A Bun consumer runs the CLI as `bun standards <command>`. Any other runs it from the repository root as `bash .agents/skills/standards-sync/scripts/standards.sh <command>`, which needs Bun installed but not a Bun workspace, and runs the CLI from the commit that `sync-standards.lock` records, as the Standards workflow does. `bunx @davidvornholt/standards` runs whatever version Bun resolves, so use it only for `init` in a repository without a lock.
 
 | Class | How to recognize it | Where a change goes |
 | --- | --- | --- |
