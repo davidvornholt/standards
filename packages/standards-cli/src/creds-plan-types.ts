@@ -23,7 +23,8 @@ export type BrokeredElsewhereToken = UnmanagedToken & {
 };
 
 // A token renewal replaced and renamed. It keeps working until its expiry so a
-// running host lasts until its deploy, and Cloudflare then expires it.
+// running host lasts until its deploy, and Cloudflare then expires it. Deleting
+// its destination revokes it instead.
 export type SupersededToken = UnmanagedToken & {
   readonly expiresOn: string | null;
 };

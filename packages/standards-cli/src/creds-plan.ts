@@ -12,10 +12,12 @@ import type {
   AccountToken,
   CredsPlan,
   PlannedAction,
+  SupersededToken,
 } from './creds-plan-types';
 import {
   type ManagedTokenRef,
   partitionAccountTokens,
+  reported,
 } from './creds-plan-unmanaged';
 import { destinationFormatOf, inferredDestinationFootprint } from './creds-r2';
 
@@ -38,6 +40,33 @@ const supersededExpiresOn = (
   now: Date,
 ): string | null =>
   expired || expiry <= now.getTime() ? null : cloudflareExpiresOn(expiry);
+
+const revokeAction = (entry: ManagedTokenRef): PlannedAction => ({
+  kind: 'revoke',
+  accountId: entry.accountId,
+  tokenId: entry.token.id,
+  name: entry.token.name,
+  reason: `secret ${entry.ref.target}:${entry.ref.key} no longer exists`,
+});
+
+// A superseded token bridges only until its destination deploys the
+// replacement. Once that destination is deleted nothing will deploy, and
+// leaving the token would keep access the operator withdrew alive until its
+// own expiry. A status other than active may be deliberate and stays reported.
+const supersededDisposition = (
+  entry: ManagedTokenRef,
+  keysByTarget: ReadonlyMap<string, ReadonlySet<string>>,
+):
+  | { readonly kind: 'revoke'; readonly action: PlannedAction }
+  | { readonly kind: 'bridging'; readonly report: SupersededToken } =>
+  entry.token.status === 'active' &&
+  destinationFormatOf(keysByTarget.get(entry.ref.target), entry.ref.key) ===
+    'absent'
+    ? { kind: 'revoke', action: revokeAction(entry) }
+    : {
+        kind: 'bridging',
+        report: { ...reported(entry), expiresOn: entry.token.expiresOn },
+      };
 
 const dispositionOf = (
   entry: ManagedToken,
@@ -64,14 +93,7 @@ const dispositionOf = (
     ref.key,
   );
   if (format === 'absent') {
-    return {
-      kind: 'action',
-      action: {
-        ...base,
-        kind: 'revoke',
-        reason: `secret ${ref.target}:${ref.key} no longer exists`,
-      },
-    };
+    return { kind: 'action', action: revokeAction(entry) };
   }
   if (format === 'partial') {
     return {
@@ -189,12 +211,21 @@ export const computeCredsPlan = (input: {
       healthy += 1;
     }
   }
+  const superseded: Array<SupersededToken> = [];
+  for (const entry of partition.superseded) {
+    const disposition = supersededDisposition(entry, input.keysByTarget);
+    if (disposition.kind === 'revoke') {
+      actions.push(disposition.action);
+    } else {
+      superseded.push(disposition.report);
+    }
+  }
   return {
     actions,
     findings,
     healthy,
     unmanaged: partition.unmanaged,
     brokeredElsewhere: partition.brokeredElsewhere,
-    superseded: partition.superseded,
+    superseded,
   };
 };
