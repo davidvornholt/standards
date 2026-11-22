@@ -6,7 +6,7 @@ type Viewport = { readonly width: number; readonly height: number };
 const phone: Viewport = { width: 412, height: 839 };
 const desktop: Viewport = { width: 1280, height: 720 };
 
-const recordingPage = (initial: Viewport | null) => {
+const recordingPage = (initial: Viewport | null, fullscreen = false) => {
   const events: Array<string> = [];
   let viewport = initial;
   const page: ResizablePage = {
@@ -32,10 +32,11 @@ const recordingPage = (initial: Viewport | null) => {
       return Promise.resolve();
     });
   };
+  const inFullscreen = () => Promise.resolve(fullscreen);
   return {
     events,
     page,
-    steps: { scan, keepFocus, settle },
+    steps: { scan, keepFocus, settle, inFullscreen },
     scan,
     current: () => viewport,
   };
@@ -67,6 +68,16 @@ describe('scanAtPhoneWidthToo', () => {
 
     expect(violations).toEqual(['violation at 320']);
     expect(run.events).toEqual(['scan 320x900']);
+  });
+
+  it('scans a page with an element in fullscreen once, without resizing it', async () => {
+    const run = recordingPage(desktop, true);
+
+    const violations = await scanAtPhoneWidthToo(run.page, phone, run.steps);
+
+    expect(violations).toEqual(['violation at 1280']);
+    expect(run.events).toEqual(['scan 1280x720']);
+    expect(run.current()).toEqual(desktop);
   });
 
   it('restores the viewport and focus when the phone-width scan fails', async () => {

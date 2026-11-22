@@ -189,4 +189,6 @@ export const scanWcag22AaViolations = (
     // Layout-driven re-renders, such as a navigation rail replacing a drawer,
     // finish before the test continues at its own viewport.
     settle: () => waitForStreamedDom(page),
+    inFullscreen: () =>
+      page.evaluate(() => document.fullscreenElement !== null),
   });
