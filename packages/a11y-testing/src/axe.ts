@@ -37,8 +37,17 @@ const reactStreamingPlaceholders = ['P:', 'B:']
   .join(', ');
 const structuralSettleMilliseconds = 250;
 const structuralSettleDeadlineMilliseconds = 10_000;
+// A resize streams nothing: its re-renders, such as a navigation rail replacing
+// a drawer, land within a few frames. Across atrium's suite the longest pause
+// between two of them was 48 ms, so a shorter quiet window still sees each one
+// through, and the scan's waits on both sides of the resize stop costing 250 ms
+// each on a page that doesn't change.
+const resizeSettleMilliseconds = 100;
 
-const waitForStreamedDom = async (page: playwright.Page): Promise<void> => {
+const waitForStreamedDom = async (
+  page: playwright.Page,
+  settleMilliseconds: number,
+): Promise<void> => {
   await page.waitForFunction(
     (selector) => document.querySelector(selector) === null,
     reactStreamingPlaceholders,
@@ -73,7 +82,7 @@ const waitForStreamedDom = async (page: playwright.Page): Promise<void> => {
         });
       }),
     {
-      settleMilliseconds: structuralSettleMilliseconds,
+      settleMilliseconds,
       deadlineMilliseconds: structuralSettleDeadlineMilliseconds,
     },
   );
@@ -104,8 +113,9 @@ const waitForAnimations = async (page: playwright.Page): Promise<void> => {
 const scanCurrentViewport = async (
   page: playwright.Page,
   viewport: playwright.ViewportSize,
+  settleMilliseconds: number,
 ): Promise<ReadonlyArray<AccessibilityViolation>> => {
-  await waitForStreamedDom(page);
+  await waitForStreamedDom(page, settleMilliseconds);
   await waitForAnimations(page);
   const results = await new AxeBuilder({ page })
     .options({
@@ -184,9 +194,14 @@ export const scanWcag22AaViolations = (
   page: playwright.Page,
 ): Promise<ReadonlyArray<AccessibilityViolation>> =>
   scanAtPhoneWidthToo(page, mobileDevice.viewport, {
-    scan: (viewport) => scanCurrentViewport(page, viewport),
+    scan: (viewport, { resized }) =>
+      scanCurrentViewport(
+        page,
+        viewport,
+        resized ? resizeSettleMilliseconds : structuralSettleMilliseconds,
+      ),
     keepFocus: () => keepFocus(page),
     // Layout-driven re-renders, such as a navigation rail replacing a drawer,
     // finish before the test continues at its own viewport.
-    settle: () => waitForStreamedDom(page),
+    settle: () => waitForStreamedDom(page, resizeSettleMilliseconds),
   });

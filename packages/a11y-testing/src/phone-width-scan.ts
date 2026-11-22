@@ -6,8 +6,11 @@ export type ResizablePage = Pick<
 >;
 
 export type PhoneWidthScanSteps<Violation> = {
+  // `resized` tells the scan whether the page was just narrowed, so it can wait
+  // for the resize's re-renders rather than for a page still loading.
   readonly scan: (
     viewport: playwright.ViewportSize,
+    context: { readonly resized: boolean },
   ) => Promise<ReadonlyArray<Violation>>;
   // Remembers the focused element before the page narrows and returns the step
   // that gives focus back to it, because narrowing can hide it and the browser
@@ -30,14 +33,14 @@ export const scanAtPhoneWidthToo = async <Violation>(
       'scanWcag22AaViolations needs a fixed viewport to restore after its phone-width scan; do not set `viewport: null`.',
     );
   }
-  const atViewport = await scan(viewport);
+  const atViewport = await scan(viewport, { resized: false });
   if (viewport.width <= phone.width) {
     return atViewport;
   }
   const restoreFocus = await keepFocus();
   await page.setViewportSize(phone);
   try {
-    return [...atViewport, ...(await scan(phone))];
+    return [...atViewport, ...(await scan(phone, { resized: true }))];
   } finally {
     await page.setViewportSize(viewport);
     await settle();

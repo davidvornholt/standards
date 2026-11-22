@@ -17,8 +17,10 @@ const recordingPage = (initial: Viewport | null) => {
       return Promise.resolve();
     },
   };
-  const scan = (size: Viewport) => {
-    events.push(`scan ${size.width}x${size.height}`);
+  const scan = (size: Viewport, { resized }: { readonly resized: boolean }) => {
+    events.push(
+      `scan ${size.width}x${size.height}${resized ? ' after resize' : ''}`,
+    );
     return Promise.resolve([`violation at ${size.width}`]);
   };
   const settle = () => {
@@ -52,7 +54,7 @@ describe('scanAtPhoneWidthToo', () => {
       'scan 1280x720',
       'remember focus',
       'resize 412x839',
-      'scan 412x839',
+      'scan 412x839 after resize',
       'resize 1280x720',
       'settle',
       'restore focus',
@@ -71,10 +73,13 @@ describe('scanAtPhoneWidthToo', () => {
 
   it('restores the viewport and focus when the phone-width scan fails', async () => {
     const run = recordingPage(desktop);
-    const failAtPhone = (size: Viewport) =>
+    const failAtPhone = (
+      size: Viewport,
+      context: { readonly resized: boolean },
+    ) =>
       size.width === phone.width
         ? Promise.reject(new Error('axe failed'))
-        : run.scan(size);
+        : run.scan(size, context);
 
     await expect(
       scanAtPhoneWidthToo(run.page, phone, {
