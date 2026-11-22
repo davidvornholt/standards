@@ -77,8 +77,6 @@ export type TokenPartition = {
   readonly managed: ReadonlyArray<ManagedTokenRef>;
   readonly unmanaged: ReadonlyArray<UnmanagedToken>;
   readonly brokeredElsewhere: ReadonlyArray<BrokeredElsewhereToken>;
-  // Carries the destination of the name renewal replaced, so the plan can
-  // revoke the token once that destination is deleted.
   readonly superseded: ReadonlyArray<ManagedTokenRef>;
   readonly findings: ReadonlyArray<string>;
 };

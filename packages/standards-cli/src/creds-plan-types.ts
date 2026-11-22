@@ -62,7 +62,7 @@ export type CredsPlan = {
   readonly unmanaged: ReadonlyArray<UnmanagedToken>;
   // Tokens the broker minted for another repository. Reported, never mutated.
   readonly brokeredElsewhere: ReadonlyArray<BrokeredElsewhereToken>;
-  // Unexpired tokens renewal superseded for this repository whose destination
-  // still exists. Reported, never mutated, because they retire themselves.
+  // Unexpired tokens renewal superseded for this repository. Reported, never
+  // mutated, because they retire themselves.
   readonly superseded: ReadonlyArray<SupersededToken>;
 };
