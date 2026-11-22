@@ -4,7 +4,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { runBunUpgrade, type UpgradeHttp } from './bun-upgrade';
 import {
@@ -192,6 +192,18 @@ describe('runBunUpgrade with an upgrade', () => {
         .find(({ name }) => name === 'Install pinned settings checker')
         ?.run?.trimEnd(),
     ).toBe(install.trimEnd());
+  });
+
+  it('upgrades a checkout through a symlink to it', async () => {
+    const dir = repo();
+    const link = join(mkTmp('bun-upgrade-link-'), 'checkout');
+    symlinkSync(dir, link);
+
+    expect(await upgrade(link, RELEASES)).toEqual({ current, next: NEXT });
+    expect(read(dir, 'package.json')).toContain(`"bun@${NEXT}"`);
+    expect(read(dir, '.github/workflows/standards-sync.yml')).toContain(
+      `|| '${NEXT}' }}`,
+    );
   });
 
   it('raises every other Bun pin to that release', async () => {

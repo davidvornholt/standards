@@ -6,7 +6,7 @@
 // and its test fixture, the sync workflow's fallback, and every other Bun pin.
 
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { dockerHubDigestResolver } from './bun-docker-hub';
 import { type ImageDigestResolver, planBunPins, writeFiles } from './bun-pins';
@@ -241,7 +241,7 @@ const readArchiveTable = async (dir: string): Promise<ArchiveTable> =>
   JSON.parse(await readFile(join(dir, ARCHIVES_FILE), 'utf8')) as ArchiveTable;
 
 export const runBunUpgrade = async ({
-  dir,
+  dir: given,
   now,
   http,
   resolveDigest = dockerHubDigestResolver(),
@@ -253,6 +253,9 @@ export const runBunUpgrade = async ({
   readonly resolveDigest?: ImageDigestResolver;
   readonly write: boolean;
 }): Promise<BunUpgradeResult> => {
+  // The pin raise reads only files inside a real directory, so a symlinked
+  // checkout is upgraded through its target.
+  const dir = await realpath(given);
   const current = await readBunVersion(join(dir, 'package.json'));
   if (current === null) {
     throw new Error('package.json must pin an exact bun@x.y.z packageManager');
@@ -307,6 +310,9 @@ export const runBunUpgrade = async ({
   });
   if (pins === null) {
     throw new Error(`${dir} must be a git checkout to raise its Bun pins`);
+  }
+  if (!pins.writes.has('package.json')) {
+    throw new Error(`The Bun pin raise left ${dir}/package.json at ${current}`);
   }
   if (pins.kept.length > 0) {
     throw new Error(
