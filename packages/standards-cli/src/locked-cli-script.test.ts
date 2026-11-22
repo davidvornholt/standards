@@ -45,6 +45,7 @@ const buildUpstream = (): string => {
   git(up, ['init', '--quiet']);
   git(up, ['config', 'user.email', 'test@example.com']);
   git(up, ['config', 'user.name', 'test']);
+  git(up, ['config', 'commit.gpgsign', 'false']);
   write(
     up,
     'package.json',
