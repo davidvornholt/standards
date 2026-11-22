@@ -137,14 +137,34 @@ const scanCurrentViewport = async (
 // browser's pointer, hover, user agent, and pixel density, so styles that
 // depend on those, such as larger touch targets under `pointer: coarse`, are
 // scanned as a desktop browser renders them at the phone's width.
+// Focus moves only if narrowing took it away, so focus handlers such as a
+// tooltip that opens on focus don't run again for an element that kept it.
+const keepFocus = async (
+  page: playwright.Page,
+): Promise<() => Promise<void>> => {
+  const focused = await page.evaluateHandle(() => document.activeElement);
+  return async () => {
+    await focused.evaluate((element) => {
+      if (
+        (element instanceof HTMLElement || element instanceof SVGElement) &&
+        element !== document.body &&
+        element.isConnected &&
+        document.activeElement !== element
+      ) {
+        element.focus({ preventScroll: true });
+      }
+    });
+    await focused.dispose();
+  };
+};
+
 export const scanWcag22AaViolations = (
   page: playwright.Page,
 ): Promise<ReadonlyArray<AccessibilityViolation>> =>
-  scanAtPhoneWidthToo(
-    page,
-    mobileDevice.viewport,
-    (viewport) => scanCurrentViewport(page, viewport),
+  scanAtPhoneWidthToo(page, mobileDevice.viewport, {
+    scan: (viewport) => scanCurrentViewport(page, viewport),
+    keepFocus: () => keepFocus(page),
     // Layout-driven re-renders, such as a navigation rail replacing a drawer,
     // finish before the test continues at its own viewport.
-    () => waitForStreamedDom(page),
-  );
+    settle: () => waitForStreamedDom(page),
+  });
