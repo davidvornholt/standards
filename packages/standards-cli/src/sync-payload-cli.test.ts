@@ -21,6 +21,7 @@ import {
   write,
   writeSyncManifest,
 } from './cli-test-support';
+import { writeCiSecretsPair } from './structure-test-support';
 
 afterEach(cleanupTmpDirs);
 
@@ -81,9 +82,12 @@ const buildUpstream = (): string => {
   return up;
 };
 
+// Every consumer here has automatic sync on, so check requires the CI
+// secrets pair.
 const newConsumer = (policy?: string): string => {
   const consumer = mkTmp('payload-cons-');
   execFileSync('git', ['init', '--quiet', consumer]);
+  writeCiSecretsPair(consumer);
   if (policy !== undefined) {
     write(consumer, 'sync-standards.local.json', policy);
   }
