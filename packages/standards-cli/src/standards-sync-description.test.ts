@@ -30,6 +30,15 @@ const LOCK_ONLY =
 const RAISED =
   '**CLI.** This sync also raises `@davidvornholt/standards` in `package.json` from `0.31.0` to `0.38.0` and updates `bun.lock` to match. The sync run itself used `0.31.0`, so the required checks on this pull request are the first to run `0.38.0`. If they fail, the new release may be the cause. This pull request does not merge until they pass.';
 
+const BUN =
+  '**Bun.** This sync also raises the Bun pins here, such as `packageManager`, `BUN_VERSION`, `bun-version`, and `oven/bun` image tags and digests, from `1.4.3` to `1.4.5`, the Bun that `davidvornholt/standards` at `2daab29` runs. The required checks on this pull request are the first to run Bun `1.4.5` here. This pull request does not merge until they pass.';
+// Container file names are PascalCase, so the fixture builds its entries.
+const bunPin = (version: string): Record<string, string> =>
+  Object.fromEntries([
+    ['Dockerfile', `ARG BUN_VERSION=${version}\n`],
+    ['package.json', `{ "packageManager": "bun@${version}" }\n`],
+  ]);
+
 const lock = (
   sha: string,
   files: Readonly<Record<string, string>> = {},
@@ -245,6 +254,35 @@ const scenarios: Array<Scenario> = [
       `**Before.** \`sync-standards.lock\` already points to \`${UPSTREAM}\` at \`2daab29\`, but some mirrored files here no longer match that commit.`,
       MATCHED,
       changedFiles(['package.json']),
+      VERIFICATION,
+    ),
+    apiCalls: '',
+  },
+  {
+    name: 'a Bun raise alone at the recorded commit changes no mirrored file',
+    base: { ...bunPin('1.4.3'), 'sync-standards.lock': lock(CURRENT) },
+    head: bunPin('1.4.5'),
+    expected: body(
+      `**Before.** This repository already mirrors \`${UPSTREAM}\` at \`2daab29\`.`,
+      LOCK_ONLY,
+      BUN,
+      VERIFICATION,
+    ),
+    apiCalls: '',
+  },
+  {
+    name: 'a Bun raise with upstream changes counts only locked files as mirrored',
+    base: {
+      ...bunPin('1.4.3'),
+      'canonical.txt': 'one\n',
+      'sync-standards.lock': lock(CURRENT, { 'canonical.txt': '0' }),
+    },
+    head: { ...bunPin('1.4.5'), 'canonical.txt': 'two\n' },
+    expected: body(
+      `**Before.** \`sync-standards.lock\` already points to \`${UPSTREAM}\` at \`2daab29\`, but some mirrored files here no longer match that commit.`,
+      MATCHED,
+      BUN,
+      changedFiles(['Dockerfile', 'canonical.txt', 'package.json']),
       VERIFICATION,
     ),
     apiCalls: '',
