@@ -136,7 +136,10 @@ const scanCurrentViewport = async (
 // needs no second run on a phone. The narrowed page keeps the desktop
 // browser's pointer, hover, user agent, and pixel density, so styles that
 // depend on those, such as larger touch targets under `pointer: coarse`, are
-// scanned as a desktop browser renders them at the phone's width.
+// scanned as a desktop browser renders them at the phone's width. Tag a test
+// that scans such a page with `mobileDeviceTag`, so it also scans on the
+// emulated phone. Narrowing can hide the focused element, and the browser then
+// moves focus to the body, so the scan gives focus back afterwards.
 // Focus moves only if narrowing took it away, so focus handlers such as a
 // tooltip that opens on focus don't run again for an element that kept it.
 const keepFocus = async (
