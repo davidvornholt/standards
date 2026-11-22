@@ -16,10 +16,10 @@ Install [Bun](https://bun.sh). Then, in a Git repository, take the core files wi
 ```sh
 echo '{ "payload": "core", "autoSync": false }' > sync-standards.local.json
 bunx @davidvornholt/standards init
-bunx @davidvornholt/standards check
+bash .agents/skills/standards-sync/scripts/standards.sh check
 ```
 
-If the repository already has an `AGENTS.md`, `init` stops and asks you to move its content below a `## Project-specific rules` heading at its end. Move the content of a `CLAUDE.md` there too and delete it, because Claude Code by default loads `AGENTS.md` only in a repository without a `CLAUDE.md`. Later, run `bunx @davidvornholt/standards sync` to take the newest standards. To adopt the Bun payload or the automatic sync, follow [Adopt the standards](docs/adoption.md), which also says which parts need your own GitHub App and secrets.
+If the repository already has an `AGENTS.md`, `init` stops and asks you to move its content below a `## Project-specific rules` heading at its end. Move the content of a `CLAUDE.md` there too and delete it, because Claude Code by default loads `AGENTS.md` only in a repository without a `CLAUDE.md`. From then on, run the CLI as `bash .agents/skills/standards-sync/scripts/standards.sh <command>`, which runs the standards commit that `sync-standards.lock` records, as CI does. Its `sync` command takes the newest standards. To adopt the Bun payload or the automatic sync, follow [Adopt the standards](docs/adoption.md), which also says which parts need your own GitHub App and secrets.
 
 ## Maintain this repository
 

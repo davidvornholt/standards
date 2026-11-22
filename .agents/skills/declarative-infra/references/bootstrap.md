@@ -4,7 +4,7 @@ Bootstrap only when a host or zone has no infrastructure home yet. Connecting an
 
 Reuse means copying. Copy the patterns below into the host repo and adapt them, and improve the patterns here, upstream, instead of creating infrastructure flakes or modules that several repos depend on. The one shared module is app-release.
 
-A dedicated infra repo isn't a Bun workspace, so it takes the core payload. Before laying out the infrastructure, follow [Repository outside Bun](https://github.com/davidvornholt/standards/blob/main/docs/adoption.md#repository-outside-bun), which selects the payload and runs `init`. Run the CLI as `bunx @davidvornholt/standards` wherever this skill writes `bun standards`. Add the Nix and OpenTofu Dependabot update blocks to `.github/dependabot.yml`: the core payload doesn't ship that file, so the repo writes its own, and a repo that does receive it puts the blocks below the `# Project-specific updates` line at the end.
+A dedicated infra repo isn't a Bun workspace, so it takes the core payload. Before laying out the infrastructure, follow [Repository outside Bun](https://github.com/davidvornholt/standards/blob/main/docs/adoption.md#repository-outside-bun), which selects the payload and runs `init`. After `init`, run the CLI as `bash .agents/skills/standards-sync/scripts/standards.sh` wherever this skill writes `bun standards`. Add the Nix and OpenTofu Dependabot update blocks to `.github/dependabot.yml`: the core payload doesn't ship that file, so the repo writes its own, and a repo that does receive it puts the blocks below the `# Project-specific updates` line at the end.
 
 ## Layout
 
