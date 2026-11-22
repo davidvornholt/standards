@@ -7,11 +7,9 @@
 import { execFileSync } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import { isRecord } from './github-settings-parse';
+import { compareVersions, VERSION } from './bun-version';
+import { isContainedPath } from './contained-path';
 
-const VERSION = String.raw`(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)`;
-const STABLE_VERSION = new RegExp(`^${VERSION}$`, 'u');
-const PACKAGE_MANAGER = new RegExp(`^bun@(?<version>${VERSION})$`, 'u');
 const IMAGE_DIGEST = /^sha256:[0-9a-f]{64}$/u;
 const GIT_OUTPUT_LIMIT = 16_777_216;
 
@@ -64,7 +62,6 @@ const CONTAINER_FILE =
   /^(?:Dockerfile|Containerfile)(?:[.-].*)?$|\.(?:dockerfile|containerfile)$/iu;
 const YAML_FILE = /\.ya?ml$/iu;
 
-// The patterns that apply to one file.
 const patternsFor = (path: string): ReadonlyArray<Pattern> => {
   const name = basename(path);
   if (name === 'package.json') {
@@ -80,42 +77,6 @@ const patternsFor = (path: string): ReadonlyArray<Pattern> => {
     return [ASSIGNMENT, IMAGE];
   }
   return [];
-};
-
-export const compareVersions = (left: string, right: string): number => {
-  const a = left.split('.').map(Number);
-  const b = right.split('.').map(Number);
-  for (let index = 0; index < a.length; index += 1) {
-    const difference = (a[index] ?? 0) - (b[index] ?? 0);
-    if (difference !== 0) {
-      return difference;
-    }
-  }
-  return 0;
-};
-
-export const isStableVersion = (version: string): boolean =>
-  STABLE_VERSION.test(version);
-
-// The version a manifest's `packageManager` pins, or null when it doesn't pin
-// an exact Bun release.
-export const packageManagerBunVersion = (manifest: unknown): string | null => {
-  const value = isRecord(manifest) ? manifest.packageManager : undefined;
-  return typeof value === 'string'
-    ? (PACKAGE_MANAGER.exec(value)?.groups?.version ?? null)
-    : null;
-};
-
-export const readBunVersion = async (path: string): Promise<string | null> => {
-  const text = await readFile(path, 'utf8').catch(() => null);
-  if (text === null) {
-    return null;
-  }
-  try {
-    return packageManagerBunVersion(JSON.parse(text) as unknown);
-  } catch {
-    return null;
-  }
 };
 
 // Resolves the digest of `oven/bun:<tag>` on Docker Hub.
@@ -163,17 +124,22 @@ export type BunPinRaise = {
   readonly from: ReadonlyArray<string>;
 };
 
-export type BunPinResult = {
+export type BunPinPlan = {
   readonly raised: ReadonlyArray<BunPinRaise>;
-  // Digest-pinned images outside Docker Hub, as `path: reference`.
+  // Images that stay below the target, as `path: reference (why)`: a
+  // digest-pinned image outside Docker Hub, or a tag Docker Hub didn't serve.
   readonly kept: ReadonlyArray<string>;
+  // The Docker Hub tags that failed to resolve, so a caller that needs every
+  // pin raised can refuse the plan.
+  readonly unresolved: ReadonlyArray<string>;
+  // The new content of each raised file, empty without a digest resolver.
+  readonly writes: ReadonlyMap<string, string>;
 };
 
 type PlannedFile = {
   readonly path: string;
   readonly text: string;
   readonly matches: ReadonlyArray<Match>;
-  readonly kept: ReadonlyArray<string>;
 };
 
 const DIGEST_SUFFIX = /^@sha256:[0-9a-f]{64}/u;
@@ -207,38 +173,66 @@ const rewrite = (
   return result + file.text.slice(cursor);
 };
 
-const unresolvable = (match: Match): boolean =>
-  match.image?.digest === true &&
-  !DOCKER_HUB_REGISTRIES.has(match.image.registry);
+const dockerHubTag = (match: Match, target: string): string | null =>
+  match.image !== null && DOCKER_HUB_REGISTRIES.has(match.image.registry)
+    ? `${target}${match.image.variant}`
+    : null;
+
+const keptReason = (
+  match: Match,
+  target: string,
+  failures: ReadonlyMap<string, string>,
+): string | null => {
+  if (match.image?.digest === true && dockerHubTag(match, target) === null) {
+    return 'outside Docker Hub, so its digest has no resolver';
+  }
+  const tag = dockerHubTag(match, target);
+  const failure = tag === null ? undefined : failures.get(tag);
+  return failure === undefined
+    ? null
+    : `Docker Hub didn't resolve oven/bun:${tag}: ${failure}`;
+};
+
+const errorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
 
 // Every digest a raise needs, plus every Docker Hub tag it moves to, so that a
-// tag Docker Hub doesn't serve fails here instead of in an image build.
+// tag Docker Hub doesn't serve stays as it is instead of failing an image build.
 const resolveTags = async (
   files: ReadonlyArray<PlannedFile>,
   target: string,
   resolveDigest: ImageDigestResolver,
-): Promise<ReadonlyMap<string, string>> => {
-  const tags = new Set(
-    files.flatMap(({ matches }) =>
-      matches.flatMap(({ image }) =>
-        image !== null && DOCKER_HUB_REGISTRIES.has(image.registry)
-          ? [`${target}${image.variant}`]
-          : [],
+): Promise<{
+  readonly digests: ReadonlyMap<string, string>;
+  readonly failures: ReadonlyMap<string, string>;
+}> => {
+  const tags = [
+    ...new Set(
+      files.flatMap(({ matches }) =>
+        matches.flatMap((match) => dockerHubTag(match, target) ?? []),
       ),
     ),
-  );
-  const resolved = await Promise.all(
-    [...tags].map(async (tag) => {
+  ];
+  const settled = await Promise.allSettled(
+    tags.map(async (tag) => {
       const digest = await resolveDigest(tag);
       if (!IMAGE_DIGEST.test(digest)) {
-        throw new Error(
-          `Docker Hub returned an invalid digest for oven/bun:${tag}`,
-        );
+        throw new Error('the registry returned an invalid digest');
       }
-      return [tag, digest] as const;
+      return digest;
     }),
   );
-  return new Map(resolved);
+  const digests = new Map<string, string>();
+  const failures = new Map<string, string>();
+  for (const [index, outcome] of settled.entries()) {
+    const tag = tags[index] ?? '';
+    if (outcome.status === 'fulfilled') {
+      digests.set(tag, outcome.value);
+    } else {
+      failures.set(tag, errorMessage(outcome.reason));
+    }
+  }
+  return { digests, failures };
 };
 
 const trackedFiles = (dir: string): ReadonlyArray<string> | null => {
@@ -256,70 +250,121 @@ const trackedFiles = (dir: string): ReadonlyArray<string> | null => {
   }
 };
 
+// A file that can hold a pin and is a regular file inside `dir`, so a tracked
+// symlink can't steer a write to its target.
+const candidate = (
+  dir: string,
+  path: string,
+  exclude: ReadonlySet<string>,
+  contents: ReadonlyMap<string, string>,
+): boolean =>
+  !exclude.has(path) &&
+  patternsFor(path).length > 0 &&
+  (contents.has(path) || isContainedPath(dir, path, 'file'));
+
 const planFile = async (
   dir: string,
   path: string,
   target: string,
+  contents: ReadonlyMap<string, string>,
 ): Promise<PlannedFile | null> => {
-  const text = await readFile(join(dir, path), 'utf8').catch(() => null);
+  const text =
+    contents.get(path) ??
+    (await readFile(join(dir, path), 'utf8').catch(() => null));
   if (text === null) {
     return null;
   }
-  const lower = matchesIn(text, patternsFor(path)).filter(
+  const matches = matchesIn(text, patternsFor(path)).filter(
     ({ version }) => compareVersions(version, target) < 0,
   );
-  const kept = lower
-    .filter(unresolvable)
-    .map(
-      (match) =>
-        `${path}: ${text.slice(match.index, match.index + match.length)}${match.image?.variant ?? ''}`,
-    );
-  const matches = lower.filter((match) => !unresolvable(match));
-  return lower.length === 0 ? null : { path, text, matches, kept };
+  return matches.length === 0 ? null : { path, text, matches };
 };
 
-// Raises the pins in the files git tracks in `dir`, except `exclude`, which holds
-// the files sync manages. Without `resolveDigest` it only plans: it reports the
-// raise and writes nothing. Returns null when `dir` isn't a git checkout.
-export const raiseBunPins = async ({
+const versionsOf = (matches: ReadonlyArray<Match>): ReadonlyArray<string> =>
+  [...new Set(matches.map(({ version }) => version))].sort(compareVersions);
+
+// Plans raising the pins in the files git tracks in `dir`, except `exclude`,
+// which holds the files sync manages. `contents` stands in for files the caller
+// already edited in memory. Without `resolveDigest` it only reports the raise.
+// An image it can't raise stays as it is, in `kept`, while every other pin is
+// raised. Returns null when `dir` isn't a git checkout.
+export const planBunPins = async ({
   dir,
   target,
   exclude,
   resolveDigest,
+  contents = new Map(),
 }: {
   readonly dir: string;
   readonly target: string;
   readonly exclude: ReadonlySet<string>;
   readonly resolveDigest: ImageDigestResolver | null;
-}): Promise<BunPinResult | null> => {
+  readonly contents?: ReadonlyMap<string, string>;
+}): Promise<BunPinPlan | null> => {
   const tracked = trackedFiles(dir);
   if (tracked === null) {
     return null;
   }
-  const planned = (
+  const lower = (
     await Promise.all(
       tracked
-        .filter((file) => !exclude.has(file))
-        .map((file) => planFile(dir, file, target)),
+        .filter((path) => candidate(dir, path, exclude, contents))
+        .map((path) => planFile(dir, path, target, contents)),
     )
   ).filter((file) => file !== null);
-  const changed = planned.filter(({ matches }) => matches.length > 0);
-  const result: BunPinResult = {
+  const { digests, failures } =
+    resolveDigest === null
+      ? { digests: new Map<string, string>(), failures: new Map() }
+      : await resolveTags(lower, target, resolveDigest);
+  const kept = lower.flatMap(({ path, text, matches }) =>
+    matches.flatMap((match) => {
+      const why = keptReason(match, target, failures);
+      return why === null
+        ? []
+        : [
+            `${path}: ${text.slice(match.index, match.index + match.length)}${match.image?.variant ?? ''} (${why})`,
+          ];
+    }),
+  );
+  const changed = lower
+    .map((file) => ({
+      ...file,
+      matches: file.matches.filter(
+        (match) => keptReason(match, target, failures) === null,
+      ),
+    }))
+    .filter(({ matches }) => matches.length > 0);
+  return {
     raised: changed.map(({ path, matches }) => ({
       path,
-      from: [...new Set(matches.map(({ version }) => version))].sort(
-        compareVersions,
-      ),
+      from: versionsOf(matches),
     })),
-    kept: planned.flatMap(({ kept }) => kept),
+    kept,
+    unresolved: [...failures.keys()],
+    writes: new Map(
+      resolveDigest === null
+        ? []
+        : changed.map((file) => [file.path, rewrite(file, target, digests)]),
+    ),
   };
-  if (resolveDigest !== null) {
-    const digests = await resolveTags(changed, target, resolveDigest);
-    await Promise.all(
-      changed.map((file) =>
-        writeFile(join(dir, file.path), rewrite(file, target, digests)),
-      ),
-    );
+};
+
+export const writeFiles = async (
+  dir: string,
+  writes: ReadonlyMap<string, string>,
+): Promise<void> => {
+  await Promise.all(
+    [...writes].map(([path, text]) => writeFile(join(dir, path), text)),
+  );
+};
+
+// Plans the raise and writes it, unless there's no digest resolver.
+export const raiseBunPins = async (
+  options: Parameters<typeof planBunPins>[0],
+): Promise<BunPinPlan | null> => {
+  const plan = await planBunPins(options);
+  if (plan !== null) {
+    await writeFiles(options.dir, plan.writes);
   }
-  return result;
+  return plan;
 };

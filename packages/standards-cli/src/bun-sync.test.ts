@@ -3,7 +3,7 @@
 
 import { afterEach, describe, expect, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { chmodSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
 import { raiseSyncedBunPins } from './bun-command';
@@ -90,7 +90,7 @@ describe('sync', () => {
     }
   });
 
-  it('leaves every pin as it was when Docker Hub fails', async () => {
+  it('raises every other pin when Docker Hub fails', async () => {
     const up = upstream();
     const dir = consumer();
     write(dir, 'Dockerfile', 'FROM oven/bun:1.4.3\n');
@@ -105,6 +105,27 @@ describe('sync', () => {
     });
 
     expect(read(dir, 'Dockerfile')).toBe('FROM oven/bun:1.4.3\n');
-    expect(read(dir, 'package.json')).toBe(CONSUMER_FILES[0][1]);
+    expect(read(dir, 'package.json')).toBe(
+      '{ "packageManager": "bun@1.4.5" }\n',
+    );
+  });
+
+  it('fails the sync when a pin cannot be written', async () => {
+    // Root ignores file modes, so only an unprivileged run can see the failure.
+    if (process.getuid?.() === 0) {
+      return;
+    }
+    const up = upstream();
+    const dir = consumer();
+    chmodSync(join(dir, 'apps/api/Dockerfile'), 0o444);
+
+    await expect(
+      raiseSyncedBunPins({
+        consumer: dir,
+        sourceDir: up,
+        managed: [],
+        dryRun: false,
+      }),
+    ).rejects.toThrow('EACCES');
   });
 });

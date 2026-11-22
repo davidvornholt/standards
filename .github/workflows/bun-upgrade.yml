@@ -20,6 +20,9 @@ concurrency:
 
 jobs:
   upgrade:
+    # A manual run from another branch would hand that branch's code the
+    # broker App credentials, so only the default branch runs.
+    if: github.ref == 'refs/heads/main'
     # Repository/organization variable; empty keeps repository-scoped secrets.
     environment: ${{ vars.CI_SECRETS_ENVIRONMENT }}
     # The job token only reads the release list and the open pull requests.
@@ -58,8 +61,9 @@ jobs:
             echo "to=$to"
           } >> "$GITHUB_OUTPUT"
 
-      # A pull request for this version that is open, merged, or closed by
-      # hand means there is nothing to open: a closed one was declined.
+      # A pull request for this version from this repository that is open,
+      # merged, or closed by hand means there is nothing to open: a closed one
+      # was declined. One from a fork with the same branch name doesn't count.
       - name: Find an earlier pull request for this version
         id: earlier
         if: steps.upgrade.outputs.from != steps.upgrade.outputs.to
@@ -68,7 +72,7 @@ jobs:
           BRANCH: bun-upgrade/${{ steps.upgrade.outputs.to }}
         run: |
           set -euo pipefail
-          count=$(gh pr list --state all --head "$BRANCH" --json number --jq length)
+          count=$(gh pr list --state all --head "$BRANCH" --limit 1000 --json headRefName,isCrossRepository | jq --arg branch "$BRANCH" '[.[] | select((.isCrossRepository | not) and .headRefName == $branch)] | length')
           if [ "$count" -gt 0 ]; then
             echo "A pull request from $BRANCH already exists; nothing to open."
             echo "open=false" >> "$GITHUB_OUTPUT"

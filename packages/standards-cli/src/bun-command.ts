@@ -1,12 +1,9 @@
 import { join, resolve } from 'node:path';
 import process from 'node:process';
 import { dockerHubDigestResolver } from './bun-docker-hub';
-import {
-  type ImageDigestResolver,
-  raiseBunPins,
-  readBunVersion,
-} from './bun-pins';
+import { type ImageDigestResolver, raiseBunPins } from './bun-pins';
 import { COOLDOWN_DAYS, runBunUpgrade, type UpgradeHttp } from './bun-upgrade';
+import { readBunVersion } from './bun-version';
 import { resolveToken } from './github-api';
 
 const USAGE = `Usage: standards bun upgrade [--write] [--dir <path>]
@@ -123,22 +120,15 @@ export const raiseSyncedBunPins = async ({
   if (target === null) {
     return;
   }
-  // A registry outage must not block the sync itself. The raise resolves every
-  // digest before it writes, so a failure leaves every pin as it was, and the
-  // next sync tries again.
+  // An image Docker Hub can't resolve, as in an outage, stays as it is and is
+  // reported, so it doesn't block the sync or the other pins; the next sync
+  // tries it again. A failed write fails the sync, so nothing commits a part.
   const result = await raiseBunPins({
     dir: consumer,
     target,
     exclude: new Set(managed),
     resolveDigest: dryRun ? null : resolveDigest,
-  }).catch((error: unknown) => {
-    console.warn(
-      `  left Bun pins as they are, because raising them to ${target} failed: ${error instanceof Error ? error.message : String(error)}`,
-    );
   });
-  if (result === undefined) {
-    return;
-  }
   if (result === null) {
     console.log(
       `  left Bun pins as they are: ${consumer} isn't a git checkout, so sync can't list its files`,
@@ -152,7 +142,7 @@ export const raiseSyncedBunPins = async ({
   }
   for (const note of result.kept) {
     console.log(
-      `  ${dryRun ? 'would leave' : 'left'} a digest-pinned image below Bun ${target} outside Docker Hub, raise it by hand: ${note}`,
+      `  ${dryRun ? 'would leave' : 'left'} an image below Bun ${target}: ${note}`,
     );
   }
 };

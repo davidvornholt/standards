@@ -23,6 +23,7 @@
     "src/bun-docker-hub.ts",
     "src/bun-pins.ts",
     "src/bun-upgrade.ts",
+    "src/bun-version.ts",
     "src/cli.ts",
     "src/contained-path.ts",
     "src/creds-add.ts",

@@ -250,6 +250,18 @@ describe('runBunUpgrade without an upgrade', () => {
     expect(snapshot(dir)).toEqual(before);
   });
 
+  it('writes nothing when one edit fails', async () => {
+    const dir = repo();
+    const sync = '.github/workflows/standards-sync.yml';
+    write(dir, sync, read(dir, sync).replace(`|| '${current}' }}`, '|| x }}'));
+    const before = snapshot(dir);
+
+    await expect(
+      upgrade(dir, [{ version: NEXT, publishedDaysAgo: 4 }]),
+    ).rejects.toThrow(`${sync} must contain`);
+    expect(snapshot(dir)).toEqual(before);
+  });
+
   it('refuses an archive whose hashes disagree and writes nothing', async () => {
     const dir = repo();
     const before = snapshot(dir);

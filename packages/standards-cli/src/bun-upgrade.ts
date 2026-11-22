@@ -6,16 +6,15 @@
 // and its test fixture, the sync workflow's fallback, and every other Bun pin.
 
 import { createHash } from 'node:crypto';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { dockerHubDigestResolver } from './bun-docker-hub';
+import { type ImageDigestResolver, planBunPins, writeFiles } from './bun-pins';
 import {
   compareVersions,
-  type ImageDigestResolver,
   isStableVersion,
-  raiseBunPins,
   readBunVersion,
-} from './bun-pins';
+} from './bun-version';
 import { isRecord } from './github-settings-parse';
 
 // The same cooldown Dependabot applies to every other dependency.
@@ -199,14 +198,14 @@ const replaceOnce = (
   return parts.join(after);
 };
 
-const editFile = async (
+const editedFile = async (
   dir: string,
   file: string,
   edit: (text: string) => string,
-): Promise<void> => {
-  const path = join(dir, file);
-  await writeFile(path, edit(await readFile(path, 'utf8')));
-};
+): Promise<readonly [string, string]> => [
+  file,
+  edit(await readFile(join(dir, file), 'utf8')),
+];
 
 // The checker step selects the archive by `uname -m`, the Nix system name
 // without its `-linux` suffix, so each pinned system has one line that names
@@ -272,35 +271,50 @@ export const runBunUpgrade = async ({
   }
   const next = release.version;
   const upgraded = await verifiedArchives(release, pinned, http);
-  if (!write) {
-    return { current, next };
-  }
-  // The table keeps the current version, which consumers pin until their next
-  // sync raises them, and drops older ones, which nothing pins any more.
-  await writeFile(
-    join(dir, ARCHIVES_FILE),
-    `${JSON.stringify({ [current]: pinned, [next]: upgraded }, null, 2)}\n`,
-  );
-  await Promise.all(
-    SETTINGS_CHECKER_FILES.map((checker) =>
-      editFile(
-        dir,
-        checker.file,
-        settingsCheckerEdit(checker, { current, next }, pinned, upgraded),
+  // Every edit and every image digest is settled before anything is written,
+  // so a failure leaves the repository as it was. The table keeps the current
+  // version, which consumers pin until their next sync raises them, and drops
+  // older ones, which nothing pins any more.
+  const edits = new Map([
+    [
+      ARCHIVES_FILE,
+      `${JSON.stringify({ [current]: pinned, [next]: upgraded }, null, 2)}\n`,
+    ],
+    ...(await Promise.all([
+      ...SETTINGS_CHECKER_FILES.map((checker) =>
+        editedFile(
+          dir,
+          checker.file,
+          settingsCheckerEdit(checker, { current, next }, pinned, upgraded),
+        ),
       ),
-    ),
-  );
-  await editFile(dir, SYNC_WORKFLOW, (text) =>
-    replaceOnce(text, SYNC_WORKFLOW, `|| '${current}' }}`, `|| '${next}' }}`),
-  );
-  const pins = await raiseBunPins({
+      editedFile(dir, SYNC_WORKFLOW, (text) =>
+        replaceOnce(
+          text,
+          SYNC_WORKFLOW,
+          `|| '${current}' }}`,
+          `|| '${next}' }}`,
+        ),
+      ),
+    ])),
+  ]);
+  const pins = await planBunPins({
     dir,
     target: next,
     exclude: new Set([ARCHIVES_FILE]),
     resolveDigest,
+    contents: edits,
   });
   if (pins === null) {
     throw new Error(`${dir} must be a git checkout to raise its Bun pins`);
+  }
+  if (pins.kept.length > 0) {
+    throw new Error(
+      `Some Bun images can't be raised to ${next}: ${pins.kept.join('; ')}`,
+    );
+  }
+  if (write) {
+    await writeFiles(dir, new Map([...edits, ...pins.writes]));
   }
   return { current, next };
 };

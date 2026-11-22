@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { compareVersions, raiseBunPins } from './bun-pins';
+import { raiseBunPins } from './bun-pins';
+import { compareVersions } from './bun-version';
 import { cleanupTmpDirs, mkTmp, write } from './cli-test-support';
 
 const OLD_DIGEST = `sha256:${'1'.repeat(64)}`;
@@ -127,7 +128,10 @@ describe('raiseBunPins limits', () => {
     ];
     const dir = repo(files);
 
-    expect(await raise(dir, ['managed.yml'])).toEqual({ raised: [], kept: [] });
+    expect(await raise(dir, ['managed.yml'])).toMatchObject({
+      raised: [],
+      kept: [],
+    });
     for (const [path, content] of files) {
       expect(read(dir, path)).toBe(content);
     }
@@ -142,10 +146,24 @@ describe('raiseBunPins limits', () => {
     ];
     const dir = repo(files);
 
-    expect(await raise(dir)).toEqual({ raised: [], kept: [] });
+    expect(await raise(dir)).toMatchObject({ raised: [], kept: [] });
     for (const [path, content] of files) {
       expect(read(dir, path)).toBe(content);
     }
+  });
+
+  it('writes through no tracked symlink', async () => {
+    const outside = mkTmp('bun-pins-outside-');
+    write(outside, 'Dockerfile', 'ARG BUN_VERSION=1.4.3\n');
+    const dir = repo([['managed.yml', 'bun-version: 1.4.3\n']]);
+    symlinkSync('managed.yml', join(dir, 'alias.yml'));
+    mkdirSync(join(dir, 'api'));
+    symlinkSync(join(outside, 'Dockerfile'), join(dir, 'api/Dockerfile'));
+    execFileSync('git', ['add', '--all'], { cwd: dir });
+
+    expect(await raise(dir, ['managed.yml'])).toMatchObject({ raised: [] });
+    expect(read(dir, 'managed.yml')).toBe('bun-version: 1.4.3\n');
+    expect(read(outside, 'Dockerfile')).toBe('ARG BUN_VERSION=1.4.3\n');
   });
 
   it('keeps a digest-pinned image outside Docker Hub and reports it', async () => {
@@ -156,9 +174,11 @@ describe('raiseBunPins limits', () => {
       ],
     ]);
 
-    expect(await raise(dir)).toEqual({
+    expect(await raise(dir)).toMatchObject({
       raised: [{ path: 'Dockerfile', from: ['1.4.3'] }],
-      kept: ['Dockerfile: ghcr.io/oven/bun:1.4.3'],
+      kept: [
+        'Dockerfile: ghcr.io/oven/bun:1.4.3 (outside Docker Hub, so its digest has no resolver)',
+      ],
     });
     expect(read(dir, 'Dockerfile')).toBe(
       `FROM ghcr.io/oven/bun:1.4.3@${OLD_DIGEST}\nARG BUN_VERSION=1.4.5\n`,
@@ -173,17 +193,29 @@ describe('raiseBunPins limits', () => {
     expect(read(dir, 'Dockerfile')).toBe(`FROM oven/bun:1.4.3@${OLD_DIGEST}\n`);
   });
 
-  it('writes nothing when Docker Hub lacks a tag', async () => {
+  it('raises every other pin when Docker Hub lacks a tag', async () => {
     const dir = repo([
       ['package.json', '{ "packageManager": "bun@1.4.3" }\n'],
-      ['Dockerfile', 'FROM oven/bun:1.4.3-gone\n'],
+      ['Dockerfile', 'FROM oven/bun:1.4.3-gone\nARG BUN_VERSION=1.4.3\n'],
     ]);
 
-    await expect(
-      raise(dir, [], (tag) => Promise.reject(new Error(`no ${tag}`))),
-    ).rejects.toThrow('no 1.4.5-gone');
+    expect(
+      await raise(dir, [], (tag) => Promise.reject(new Error(`no ${tag}`))),
+    ).toMatchObject({
+      raised: [
+        { path: 'Dockerfile', from: ['1.4.3'] },
+        { path: 'package.json', from: ['1.4.3'] },
+      ],
+      kept: [
+        "Dockerfile: oven/bun:1.4.3-gone (Docker Hub didn't resolve oven/bun:1.4.5-gone: no 1.4.5-gone)",
+      ],
+      unresolved: ['1.4.5-gone'],
+    });
     expect(read(dir, 'package.json')).toBe(
-      '{ "packageManager": "bun@1.4.3" }\n',
+      '{ "packageManager": "bun@1.4.5" }\n',
+    );
+    expect(read(dir, 'Dockerfile')).toBe(
+      'FROM oven/bun:1.4.3-gone\nARG BUN_VERSION=1.4.5\n',
     );
   });
 
