@@ -29,7 +29,7 @@
     },
     "packages/standards-cli": {
       "name": "@davidvornholt/standards",
-      "version": "0.41.2",
+      "version": "0.42.0",
       "bin": {
         "standards": "src/cli.ts",
       },
