@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs the standards CLI from the commit that sync-standards.lock records, the
-# one the Standards workflow runs in a core consumer, so a local `check` or
-# `sync` behaves as CI does. Run it from the repository root:
+# one the Standards workflow runs in a core consumer. Run it from the
+# repository root:
 #   bash .agents/skills/standards-sync/scripts/standards.sh <command> [options]
 # Each commit is fetched and installed once into the user's cache.
 set -euo pipefail
@@ -11,7 +11,6 @@ if [ ! -f "$lock" ]; then
   echo "standards.sh: run it from the repository root, where $lock is; before the first sync, run \`bunx @davidvornholt/standards init\`" >&2
   exit 1
 fi
-# Bun is the only tool the CLI needs, so it also reads the lock.
 read_lock() {
   bun --no-env-file -e '
     const lock = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));

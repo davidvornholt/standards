@@ -1,5 +1,7 @@
 # GitHub settings, automatic sync, and auto-merge
 
+This page writes the CLI as `bun standards`. In a core consumer, run `bash .agents/skills/standards-sync/scripts/standards.sh` in its place.
+
 ## Repository settings
 
 Repository settings, rulesets, and labels are declared in `.github/settings.json` and the project's `.github/settings.local.json`. Change the declarations, never the GitHub UI: the required `check` job compares the live repository with them and fails on drift.
@@ -28,8 +30,6 @@ The workflow pushes the branch, manages the sync pull request, and turns on its 
 ```sh
 bun standards creds add github --dest ci:ci.broker_app
 ```
-
-In a core consumer, run `bash .agents/skills/standards-sync/scripts/standards.sh creds add github --dest ci:ci.broker_app` instead.
 
 Standards auto-merge uses the same App. A repository with `"autoSync": false` may go without the App by having no `secrets/ci.yaml`: `check` then requires neither, and Standards auto-merge leaves Dependabot pull requests manual. Once `secrets/ci.yaml` exists, it must hold the App.
 
