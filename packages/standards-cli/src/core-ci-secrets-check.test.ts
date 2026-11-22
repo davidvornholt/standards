@@ -36,9 +36,10 @@ const coreConsumer = (): string => {
   execFileSync('git', ['init', '--quiet', consumer]);
   write(consumer, 'sync-standards.local.json', '{ "payload": "core" }\n');
   writeCiSecretsPair(consumer);
-  expect(run(consumer, ['init', '--from', up, '--dir', consumer]).status).toBe(
-    0,
-  );
+  const init = run(consumer, ['init', '--from', up, '--dir', consumer]);
+  if (init.status !== 0) {
+    throw new Error(`init failed: ${init.stderr}`);
+  }
   return consumer;
 };
 
