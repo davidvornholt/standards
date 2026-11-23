@@ -266,6 +266,37 @@ describe("standards land and GitHub's merge state", () => {
   });
 });
 
+describe('standards land on a pull request labelled not-for-agents', () => {
+  const held = { name: 'not-for-agents' };
+
+  it('refuses it before marking a draft ready', () => {
+    openPr({ isDraft: true, labels: [{ name: 'dependencies' }, held] });
+    const result = land(fixture, ['123']);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('PR #123 has the not-for-agents label.');
+    expect(calls(fixture, 'pr', 'ready')).toEqual([]);
+    expect(mergeCalls(fixture)).toEqual([]);
+  });
+
+  it('stops waiting once someone adds the label', () => {
+    openPr({
+      statusCheckRollup: [check({ status: 'IN_PROGRESS', conclusion: '' })],
+      polls: [{}, { labels: [held] }],
+    });
+    const result = land(fixture, ['123']);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('has the not-for-agents label');
+    expect(mergeCalls(fixture)).toEqual([]);
+  });
+
+  it('merges a pull request with other labels', () => {
+    openPr({ labels: [{ name: 'dependencies' }] });
+    const result = land(fixture, ['123']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(mergeCalls(fixture)).toEqual([mergeCall(fixture)]);
+  });
+});
+
 describe('standards land arguments and merge failures', () => {
   it('refuses unknown options before calling GitHub', () => {
     openPr();

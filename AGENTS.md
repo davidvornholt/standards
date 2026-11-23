@@ -4,6 +4,8 @@
 
 Ask before choosing product intent or another costly, durable direction.
 
+Leave an issue or pull request labelled `not-for-agents` alone unless the user asks you to work on it in this session. The label marks what the user handles themselves and pull requests that must not merge yet, not work that waits for a date or another project.
+
 Disagree openly when an instruction, plan, or rule seems wrong, and say what you would do instead. Recommend the better option even when it's a bigger change than was asked for.
 
 Write for a reader who has no background on the task and hasn't read the code. That includes the user, because agents write most of the code.

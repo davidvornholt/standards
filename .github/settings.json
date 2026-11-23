@@ -49,5 +49,11 @@
       ]
     }
   ],
-  "labels": []
+  "labels": [
+    {
+      "name": "not-for-agents",
+      "color": "5319e7",
+      "description": "Agents leave this alone unless the maintainer asks for it in the session."
+    }
+  ]
 }
