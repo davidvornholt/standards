@@ -102,6 +102,7 @@ const initialPr = (head: string): FakePr => ({
   statusCheckRollup: [check()],
   updatedAt: OLD_UPDATE,
   mergeCommit: null,
+  labels: [],
   files: [{ filename: 'tracked' }],
   polls: [],
 });

@@ -26,7 +26,11 @@ import { requiredChecks } from './land-required-checks';
 import { unsettledRuns } from './land-runs';
 
 const POLL_FIELDS =
-  'state,isDraft,headRefOid,headRefName,baseRefName,mergeStateStatus,statusCheckRollup,updatedAt';
+  'state,isDraft,headRefOid,headRefName,baseRefName,mergeStateStatus,statusCheckRollup,updatedAt,labels';
+
+// Agents leave an item with this label alone unless the maintainer asks for
+// it. land refuses such a pull request until someone removes the label.
+const HOLD_LABEL = 'not-for-agents';
 
 type PolledPr = {
   readonly state: string;
@@ -37,6 +41,7 @@ type PolledPr = {
   readonly mergeStateStatus: string;
   readonly statusCheckRollup: ReadonlyArray<Check> | null;
   readonly updatedAt: string;
+  readonly labels: ReadonlyArray<{ readonly name: string }>;
 };
 
 export type WaitRequest = {
@@ -76,6 +81,11 @@ const readPoll = (
   if (pr.state !== 'OPEN') {
     throw new LandError(
       `PR #${prNumber} became ${pr.state} while land waited.`,
+    );
+  }
+  if (pr.labels.some((label) => label.name === HOLD_LABEL)) {
+    throw new LandError(
+      `PR #${prNumber} has the ${HOLD_LABEL} label. Land it only when the maintainer asks you to, after removing the label.`,
     );
   }
   const head = pr.headRefOid;
