@@ -102,18 +102,19 @@ describe('standards land and review-fix reports', () => {
     expect(mergeCalls(fixture)).toEqual([]);
   });
 
-  it('posts nothing with --no-review when the checks fail', () => {
-    Object.assign(fixture.pr, {
-      comments: [],
-      statusCheckRollup: [check({ conclusion: 'FAILURE' })],
-    });
-    const result = land(fixture, ['123', '--no-review', 'typo']);
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('check failed');
+  it('only cleans up a merged pull request, without looking for a report', () => {
+    Object.assign(fixture.pr, { state: 'MERGED', comments: [] });
+    git(fixture, ['switch', 'feature/topic']);
+    const result = land(fixture);
+    expect(result.status, result.stderr).toBe(0);
+    expect(commentLookups()).toEqual([]);
     expect(comments()).toEqual([]);
     expect(mergeCalls(fixture)).toEqual([]);
+    expect(branchExists(fixture)).toBe(false);
   });
+});
 
+describe('standards land with --no-review', () => {
   it('posts the reason given with --no-review, then lands', () => {
     fixture.pr.comments = [];
     const result = land(fixture, ['123', '--no-review', ' standards sync ']);
@@ -153,15 +154,16 @@ describe('standards land and review-fix reports', () => {
     expect(calls(fixture)).toEqual([]);
   });
 
-  it('only cleans up a merged pull request, without looking for a report', () => {
-    Object.assign(fixture.pr, { state: 'MERGED', comments: [] });
-    git(fixture, ['switch', 'feature/topic']);
-    const result = land(fixture);
-    expect(result.status, result.stderr).toBe(0);
-    expect(commentLookups()).toEqual([]);
+  it('posts nothing with --no-review when the checks fail', () => {
+    Object.assign(fixture.pr, {
+      comments: [],
+      statusCheckRollup: [check({ conclusion: 'FAILURE' })],
+    });
+    const result = land(fixture, ['123', '--no-review', 'typo']);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('check failed');
     expect(comments()).toEqual([]);
     expect(mergeCalls(fixture)).toEqual([]);
-    expect(branchExists(fixture)).toBe(false);
   });
 });
 
