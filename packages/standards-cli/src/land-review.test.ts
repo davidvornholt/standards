@@ -5,6 +5,7 @@ import {
   BASE_TIP,
   branchExists,
   calls,
+  check,
   createLand,
   git,
   type Land,
@@ -33,6 +34,12 @@ const comments = (): Array<Array<string>> => calls(fixture, 'pr', 'comment');
 
 const commentLookups = (): Array<Array<string>> =>
   calls(fixture, 'api').filter((call) => call[1]?.includes('/comments'));
+
+// The polls of the pull request's checks while land waits.
+const polls = (): Array<Array<string>> =>
+  calls(fixture, 'pr', 'view').filter((call) =>
+    call.some((arg) => arg.includes('statusCheckRollup')),
+  );
 
 const refusal = (head: string): string =>
   `standards land: No review-fix report covers head ${head.slice(0, 7)} of PR #123. ` +
@@ -82,11 +89,28 @@ describe('standards land and review-fix reports', () => {
   });
 
   it('refuses without a report or --no-review, before it waits', () => {
-    fixture.pr.comments = ['Reviewed through the weekend.'];
+    Object.assign(fixture.pr, {
+      comments: ['Reviewed through the weekend.'],
+      isDraft: true,
+      mergeStateStatus: 'DRAFT',
+    });
     const result = land(fixture, ['123']);
     expect(result.status).toBe(1);
     expect(result.stderr).toBe(refusal(String(fixture.pr.headRefOid)));
     expect(calls(fixture, 'pr', 'ready')).toEqual([]);
+    expect(polls()).toEqual([]);
+    expect(mergeCalls(fixture)).toEqual([]);
+  });
+
+  it('posts nothing with --no-review when the checks fail', () => {
+    Object.assign(fixture.pr, {
+      comments: [],
+      statusCheckRollup: [check({ conclusion: 'FAILURE' })],
+    });
+    const result = land(fixture, ['123', '--no-review', 'typo']);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('check failed');
+    expect(comments()).toEqual([]);
     expect(mergeCalls(fixture)).toEqual([]);
   });
 
