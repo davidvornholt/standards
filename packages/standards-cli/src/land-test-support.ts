@@ -5,15 +5,17 @@
 // never reads process state.
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
 import { mkTmp, type RunResult } from './cli-test-support';
-import {
-  type FakeGithub,
-  type FakePr,
-  installFakeGh,
-} from './land-fake-gh-test-support';
+import type { FakeGithub, FakePr } from './land-fake-gh-test-support';
 
 const SHA_LENGTH = 40;
 export const NEW_HEAD = 'a'.repeat(SHA_LENGTH);
@@ -21,6 +23,7 @@ export const BASE_TIP = 'b'.repeat(SHA_LENGTH);
 export const CI = '.github/workflows/ci.yml';
 export const OLD_UPDATE = '2026-01-01T00:00:00Z';
 const CLI = join(import.meta.dir, 'cli.ts');
+const EXECUTABLE = 0o755;
 
 type CheckOptions = {
   readonly name?: string;
@@ -89,6 +92,10 @@ export const gitOutput = (
   cwd = fixture.checkout,
 ): string => git(fixture, args, { cwd }).stdout.trim();
 
+// A review-fix report comment that covers head.
+export const reviewReport = (head: string): string =>
+  `| Review | Findings |\n| --- | --- |\n| 1 | none |\n\nReviewed through ${head}.`;
+
 const initialPr = (head: string): FakePr => ({
   number: 123,
   url: 'https://github.com/test/repo/pull/123',
@@ -105,6 +112,7 @@ const initialPr = (head: string): FakePr => ({
   labels: [],
   files: [{ filename: 'tracked' }],
   polls: [],
+  comments: [reviewReport(head)],
 });
 
 const initialGithub = (): FakeGithub => ({
@@ -124,6 +132,30 @@ const initialGithub = (): FakeGithub => ({
   protectionChecks: [],
   workflowRuns: [[]],
 });
+
+// Writes bin/gh under root, which runs fakeGh under the running Bun.
+const installFakeGh = (root: string): string => {
+  const bin = join(root, 'bin');
+  const gh = join(bin, 'gh');
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(
+    gh,
+    [
+      `#!${process.execPath}`,
+      `import { fakeGh } from ${JSON.stringify(join(import.meta.dir, 'land-fake-gh-test-support.ts'))};`,
+      // Like gh waiting on a helper that ignores SIGTERM, so a timeout has to
+      // kill it.
+      "process.on('SIGTERM', () => {});",
+      'const result = fakeGh(process.argv.slice(2), process.env);',
+      'process.stdout.write(result.stdout);',
+      'process.stderr.write(result.stderr);',
+      'process.exitCode = result.status;',
+      '',
+    ].join('\n'),
+  );
+  chmodSync(gh, EXECUTABLE);
+  return bin;
+};
 
 // Git configuration outside the fixture, such as signing, and a GIT_DIR from
 // a hook that runs the suite would leak into its repositories.

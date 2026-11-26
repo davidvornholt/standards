@@ -1,6 +1,7 @@
 // `standards land`: merge a pull request once the checks on its current head
-// pass, squash-merging exactly that head, then delete its local branch. The
-// prs skill describes the behavior.
+// pass, squash-merging exactly that head, then delete its local branch. It
+// first needs a review-fix report on the head or a reason to skip one. The prs
+// skill describes the behavior.
 
 import { type Checkout, deleteBranch, updateBase } from './land-cleanup';
 import {
@@ -16,6 +17,7 @@ import {
   viewPr,
 } from './land-context';
 import { finishMerge } from './land-finish';
+import { postNote, reviewNote } from './land-review';
 import { waitForChecks } from './land-wait';
 import { ciDetector } from './land-workflows';
 
@@ -26,10 +28,16 @@ const openCheckout = (context: LandContext): Checkout => ({
   current: currentBranch(context),
 });
 
+export type LandOptions = {
+  readonly noWait: boolean;
+  // Why the pull request needs no review-fix, or null without --no-review.
+  readonly noReview: string | null;
+};
+
 export const land = async (
   context: LandContext,
   selector: string | null,
-  noWait: boolean,
+  { noWait, noReview }: LandOptions,
 ): Promise<void> => {
   const checkout = openCheckout(context);
   if (selector === null && checkout.current === null) {
@@ -59,6 +67,13 @@ export const land = async (
   if (pr.state !== 'OPEN') {
     throw new LandError(`PR #${pr.number} is ${pr.state}, not merged.`);
   }
+  const review = {
+    prNumber: pr.number,
+    repo,
+    head: pr.headRefOid,
+    noReview,
+  };
+  const note = reviewNote(context, review);
   const waiting = { ...context, deadline: Date.now() + context.waitMs };
   const head = await waitForChecks(waiting, {
     prNumber: pr.number,
@@ -66,6 +81,9 @@ export const land = async (
     noWait,
     hasCi: ciDetector(waiting, repo, pr),
   });
+  if (note !== null) {
+    postNote(context, review, note);
+  }
   // gh reports progress itself, so its output stays on the terminal.
   const accepted = runVisibly(context, 'gh', [
     'pr',
