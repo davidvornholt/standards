@@ -270,11 +270,12 @@ const timeoutError = (
 ): LandError => {
   const within = `within ${durationText(context.waitMs)}`;
   if (last !== null && waitingFor(last) === 'checks') {
-    // --no-wait refuses a blocked pull request.
+    // --no-wait refuses a blocked pull request. The command keeps its other
+    // options, such as --no-review and its reason.
     const advice =
       last.status === 'BLOCKED'
         ? ''
-        : ` If none of the repository's workflows reports on this pull request, run \`standards land ${prNumber} --no-wait\`.`;
+        : " If none of the repository's workflows reports on this pull request, run the same `standards land` command again with --no-wait.";
     return new LandError(
       `No checks appeared on PR #${prNumber} ${within}.${advice}`,
     );
