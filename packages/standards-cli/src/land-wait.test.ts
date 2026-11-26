@@ -150,6 +150,21 @@ describe('standards land on a blocked pull request without checks', () => {
 
 describe("standards land's limit on the wait for checks", () => {
   it(
+    'suggests --no-wait on top of the options land got',
+    () => {
+      fixture.env.LAND_WAIT_SECONDS = String(WAIT_SECONDS);
+      Object.assign(fixture.pr, { statusCheckRollup: [], comments: [] });
+      const result = land(fixture, ['123', '--no-review', 'typo']);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "If none of the repository's workflows reports on this pull request, run the same `standards land` command again with --no-wait.",
+      );
+      expect(result.stderr).not.toContain('standards land 123 --no-wait');
+    },
+    SLOW_TEST_MS,
+  );
+
+  it(
     'counts the time GitHub takes to answer',
     () => {
       fixture.env.LAND_WAIT_SECONDS = String(WAIT_SECONDS);
