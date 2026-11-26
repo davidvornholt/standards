@@ -80,7 +80,6 @@ export const runLandCommand = async (
     return true;
   }
   const { operands, noWait, noReview } = parseArgs(argv);
-  // A reason that starts with a dash is another option.
   if (noReview === '' || noReview?.startsWith('-') === true) {
     edge.err(
       `standards land: ${NO_REVIEW} needs a reason, such as ${NO_REVIEW} "only fixes a typo". See \`standards land --help\`.`,
