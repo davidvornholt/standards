@@ -96,6 +96,14 @@ export const gitOutput = (
 export const reviewReport = (head: string): string =>
   `| Review | Findings |\n| --- | --- |\n| 1 | none |\n\nReviewed through ${head}.`;
 
+// Makes NEW_HEAD the merge commit that land's update of the branch puts on
+// the pull request's head, so the head's review-fix report still covers it.
+export const mergesBase = (fixture: Land): void => {
+  fixture.github.parents = {
+    [NEW_HEAD]: [String(fixture.pr.headRefOid), BASE_TIP],
+  };
+};
+
 const initialPr = (head: string): FakePr => ({
   number: 123,
   url: 'https://github.com/test/repo/pull/123',
@@ -131,6 +139,7 @@ const initialGithub = (): FakeGithub => ({
   rulesetChecks: [],
   protectionChecks: [],
   workflowRuns: [[]],
+  parents: {},
 });
 
 // Writes bin/gh under root, which runs fakeGh under the running Bun.

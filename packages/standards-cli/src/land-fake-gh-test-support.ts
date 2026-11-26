@@ -58,6 +58,9 @@ export type FakeGithub = {
   // Each lookup of the workflow runs on the pull request's head applies the
   // next entry; the last one stays.
   workflowRuns: Array<Array<FakeRun>>;
+  // The parents of the commits listed here, first parent first. Other commits
+  // have one parent.
+  parents: Record<string, Array<string>>;
 };
 
 export type FakeRun = {
@@ -310,6 +313,12 @@ const workflowRuns = ({ github, saveGithub }: Call): FakeGhResult => {
   return ok(runs.map((run) => `${JSON.stringify(run)}\n`).join(''));
 };
 
+// land asks gh's --jq for one JSON array of the commit's parents.
+const commitParents = ({ args, github }: Call): FakeGhResult => {
+  const sha = (args[1] ?? '').split('/').at(-1) ?? '';
+  return json(github.parents[sha] ?? ['0'.repeat(SHA_LENGTH)]);
+};
+
 const REST_ROUTES: ReadonlyArray<
   readonly [RegExp, (call: Call) => FakeGhResult]
 > = [
@@ -319,6 +328,7 @@ const REST_ROUTES: ReadonlyArray<
   [/^repos\/[^/]+\/[^/]+\/pulls\/\d+\/files/u, prFiles],
   [/^repos\/[^/]+\/[^/]+\/issues\/\d+\/comments/u, prComments],
   [/^repos\/[^/]+\/[^/]+\/actions\/runs\?/u, workflowRuns],
+  [/^repos\/[^/]+\/[^/]+\/commits\/[0-9a-f]+$/u, commitParents],
 ];
 
 const repoView = ({ env }: Call): FakeGhResult =>

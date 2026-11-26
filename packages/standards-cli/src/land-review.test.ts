@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import process from 'node:process';
 import { cleanupTmpDirs } from './cli-test-support';
 import {
+  BASE_TIP,
   branchExists,
   calls,
   createLand,
@@ -122,5 +123,68 @@ describe('standards land and review-fix reports', () => {
     expect(comments()).toEqual([]);
     expect(mergeCalls(fixture)).toEqual([]);
     expect(branchExists(fixture)).toBe(false);
+  });
+});
+
+describe('standards land when the head changes while it waits', () => {
+  const pushedHead = (): void => {
+    fixture.pr.polls = [{ headRefOid: NEW_HEAD }];
+  };
+
+  // land's update of a branch that lacks its base moves the head to NEW_HEAD.
+  const updatedHead = (parents: Array<string> | null): void => {
+    fixture.github.behindBy = [1, 0];
+    fixture.pr.polls = [{}, { headRefOid: NEW_HEAD }];
+    if (parents !== null) {
+      fixture.github.parents = { [NEW_HEAD]: parents };
+    }
+  };
+
+  it('refuses a pushed head that no report covers', () => {
+    pushedHead();
+    const result = land(fixture, ['123']);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toBe(refusal(NEW_HEAD));
+    expect(comments()).toEqual([]);
+    expect(mergeCalls(fixture)).toEqual([]);
+  });
+
+  it('lands a pushed head that a report covers', () => {
+    pushedHead();
+    fixture.pr.comments.push(reviewReport(NEW_HEAD));
+    const result = land(fixture, ['123']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(comments()).toEqual([]);
+    expect(mergeCalls(fixture)).toEqual([mergeCall(fixture, NEW_HEAD)]);
+  });
+
+  it('posts the reason given with --no-review for a pushed head, then lands', () => {
+    pushedHead();
+    const result = land(fixture, ['123', '--no-review', 'typo']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(comments().map((call) => call.at(-1))).toEqual([
+      'Landing without review-fix: typo',
+    ]);
+    expect(mergeCalls(fixture)).toEqual([mergeCall(fixture, NEW_HEAD)]);
+  });
+
+  it('lands the merge commit of its own update on the reviewed head', () => {
+    updatedHead([String(fixture.pr.headRefOid), BASE_TIP]);
+    const result = land(fixture, ['123']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(calls(fixture, 'pr', 'update-branch')).toHaveLength(1);
+    expect(comments()).toEqual([]);
+    expect(mergeCalls(fixture)).toEqual([mergeCall(fixture, NEW_HEAD)]);
+  });
+
+  it.each([
+    ['a commit on top of the reviewed head', null],
+    ['a merge commit on another commit', [BASE_TIP, BASE_TIP]],
+  ])('refuses %s after its own update', (_case, parents) => {
+    updatedHead(parents);
+    const result = land(fixture, ['123']);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toBe(refusal(NEW_HEAD));
+    expect(mergeCalls(fixture)).toEqual([]);
   });
 });

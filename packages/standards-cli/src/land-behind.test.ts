@@ -9,6 +9,7 @@ import {
   land,
   mergeCall,
   mergeCalls,
+  mergesBase,
   NEW_HEAD,
   now,
   OLD_UPDATE,
@@ -31,6 +32,7 @@ const openPr = (fields: Record<string, unknown> = {}): void => {
 describe('standards land on a clean pull request behind its base branch', () => {
   it('updates a clean pull request that lacks its base branch, then waits for the new head', () => {
     fixture.github.behindBy = [2, 0];
+    mergesBase(fixture);
     openPr({
       polls: [
         {},
@@ -66,6 +68,7 @@ describe('standards land on a clean pull request behind its base branch', () => 
     // --no-wait skips waiting for checks, as it does after an update of a
     // branch that GitHub reports as behind. It doesn't skip the update.
     fixture.github.behindBy = [1, 0];
+    mergesBase(fixture);
     openPr({
       polls: [
         {},

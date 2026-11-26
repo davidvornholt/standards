@@ -17,7 +17,7 @@ import {
   viewPr,
 } from './land-context';
 import { finishMerge } from './land-finish';
-import { postNote, reviewNote } from './land-review';
+import { postNote, reviewNote, settledNote } from './land-review';
 import { waitForChecks } from './land-wait';
 import { ciDetector } from './land-workflows';
 
@@ -75,14 +75,16 @@ export const land = async (
   };
   const note = reviewNote(context, review);
   const waiting = { ...context, deadline: Date.now() + context.waitMs };
-  const head = await waitForChecks(waiting, {
+  const settled = await waitForChecks(waiting, {
     prNumber: pr.number,
     repo,
     noWait,
     hasCi: ciDetector(waiting, repo, pr),
   });
-  if (note !== null) {
-    postNote(context, review, note);
+  // Someone may have pushed while land waited.
+  const finalNote = settledNote(context, review, note, settled);
+  if (finalNote !== null) {
+    postNote(context, review, finalNote);
   }
   // gh reports progress itself, so its output stays on the terminal.
   const accepted = runVisibly(context, 'gh', [
@@ -93,7 +95,7 @@ export const land = async (
     repo.url,
     '--squash',
     '--match-head-commit',
-    head,
+    settled.head,
   ]);
   await finishMerge(context, { prNumber: pr.number, repo, accepted }, checkout);
 };
