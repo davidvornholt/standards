@@ -43,6 +43,6 @@ Add `### Check it yourself` only when a reviewer can confirm the behavior intera
 
 ## Landing
 
-Before landing a pull request of any size, run the `review-fix` skill if you judge that a reviewer could find a bug in it that someone would otherwise run into. Otherwise, give `land` the reason it needs none with `--no-review "<reason>"`, which it posts on the pull request. A standards sync passes `--no-review "standards sync"`, because a consumer can't change synced files.
+Before landing a pull request of any size, run the `review-fix` skill if you judge that a reviewer could find a bug in it that someone would otherwise run into. Otherwise, give `land` the reason it needs none with `--no-review "<reason>"`, which it posts on the pull request. A pull request holding only a standards sync and clean merges from its base passes `--no-review "standards sync"`, because a consumer can't change synced files.
 
 Land with `bun standards land <pr>`, or `bash .agents/skills/standards-sync/scripts/standards.sh land <pr>` in a repository without a Bun workspace, even when your harness offers its own merge tool, such as T3 Code's `pull_request_merge`. Never use `gh pr merge` or turn on auto-merge. GitHub can't require checks in private repositories on its free plan, so `land`'s wait for them may be the only gate.
