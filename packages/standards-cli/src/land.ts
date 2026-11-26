@@ -71,6 +71,7 @@ export const land = async (
     prNumber: pr.number,
     repo,
     head: pr.headRefOid,
+    base: pr.baseRefName,
     noReview,
   };
   const note = reviewNote(context, review);

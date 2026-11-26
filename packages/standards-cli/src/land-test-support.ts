@@ -140,6 +140,7 @@ const initialGithub = (): FakeGithub => ({
   protectionChecks: [],
   workflowRuns: [[]],
   parents: {},
+  onBase: [BASE_TIP],
 });
 
 // Writes bin/gh under root, which runs fakeGh under the running Bun.

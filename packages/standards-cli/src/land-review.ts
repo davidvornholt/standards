@@ -26,6 +26,7 @@ export type ReviewRequest = {
   readonly prNumber: number;
   readonly repo: Repository;
   readonly head: string;
+  readonly base: string;
   // Why the pull request needs no review-fix, or null without --no-review.
   readonly noReview: string | null;
 };
@@ -69,9 +70,32 @@ export const reviewNote = (
   );
 };
 
+// Whether the base branch's history contains commit. A failed lookup counts
+// as no.
+const onBase = (
+  context: LandContext,
+  { repo, base }: ReviewRequest,
+  commit: string,
+): boolean => {
+  const result = run(
+    context,
+    'gh',
+    [
+      'api',
+      `repos/${repo.nameWithOwner}/compare/${commit}...${base}`,
+      '--jq',
+      '.status',
+    ],
+    false,
+  );
+  const status = result.stdout.trim();
+  return result.status === 0 && (status === 'ahead' || status === 'identical');
+};
+
 // Whether head is the reviewed head plus at most updates merge commits on top
 // of it, such as land's own updates of the branch make. GitHub's merge commit
-// has the old head as its first parent.
+// has the old head as its first parent and a commit of the base as its
+// second, so a merge of other work doesn't count.
 const onlyUpdates = (
   context: LandContext,
   request: ReviewRequest,
@@ -90,10 +114,12 @@ const onlyUpdates = (
     '--jq',
     '[.parents[].sha]',
   );
-  const [first] = parents;
+  const [first, second] = parents;
   return (
     parents.length === MERGE_PARENTS &&
     first !== undefined &&
+    second !== undefined &&
+    onBase(context, request, second) &&
     onlyUpdates(context, request, { head: first, updates: updates - 1 })
   );
 };

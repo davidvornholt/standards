@@ -16,6 +16,10 @@ import {
   reviewReport,
 } from './land-test-support';
 
+const SHA_LENGTH = 40;
+// A commit outside the base branch's history.
+const FOREIGN_TIP = 'c'.repeat(SHA_LENGTH);
+
 // Longer than the output spawnSync buffers by default.
 const LONG_COMMENT = 2_000_000;
 
@@ -216,6 +220,15 @@ describe('standards land when the head changes while it waits', () => {
     expect(calls(fixture, 'pr', 'update-branch')).toHaveLength(1);
     expect(comments()).toEqual([]);
     expect(mergeCalls(fixture)).toEqual([mergeCall(fixture, NEW_HEAD)]);
+  });
+
+  it('refuses a merge on the reviewed head of a commit the base lacks', () => {
+    // Like a push that replaces land's own merge commit with another one.
+    updatedHead([String(fixture.pr.headRefOid), FOREIGN_TIP]);
+    const result = land(fixture, ['123']);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toBe(refusal(NEW_HEAD));
+    expect(mergeCalls(fixture)).toEqual([]);
   });
 
   it.each([

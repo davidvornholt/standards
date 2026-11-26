@@ -12,6 +12,8 @@ const UNKNOWN_CALL = 99;
 const WORKFLOWS_DIR = '.github/workflows/';
 const MILLISECONDS = /\.\d+Z$/u;
 const INT32_BYTES = 4;
+// How land asks whether the base branch, trunk, contains a commit.
+const ON_BASE = /\/compare\/(?<commit>[0-9a-f]+)\.\.\.trunk$/u;
 
 type FakeFile = {
   filename: string;
@@ -61,6 +63,8 @@ export type FakeGithub = {
   // The parents of the commits listed here, first parent first. Other commits
   // have one parent.
   parents: Record<string, Array<string>>;
+  // Commits in the base branch's history.
+  onBase: Array<string>;
 };
 
 export type FakeRun = {
@@ -245,6 +249,10 @@ const compare = ({ args, env, github, saveGithub }: Call): FakeGhResult => {
     saveGithub();
     return ok(`${behind}\n`);
   }
+  const commit = ON_BASE.exec(args[1] ?? '')?.groups?.commit;
+  if (commit !== undefined) {
+    return ok(`${github.onBase.includes(commit) ? 'ahead' : 'diverged'}\n`);
+  }
   return github.compare === null ? notFound() : ok(`${github.compare}\n`);
 };
 
@@ -262,14 +270,12 @@ const prFiles = ({ pr }: Call): FakeGhResult =>
       .join('\n')}\n`,
   );
 
-// land asks gh's --jq for the comments' lines that contain this text.
-const REVIEW_TEXT = 'Reviewed through ';
-
+// land asks gh's --jq for the comments' lines with "Reviewed through ".
 const prComments = ({ pr }: Call): FakeGhResult =>
   ok(
     pr.comments
       .flatMap((body) => body.split('\n'))
-      .filter((line) => line.includes(REVIEW_TEXT))
+      .filter((line) => line.includes('Reviewed through '))
       .map((line) => `${line}\n`)
       .join(''),
   );
@@ -323,10 +329,8 @@ const workflowRuns = ({ github, saveGithub }: Call): FakeGhResult => {
 };
 
 // land asks gh's --jq for one JSON array of the commit's parents.
-const commitParents = ({ args, github }: Call): FakeGhResult => {
-  const sha = (args[1] ?? '').split('/').at(-1) ?? '';
-  return json(github.parents[sha] ?? ['0'.repeat(SHA_LENGTH)]);
-};
+const commitParents = ({ args, github }: Call): FakeGhResult =>
+  json(github.parents[args[1]?.slice(-SHA_LENGTH) ?? ''] ?? [MERGE_COMMIT]);
 
 const REST_ROUTES: ReadonlyArray<
   readonly [RegExp, (call: Call) => FakeGhResult]
@@ -337,7 +341,7 @@ const REST_ROUTES: ReadonlyArray<
   [/^repos\/[^/]+\/[^/]+\/pulls\/\d+\/files/u, prFiles],
   [/^repos\/[^/]+\/[^/]+\/issues\/\d+\/comments/u, prComments],
   [/^repos\/[^/]+\/[^/]+\/actions\/runs\?/u, workflowRuns],
-  [/^repos\/[^/]+\/[^/]+\/commits\/[0-9a-f]+$/u, commitParents],
+  [/^repos\/[^/]+\/[^/]+\/commits\/[0-9a-f]{40}$/u, commitParents],
 ];
 
 const repoView = ({ env }: Call): FakeGhResult =>
