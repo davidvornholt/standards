@@ -15,6 +15,9 @@ import {
   reviewReport,
 } from './land-test-support';
 
+// Longer than the output spawnSync buffers by default.
+const LONG_COMMENT = 2_000_000;
+
 let fixture: Land;
 
 beforeEach(() => {
@@ -50,9 +53,21 @@ describe('standards land and review-fix reports', () => {
         'repos/test/repo/issues/123/comments?per_page=100',
         '--paginate',
         '--jq',
-        '.[].body',
+        '.[].body | split("\\n")[] | select(contains("Reviewed through "))',
       ],
     ]);
+    expect(comments()).toEqual([]);
+    expect(mergeCalls(fixture)).toEqual([mergeCall(fixture)]);
+  });
+
+  it('finds a report among comments longer than a command may print', () => {
+    fixture.pr.comments = [
+      'x'.repeat(LONG_COMMENT),
+      `Notes\r\n${reviewReport(String(fixture.pr.headRefOid))}\r\n`,
+      `See Reviewed through ${NEW_HEAD}.`,
+    ];
+    const result = land(fixture, ['123']);
+    expect(result.status, result.stderr).toBe(0);
     expect(comments()).toEqual([]);
     expect(mergeCalls(fixture)).toEqual([mergeCall(fixture)]);
   });

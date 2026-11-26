@@ -15,6 +15,10 @@ import type { SettledHead } from './land-wait';
 
 // The last line of a review-fix report, which names the head it covers.
 const REVIEW_LINE = /^Reviewed through (?<sha>[0-9a-f]{40})\.$/u;
+// Prints the comments' lines that may be such a line, because all of their
+// text can overflow the output that land buffers.
+const REVIEW_LINES_JQ =
+  '.[].body | split("\\n")[] | select(contains("Reviewed through "))';
 const COMMENTS_PER_PAGE = 100;
 const MERGE_PARENTS = 2;
 
@@ -36,7 +40,7 @@ const reviewedHeads = (
     `repos/${repo.nameWithOwner}/issues/${prNumber}/comments?per_page=${COMMENTS_PER_PAGE}`,
     '--paginate',
     '--jq',
-    '.[].body',
+    REVIEW_LINES_JQ,
   ]);
   return new Set(
     stdout

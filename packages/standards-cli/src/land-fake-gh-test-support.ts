@@ -128,7 +128,8 @@ const viewPr = ({ args, pr, savePr }: Call): FakeGhResult => {
       );
     }
   }
-  return json(pr);
+  // No field that land views holds the comments.
+  return json({ ...pr, comments: undefined });
 };
 
 const markReady = ({ pr, github, savePr, saveGithub }: Call): FakeGhResult => {
@@ -261,9 +262,17 @@ const prFiles = ({ pr }: Call): FakeGhResult =>
       .join('\n')}\n`,
   );
 
-// land asks gh's --jq for each comment's body.
+// land asks gh's --jq for the comments' lines that contain this text.
+const REVIEW_TEXT = 'Reviewed through ';
+
 const prComments = ({ pr }: Call): FakeGhResult =>
-  ok(pr.comments.map((body) => `${body}\n`).join(''));
+  ok(
+    pr.comments
+      .flatMap((body) => body.split('\n'))
+      .filter((line) => line.includes(REVIEW_TEXT))
+      .map((line) => `${line}\n`)
+      .join(''),
+  );
 
 const addComment = ({ args, pr, savePr }: Call): FakeGhResult => {
   pr.comments.push(args[args.indexOf('--body') + 1] ?? '');
