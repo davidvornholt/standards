@@ -7,6 +7,7 @@ import {
   ghJson,
   type LandContext,
   LandError,
+  ownerAndName,
   type Repository,
   run,
   shortSha,
@@ -15,10 +16,11 @@ import type { SettledHead } from './land-wait';
 
 // The last line of a review-fix report, which names the head it covers.
 const REVIEW_LINE = /^Reviewed through (?<sha>[0-9a-f]{40})\.$/u;
-// Prints the comments' lines that may be such a line, because all of their
-// text can overflow the output that land buffers.
+// Prints each comment line that may be such a line, with the comment's
+// author, because all of the comments' text can overflow the output that land
+// buffers.
 const REVIEW_LINES_JQ =
-  '.[].body | split("\\n")[] | select(contains("Reviewed through "))';
+  '.[] | .user.login as $author | .body | split("\\n")[] | select(contains("Reviewed through ")) | {author: $author, line: .}';
 const COMMENTS_PER_PAGE = 100;
 const MERGE_PARENTS = 2;
 
@@ -31,7 +33,18 @@ export type ReviewRequest = {
   readonly noReview: string | null;
 };
 
-// The heads that review-fix reports on the pull request cover.
+type ReviewLine = { readonly author: string; readonly line: string };
+
+const isReviewLine = (value: unknown): value is ReviewLine =>
+  typeof value === 'object' &&
+  value !== null &&
+  typeof Reflect.get(value, 'author') === 'string' &&
+  typeof Reflect.get(value, 'line') === 'string';
+
+// The heads that review-fix reports on the pull request cover. Only a report
+// by the repository's owner or by the account running land counts, because
+// anyone can comment on a public repository's pull requests. GitHub logins
+// ignore case.
 const reviewedHeads = (
   context: LandContext,
   { prNumber, repo }: ReviewRequest,
@@ -43,11 +56,28 @@ const reviewedHeads = (
     '--jq',
     REVIEW_LINES_JQ,
   ]);
+  const reports = stdout
+    .split('\n')
+    .filter((line) => line.trim() !== '')
+    .map((line): unknown => JSON.parse(line))
+    .filter(isReviewLine)
+    .flatMap(({ author, line }) => {
+      const sha = REVIEW_LINE.exec(line.trim())?.groups?.sha;
+      return sha === undefined ? [] : [{ author: author.toLowerCase(), sha }];
+    });
+  const owner = ownerAndName(repo).owner.toLowerCase();
+  // Looked up only when someone else posted a report, which saves a call on
+  // most pull requests.
+  const trusted = reports.some(({ author }) => author !== owner)
+    ? new Set([
+        owner,
+        run(context, 'gh', ['api', 'user', '--jq', '.login'])
+          .stdout.trim()
+          .toLowerCase(),
+      ])
+    : new Set([owner]);
   return new Set(
-    stdout
-      .split('\n')
-      .map((line) => REVIEW_LINE.exec(line.trim())?.groups?.sha)
-      .filter((sha) => sha !== undefined),
+    reports.filter(({ author }) => trusted.has(author)).map(({ sha }) => sha),
   );
 };
 

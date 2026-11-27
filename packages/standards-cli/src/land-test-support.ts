@@ -141,6 +141,7 @@ const initialGithub = (): FakeGithub => ({
   workflowRuns: [[]],
   parents: {},
   onBase: [BASE_TIP],
+  viewer: 'runner',
 });
 
 // Writes bin/gh under root, which runs fakeGh under the running Bun.

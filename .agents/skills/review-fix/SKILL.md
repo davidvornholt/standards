@@ -47,6 +47,6 @@ Post one comment on the pull request, leaving out any part with nothing in it:
 - One table row per finding: its file and line, what goes wrong, every reviewer that reported it, its label, and the commit that fixed it or why it wasn't fixed. Naming the reviewers shows which ones find what the others miss.
 - Each label you changed, and why.
 - Any risk that remains. If it would show only after deployment, name the check that covers it or file an issue for one.
-- Last, the line `Reviewed through <full SHA of the head the review covers>.`, which `standards land` looks for.
+- Last, the line `Reviewed through <full SHA of the head the review covers>.`, which `standards land` looks for. It counts the line only in a comment by the repository's owner or the account running `land`.
 
 Run `gh pr ready` unless an `ask` is open. If the user asked you to land the pull request when you're confident, and you are, land it as the [prs skill](../prs/SKILL.md) describes. Otherwise report CI as pending, and stop.
