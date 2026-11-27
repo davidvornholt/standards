@@ -1,6 +1,7 @@
 // `standards land`: merge a pull request once the checks on its current head
-// pass, squash-merging exactly that head, then delete its local branch. The
-// prs skill describes the behavior.
+// pass, squash-merging exactly that head, then delete its local branch. It
+// first needs a review-fix report on the head or a reason to skip one. The prs
+// skill describes the behavior.
 
 import { type Checkout, deleteBranch, updateBase } from './land-cleanup';
 import {
@@ -16,6 +17,7 @@ import {
   viewPr,
 } from './land-context';
 import { finishMerge } from './land-finish';
+import { postNote, reviewNote, settledNote } from './land-review';
 import { waitForChecks } from './land-wait';
 import { ciDetector } from './land-workflows';
 
@@ -26,10 +28,16 @@ const openCheckout = (context: LandContext): Checkout => ({
   current: currentBranch(context),
 });
 
+export type LandOptions = {
+  readonly noWait: boolean;
+  // Why the pull request needs no review-fix, or null without --no-review.
+  readonly noReview: string | null;
+};
+
 export const land = async (
   context: LandContext,
   selector: string | null,
-  noWait: boolean,
+  { noWait, noReview }: LandOptions,
 ): Promise<void> => {
   const checkout = openCheckout(context);
   if (selector === null && checkout.current === null) {
@@ -59,13 +67,26 @@ export const land = async (
   if (pr.state !== 'OPEN') {
     throw new LandError(`PR #${pr.number} is ${pr.state}, not merged.`);
   }
+  const review = {
+    prNumber: pr.number,
+    repo,
+    head: pr.headRefOid,
+    base: pr.baseRefName,
+    noReview,
+  };
+  const note = reviewNote(context, review);
   const waiting = { ...context, deadline: Date.now() + context.waitMs };
-  const head = await waitForChecks(waiting, {
+  const settled = await waitForChecks(waiting, {
     prNumber: pr.number,
     repo,
     noWait,
     hasCi: ciDetector(waiting, repo, pr),
   });
+  // Someone may have pushed while land waited.
+  const finalNote = settledNote(context, review, note, settled);
+  if (finalNote !== null) {
+    postNote(context, review, finalNote);
+  }
   // gh reports progress itself, so its output stays on the terminal.
   const accepted = runVisibly(context, 'gh', [
     'pr',
@@ -75,7 +96,7 @@ export const land = async (
     repo.url,
     '--squash',
     '--match-head-commit',
-    head,
+    settled.head,
   ]);
   await finishMerge(context, { prNumber: pr.number, repo, accepted }, checkout);
 };
