@@ -101,6 +101,29 @@ describe('standards land and review-fix reports', () => {
     expect(mergeCalls(fixture)).toEqual([mergeCall(fixture)]);
   });
 
+  it("accepts the owner's report without looking up the account", () => {
+    fixture.github.viewer = null;
+    fixture.pr.comments = [
+      { author: 'stranger', body: reviewReport(NEW_HEAD) },
+      reviewReport(String(fixture.pr.headRefOid)),
+    ];
+    const result = land(fixture, ['123']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(calls(fixture, 'api', 'user')).toEqual([]);
+    expect(mergeCalls(fixture)).toEqual([mergeCall(fixture)]);
+  });
+
+  it("uses --no-review when the account behind another author's report can't be looked up", () => {
+    fixture.github.viewer = null;
+    fixture.pr.comments = [
+      { author: 'stranger', body: reviewReport(String(fixture.pr.headRefOid)) },
+    ];
+    const result = land(fixture, ['123', '--no-review', 'typo']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(comments().at(-1)?.at(-1)).toBe('Landing without review-fix: typo');
+    expect(mergeCalls(fixture)).toEqual([mergeCall(fixture)]);
+  });
+
   it('refuses when the only report covers an older head', () => {
     fixture.pr.comments = [reviewReport(NEW_HEAD)];
     const result = land(fixture, ['123']);

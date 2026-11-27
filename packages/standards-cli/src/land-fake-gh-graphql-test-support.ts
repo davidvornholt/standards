@@ -1,6 +1,3 @@
-// The GraphQL queries of the fake `gh` in land-fake-gh-test-support.ts, and
-// the result helpers both files use.
-
 import type { Call, FakeGhResult } from './land-fake-gh-test-support';
 
 const WORKFLOWS_DIR = '.github/workflows/';

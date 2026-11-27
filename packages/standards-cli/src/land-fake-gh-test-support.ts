@@ -71,8 +71,8 @@ export type FakeGithub = {
   parents: Record<string, Array<string>>;
   // Commits in the base branch's history.
   onBase: Array<string>;
-  // The login of the account gh is signed in to.
-  viewer: string;
+  // The login of the account gh is signed in to, or null to fail the lookup.
+  viewer: string | null;
 };
 
 export type FakeRun = {
@@ -291,7 +291,11 @@ const ROUTES: ReadonlyMap<string, (call: Call) => FakeGhResult> = new Map([
   ['pr merge', merge],
   ['pr comment', addComment],
   ['api graphql', graphql],
-  ['api user', ({ github }) => ok(`${github.viewer}\n`)],
+  [
+    'api user',
+    ({ github }) =>
+      github.viewer === null ? failure('HTTP 401\n') : ok(`${github.viewer}\n`),
+  ],
 ]);
 
 const route = (call: Call): FakeGhResult => {

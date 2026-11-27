@@ -41,13 +41,11 @@ const isReviewLine = (value: unknown): value is ReviewLine =>
   typeof Reflect.get(value, 'author') === 'string' &&
   typeof Reflect.get(value, 'line') === 'string';
 
-// The heads that review-fix reports on the pull request cover. Only a report
-// by the repository's owner or by the account running land counts, because
-// anyone can comment on a public repository's pull requests. GitHub logins
-// ignore case.
-const reviewedHeads = (
+// The authors of the review-fix reports that cover the request's head, in
+// lower case, as GitHub logins ignore case.
+const reportAuthors = (
   context: LandContext,
-  { prNumber, repo }: ReviewRequest,
+  { prNumber, repo, head }: ReviewRequest,
 ): ReadonlySet<string> => {
   const { stdout } = run(context, 'gh', [
     'api',
@@ -56,29 +54,32 @@ const reviewedHeads = (
     '--jq',
     REVIEW_LINES_JQ,
   ]);
-  const reports = stdout
-    .split('\n')
-    .filter((line) => line.trim() !== '')
-    .map((line): unknown => JSON.parse(line))
-    .filter(isReviewLine)
-    .flatMap(({ author, line }) => {
-      const sha = REVIEW_LINE.exec(line.trim())?.groups?.sha;
-      return sha === undefined ? [] : [{ author: author.toLowerCase(), sha }];
-    });
-  const owner = ownerAndName(repo).owner.toLowerCase();
-  // Looked up only when someone else posted a report, which saves a call on
-  // most pull requests.
-  const trusted = reports.some(({ author }) => author !== owner)
-    ? new Set([
-        owner,
-        run(context, 'gh', ['api', 'user', '--jq', '.login'])
-          .stdout.trim()
-          .toLowerCase(),
-      ])
-    : new Set([owner]);
   return new Set(
-    reports.filter(({ author }) => trusted.has(author)).map(({ sha }) => sha),
+    stdout
+      .split('\n')
+      .filter((line) => line.trim() !== '')
+      .map((line): unknown => JSON.parse(line))
+      .filter(isReviewLine)
+      .filter(({ line }) => REVIEW_LINE.exec(line.trim())?.groups?.sha === head)
+      .map(({ author }) => author.toLowerCase()),
   );
+};
+
+// Whether a review-fix report covers the request's head. Only a report by the
+// repository's owner or by the account running land counts, because anyone
+// can comment on a public repository's pull requests. The account is looked
+// up only for another author's report, and a failed lookup counts it as
+// someone else's.
+const isReviewed = (context: LandContext, request: ReviewRequest): boolean => {
+  const authors = reportAuthors(context, request);
+  if (authors.has(ownerAndName(request.repo).owner.toLowerCase())) {
+    return true;
+  }
+  if (authors.size === 0) {
+    return false;
+  }
+  const viewer = run(context, 'gh', ['api', 'user', '--jq', '.login'], false);
+  return viewer.status === 0 && authors.has(viewer.stdout.trim().toLowerCase());
 };
 
 // Returns the comment to post before merging, or null when a review-fix
@@ -87,7 +88,7 @@ export const reviewNote = (
   context: LandContext,
   request: ReviewRequest,
 ): string | null => {
-  if (reviewedHeads(context, request).has(request.head)) {
+  if (isReviewed(context, request)) {
     return null;
   }
   if (request.noReview !== null) {
