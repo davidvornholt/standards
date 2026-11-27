@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
+// biome-ignore lint/performance/noNamespaceImport: spyOn makes the example write fail the same way for every user, root included.
+import * as fs from 'node:fs';
 import {
-  chmodSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -85,8 +86,14 @@ ci:
     ).toBeNull();
     expect(
       addExamplePlaceholders('base: &base\n  old: documented\nci: *base\n', [
-        'ci.token',
+        'other.token',
       ]),
+    ).toBeNull();
+    expect(
+      addExamplePlaceholders(
+        'ci:\n  <<:\n    service:\n      old: documented\n',
+        ['ci.service.token'],
+      ),
     ).toBeNull();
   });
 });
@@ -158,7 +165,11 @@ describe('setSopsValues', () => {
 
   it('still reports the encrypted write as done when the example cannot be written', () => {
     const consumer = consumerWith(EXAMPLE);
-    chmodSync(join(consumer, 'secrets/ci.example.yaml'), 0o444);
+    spyOn(fs, 'writeFileSync').mockImplementation(() => {
+      throw Object.assign(new Error('EACCES: permission denied'), {
+        code: 'EACCES',
+      });
+    });
     sopsExits(0);
     const errors: Array<string> = [];
     spyOn(console, 'error').mockImplementation((...values) => {

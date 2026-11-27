@@ -6,7 +6,7 @@
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { isAlias, isMap, parseDocument, visit } from 'yaml';
+import { isAlias, isMap, isScalar, parseDocument, visit } from 'yaml';
 import { isContainedPath } from './contained-path';
 import { parseSopsKeyPath } from './creds-sops-structure';
 
@@ -38,10 +38,10 @@ const canAdd = (
   return !document.hasIn(path);
 };
 
-const hasAlias = (document: ReturnType<typeof parseDocument>): boolean => {
+const inheritsKeys = (document: ReturnType<typeof parseDocument>): boolean => {
   let found = false;
   visit(document, (_key, node) => {
-    if (isAlias(node)) {
+    if (isAlias(node) || (isScalar(node) && node.value === '<<')) {
       found = true;
       return visit.BREAK;
     }
@@ -57,7 +57,7 @@ export const addExamplePlaceholders = (
   dottedPaths: ReadonlyArray<string>,
 ): string | null => {
   const document = parseDocument(text);
-  if (document.errors.length > 0 || hasAlias(document)) {
+  if (document.errors.length > 0 || inheritsKeys(document)) {
     return null;
   }
   const missing = dottedPaths
