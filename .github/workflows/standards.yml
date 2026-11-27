@@ -748,7 +748,7 @@ jobs:
       # which would bill a runner minute in every repository without a CLI.
       - name: Install Nix for the package checks
         if: steps.payload.outputs.payload == 'bun' && hashFiles('nix/package.nix') != ''
-        uses: cachix/install-nix-action@v31
+        uses: cachix/install-nix-action@v32
 
       - name: Build the Nix packages and their source check
         if: steps.payload.outputs.payload == 'bun' && hashFiles('nix/package.nix') != ''
@@ -923,7 +923,7 @@ jobs:
       # feature lets the x86_64-linux runner build the app-release VM test.
       # Arm runners have no KVM, so they declare no extra features.
       - name: Install Nix
-        uses: cachix/install-nix-action@v31
+        uses: cachix/install-nix-action@v32
         with:
           extra_nix_config: ${{ matrix.system == 'x86_64-linux' && 'system-features = nixos-test benchmark big-parallel kvm' || '' }}
 
@@ -1075,7 +1075,9 @@ jobs:
       # closed until the check is re-run locally with admin auth. The retired
       # PAT was user-scoped and did see those actor lists over REST, so that
       # case is a deliberate, disclosed narrowing rather than a property of
-      # GitHub's API; no credential CI can safely hold recovers it.
+      # GitHub's API; no credential CI can safely hold recovers it. Actions
+      # event policies need repository Administration write even to read, so
+      # here the CLI prints a notice instead of verifying them.
       - name: Check GitHub settings
         env:
           SETTINGS_TOKEN: ${{ github.token }}

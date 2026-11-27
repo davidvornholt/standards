@@ -53,7 +53,7 @@ const consumer = (): string => {
 
 const RULESET_ID = 7;
 
-const restHidden = JSON.parse('{"private":false}') as unknown;
+const restHidden = JSON.parse('{"private":true}') as unknown;
 const liveRuleset = {
   id: RULESET_ID,
   name: 'Protect main',

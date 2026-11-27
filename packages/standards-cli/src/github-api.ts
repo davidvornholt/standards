@@ -53,6 +53,10 @@ export const resolveToken = (): string | null => {
   return quietExec('gh', ['auth', 'token']);
 };
 
+// GitHub sets this in every workflow run.
+export const runsInGithubActions = (): boolean =>
+  process.env.GITHUB_ACTIONS === 'true';
+
 export const resolveGithubRepo = (consumer: string): string | null => {
   const url = quietExec('git', ['-C', consumer, 'remote', 'get-url', 'origin']);
   const repo = url?.match(GITHUB_REMOTE_PATTERN)?.groups?.repo?.toLowerCase();

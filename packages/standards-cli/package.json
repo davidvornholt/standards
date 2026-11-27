@@ -98,6 +98,7 @@
     "src/dev-env-transaction-recovery.ts",
     "src/dev-env-transaction.ts",
     "src/dev-env.ts",
+    "src/github-actions-policy.ts",
     "src/github-api.ts",
     "src/github-apply.ts",
     "src/github-bypass-actors.ts",

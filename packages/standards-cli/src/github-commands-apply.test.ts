@@ -96,8 +96,8 @@ describe('runGithubApply', () => {
 
   it('preserves enforced repository and ruleset mutations', async () => {
     const calls = installApi([
-      { body: liveRepository(false, false) },
-      { body: liveRepository(false, true) },
+      { body: liveRepository(true, false) },
+      { body: liveRepository(true, true) },
       { body: [] },
       { status: HTTP_CREATED, body: { id: 7 } },
     ]);
@@ -142,8 +142,8 @@ describe('runGithubApply', () => {
 describe('runGithubApply update verification', () => {
   it('fails when GitHub returns HTTP 200 but silently keeps an old value', async () => {
     const calls = installApi([
-      { body: liveRepository(false, false) },
-      { body: liveRepository(false, false) },
+      { body: liveRepository(true, false) },
+      { body: liveRepository(true, false) },
     ]);
 
     expect(await runGithubApply(consumer({ optOut: false }))).toBe(false);
@@ -169,7 +169,7 @@ it.each([0, 1])(
       rules: [],
     };
     const calls = installApi([
-      { body: liveRepository(false, true) },
+      { body: liveRepository(true, true) },
       { body: [liveRulesetSummary()] },
       { body: ruleset },
       {
@@ -189,7 +189,7 @@ it.each([0, 1])(
 
 it('fails unreadable ruleset identity without rewriting it', async () => {
   const calls = installApi([
-    { body: liveRepository(false, true) },
+    { body: liveRepository(true, true) },
     { body: [liveRulesetSummary()] },
     {
       body: {

@@ -81,7 +81,7 @@ describe('runGithubCheck', () => {
     ];
     const calls = installApi([
       { body: labels },
-      { body: liveRepository(false, true) },
+      { body: liveRepository(true, true) },
       { body: [liveRulesetSummary()] },
       {
         body: {
