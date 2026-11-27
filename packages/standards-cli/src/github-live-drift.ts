@@ -16,6 +16,7 @@ import {
   request,
   resolveGithubRepo,
   resolveToken,
+  runsInGithubActions,
 } from './github-api';
 import { resolveHiddenBypassActors } from './github-bypass-actors';
 import {
@@ -172,9 +173,10 @@ const rulesetDrift = async (
   ];
 };
 
-// A token that can't read policies leaves them unverified with a notice
-// rather than failing: no workflow token can read them, so failing would fail
-// every public repository's CI.
+// No workflow token can read policies, so in GitHub Actions an unreadable
+// policy list leaves them unverified with a notice; failing would fail every
+// public repository's CI. Anywhere else, it fails closed like every other
+// setting the token can't see.
 const actionsPolicyDrift = async (
   token: string | null,
   repo: string,
@@ -184,9 +186,12 @@ const actionsPolicyDrift = async (
     return { problems: [], notices: [] };
   }
   const live = await fetchActionsPolicies(token, repo);
-  return live.kind === 'not-visible'
+  if (live.kind === 'visible') {
+    return { problems: diffActionsPolicies(live.policies), notices: [] };
+  }
+  return runsInGithubActions()
     ? { problems: [], notices: [POLICY_NOT_VISIBLE_NOTICE] }
-    : { problems: diffActionsPolicies(live.policies), notices: [] };
+    : { problems: [live.problem], notices: [] };
 };
 
 export type LiveDrift = {

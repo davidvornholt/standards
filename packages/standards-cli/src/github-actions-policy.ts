@@ -4,10 +4,6 @@
 // requests stop merging on their own. The policy isn't declared in
 // settings.json because every consumer needs the same one, for the synced
 // workflow path.
-//
-// Reading policies needs repository Administration write, which no workflow
-// token can hold, so a check whose token can't read them prints a notice and
-// leaves the verification to a local, admin-authenticated check.
 
 import { matchesGlob } from 'node:path';
 import {
@@ -23,7 +19,6 @@ import { isRecord } from './github-settings-parse';
 
 const HTTP_NOT_FOUND = 404;
 const PAGE_SIZE = 100;
-const API_ROOT = 'https://api.github.com';
 const ALL_WORKFLOWS = '~ALL';
 
 export const AUTO_MERGE_WORKFLOW_PATH =
@@ -49,13 +44,20 @@ export const AUTO_MERGE_POLICY = {
   ],
 } as const;
 
-export const POLICY_NOT_VISIBLE_NOTICE = `standards github: Actions event policies not verified, because this token can't read them; they need repository Administration write, which no workflow token holds. Run \`bun standards github --check\` locally with admin auth to verify that public repositories allow pull_request_target for ${AUTO_MERGE_WORKFLOW_PATH}`;
+const POLICY_READ_ADVICE = `reading them needs repository Administration write, so run \`github --check\` locally with admin auth to verify that ${AUTO_MERGE_WORKFLOW_PATH} may run on pull_request_target`;
+
+export const POLICY_NOT_VISIBLE_NOTICE = `standards github: Actions event policies not verified, because no workflow token can read them; ${POLICY_READ_ADVICE}`;
 
 type Policy = Readonly<Record<string, unknown>>;
 
 export type LivePolicies =
   | { readonly kind: 'visible'; readonly policies: ReadonlyArray<Policy> }
-  | { readonly kind: 'not-visible' };
+  | { readonly kind: 'not-visible'; readonly problem: string };
+
+const notVisible = (context: string, response: ApiResponse): LivePolicies => ({
+  kind: 'not-visible',
+  problem: `${apiError(context, response)}; ${POLICY_READ_ADVICE}`,
+});
 
 const stringList = (value: unknown): ReadonlyArray<string> =>
   Array.isArray(value)
@@ -139,40 +141,44 @@ export const diffActionsPolicies = (
 const isDenied = (response: ApiResponse): boolean =>
   [HTTP_UNAUTHORIZED, HTTP_FORBIDDEN, HTTP_NOT_FOUND].includes(response.status);
 
-// The list omits conditions and rules, so each policy is read through its own
-// link, which also reaches policies an organization or enterprise sets.
+// The list omits conditions and rules, so each policy is read again. The
+// repository path also serves policies an organization or enterprise sets,
+// whose own links would need administration of that organization.
 const readPolicy = async (
   token: string | null,
+  repo: string,
   summary: Policy,
-): Promise<Policy> => {
-  const links = isRecord(summary._links) ? summary._links : {};
-  const href =
-    isRecord(links.self) && typeof links.self.href === 'string'
-      ? links.self.href
-      : '';
-  if (!href.startsWith(`${API_ROOT}/`)) {
-    throw new Error(
-      `${policyLabel(summary)} has no API link to read its conditions and rules`,
-    );
+): Promise<Policy | LivePolicies> => {
+  const context = `reading ${policyLabel(summary)}`;
+  const response = await request(
+    token,
+    'GET',
+    `/repos/${repo}/actions/policies/${String(summary.id)}`,
+  );
+  if (isDenied(response)) {
+    return notVisible(context, response);
   }
-  const response = await request(token, 'GET', href.slice(API_ROOT.length));
   if (response.status !== HTTP_OK || !isRecord(response.body)) {
-    throw new Error(apiError(`reading ${policyLabel(summary)}`, response));
+    throw new Error(apiError(context, response));
   }
   return { ...summary, ...response.body };
 };
+
+const isLivePolicies = (value: Policy | LivePolicies): value is LivePolicies =>
+  value.kind === 'not-visible';
 
 export const fetchActionsPolicies = async (
   token: string | null,
   repo: string,
 ): Promise<LivePolicies> => {
+  const context = 'listing Actions policies';
   const response = await request(
     token,
     'GET',
     `/repos/${repo}/actions/policies?per_page=${PAGE_SIZE}`,
   );
   if (isDenied(response)) {
-    return { kind: 'not-visible' };
+    return notVisible(context, response);
   }
   const body = isRecord(response.body) ? response.body : null;
   if (
@@ -180,7 +186,7 @@ export const fetchActionsPolicies = async (
     body === null ||
     !Array.isArray(body.policies)
   ) {
-    throw new Error(apiError('listing Actions policies', response));
+    throw new Error(apiError(context, response));
   }
   const summaries = body.policies.filter(isRecord);
   if (
@@ -188,15 +194,19 @@ export const fetchActionsPolicies = async (
     body.total_count > summaries.length
   ) {
     throw new Error(
-      `listing Actions policies: more than ${PAGE_SIZE} policies; refusing to judge from a truncated list`,
+      `${context}: more than ${PAGE_SIZE} policies; refusing to judge from a truncated list`,
     );
   }
-  return {
-    kind: 'visible',
-    policies: await Promise.all(
-      summaries.map((summary) => readPolicy(token, summary)),
-    ),
-  };
+  const policies = await Promise.all(
+    summaries.map((summary) => readPolicy(token, repo, summary)),
+  );
+  const denied = policies.find(isLivePolicies);
+  return (
+    denied ?? {
+      kind: 'visible',
+      policies: policies.filter((policy) => !isLivePolicies(policy)),
+    }
+  );
 };
 
 export const isPublicRepository = (
@@ -212,9 +222,7 @@ export const applyActionsPolicy = async (
 ): Promise<ReadonlyArray<string>> => {
   const live = await fetchActionsPolicies(token, repo);
   if (live.kind === 'not-visible') {
-    throw new Error(
-      'cannot read Actions policies; apply needs a token with repository Administration write',
-    );
+    throw new Error(live.problem);
   }
   if (diffActionsPolicies(live.policies).length === 0) {
     return [];
@@ -224,36 +232,45 @@ export const applyActionsPolicy = async (
       policy.name === AUTO_MERGE_POLICY.name &&
       policy.source_type === 'Repository',
   );
-  const response =
+  // Judged before writing, so a conflict apply can't resolve leaves the
+  // repository's own policy untouched.
+  const conflicts = diffActionsPolicies([
+    ...live.policies.filter((policy) => policy !== own),
+    AUTO_MERGE_POLICY,
+  ]);
+  if (conflicts.length > 0) {
+    throw new Error(
+      `cannot converge Actions policy "${AUTO_MERGE_POLICY.name}": ${conflicts.join('; ')}`,
+    );
+  }
+  const [verb, done, expected, response] =
     own === undefined
-      ? await request(
-          token,
-          'POST',
-          `/repos/${repo}/actions/policies`,
-          AUTO_MERGE_POLICY,
-        )
-      : await request(
-          token,
-          'PUT',
-          `/repos/${repo}/actions/policies/${String(own.id)}`,
-          AUTO_MERGE_POLICY,
-        );
-  const [verb, done, expected] =
-    own === undefined
-      ? ['creating', 'created', HTTP_CREATED]
-      : ['updating', 'updated', HTTP_OK];
-  const action = `${done} Actions policy "${AUTO_MERGE_POLICY.name}"`;
+      ? ([
+          'creating',
+          'created',
+          HTTP_CREATED,
+          await request(
+            token,
+            'POST',
+            `/repos/${repo}/actions/policies`,
+            AUTO_MERGE_POLICY,
+          ),
+        ] as const)
+      : ([
+          'updating',
+          'updated',
+          HTTP_OK,
+          await request(
+            token,
+            'PUT',
+            `/repos/${repo}/actions/policies/${String(own.id)}`,
+            AUTO_MERGE_POLICY,
+          ),
+        ] as const);
   if (response.status !== expected) {
     throw new Error(
       apiError(`${verb} Actions policy "${AUTO_MERGE_POLICY.name}"`, response),
     );
   }
-  const remaining = diffActionsPolicies([
-    ...live.policies.filter((policy) => policy !== own),
-    AUTO_MERGE_POLICY,
-  ]);
-  if (remaining.length > 0) {
-    throw new Error(`${action}, but ${remaining.join('; ')}`);
-  }
-  return [action];
+  return [`${done} Actions policy "${AUTO_MERGE_POLICY.name}"`];
 };

@@ -23,6 +23,7 @@ import { restoreProcessEnv } from './process-env-test-support';
 const originalFetch = globalThis.fetch;
 const originalGhToken = process.env.GH_TOKEN;
 const originalGithubToken = process.env.GITHUB_TOKEN;
+const originalGithubActions = process.env.GITHUB_ACTIONS;
 const commandConsole = Reflect.get(globalThis, 'console') as Console;
 const temporaryPaths: Array<string> = [];
 let output = captureConsole(commandConsole);
@@ -32,6 +33,7 @@ beforeEach(() => {
   output = captureConsole(commandConsole);
   process.env.GH_TOKEN = 'test-token';
   delete process.env.GITHUB_TOKEN;
+  delete process.env.GITHUB_ACTIONS;
 });
 
 afterEach(() => {
@@ -40,6 +42,7 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
   restoreProcessEnv('GH_TOKEN', originalGhToken);
   restoreProcessEnv('GITHUB_TOKEN', originalGithubToken);
+  restoreProcessEnv('GITHUB_ACTIONS', originalGithubActions);
 });
 
 const consumer = (): string => {
@@ -92,7 +95,10 @@ const listed = (policies: ReadonlyArray<Readonly<Record<string, unknown>>>) => [
         ...summary,
         _links: {
           self: {
-            href: `https://api.github.com/repos/owner/repo/actions/policies/${String(summary.id)}`,
+            href:
+              summary.source_type === 'Repository'
+                ? `https://api.github.com/repos/owner/repo/actions/policies/${String(summary.id)}`
+                : `https://api.github.com/orgs/owner/actions/policies/${String(summary.id)}`,
           },
         },
       })),
@@ -163,7 +169,7 @@ describe('diffActionsPolicies', () => {
 });
 
 describe('github --check in a public repository', () => {
-  it('reads each policy through its link and passes on the standard one', async () => {
+  it('reads each policy and passes on the standard one', async () => {
     const calls = installApi([...convergedRepository, ...listed([policy()])]);
 
     expect(await runGithubCheck(consumer())).toBe(true);
@@ -185,14 +191,42 @@ describe('github --check in a public repository', () => {
     );
   });
 
-  it('passes with a notice when the token cannot read policies', async () => {
-    installApi([
-      ...convergedRepository,
-      {
-        status: HTTP_FORBIDDEN,
-        body: { message: 'Resource not accessible by integration' },
-      },
-    ]);
+  it('reads an inherited policy through the repository path', async () => {
+    const inherited = policy({
+      id: 9,
+      name: 'Org events',
+      source_type: 'Organization',
+      source: 'owner',
+    });
+    const calls = installApi([...convergedRepository, ...listed([inherited])]);
+
+    expect(await runGithubCheck(consumer())).toBe(true);
+    expect(calls.at(-1)?.path).toBe('/repos/owner/repo/actions/policies/9');
+  });
+
+  const denied = {
+    status: HTTP_FORBIDDEN,
+    body: { message: 'Resource not accessible by integration' },
+  };
+
+  it.each([
+    ['the list', [denied]],
+    ['a policy', [...listed([policy()]).slice(0, 1), denied]],
+  ])(
+    'fails closed outside GitHub Actions when the token cannot read %s',
+    async (_what, responses) => {
+      installApi([...convergedRepository, ...responses]);
+
+      expect(await runGithubCheck(consumer())).toBe(false);
+      expect(output.errors.join('\n')).toContain(
+        'HTTP 403 Resource not accessible by integration; reading them needs repository Administration write',
+      );
+    },
+  );
+
+  it('passes with a notice in GitHub Actions when the token cannot read policies', async () => {
+    process.env.GITHUB_ACTIONS = 'true';
+    installApi([...convergedRepository, denied]);
 
     expect(await runGithubCheck(consumer())).toBe(true);
     expect(output.logs).toEqual([
@@ -248,12 +282,41 @@ describe('github --apply in a public repository', () => {
     );
   });
 
+  it('leaves its own policy alone when an inherited policy conflicts', async () => {
+    const actorRule = {
+      type: 'restrict_actions_actors',
+      parameters: { allowed_actors: [{ id: 1, type: 'User' }] },
+    };
+    const calls = installApi([
+      ...convergedRepository,
+      ...listed([
+        policy({
+          rules: [...eventRule(['pull_request_target', 'push']), actorRule],
+        }),
+        policy({
+          id: 9,
+          name: 'Org events',
+          source_type: 'Organization',
+          source: 'owner',
+          conditions: workflowPaths(['~ALL']),
+          rules: eventRule(['push']),
+        }),
+      ]),
+    ]);
+
+    expect(await runGithubApply(consumer())).toBe(false);
+    expect(calls.every(({ method }) => method === 'GET')).toBe(true);
+    expect(output.errors.join('\n')).toContain(
+      'cannot converge Actions policy "Standards auto-merge events": Actions policy "Org events" from owner applies',
+    );
+  });
+
   it('fails when the token cannot read policies', async () => {
     installApi([...convergedRepository, { status: HTTP_FORBIDDEN, body: {} }]);
 
     expect(await runGithubApply(consumer())).toBe(false);
-    expect(output.errors).toEqual([
-      'standards github: cannot read Actions policies; apply needs a token with repository Administration write',
-    ]);
+    expect(output.errors.join('\n')).toContain(
+      'listing Actions policies: HTTP 403 unexpected response; reading them needs repository Administration write',
+    );
   });
 });
