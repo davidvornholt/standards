@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import {
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -68,7 +69,7 @@ ci:
     );
   });
 
-  it('changes nothing when every key exists, a scalar is in the way, or the YAML is invalid', () => {
+  it('changes nothing when every key exists, a scalar is in the way, the YAML is invalid, or it uses aliases', () => {
     expect(
       addExamplePlaceholders(EXAMPLE, ['ci.broker_app.app_id']),
     ).toBeNull();
@@ -76,6 +77,17 @@ ci:
       addExamplePlaceholders(EXAMPLE, ['ci.broker_app.app_id.nested']),
     ).toBeNull();
     expect(addExamplePlaceholders('ci: [unclosed', ['ci.token'])).toBeNull();
+    expect(
+      addExamplePlaceholders(
+        'base: &base\n  service:\n    old: documented\nci:\n  <<: *base\n',
+        ['ci.service.token'],
+      ),
+    ).toBeNull();
+    expect(
+      addExamplePlaceholders('base: &base\n  old: documented\nci: *base\n', [
+        'ci.token',
+      ]),
+    ).toBeNull();
   });
 });
 
@@ -142,5 +154,26 @@ describe('setSopsValues', () => {
     expect(() =>
       readFileSync(join(withoutExample, 'secrets/ci.example.yaml')),
     ).toThrow();
+  });
+
+  it('still reports the encrypted write as done when the example cannot be written', () => {
+    const consumer = consumerWith(EXAMPLE);
+    chmodSync(join(consumer, 'secrets/ci.example.yaml'), 0o444);
+    sopsExits(0);
+    const errors: Array<string> = [];
+    spyOn(console, 'error').mockImplementation((...values) => {
+      errors.push(values.join(' '));
+    });
+
+    expect(
+      setSopsValues(consumer, 'secrets/ci.yaml', [
+        { path: 'ci.cloudflare_dns_token', value: 'secret-value' },
+      ]),
+    ).toEqual({ ok: true });
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain(
+      'standards creds: warning: could not add placeholders for ci.cloudflare_dns_token to secrets/ci.example.yaml',
+    );
+    expect(errors[0]).not.toContain('secret-value');
   });
 });

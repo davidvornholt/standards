@@ -6,7 +6,7 @@
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { isMap, parseDocument } from 'yaml';
+import { isAlias, isMap, parseDocument, visit } from 'yaml';
 import { isContainedPath } from './contained-path';
 import { parseSopsKeyPath } from './creds-sops-structure';
 
@@ -19,8 +19,7 @@ const placeholderFor = (path: ReadonlyArray<string>): string =>
   `replace-with-${(path.at(-1) ?? 'value').replaceAll('_', '-')}`;
 
 // A path is added only where every ancestor is a mapping or missing and the
-// leaf itself is missing. Anything else, such as a scalar in the way, is left
-// for `standards check` to report.
+// leaf itself is missing.
 const canAdd = (
   document: ReturnType<typeof parseDocument>,
   path: ReadonlyArray<string>,
@@ -39,14 +38,26 @@ const canAdd = (
   return !document.hasIn(path);
 };
 
+const hasAlias = (document: ReturnType<typeof parseDocument>): boolean => {
+  let found = false;
+  visit(document, (_key, node) => {
+    if (isAlias(node)) {
+      found = true;
+      return visit.BREAK;
+    }
+  });
+  return found;
+};
+
 // Returns the updated text, or null when nothing needs adding or the example
-// isn't valid YAML.
+// can't be edited safely: invalid YAML, or aliases and merge keys, where a
+// new key could hide keys the example inherits.
 export const addExamplePlaceholders = (
   text: string,
   dottedPaths: ReadonlyArray<string>,
 ): string | null => {
   const document = parseDocument(text);
-  if (document.errors.length > 0) {
+  if (document.errors.length > 0 || hasAlias(document)) {
     return null;
   }
   const missing = dottedPaths
@@ -62,7 +73,9 @@ export const addExamplePlaceholders = (
   return document.toString();
 };
 
-// Adds placeholders to the example beside `rel` when that example exists.
+// Adds placeholders to the example beside `rel` when that example exists. The
+// encrypted write has already succeeded, so a failure here only warns: the
+// caller still has to verify the stored value and finish its transaction.
 export const mirrorExamplePlaceholders = (
   consumer: string,
   rel: string,
@@ -73,11 +86,17 @@ export const mirrorExamplePlaceholders = (
     return;
   }
   const file = join(consumer, exampleRel);
-  const updated = addExamplePlaceholders(
-    readFileSync(file, 'utf8'),
-    dottedPaths,
-  );
-  if (updated !== null) {
-    writeFileSync(file, updated);
+  try {
+    const updated = addExamplePlaceholders(
+      readFileSync(file, 'utf8'),
+      dottedPaths,
+    );
+    if (updated !== null) {
+      writeFileSync(file, updated);
+    }
+  } catch (error) {
+    console.error(
+      `standards creds: warning: could not add placeholders for ${dottedPaths.join(', ')} to ${exampleRel} (${error instanceof Error ? error.message : String(error)}); add them by hand`,
+    );
   }
 };
