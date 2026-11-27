@@ -213,34 +213,33 @@ export const isPublicRepository = (
   liveRepository: Readonly<Record<string, unknown>>,
 ): boolean => liveRepository.private === false;
 
-// The repository's own policy with what the workflow needs added: active, the
-// workflow included and not excluded, and both events allowed. Every other
-// workflow path, event, and rule an administrator set stays, because a PUT
-// replaces the whole policy and dropping a rule such as an actor allowlist
-// would widen who may run the workflow.
+// Whether a policy's include list names only the auto-merge workflow, so
+// changing its events or rules can't change what another workflow may run on.
+const coversOnlyAutoMerge = (policy: Policy): boolean => {
+  const conditions = isRecord(policy.conditions) ? policy.conditions : {};
+  const include = isRecord(conditions.workflow_path)
+    ? stringList(conditions.workflow_path.include)
+    : [];
+  return (
+    include.length > 0 &&
+    include.every((pattern) => pattern === AUTO_MERGE_WORKFLOW_PATH)
+  );
+};
+
+// A PUT replaces the whole policy, so the repair keeps the live policy's other
+// rules and events: dropping a rule such as an actor allowlist would widen who
+// may run the workflow.
 const repairedPolicy = (own: Policy): Policy => {
+  if (!coversOnlyAutoMerge(own)) {
+    throw new Error(
+      `cannot repair ${policyLabel(own)}: it also applies to workflows other than ${AUTO_MERGE_WORKFLOW_PATH}, so allowing its events could change what they may run on; limit its workflow paths to ${AUTO_MERGE_WORKFLOW_PATH}`,
+    );
+  }
   const conditions = isRecord(own.conditions) ? own.conditions : {};
-  const paths = isRecord(conditions.workflow_path)
-    ? conditions.workflow_path
-    : {};
-  const include = stringList(paths.include);
   const rules = Array.isArray(own.rules) ? own.rules.filter(isRecord) : [];
   return {
     ...AUTO_MERGE_POLICY,
-    conditions: {
-      ...conditions,
-      // biome-ignore lint/style/useNamingConvention: GitHub's REST field.
-      workflow_path: {
-        ...paths,
-        include:
-          include.length === 0 || include.some(patternMatches)
-            ? include
-            : [...include, AUTO_MERGE_WORKFLOW_PATH],
-        exclude: stringList(paths.exclude).filter(
-          (pattern) => !patternMatches(pattern),
-        ),
-      },
-    },
+    conditions: { ...conditions, ...AUTO_MERGE_POLICY.conditions },
     rules: [
       ...rules.filter((rule) => rule.type !== 'restrict_action_events'),
       {

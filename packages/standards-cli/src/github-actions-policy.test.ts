@@ -325,7 +325,7 @@ describe('github --apply repairing its own policy', () => {
     });
   });
 
-  it('keeps the rules and workflows it does not change when it repairs its own policy', async () => {
+  it('keeps the rules and events it does not change when it repairs its own policy', async () => {
     const actorRule = {
       type: 'restrict_actions_actors',
       parameters: { allowed_actors: [{ id: 42, type: 'User' }] },
@@ -335,8 +335,8 @@ describe('github --apply repairing its own policy', () => {
       ...listed([
         policy({
           conditions: workflowPaths(
-            [AUTO_MERGE_WORKFLOW_PATH, '.github/workflows/release.yml'],
-            ['.github/workflows/ci.yml'],
+            [AUTO_MERGE_WORKFLOW_PATH],
+            ['.github/workflows/*-merge.yml'],
           ),
           rules: [actorRule, ...eventRule(['push', 'workflow_dispatch'])],
         }),
@@ -351,10 +351,6 @@ describe('github --apply repairing its own policy', () => {
       search: '',
       body: {
         ...AUTO_MERGE_POLICY,
-        conditions: workflowPaths(
-          [AUTO_MERGE_WORKFLOW_PATH, '.github/workflows/release.yml'],
-          ['.github/workflows/ci.yml'],
-        ),
         rules: [
           actorRule,
           ...eventRule(['push', 'workflow_dispatch', 'pull_request_target']),
@@ -363,27 +359,31 @@ describe('github --apply repairing its own policy', () => {
     });
   });
 
-  it('adds the workflow back to its own policy without dropping other paths', async () => {
-    const calls = installApi([
-      ...convergedRepository,
-      ...listed([
-        policy({
-          conditions: workflowPaths(
-            ['.github/workflows/release.yml'],
-            ['.github/workflows/*-merge.yml'],
-          ),
-        }),
-      ]),
-      { body: policy() },
-    ]);
+  it.each([
+    [
+      'another workflow',
+      [AUTO_MERGE_WORKFLOW_PATH, '.github/workflows/release.yml'],
+    ],
+    ['a glob', ['.github/workflows/*.yml']],
+    ['every workflow', []],
+  ])(
+    'leaves its own policy alone when it also covers %s',
+    async (_what, include) => {
+      const calls = installApi([
+        ...convergedRepository,
+        ...listed([
+          policy({
+            conditions: workflowPaths(include),
+            rules: eventRule(['push']),
+          }),
+        ]),
+      ]);
 
-    expect(await runGithubApply(consumer())).toBe(true);
-    expect(calls.at(-1)?.body).toEqual({
-      ...AUTO_MERGE_POLICY,
-      conditions: workflowPaths([
-        '.github/workflows/release.yml',
-        AUTO_MERGE_WORKFLOW_PATH,
-      ]),
-    });
-  });
+      expect(await runGithubApply(consumer())).toBe(false);
+      expect(calls.every(({ method }) => method === 'GET')).toBe(true);
+      expect(output.errors.join('\n')).toContain(
+        `cannot repair Actions policy "Standards auto-merge events": it also applies to workflows other than ${AUTO_MERGE_WORKFLOW_PATH}`,
+      );
+    },
+  );
 });
