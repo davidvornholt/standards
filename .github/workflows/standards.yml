@@ -748,7 +748,7 @@ jobs:
       # which would bill a runner minute in every repository without a CLI.
       - name: Install Nix for the package checks
         if: steps.payload.outputs.payload == 'bun' && hashFiles('nix/package.nix') != ''
-        uses: cachix/install-nix-action@v31
+        uses: cachix/install-nix-action@v32
 
       - name: Build the Nix packages and their source check
         if: steps.payload.outputs.payload == 'bun' && hashFiles('nix/package.nix') != ''
@@ -923,7 +923,7 @@ jobs:
       # feature lets the x86_64-linux runner build the app-release VM test.
       # Arm runners have no KVM, so they declare no extra features.
       - name: Install Nix
-        uses: cachix/install-nix-action@v31
+        uses: cachix/install-nix-action@v32
         with:
           extra_nix_config: ${{ matrix.system == 'x86_64-linux' && 'system-features = nixos-test benchmark big-parallel kvm' || '' }}
 

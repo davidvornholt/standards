@@ -3318,7 +3318,7 @@ describe('canonical standards workflow Nix steps', () => {
       expect.arrayContaining([
         expect.objectContaining({
           name: 'Install Nix',
-          uses: 'cachix/install-nix-action@v31',
+          uses: 'cachix/install-nix-action@v32',
           with: {
             extra_nix_config: githubExpression(
               "matrix.system == 'x86_64-linux' && 'system-features = nixos-test benchmark big-parallel kvm' || ''",
