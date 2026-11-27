@@ -9,7 +9,7 @@ A value is secret when disclosing it enables impersonation, data access, or cost
 
 Never let a decrypted secret reach a command's output, not even through a filter, because the session transcript keeps it and filters miss multi-line values such as private keys. Pipe it into the command that needs it, or compare values by hash.
 
-Document each value once, where it is declared. A plain value is explained in its configuration file. A secret is explained in the matching `*.example.yaml`, which mirrors the key shape of the encrypted file, because the encrypted file cannot carry readable comments. Use a workspace README only for setup that these declarations cannot express.
+Document each value once, where it is declared. A plain value is explained in its configuration file. A secret is explained in the matching `*.example.yaml`, which mirrors the key shape of the encrypted file, because the encrypted file cannot carry readable comments. When the example exists, `standards creds` fills in missing placeholders. Use a workspace README only for setup that these declarations cannot express.
 
 SOPS identities, recipients, CI secrets, and brokered provider credentials are covered in the declarative-infra skill's [secrets reference](../declarative-infra/references/secrets.md).
 

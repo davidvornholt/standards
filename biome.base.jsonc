@@ -377,6 +377,7 @@
       // environment variables directly.
       "includes": [
         "packages/standards-cli/src/bun-command.ts",
+        "packages/standards-cli/src/creds-example.ts",
         "packages/standards-cli/src/dev-env.ts",
         "packages/standards-cli/src/dev-env-brokered-refresh.ts",
         "packages/standards-cli/src/screenshots-commands.ts",
