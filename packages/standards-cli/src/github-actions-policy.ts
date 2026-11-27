@@ -44,7 +44,7 @@ export const AUTO_MERGE_POLICY = {
   ],
 } as const;
 
-const POLICY_READ_ADVICE = `reading them needs repository Administration write, so run \`github --check\` locally with admin auth to verify that ${AUTO_MERGE_WORKFLOW_PATH} may run on pull_request_target`;
+const POLICY_READ_ADVICE = `reading them needs repository Administration write, so run \`bash .agents/skills/standards-sync/scripts/standards.sh github --check\` locally with admin auth to verify that ${AUTO_MERGE_WORKFLOW_PATH} may run on pull_request_target`;
 
 export const POLICY_NOT_VISIBLE_NOTICE = `standards github: Actions event policies not verified, because no workflow token can read them; ${POLICY_READ_ADVICE}`;
 

@@ -229,6 +229,9 @@ describe('github --check in a public repository', () => {
     installApi([...convergedRepository, denied]);
 
     expect(await runGithubCheck(consumer())).toBe(true);
+    expect(output.logs[0]).toContain(
+      'run `bash .agents/skills/standards-sync/scripts/standards.sh github --check` locally',
+    );
     expect(output.logs).toEqual([
       POLICY_NOT_VISIBLE_NOTICE,
       'standards github: live GitHub settings match the declared configuration',
