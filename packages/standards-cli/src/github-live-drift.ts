@@ -3,6 +3,12 @@
 // token cannot see. Command wiring lives in github-commands.ts.
 
 import {
+  diffActionsPolicies,
+  fetchActionsPolicies,
+  isPublicRepository,
+  POLICY_NOT_VISIBLE_NOTICE,
+} from './github-actions-policy';
+import {
   apiError,
   HTTP_FORBIDDEN,
   HTTP_OK,
@@ -10,6 +16,7 @@ import {
   request,
   resolveGithubRepo,
   resolveToken,
+  runsInGithubActions,
 } from './github-api';
 import { resolveHiddenBypassActors } from './github-bypass-actors';
 import {
@@ -49,25 +56,44 @@ const isLabelPermissionDenial = (error: unknown): boolean =>
       typeof error.responseBody.message === 'string' &&
       PERMISSION_DENIAL_MESSAGES.has(error.responseBody.message)));
 
+type RepositoryDrift = {
+  readonly problems: ReadonlyArray<string>;
+  // Null when the repository couldn't be read or its declaration is
+  // ineligible, so nothing that depends on it is compared.
+  readonly live: Readonly<Record<string, unknown>> | null;
+};
+
 const repositoryDrift = async (
   token: string | null,
   repo: string,
   declared: GithubSettings,
-): Promise<ReadonlyArray<string>> => {
+): Promise<RepositoryDrift> => {
   const repoResponse = await request(token, 'GET', `/repos/${repo}`);
   if (repoResponse.status !== HTTP_OK || !isRecord(repoResponse.body)) {
-    return [apiError(`reading repository ${repo}`, repoResponse)];
+    return {
+      problems: [apiError(`reading repository ${repo}`, repoResponse)],
+      live: null,
+    };
   }
-  const eligibilityProblem = optOutEligibilityProblem(
-    repo,
-    declared,
-    repoResponse.body,
-  );
+  const live = repoResponse.body;
+  const eligibilityProblem = optOutEligibilityProblem(repo, declared, live);
   if (eligibilityProblem !== null) {
-    return [eligibilityProblem];
+    return { problems: [eligibilityProblem], live: null };
   }
+  return {
+    problems: await repositorySettingsDrift(token, repo, declared, live),
+    live,
+  };
+};
+
+const repositorySettingsDrift = async (
+  token: string | null,
+  repo: string,
+  declared: GithubSettings,
+  live: Readonly<Record<string, unknown>>,
+): Promise<ReadonlyArray<string>> => {
   const declaredRepository = enforceableRepositorySettings(declared);
-  const diff = diffRepositorySettings(declaredRepository, repoResponse.body);
+  const diff = diffRepositorySettings(declaredRepository, live);
   if (diff.unverifiable.length === 0) {
     return diff.drifted;
   }
@@ -79,7 +105,7 @@ const repositoryDrift = async (
     diff.unverifiable,
   );
   const rediff = diffRepositorySettings(declaredRepository, {
-    ...repoResponse.body,
+    ...live,
     ...fallback,
   });
   return [
@@ -147,13 +173,46 @@ const rulesetDrift = async (
   ];
 };
 
+// No workflow token can read policies, so in GitHub Actions an unreadable
+// policy list leaves them unverified with a notice; failing would fail every
+// public repository's CI. Anywhere else, it fails closed like every other
+// setting the token can't see.
+const actionsPolicyDrift = async (
+  token: string | null,
+  repo: string,
+  liveRepository: Readonly<Record<string, unknown>>,
+): Promise<LiveDrift> => {
+  if (!isPublicRepository(liveRepository)) {
+    return { problems: [], notices: [] };
+  }
+  const live = await fetchActionsPolicies(token, repo);
+  if (live.kind === 'visible') {
+    return { problems: diffActionsPolicies(live.policies), notices: [] };
+  }
+  return runsInGithubActions()
+    ? { problems: [], notices: [POLICY_NOT_VISIBLE_NOTICE] }
+    : { problems: [live.problem], notices: [] };
+};
+
+export type LiveDrift = {
+  readonly problems: ReadonlyArray<string>;
+  readonly notices: ReadonlyArray<string>;
+};
+
+const onlyProblem = (problem: string): LiveDrift => ({
+  problems: [problem],
+  notices: [],
+});
+
 export const collectLiveDrift = async (
   consumer: string,
   declared: GithubSettings,
-): Promise<ReadonlyArray<string>> => {
+): Promise<LiveDrift> => {
   const repo = resolveGithubRepo(consumer);
   if (repo === null) {
-    return ['cannot determine the GitHub repository from the origin remote'];
+    return onlyProblem(
+      'cannot determine the GitHub repository from the origin remote',
+    );
   }
   const token = resolveToken();
   try {
@@ -163,17 +222,27 @@ export const collectLiveDrift = async (
       declared.labels.length === 0
         ? []
         : diffLabels(declared.labels, await fetchLiveLabels(token, repo));
-    return [
-      ...(await repositoryDrift(token, repo, declared)),
-      ...(await rulesetDrift(token, repo, declared)),
-      ...labelDrift,
-    ];
+    const repository = await repositoryDrift(token, repo, declared);
+    const rulesets = await rulesetDrift(token, repo, declared);
+    const policies =
+      repository.live === null
+        ? { problems: [], notices: [] }
+        : await actionsPolicyDrift(token, repo, repository.live);
+    return {
+      problems: [
+        ...repository.problems,
+        ...rulesets,
+        ...labelDrift,
+        ...policies.problems,
+      ],
+      notices: policies.notices,
+    };
   } catch (error) {
     if (isLabelPermissionDenial(error)) {
-      return [LABEL_VISIBILITY_PROBLEM];
+      return onlyProblem(LABEL_VISIBILITY_PROBLEM);
     }
-    return [
+    return onlyProblem(
       `GitHub API unreachable: ${error instanceof Error ? error.message : String(error)}`,
-    ];
+    );
   }
 };

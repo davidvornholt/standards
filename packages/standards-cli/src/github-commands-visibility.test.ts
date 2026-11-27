@@ -131,7 +131,7 @@ describe('runGithubCheck fail-closed visibility', () => {
 
   it('fails when repository settings are invisible over REST and GraphQL', async () => {
     installApi([
-      { body: JSON.parse('{"private":false}') },
+      { body: JSON.parse('{"private":true}') },
       { body: JSON.parse('{"data":{"repository":null}}') },
       { body: [liveRulesetSummary()] },
       {
@@ -165,7 +165,7 @@ describe('runGithubCheck fail-closed visibility', () => {
 describe('runGithubCheck ruleset visibility', () => {
   it('fails when a declared ruleset field is invisible to the token', async () => {
     installApi([
-      { body: liveRepository(false, true) },
+      { body: liveRepository(true, true) },
       { body: [liveRulesetSummary()] },
       {
         body: {

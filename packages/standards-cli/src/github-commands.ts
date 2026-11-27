@@ -1,8 +1,13 @@
 // `standards github --check` verifies the live GitHub repository against the
-// declared settings and fails closed on any drift, API error, or declared
-// state the token cannot see. `standards github --apply` converges the live
+// declared settings and, in a public repository, the Actions event policy that
+// auto-merge needs. It fails closed on any drift, API error, or declared state
+// the token cannot see. `standards github --apply` converges the live
 // repository; it needs an admin token, so it runs locally rather than in CI.
 
+import {
+  applyActionsPolicy,
+  isPublicRepository,
+} from './github-actions-policy';
 import {
   apiError,
   HTTP_OK,
@@ -43,7 +48,11 @@ export const runGithubCheck = async (consumer: string): Promise<boolean> => {
   }
   const problems = [...declared.problems];
   if (declared.merged !== null) {
-    problems.push(...(await collectLiveDrift(consumer, declared.merged)));
+    const drift = await collectLiveDrift(consumer, declared.merged);
+    for (const notice of drift.notices) {
+      console.log(notice);
+    }
+    problems.push(...drift.problems);
   }
   if (problems.length > 0) {
     reportProblems(problems);
@@ -110,6 +119,9 @@ export const runGithubApply = async (consumer: string): Promise<boolean> => {
       actions.push(...(await applyRulesets(token, repo, declared.merged)));
     }
     actions.push(...(await applyLabels(token, repo, declared.merged.labels)));
+    if (isPublicRepository(repoResponse.body)) {
+      actions.push(...(await applyActionsPolicy(token, repo)));
+    }
     for (const action of actions) {
       console.log(`  ${action}`);
     }

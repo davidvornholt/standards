@@ -1075,7 +1075,9 @@ jobs:
       # closed until the check is re-run locally with admin auth. The retired
       # PAT was user-scoped and did see those actor lists over REST, so that
       # case is a deliberate, disclosed narrowing rather than a property of
-      # GitHub's API; no credential CI can safely hold recovers it.
+      # GitHub's API; no credential CI can safely hold recovers it. Actions
+      # event policies need repository Administration write even to read, so
+      # here the CLI prints a notice instead of verifying them.
       - name: Check GitHub settings
         env:
           SETTINGS_TOKEN: ${{ github.token }}

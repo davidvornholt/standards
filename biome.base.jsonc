@@ -411,6 +411,7 @@
         "packages/standards-cli/src/dev-env-dotenv.test.ts",
         "packages/standards-cli/src/dev-env-layers.test.ts",
         "packages/standards-cli/src/dev-env.test.ts",
+        "packages/standards-cli/src/github-actions-policy.test.ts",
         "packages/standards-cli/src/github-diff.test.ts",
         "packages/standards-cli/src/github-settings.test.ts",
         "packages/standards-cli/src/sops-secret-action-test-support.ts",

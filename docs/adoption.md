@@ -85,7 +85,7 @@ Biome's `noUndeclaredEnvVars` rule requires every environment variable that code
 ## Connect CI and GitHub
 
 1. Create the repository's CI age key and its `SOPS_AGE_KEY` Actions secret as described in [Secrets bootstrap](../.agents/skills/declarative-infra/references/secrets.md).
-2. Install the repository owner's broker GitHub App on the repository, after creating it as [What each part needs](#what-each-part-needs) describes if the owner has none, then provision it with `bun standards creds add github --dest ci:ci.broker_app`. Automatic sync and Standards auto-merge need it; see [GitHub settings, automatic sync, and auto-merge](../.agents/skills/standards-sync/references/github.md). In a public repository, also allow `pull_request_target` for `.github/workflows/standards-auto-merge.yml` in an Actions event policy, as that page describes.
+2. Install the repository owner's broker GitHub App on the repository, after creating it as [What each part needs](#what-each-part-needs) describes if the owner has none, then provision it with `bun standards creds add github --dest ci:ci.broker_app`. Automatic sync and Standards auto-merge need it; see [GitHub settings, automatic sync, and auto-merge](../.agents/skills/standards-sync/references/github.md).
 3. With admin-authenticated `gh`, run `bun standards github --apply`, then `bun standards github --check`.
 4. To pin the source, set `"ref"` as [What each part needs](#what-each-part-needs) describes. To turn off the weekly sync, set `"autoSync": false` in `sync-standards.local.json`.
 5. Run `bun run check`.

@@ -88,7 +88,7 @@ const installCalls = (graphql: {
   readonly status?: number;
 }): ReadonlyArray<ApiCall> =>
   installApi([
-    { body: liveRepository(false, true) },
+    { body: liveRepository(true, true) },
     { body: [liveRulesetSummary()] },
     { body: liveRuleset },
     graphql,
@@ -145,7 +145,7 @@ it.each([
       JSON.stringify({ repository: {}, rulesets: localRulesets }),
     );
     const calls = installApi([
-      { body: liveRepository(false, true) },
+      { body: liveRepository(true, true) },
       { body: [liveRulesetSummary()] },
       { body: { ...liveRuleset, [BYPASS_ACTORS_KEY]: [declaredActor] } },
     ]);
