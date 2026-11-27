@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { isContainedPath } from './contained-path';
+import { mirrorExamplePlaceholders } from './creds-example';
 import {
   type SopsValueChange as EditorValueChange,
   inspectSopsScalarStructure,
@@ -111,6 +112,11 @@ export const setSopsValues = (
     [SET_CHANGES_ENV]: JSON.stringify(changes),
   });
   if (result.status === 0 || result.status === SOPS_UNCHANGED_STATUS) {
+    mirrorExamplePlaceholders(
+      consumer,
+      rel,
+      changes.map(({ path }) => path),
+    );
     return { ok: true };
   }
   const paths = changes.map(({ path }) => path).join(', ');
