@@ -259,22 +259,6 @@ describe('github --apply in a public repository', () => {
     );
   });
 
-  it('rewrites its own policy when it has drifted', async () => {
-    const calls = installApi([
-      ...convergedRepository,
-      ...listed([policy({ rules: eventRule(['pull_request_target']) })]),
-      { body: policy() },
-    ]);
-
-    expect(await runGithubApply(consumer())).toBe(true);
-    expect(calls.at(-1)).toEqual({
-      method: 'PUT',
-      path: '/repos/owner/repo/actions/policies/3',
-      search: '',
-      body: AUTO_MERGE_POLICY,
-    });
-  });
-
   it('changes nothing when a policy already allows the workflow', async () => {
     const calls = installApi([...convergedRepository, ...listed([policy()])]);
 
@@ -321,5 +305,85 @@ describe('github --apply in a public repository', () => {
     expect(output.errors.join('\n')).toContain(
       'listing Actions policies: HTTP 403 unexpected response; reading them needs repository Administration write',
     );
+  });
+});
+
+describe('github --apply repairing its own policy', () => {
+  it('rewrites its own policy when it has drifted', async () => {
+    const calls = installApi([
+      ...convergedRepository,
+      ...listed([policy({ rules: eventRule(['pull_request_target']) })]),
+      { body: policy() },
+    ]);
+
+    expect(await runGithubApply(consumer())).toBe(true);
+    expect(calls.at(-1)).toEqual({
+      method: 'PUT',
+      path: '/repos/owner/repo/actions/policies/3',
+      search: '',
+      body: AUTO_MERGE_POLICY,
+    });
+  });
+
+  it('keeps the rules and workflows it does not change when it repairs its own policy', async () => {
+    const actorRule = {
+      type: 'restrict_actions_actors',
+      parameters: { allowed_actors: [{ id: 42, type: 'User' }] },
+    };
+    const calls = installApi([
+      ...convergedRepository,
+      ...listed([
+        policy({
+          conditions: workflowPaths(
+            [AUTO_MERGE_WORKFLOW_PATH, '.github/workflows/release.yml'],
+            ['.github/workflows/ci.yml'],
+          ),
+          rules: [actorRule, ...eventRule(['push', 'workflow_dispatch'])],
+        }),
+      ]),
+      { body: policy() },
+    ]);
+
+    expect(await runGithubApply(consumer())).toBe(true);
+    expect(calls.at(-1)).toEqual({
+      method: 'PUT',
+      path: '/repos/owner/repo/actions/policies/3',
+      search: '',
+      body: {
+        ...AUTO_MERGE_POLICY,
+        conditions: workflowPaths(
+          [AUTO_MERGE_WORKFLOW_PATH, '.github/workflows/release.yml'],
+          ['.github/workflows/ci.yml'],
+        ),
+        rules: [
+          actorRule,
+          ...eventRule(['push', 'workflow_dispatch', 'pull_request_target']),
+        ],
+      },
+    });
+  });
+
+  it('adds the workflow back to its own policy without dropping other paths', async () => {
+    const calls = installApi([
+      ...convergedRepository,
+      ...listed([
+        policy({
+          conditions: workflowPaths(
+            ['.github/workflows/release.yml'],
+            ['.github/workflows/*-merge.yml'],
+          ),
+        }),
+      ]),
+      { body: policy() },
+    ]);
+
+    expect(await runGithubApply(consumer())).toBe(true);
+    expect(calls.at(-1)?.body).toEqual({
+      ...AUTO_MERGE_POLICY,
+      conditions: workflowPaths([
+        '.github/workflows/release.yml',
+        AUTO_MERGE_WORKFLOW_PATH,
+      ]),
+    });
   });
 });

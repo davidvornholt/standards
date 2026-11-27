@@ -213,7 +213,50 @@ export const isPublicRepository = (
   liveRepository: Readonly<Record<string, unknown>>,
 ): boolean => liveRepository.private === false;
 
-// Creates the standard policy, or rewrites a repository policy of the same
+// The repository's own policy with what the workflow needs added: active, the
+// workflow included and not excluded, and both events allowed. Every other
+// workflow path, event, and rule an administrator set stays, because a PUT
+// replaces the whole policy and dropping a rule such as an actor allowlist
+// would widen who may run the workflow.
+const repairedPolicy = (own: Policy): Policy => {
+  const conditions = isRecord(own.conditions) ? own.conditions : {};
+  const paths = isRecord(conditions.workflow_path)
+    ? conditions.workflow_path
+    : {};
+  const include = stringList(paths.include);
+  const rules = Array.isArray(own.rules) ? own.rules.filter(isRecord) : [];
+  return {
+    ...AUTO_MERGE_POLICY,
+    conditions: {
+      ...conditions,
+      // biome-ignore lint/style/useNamingConvention: GitHub's REST field.
+      workflow_path: {
+        ...paths,
+        include:
+          include.length === 0 || include.some(patternMatches)
+            ? include
+            : [...include, AUTO_MERGE_WORKFLOW_PATH],
+        exclude: stringList(paths.exclude).filter(
+          (pattern) => !patternMatches(pattern),
+        ),
+      },
+    },
+    rules: [
+      ...rules.filter((rule) => rule.type !== 'restrict_action_events'),
+      {
+        type: 'restrict_action_events',
+        parameters: {
+          // biome-ignore lint/style/useNamingConvention: GitHub's REST field.
+          allowed_events: [
+            ...new Set([...(allowedEvents(own) ?? []), ...REQUIRED_EVENTS]),
+          ],
+        },
+      },
+    ],
+  };
+};
+
+// Creates the standard policy, or repairs a repository policy of the same
 // name, when no active policy already allows the workflow's events. A
 // conflicting policy from elsewhere is reported, never changed.
 export const applyActionsPolicy = async (
@@ -232,11 +275,12 @@ export const applyActionsPolicy = async (
       policy.name === AUTO_MERGE_POLICY.name &&
       policy.source_type === 'Repository',
   );
+  const desired = own === undefined ? AUTO_MERGE_POLICY : repairedPolicy(own);
   // Judged before writing, so a conflict apply can't resolve leaves the
   // repository's own policy untouched.
   const conflicts = diffActionsPolicies([
     ...live.policies.filter((policy) => policy !== own),
-    AUTO_MERGE_POLICY,
+    desired,
   ]);
   if (conflicts.length > 0) {
     throw new Error(
@@ -264,7 +308,7 @@ export const applyActionsPolicy = async (
             token,
             'PUT',
             `/repos/${repo}/actions/policies/${String(own.id)}`,
-            AUTO_MERGE_POLICY,
+            desired,
           ),
         ] as const);
   if (response.status !== expected) {
