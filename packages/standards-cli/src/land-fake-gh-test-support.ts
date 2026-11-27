@@ -1,26 +1,19 @@
-// A fake `gh` for the land suites. The bin/gh shim that installFakeGh writes
-// runs fakeGh with the arguments and environment it got, so this module never
-// reads process state. GitHub's side lives in two JSON files the test writes
+// A fake `gh` for the land suites. The bin/gh shim that land-test-support.ts
+// writes runs fakeGh with the arguments and environment it got, so this module
+// never reads process state. GitHub's side lives in two JSON files the test writes
 // before each run: the pull request (GH_FIXTURE) and the rest (GH_GITHUB).
 // Every call is appended to GH_CALLS as a JSON array of its arguments.
 
-import {
-  appendFileSync,
-  chmodSync,
-  mkdirSync,
-  readFileSync,
-  writeFileSync,
-} from 'node:fs';
-import { join } from 'node:path';
-import process from 'node:process';
+import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 
 const SHA_LENGTH = 40;
 const MERGE_COMMIT = 'f'.repeat(SHA_LENGTH);
-const EXECUTABLE = 0o755;
 const UNKNOWN_CALL = 99;
 const WORKFLOWS_DIR = '.github/workflows/';
 const MILLISECONDS = /\.\d+Z$/u;
 const INT32_BYTES = 4;
+// How land asks whether the base branch, trunk, contains a commit.
+const ON_BASE = /\/compare\/(?<commit>[0-9a-f]+)\.\.\.trunk$/u;
 
 type FakeFile = {
   filename: string;
@@ -33,6 +26,8 @@ export type FakePr = Record<string, unknown> & {
   files: Array<FakeFile>;
   // Each poll of the checks applies the next entry; the last one stays.
   polls: Array<Record<string, unknown>>;
+  // The bodies of the pull request's comments, oldest first.
+  comments: Array<string>;
 };
 
 export type FakeGithub = {
@@ -65,6 +60,11 @@ export type FakeGithub = {
   // Each lookup of the workflow runs on the pull request's head applies the
   // next entry; the last one stays.
   workflowRuns: Array<Array<FakeRun>>;
+  // The parents of the commits listed here, first parent first. Other commits
+  // have one parent.
+  parents: Record<string, Array<string>>;
+  // Commits in the base branch's history.
+  onBase: Array<string>;
 };
 
 export type FakeRun = {
@@ -132,7 +132,8 @@ const viewPr = ({ args, pr, savePr }: Call): FakeGhResult => {
       );
     }
   }
-  return json(pr);
+  // No field that land views holds the comments.
+  return json({ ...pr, comments: undefined });
 };
 
 const markReady = ({ pr, github, savePr, saveGithub }: Call): FakeGhResult => {
@@ -248,6 +249,10 @@ const compare = ({ args, env, github, saveGithub }: Call): FakeGhResult => {
     saveGithub();
     return ok(`${behind}\n`);
   }
+  const commit = ON_BASE.exec(args[1] ?? '')?.groups?.commit;
+  if (commit !== undefined) {
+    return ok(`${github.onBase.includes(commit) ? 'ahead' : 'diverged'}\n`);
+  }
   return github.compare === null ? notFound() : ok(`${github.compare}\n`);
 };
 
@@ -264,6 +269,22 @@ const prFiles = ({ pr }: Call): FakeGhResult =>
       )
       .join('\n')}\n`,
   );
+
+// land asks gh's --jq for the comments' lines with "Reviewed through ".
+const prComments = ({ pr }: Call): FakeGhResult =>
+  ok(
+    pr.comments
+      .flatMap((body) => body.split('\n'))
+      .filter((line) => line.includes('Reviewed through '))
+      .map((line) => `${line}\n`)
+      .join(''),
+  );
+
+const addComment = ({ args, pr, savePr }: Call): FakeGhResult => {
+  pr.comments.push(args[args.indexOf('--body') + 1] ?? '');
+  savePr();
+  return ok();
+};
 
 const branchRules = ({ github }: Call): FakeGhResult =>
   json([
@@ -307,6 +328,10 @@ const workflowRuns = ({ github, saveGithub }: Call): FakeGhResult => {
   return ok(runs.map((run) => `${JSON.stringify(run)}\n`).join(''));
 };
 
+// land asks gh's --jq for one JSON array of the commit's parents.
+const commitParents = ({ args, github }: Call): FakeGhResult =>
+  json(github.parents[args[1]?.slice(-SHA_LENGTH) ?? ''] ?? [MERGE_COMMIT]);
+
 const REST_ROUTES: ReadonlyArray<
   readonly [RegExp, (call: Call) => FakeGhResult]
 > = [
@@ -314,7 +339,9 @@ const REST_ROUTES: ReadonlyArray<
   [/^repos\/[^/]+\/[^/]+\/rules\/branches\//u, branchRules],
   [/^repos\/[^/]+\/[^/]+\/branches\//u, branch],
   [/^repos\/[^/]+\/[^/]+\/pulls\/\d+\/files/u, prFiles],
+  [/^repos\/[^/]+\/[^/]+\/issues\/\d+\/comments/u, prComments],
   [/^repos\/[^/]+\/[^/]+\/actions\/runs\?/u, workflowRuns],
+  [/^repos\/[^/]+\/[^/]+\/commits\/[0-9a-f]{40}$/u, commitParents],
 ];
 
 const repoView = ({ env }: Call): FakeGhResult =>
@@ -331,6 +358,7 @@ const ROUTES: ReadonlyMap<string, (call: Call) => FakeGhResult> = new Map([
   ['pr ready', markReady],
   ['pr update-branch', () => ok()],
   ['pr merge', merge],
+  ['pr comment', addComment],
   ['api graphql', graphql],
 ]);
 
@@ -369,28 +397,4 @@ export const fakeGh = (args: ReadonlyArray<string>, env: Env): FakeGhResult => {
     savePr: () => writeFileSync(prPath, JSON.stringify(pr)),
     saveGithub: () => writeFileSync(githubPath, JSON.stringify(github)),
   });
-};
-
-// Writes bin/gh under root, which runs fakeGh under the running Bun.
-export const installFakeGh = (root: string): string => {
-  const bin = join(root, 'bin');
-  const gh = join(bin, 'gh');
-  mkdirSync(bin, { recursive: true });
-  writeFileSync(
-    gh,
-    [
-      `#!${process.execPath}`,
-      `import { fakeGh } from ${JSON.stringify(join(import.meta.dir, 'land-fake-gh-test-support.ts'))};`,
-      // Like gh waiting on a helper that ignores SIGTERM, so a timeout has to
-      // kill it.
-      "process.on('SIGTERM', () => {});",
-      'const result = fakeGh(process.argv.slice(2), process.env);',
-      'process.stdout.write(result.stdout);',
-      'process.stderr.write(result.stderr);',
-      'process.exitCode = result.status;',
-      '',
-    ].join('\n'),
-  );
-  chmodSync(gh, EXECUTABLE);
-  return bin;
 };

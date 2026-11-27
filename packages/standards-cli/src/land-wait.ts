@@ -57,6 +57,14 @@ type WaitState = {
   readonly again: Map<number, boolean>;
   readonly workflows: Map<number, string>;
   readonly deadline: number;
+  // How often land updated the branch with its base.
+  updates: number;
+};
+
+// The head that may merge, and how often land updated the branch on the way.
+export type SettledHead = {
+  readonly head: string;
+  readonly updates: number;
 };
 
 type Poll = {
@@ -185,8 +193,13 @@ const lacksBase = (
   return Number(stdout.trim()) > 0;
 };
 
-const updateBranch = (context: LandContext, request: WaitRequest): void => {
+const updateBranch = (
+  context: LandContext,
+  request: WaitRequest,
+  state: WaitState,
+): void => {
   // A merge commit keeps the old head in the new one's history.
+  state.updates += 1;
   run(context, 'gh', [
     'pr',
     'update-branch',
@@ -201,6 +214,7 @@ const advance = (
   context: LandContext,
   request: WaitRequest,
   poll: Poll,
+  state: WaitState,
 ): boolean => {
   const { prNumber, repo, noWait } = request;
   const { checks, status } = poll;
@@ -215,7 +229,7 @@ const advance = (
   if (poll.isDraft) {
     run(context, 'gh', ['pr', 'ready', String(prNumber), '--repo', repo.url]);
   } else if (status === 'BEHIND') {
-    updateBranch(context, request);
+    updateBranch(context, request, state);
   } else if (status === 'CLEAN' || status === 'UNSTABLE') {
     if (!mayMerge(request, poll)) {
       return false;
@@ -223,7 +237,7 @@ const advance = (
     if (!lacksBase(context, request, poll)) {
       return true;
     }
-    updateBranch(context, request);
+    updateBranch(context, request, state);
   } else if (status === 'BLOCKED' && noWait) {
     throw new LandError(
       `GitHub requires checks or reviews that PR #${prNumber} still lacks, so --no-wait can't skip them.`,
@@ -256,11 +270,12 @@ const timeoutError = (
 ): LandError => {
   const within = `within ${durationText(context.waitMs)}`;
   if (last !== null && waitingFor(last) === 'checks') {
-    // --no-wait refuses a blocked pull request.
+    // --no-wait refuses a blocked pull request. The command keeps its other
+    // options, such as --no-review and its reason.
     const advice =
       last.status === 'BLOCKED'
         ? ''
-        : ` If none of the repository's workflows reports on this pull request, run \`standards land ${prNumber} --no-wait\`.`;
+        : " If none of the repository's workflows reports on this pull request, run the same `standards land` command again with --no-wait.";
     return new LandError(
       `No checks appeared on PR #${prNumber} ${within}.${advice}`,
     );
@@ -291,7 +306,7 @@ const pollOnce = (
   try {
     const poll = readPoll(context, request, state);
     state.last = poll;
-    return { poll, ready: advance(context, request, poll) };
+    return { poll, ready: advance(context, request, poll, state) };
   } catch (error) {
     if (isCommandTimeout(error) && Date.now() >= state.deadline) {
       throw timeoutError(context, request.prNumber, state);
@@ -304,13 +319,13 @@ const pollUntilReady = async (
   context: LandContext,
   request: WaitRequest,
   state: WaitState,
-): Promise<string> => {
+): Promise<SettledHead> => {
   if (Date.now() >= state.deadline) {
     throw timeoutError(context, request.prNumber, state);
   }
   const { poll, ready } = pollOnce(context, request, state);
   if (ready) {
-    return poll.head;
+    return { head: poll.head, updates: state.updates };
   }
   const waiting = waitingFor(poll);
   if (state.shown?.head !== poll.head || state.shown.waiting !== waiting) {
@@ -326,11 +341,12 @@ const pollUntilReady = async (
 export const waitForChecks = (
   context: LandContext,
   request: WaitRequest,
-): Promise<string> =>
+): Promise<SettledHead> =>
   pollUntilReady(context, request, {
     shown: null,
     last: null,
     again: new Map(),
     workflows: new Map(),
     deadline: context.deadline ?? Date.now() + context.waitMs,
+    updates: 0,
   });

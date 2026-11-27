@@ -14,6 +14,7 @@ import {
   lookups,
   mergeCall,
   mergeCalls,
+  mergesBase,
   NEW_HEAD,
   now,
   OLD_UPDATE,
@@ -70,6 +71,7 @@ describe('standards land on an open pull request', () => {
       ],
     });
     fixture.github.compare = 'ahead';
+    mergesBase(fixture);
     const result = land(fixture, ['123']);
     expect(result.status, result.stderr).toBe(0);
     expect(calls(fixture, 'pr', 'ready')).toHaveLength(1);

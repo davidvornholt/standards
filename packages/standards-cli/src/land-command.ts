@@ -10,14 +10,15 @@ import {
   WAIT_SECONDS,
 } from './land-context';
 
-const LAND_USAGE = `Usage: standards land [PR_OR_BRANCH] [--no-wait]
+const LAND_USAGE = `Usage: standards land [PR_OR_BRANCH] [--no-review REASON] [--no-wait]
 
-Wait until the checks on a pull request's current head pass, squash-merge exactly that head, and delete its local branch. A pull request that no workflow checks merges at once.
+Wait until the checks on a pull request's current head pass, squash-merge exactly that head, and delete its local branch. A pull request that no workflow checks merges at once. It refuses an open pull request unless a review-fix report covers its current head or --no-review gives a reason.
 
 PR_OR_BRANCH is a pull request number, URL, or branch (default: the current branch's pull request).
 
 Options:
-  --no-wait  Merge without waiting for pending checks, where GitHub allows that. Use it only when the change can't affect the checks, or when no workflow reports on the pull request.
+  --no-review REASON  Land without a review-fix report for the head, and post REASON on the pull request.
+  --no-wait           Merge without waiting for pending checks, where GitHub allows that. Use it only when the change can't affect the checks, or when no workflow reports on the pull request.
 
 Exit code 1 means the pull request isn't merged, land couldn't confirm that it is, or cleaning up after an earlier merge stopped. Once land merges, a cleanup problem is only a warning.`;
 
@@ -41,6 +42,29 @@ const envMs = (
   return secondsToMs(seconds);
 };
 
+const NO_REVIEW = '--no-review';
+const NO_WAIT = '--no-wait';
+
+type LandArgs = {
+  readonly operands: ReadonlyArray<string>;
+  readonly noWait: boolean;
+  // The reason after --no-review, trimmed, or null without the flag.
+  readonly noReview: string | null;
+};
+
+const parseArgs = (argv: ReadonlyArray<string>): LandArgs => {
+  const at = argv.indexOf(NO_REVIEW);
+  const rest =
+    at === -1
+      ? argv
+      : argv.filter((_, index) => index !== at && index !== at + 1);
+  return {
+    operands: rest.filter((arg) => arg !== NO_WAIT),
+    noWait: rest.includes(NO_WAIT),
+    noReview: at === -1 ? null : (argv[at + 1] ?? '').trim(),
+  };
+};
+
 export type LandProcess = {
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly out: (line: string) => void;
@@ -55,8 +79,13 @@ export const runLandCommand = async (
     edge.out(LAND_USAGE);
     return true;
   }
-  const noWait = argv.includes('--no-wait');
-  const operands = argv.filter((arg) => arg !== '--no-wait');
+  const { operands, noWait, noReview } = parseArgs(argv);
+  if (noReview === '' || noReview?.startsWith('-') === true) {
+    edge.err(
+      `standards land: ${NO_REVIEW} needs a reason, such as ${NO_REVIEW} "only fixes a typo". See \`standards land --help\`.`,
+    );
+    return false;
+  }
   // Merge options such as --auto or --admin are refused, because where
   // nothing requires checks, --auto merges before CI has run.
   if (operands.length > 1 || operands[0]?.startsWith('-') === true) {
@@ -77,7 +106,7 @@ export const runLandCommand = async (
       print: edge.out,
       warn: (line: string) => edge.err(`standards land: ${line}`),
     };
-    await land(context, operands[0] ?? null, noWait);
+    await land(context, operands[0] ?? null, { noWait, noReview });
     return true;
   } catch (error) {
     edge.err(`standards land: ${errorMessage(error)}`);
