@@ -16,10 +16,11 @@
 # installFlags go to `bun install` after
 # `--frozen-lockfile --production --ignore-scripts`.
 #
-# Every bun.lock package must come from the default npm registry; a git,
-# tarball or other-registry entry stops evaluation with a message. Packages for
-# other platforms aren't fetched, but development dependencies are, because
-# bun.lock doesn't say which packages only they need.
+# Workspace entries are skipped. Every other bun.lock package must come from
+# the default npm registry; a git, tarball or other-registry entry stops
+# evaluation with a message. It builds for x86_64-linux and aarch64-linux and
+# fetches only the packages that install there, development dependencies
+# included, because bun.lock doesn't say which packages only they need.
 {
   bun,
   fetchurl,
