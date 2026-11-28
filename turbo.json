@@ -45,6 +45,7 @@
         "$TURBO_ROOT$/nix/bun-archives.json",
         "$TURBO_ROOT$/nix/package-source.nix",
         "$TURBO_ROOT$/nix/package-source-check.nix",
+        "$TURBO_ROOT$/nix/bun-lock-deps.nix",
         "$TURBO_ROOT$/nix/bun-system-matrix.jq",
         "$TURBO_ROOT$/.github/settings.json",
         "$TURBO_ROOT$/.github/dependabot.yml",
