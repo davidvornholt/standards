@@ -5,11 +5,17 @@
 // Every call is appended to GH_CALLS as a JSON array of its arguments.
 
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  failure,
+  graphql,
+  json,
+  nextOf,
+  ok,
+} from './land-fake-gh-graphql-test-support';
 
 const SHA_LENGTH = 40;
 const MERGE_COMMIT = 'f'.repeat(SHA_LENGTH);
 const UNKNOWN_CALL = 99;
-const WORKFLOWS_DIR = '.github/workflows/';
 const MILLISECONDS = /\.\d+Z$/u;
 const INT32_BYTES = 4;
 // How land asks whether the base branch, trunk, contains a commit.
@@ -26,8 +32,8 @@ export type FakePr = Record<string, unknown> & {
   files: Array<FakeFile>;
   // Each poll of the checks applies the next entry; the last one stays.
   polls: Array<Record<string, unknown>>;
-  // The bodies of the pull request's comments, oldest first.
-  comments: Array<string>;
+  // The pull request's comments, oldest first. A bare body is the owner's.
+  comments: Array<string | { readonly author: string; readonly body: string }>;
 };
 
 export type FakeGithub = {
@@ -65,6 +71,8 @@ export type FakeGithub = {
   parents: Record<string, Array<string>>;
   // Commits in the base branch's history.
   onBase: Array<string>;
+  // The login of the account gh is signed in to, or null to fail the lookup.
+  viewer: string | null;
 };
 
 export type FakeRun = {
@@ -85,7 +93,7 @@ export type FakeGhResult = {
   readonly status: number;
 };
 
-type Call = {
+export type Call = {
   readonly args: ReadonlyArray<string>;
   readonly env: Env;
   readonly pr: FakePr;
@@ -94,17 +102,7 @@ type Call = {
   readonly saveGithub: () => void;
 };
 
-const ok = (stdout = ''): FakeGhResult => ({ stdout, stderr: '', status: 0 });
-const json = (value: unknown): FakeGhResult => ok(`${JSON.stringify(value)}\n`);
-const failure = (stderr: string, status = 1): FakeGhResult => ({
-  stdout: '',
-  stderr,
-  status,
-});
 const notFound = (): FakeGhResult => failure('gh: Not Found (HTTP 404)\n');
-
-const nextOf = <T>(queue: Array<T>): T | undefined =>
-  queue.length > 1 ? queue.shift() : queue[0];
 
 // A poll whose entry sets hangMs answers only after that long, like a gh
 // call that hangs.
@@ -165,81 +163,6 @@ const merge = ({ env, pr, savePr }: Call): FakeGhResult => {
   return ok();
 };
 
-const runsLookup = ({ github }: Call): FakeGhResult =>
-  json({
-    data: {
-      repository: {
-        commit: {
-          checkSuites: {
-            nodes: [
-              { workflowRun: null },
-              ...Object.entries(github.runFiles).map(([run, path]) => ({
-                workflowRun: {
-                  databaseId: Number(run),
-                  event: github.runEvents[run] ?? 'pull_request',
-                  file: { path },
-                },
-              })),
-            ],
-          },
-        },
-        workflows: {
-          entries: Object.entries(github.workflowFiles).map(([path, text]) => ({
-            path,
-            object: { text },
-          })),
-        },
-      },
-    },
-  });
-
-const workflowTree = ({ args, github }: Call): FakeGhResult => {
-  if (github.workflowsFail) {
-    return failure('GitHub unavailable\n');
-  }
-  const files =
-    Object.entries(github.commitWorkflows).find(([sha]) =>
-      args.includes(`tree=${sha}:.github/workflows`),
-    )?.[1] ?? github.workflowFiles;
-  const entries = Object.entries(files)
-    .filter(([path]) => path.startsWith(WORKFLOWS_DIR))
-    .map(([path, text]) => ({
-      name: path.slice(WORKFLOWS_DIR.length),
-      type: 'blob',
-      object: { text, isTruncated: false },
-    }));
-  return json({
-    data: {
-      repository: { workflows: github.workflows ? { entries } : null },
-    },
-  });
-};
-
-// Only the pull request's base branch exists.
-const branchTip = ({ args, pr, github, saveGithub }: Call): FakeGhResult => {
-  const base = `ref=refs/heads/${String(pr.baseRefName)}`;
-  const tip = args.includes(base) ? nextOf(github.baseTips) : undefined;
-  saveGithub();
-  return json({
-    data: {
-      repository: { ref: tip === undefined ? null : { target: { oid: tip } } },
-    },
-  });
-};
-
-const graphql = (call: Call): FakeGhResult => {
-  if (call.args.some((arg) => arg.includes('qualifiedName'))) {
-    return branchTip(call);
-  }
-  if (call.args.some((arg) => arg.includes('timelineItems'))) {
-    return ok(`${call.github.ready ?? ''}\n`);
-  }
-  if (call.args.some((arg) => arg.includes('checkSuites'))) {
-    return runsLookup(call);
-  }
-  return workflowTree(call);
-};
-
 const compare = ({ args, env, github, saveGithub }: Call): FakeGhResult => {
   if (args.includes('.behind_by')) {
     if (env.GH_BEHIND_FAIL) {
@@ -270,13 +193,21 @@ const prFiles = ({ pr }: Call): FakeGhResult =>
       .join('\n')}\n`,
   );
 
-// land asks gh's --jq for the comments' lines with "Reviewed through ".
+// land asks gh's --jq for each comment line with "Reviewed through " and its
+// author, as one JSON object per line.
 const prComments = ({ pr }: Call): FakeGhResult =>
   ok(
     pr.comments
-      .flatMap((body) => body.split('\n'))
-      .filter((line) => line.includes('Reviewed through '))
-      .map((line) => `${line}\n`)
+      .flatMap((comment) => {
+        const { author, body } =
+          typeof comment === 'string'
+            ? { author: 'test', body: comment }
+            : comment;
+        return body
+          .split('\n')
+          .filter((line) => line.includes('Reviewed through '))
+          .map((line) => `${JSON.stringify({ author, line })}\n`);
+      })
       .join(''),
   );
 
@@ -360,6 +291,11 @@ const ROUTES: ReadonlyMap<string, (call: Call) => FakeGhResult> = new Map([
   ['pr merge', merge],
   ['pr comment', addComment],
   ['api graphql', graphql],
+  [
+    'api user',
+    ({ github }) =>
+      github.viewer === null ? failure('HTTP 401\n') : ok(`${github.viewer}\n`),
+  ],
 ]);
 
 const route = (call: Call): FakeGhResult => {

@@ -64,7 +64,7 @@ describe('standards land and review-fix reports', () => {
         'repos/test/repo/issues/123/comments?per_page=100',
         '--paginate',
         '--jq',
-        '.[].body | split("\\n")[] | select(contains("Reviewed through "))',
+        '.[] | .user.login as $author | .body | split("\\n")[] | select(contains("Reviewed through ")) | {author: $author, line: .}',
       ],
     ]);
     expect(comments()).toEqual([]);
@@ -80,6 +80,47 @@ describe('standards land and review-fix reports', () => {
     const result = land(fixture, ['123']);
     expect(result.status, result.stderr).toBe(0);
     expect(comments()).toEqual([]);
+    expect(mergeCalls(fixture)).toEqual([mergeCall(fixture)]);
+  });
+
+  it('counts only reports by the owner or the account running land', () => {
+    const head = String(fixture.pr.headRefOid);
+    fixture.pr.comments = [
+      { author: 'stranger', body: reviewReport(head) },
+      { author: 'TEST', body: reviewReport(NEW_HEAD) },
+    ];
+    const refused = land(fixture, ['123']);
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toBe(refusal(head));
+    expect(mergeCalls(fixture)).toEqual([]);
+
+    fixture.pr.comments.push({ author: 'Runner', body: reviewReport(head) });
+    const result = land(fixture, ['123']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(calls(fixture, 'api', 'user')).toHaveLength(2);
+    expect(mergeCalls(fixture)).toEqual([mergeCall(fixture)]);
+  });
+
+  it("accepts the owner's report without looking up the account", () => {
+    fixture.github.viewer = null;
+    fixture.pr.comments = [
+      { author: 'stranger', body: reviewReport(NEW_HEAD) },
+      reviewReport(String(fixture.pr.headRefOid)),
+    ];
+    const result = land(fixture, ['123']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(calls(fixture, 'api', 'user')).toEqual([]);
+    expect(mergeCalls(fixture)).toEqual([mergeCall(fixture)]);
+  });
+
+  it("uses --no-review when the account behind another author's report can't be looked up", () => {
+    fixture.github.viewer = null;
+    fixture.pr.comments = [
+      { author: 'stranger', body: reviewReport(String(fixture.pr.headRefOid)) },
+    ];
+    const result = land(fixture, ['123', '--no-review', 'typo']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(comments().at(-1)?.at(-1)).toBe('Landing without review-fix: typo');
     expect(mergeCalls(fixture)).toEqual([mergeCall(fixture)]);
   });
 
