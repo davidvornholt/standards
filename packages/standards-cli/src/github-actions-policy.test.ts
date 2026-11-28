@@ -374,7 +374,13 @@ describe('github --apply repairing its own policy', () => {
         ...listed([
           policy({
             conditions: workflowPaths(include),
-            rules: eventRule(['push']),
+            rules: [
+              {
+                type: 'restrict_actions_actors',
+                parameters: { allowed_actors: [{ id: 42, type: 'User' }] },
+              },
+              ...eventRule(['push']),
+            ],
           }),
         ]),
       ]);
@@ -382,7 +388,7 @@ describe('github --apply repairing its own policy', () => {
       expect(await runGithubApply(consumer())).toBe(false);
       expect(calls.every(({ method }) => method === 'GET')).toBe(true);
       expect(output.errors.join('\n')).toContain(
-        `cannot repair Actions policy "Standards auto-merge events": it also applies to workflows other than ${AUTO_MERGE_WORKFLOW_PATH}`,
+        `cannot repair Actions policy "Standards auto-merge events": it also applies to workflows other than ${AUTO_MERGE_WORKFLOW_PATH}, so allowing its events could change what they may run on; move those workflows and the rules they need to a policy of their own, then run apply again`,
       );
     },
   );

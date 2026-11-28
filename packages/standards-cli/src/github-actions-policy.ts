@@ -232,7 +232,7 @@ const coversOnlyAutoMerge = (policy: Policy): boolean => {
 const repairedPolicy = (own: Policy): Policy => {
   if (!coversOnlyAutoMerge(own)) {
     throw new Error(
-      `cannot repair ${policyLabel(own)}: it also applies to workflows other than ${AUTO_MERGE_WORKFLOW_PATH}, so allowing its events could change what they may run on; limit its workflow paths to ${AUTO_MERGE_WORKFLOW_PATH}`,
+      `cannot repair ${policyLabel(own)}: it also applies to workflows other than ${AUTO_MERGE_WORKFLOW_PATH}, so allowing its events could change what they may run on; move those workflows and the rules they need to a policy of their own, then run apply again`,
     );
   }
   const conditions = isRecord(own.conditions) ? own.conditions : {};
