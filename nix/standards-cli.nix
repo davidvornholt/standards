@@ -1,5 +1,5 @@
 {
-  cacert,
+  callPackage,
   lib,
   makeWrapper,
   src,
@@ -12,33 +12,14 @@ let
   packageName = cliManifest.name;
   version = cliManifest.version;
   bunVersion = standardsBun.version;
-  runtimeDependencies = stdenvNoCC.mkDerivation {
-    pname = "standards-cli-runtime-dependencies";
-    inherit src version;
-    nativeBuildInputs = [ standardsBun ];
-    SSL_CERT_FILE = "${cacert}/etc/ssl/certs/ca-bundle.crt";
-    buildPhase = ''
-      runHook preBuild
-      export HOME="$TMPDIR/home"
-      mkdir -p "$HOME"
-      bun install \
-        --backend=copyfile \
-        --filter=${lib.escapeShellArg packageName} \
-        --frozen-lockfile \
-        --ignore-scripts \
-        --production
-      runHook postBuild
-    '';
-    installPhase = ''
-      runHook preInstall
-      mkdir -p "$out/packages/standards-cli"
-      cp -R node_modules "$out/node_modules"
-      cp -R packages/standards-cli/node_modules "$out/packages/standards-cli/node_modules"
-      runHook postInstall
-    '';
-    outputHash = "sha256-2Y6v9QEwnBI6vUgLUBZcQn3ewjH/R1Gycn+z2gEYUqk=";
-    outputHashAlgo = "sha256";
-    outputHashMode = "recursive";
+  runtimeDependencies = callPackage ./bun-lock-deps.nix {
+    inherit src;
+    bun = standardsBun;
+    name = "standards-cli-runtime-dependencies-${version}";
+    installFlags = [
+      "--filter"
+      packageName
+    ];
   };
 in
 assert rootManifest.packageManager == "bun@${bunVersion}";
