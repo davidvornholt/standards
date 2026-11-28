@@ -40,6 +40,7 @@
         "nix/bun-archives.json",
         "nix/package-source.nix",
         "nix/package-source-check.nix",
+        "nix/bun-lock-deps.nix",
         ".github/dependabot.yml",
         ".github/actions/app-release",
         "packages/typescript-config",
